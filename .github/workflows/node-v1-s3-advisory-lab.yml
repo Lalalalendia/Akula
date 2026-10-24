@@ -1,0 +1,47 @@
+name: Lab Node-V1 S3 SigV4a advisory lock check
+on:
+  push:
+    branches: [lab/node-v1-aws-sigv4a-advisory-20261024]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lock-review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve feature-reduced lock without upgrading unrelated dependencies
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo metadata --format-version 1 --no-deps >/dev/null
+          cargo metadata --locked --format-version 1 --no-deps >/dev/null
+          git diff --check
+          echo "AKULA_LOCK_REVIEW_NUMSTAT"
+          git diff --numstat -- Cargo.lock
+          echo "AKULA_LOCK_GIT_BLOB_BEGIN"
+          git hash-object Cargo.lock
+          echo "AKULA_LOCK_GIT_BLOB_END"
+          echo "AKULA_LOCK_BASE64_BEGIN"
+          base64 -w0 Cargo.lock | fold -w 4096
+          echo "AKULA_LOCK_BASE64_END"
+          if grep -Fxq 'name = "crypto-bigint"' Cargo.lock; then
+            echo "::error::crypto-bigint remains in resolved Cargo.lock"
+            exit 1
+          fi
+          echo "AKULA_ADVISORY_DEPENDENCY_ABSENT"
+      - name: Upload resolved lock for independent comparison
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: node-v1-sigv4a-no-vulnerable-lock
+          path: aquilum-app/Cargo.lock
+          retention-days: 2
+          if-no-files-found: error
