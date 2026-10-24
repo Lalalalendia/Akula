@@ -358,10 +358,18 @@ mod tests {
     }
 
     #[cfg(windows)]
-    fn grant_everyone_full_control(path: &Path) {
+    fn grant_everyone_full_control(path: &Path, directory: bool) {
+        // A file has no children: (OI)(CI) is a directory inheritance
+        // directive, not reliable evidence of an effective file write ACE.
+        // The SQLite regression must grant *this file* explicit Full Control.
+        let ace = if directory {
+            "*S-1-1-0:(OI)(CI)F"
+        } else {
+            "*S-1-1-0:F"
+        };
         let grant = std::process::Command::new("icacls")
             .arg(path)
-            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .args(["/grant", ace])
             .output()
             .expect("icacls is required for Windows P2P Inbox ACL regression");
         assert!(
@@ -387,7 +395,7 @@ mod tests {
             [51; 32],
         )
         .unwrap();
-        grant_everyone_full_control(&root.join("objects"));
+        grant_everyone_full_control(&root.join("objects"), true);
         let other = b"second file must not enter exposed objects";
         assert!(
             persist_received_payload(
@@ -420,7 +428,7 @@ mod tests {
             [71; 32],
         )
         .unwrap();
-        grant_everyone_full_control(&root.join("received-inbox.sqlite3"));
+        grant_everyone_full_control(&root.join("received-inbox.sqlite3"), false);
         let other = b"second receipt must not enter exposed sqlite";
         assert!(
             persist_received_payload(
