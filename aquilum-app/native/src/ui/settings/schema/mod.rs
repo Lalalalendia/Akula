@@ -12,7 +12,7 @@ mod section;
 mod support;
 mod system;
 mod sync;
-mod server;
+pub(crate) mod server;
 #[cfg(test)]
 mod tests;
 mod trash;
@@ -22,8 +22,6 @@ pub use appearance::reader_quick;
 pub use data::templates_path;
 pub use mcp::new_token;
 pub use section::Section;
-#[cfg(all(windows, feature = "server-readonly-preflight"))]
-pub(crate) use server::identity::probe_target;
 pub use types::*;
 
 use appearance::*;

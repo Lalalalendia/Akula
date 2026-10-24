@@ -1,5 +1,6 @@
 //! Feature-gated SSH probe state, separate from window's global state.
 use super::{App, Effect, Section, Action, Context, SettingsDialog};
+use masonry::app::RenderRoot;
 use aquilum_core::settings::models::ServerBootstrapDraft;
 use crate::ui::settings::schema::ServerProbeView;
 #[cfg(all(windows, feature = "server-readonly-preflight"))]
@@ -28,6 +29,13 @@ impl Default for ServerProbeState {
     }
 }
 impl App {
+    /// Refresh updates on every platform; poll signed SSH only on Windows.
+    pub(in crate::app) fn poll_update_and_server_probe(&mut self, root: &mut RenderRoot) {
+        self.on_update(root);
+        #[cfg(all(windows, feature = "server-readonly-preflight"))]
+        self.on_server_probe(root);
+    }
+
     pub(super) fn server_probe_view(&self, section: Section) -> Option<ServerProbeView> {
         if section != Section::Server {
             return None;

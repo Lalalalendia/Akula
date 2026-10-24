@@ -10,7 +10,8 @@ use super::{App, Effect, Popup, Section};
 use aquilum_core::server_bootstrap_lab::{MachineArch, SupportedOs};
 use aquilum_core::server_bootstrap_ssh_windows_lab::WindowsOpenSshPinnedProbe;
 use aquilum_core::settings::models::ServerBootstrapDraft;
-use crate::ui::settings::schema::{ServerProbeView, probe_target};
+use crate::ui::settings::schema::ServerProbeView;
+use crate::ui::settings::schema::server::identity::probe_target;
 use masonry::app::RenderRoot;
 use std::sync::Arc;
 

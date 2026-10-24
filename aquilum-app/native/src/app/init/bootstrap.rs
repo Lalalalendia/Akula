@@ -16,9 +16,7 @@ impl App {
         let (titles_tx, titles_rx) = channel();
         let workspace_wake = Arc::clone(&workspace.wake);
         let auto_update = workspace.core.settings.get_config().updates.auto;
-        let mut yandex_probe = crate::yandex_probe_session::ProbeSession::new(
-            Arc::clone(&workspace_wake),
-        );
+        let mut yandex_probe = crate::yandex_probe_session::ProbeSession::new(Arc::clone(&workspace_wake));
         yandex_probe.set_bucket(&workspace.core.settings.get_config().s3_onboarding.bucket);
         let mut app = App {
             workspace,
