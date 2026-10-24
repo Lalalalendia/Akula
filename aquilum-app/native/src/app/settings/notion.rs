@@ -90,7 +90,7 @@ impl App {
                     .set_buttons(rfd::MessageButtons::YesNo)
                     .show() == rfd::MessageDialogResult::Yes;
                 if confirmed && self.notion_import.publish(
-                    Arc::clone(&self.workspace.core), self.workspace.data_dir.clone(),
+                    std::sync::Arc::clone(&self.workspace.core), self.workspace.data_dir.clone(),
                     root.clone(), target.to_path_buf()
                 ).is_err() {
                     self.notion_import.refused();
