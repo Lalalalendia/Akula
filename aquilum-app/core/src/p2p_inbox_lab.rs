@@ -41,6 +41,30 @@ pub fn audit_pinned_windows_inbox_storage(
         .map_err(|_| InboxError::InvalidDestination)
 }
 
+/// Windows-only permanent Inbox publication: copy and re-hash the already
+/// opened verified stage into an exclusively created NT file beneath the
+/// pinned objects HANDLE; atomically rename that same HANDLE without replace.
+/// No path-based object stage/create/hard-link and no Vault write authority.
+#[cfg(windows)]
+pub fn publish_pinned_windows_inbox_object(
+    root: &Path,
+    pinned_root: &File,
+    stage: &mut File,
+    transfer_id: Uuid,
+    expected_bytes: u64,
+    expected_root: [u8; 32],
+) -> Result<(), InboxError> {
+    crate::sync::publish_pinned_p2p_inbox_object(
+        root,
+        pinned_root,
+        stage,
+        transfer_id,
+        expected_bytes,
+        expected_root,
+    )
+    .map_err(|_| InboxError::InvalidDestination)
+}
+
 /// Verify one finished Inbox blob by its locally derived UUID through
 /// root-relative Windows NT opens and read-only BLAKE3. A path-based SQLite
 /// receipt cannot by itself satisfy this final safety gate.
