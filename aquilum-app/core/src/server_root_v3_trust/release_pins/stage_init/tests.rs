@@ -12,17 +12,9 @@ fn fixture() -> (tempfile::TempDir, FirstReleaseApproval) {
     let admin = dir.path().join("root");
     fs::create_dir(&admin).unwrap();
     fs::set_permissions(&admin, Permissions::from_mode(0o700)).unwrap();
-    fs::rename(
-        trust.join(FIRST_RELEASE_STAGE),
-        admin.join(ADMIN_SOURCE),
-    )
-    .unwrap();
+    fs::rename(trust.join(FIRST_RELEASE_STAGE), admin.join(ADMIN_SOURCE)).unwrap();
     fs::write(admin.join(ADMIN_CANDIDATE), approval.encode()).unwrap();
-    fs::set_permissions(
-        admin.join(ADMIN_CANDIDATE),
-        Permissions::from_mode(0o600),
-    )
-    .unwrap();
+    fs::set_permissions(admin.join(ADMIN_CANDIDATE), Permissions::from_mode(0o600)).unwrap();
     (dir, approval)
 }
 fn stage(dir: &tempfile::TempDir, now: u64) -> Result<(), FirstStageError> {
@@ -48,12 +40,8 @@ fn signed_b1a_stage_is_durable_one_shot_and_still_not_approved() {
     assert!(verify_first_from_trust_fd(&root_fd, NOW).is_err());
     // The separate one-use root approval is the only follow-up that unlocks
     // the read-only B1a descriptor. No Node /opt write or systemd starts.
-    super::super::enrollment::enroll_once_from_reviewed_bytes(
-        &root_fd,
-        &approval.encode(),
-        NOW,
-    )
-    .unwrap();
+    super::super::enrollment::enroll_once_from_reviewed_bytes(&root_fd, &approval.encode(), NOW)
+        .unwrap();
     let verified = verify_first_from_trust_fd(&root_fd, NOW).unwrap();
     assert_eq!(verified.receipt.package_sha256, approval.package_sha256);
 }
@@ -92,7 +80,11 @@ fn invalid_or_interrupted_stage_never_publishes_a_new_signed_release() {
                 fs::create_dir(trust.join(FIRST_RELEASE_STAGE)).unwrap();
             }
             9 => {
-                fs::write(trust.join(FIRST_APPROVAL_MARKER), FIRST_APPROVAL_MARKER_BYTES).unwrap();
+                fs::write(
+                    trust.join(FIRST_APPROVAL_MARKER),
+                    FIRST_APPROVAL_MARKER_BYTES,
+                )
+                .unwrap();
             }
             10 => {}
             _ => unreachable!(),

@@ -160,12 +160,7 @@ pub(super) fn stage_from_admin_fds(
 
         // Exclusive pending state and fsync BEFORE copying; a crash leaves
         // a hard refusal rather than replacing an incomplete or stale stage.
-        mkdirat(
-            trust,
-            STAGE_PENDING,
-            Mode::RUSR | Mode::WUSR | Mode::XUSR,
-        )
-        .map_err(syscall)?;
+        mkdirat(trust, STAGE_PENDING, Mode::RUSR | Mode::WUSR | Mode::XUSR).map_err(syscall)?;
         trust.sync_all()?;
         let pending = File::from(
             openat(
