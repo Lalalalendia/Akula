@@ -177,11 +177,20 @@ fn catalog(workspace: &Path, source: &str) -> Result<Vec<BaseChoice>, ()> {
 fn load(workspace: &Path, source: &str, digest: &str, base_id: &str)
     -> Result<Payload, ()>
 {
-    let base = bases_edits::read_effective_base(workspace,source,digest,base_id)
+    // Read the CAS sidecar on BOTH sides of the effective projection.
+    // A newer disk hash must never authorize writing from an older UI view.
+    let fingerprint=||->Result<Option<(u64,String)>,()> {
+        Ok(bases_edits::open(workspace,source,digest).map_err(|_| ())?
+            .map(|state|(state.state.revision,state.expected_disk_hash)))
+    };
+    let before=fingerprint()?;
+    let base=bases_edits::read_effective_base(workspace,source,digest,base_id)
         .map_err(|_| ())?;
-    let hash = bases_edits::open(workspace,source,digest).map_err(|_| ())?
-        .map(|state|state.expected_disk_hash);
-    Ok(Payload::Loaded(base,hash))
+    let after=fingerprint()?;
+    if before!=after || base.local_revision!=before.as_ref().map_or(0,|v|v.0){
+        return Err(());
+    }
+    Ok(Payload::Loaded(base,before.map(|v|v.1)))
 }
 impl BasesSession {
     pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> Self {
