@@ -55,4 +55,24 @@ impl App {
         }
         false
     }
+    /// A dismissed Notion popup must not silently discard a cell or schema
+    /// draft. A File Gate save in flight cannot be cancelled by closing it.
+    pub(super) fn confirm_close_notion_bases(&mut self) -> bool {
+        if self.notion_bases.view().stage == crate::notion_bases::Stage::Saving {
+            return false;
+        }
+        if !self.notion_bases.has_pending_draft() { return true; }
+        let confirmed = rfd::MessageDialog::new()
+            .set_title("Akula Bases — незавершённая правка")
+            .set_description("Отменить несохранённый черновик и закрыть окно? Локальные изменения в исходном Notion не записывались.")
+            .set_level(rfd::MessageLevel::Warning)
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show() == rfd::MessageDialogResult::Yes;
+        if confirmed {
+            self.notion_bases.cancel_draft();
+            self.notion_bases.cancel_schema();
+        }
+        confirmed
+    }
+
 }
