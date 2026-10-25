@@ -324,7 +324,8 @@ mod destination_init;
 pub use destination_init::admin_enroll_fixed_opt_once;
 mod release_pins;
 pub use release_pins::{
-    admin_enroll_first_b1a_fixed_root_once, open_provisioned_first_b1a_release, FirstReleaseError,
+    admin_enroll_first_b1a_fixed_root_once, admin_stage_first_b1a_fixed_root_once,
+    open_provisioned_first_b1a_release, FirstReleaseError,
 };
 
 #[cfg(test)]

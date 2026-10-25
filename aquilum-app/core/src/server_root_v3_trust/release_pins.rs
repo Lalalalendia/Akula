@@ -132,6 +132,8 @@ fn verify_first_from_trust_fd(
 
 mod enrollment;
 pub use enrollment::admin_enroll_first_b1a_fixed_root_once;
+mod stage_init;
+pub use stage_init::admin_stage_first_b1a_fixed_root_once;
 
 /// Fixed production entry point. No path, verifier key, expected fingerprint
 /// or clock value is accepted from caller/SSH. Privileged state must already

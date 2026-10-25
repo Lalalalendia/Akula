@@ -592,3 +592,33 @@ This does NOT provide independent production signing key/artifact publication,
 safe staging of release files on a real VPS, a reviewed human-admin ceremony,
 protected installation transport, root IPC, systemd activation, reboot recovery
 or a two-installed-Windows acceptance. Install Node / B1-E2E-07 remain HOLD.
+
+
+### 25 October 2026 — root-only first-release staging, distinct from approval
+
+A separate opt-in non-shipping administrator CLI \`akula-root-b1a-stage-lab\`
+is a prerequisite to the existing \`akula-root-b1a-enroll-lab\`. It consumes
+only a root-owned 0700 fixed source directory
+\`/root/akula-b1a-first-source\` (with root 0400 manifest/signature/node)
+and an independently reviewed 0600 fixed candidate
+\`/root/akula-b1a-first.approval.candidate\`. An authorized administrator
+must populate and authenticate these inputs independently; Akula Windows
+never stages them via an SSH-controlled path.
+
+After independently enrolled root B0v3/witness checks, the CLI uses that
+policy's publisher Ed25519 key, a canonical B1a manifest, SHA256/length,
+approval fingerprint/sequence and Linux time to verify the real source.
+Under the exclusive root-trust lock, it creates the **single-use**
+\`b1a-first-stage.pending\` directory, copies bounded manifest/signature
+and streams the already verified Node FD with rehash, writes root-owned
+0400 files, fsyncs each and the directory, independently verifies the
+**copied** bytes, then publishes via NOREPLACE rename with parent fsync.
+Existing, interrupted, symlinked, corrupt, expired or mismatched state HOLD.
+The separate \`b1a.first.enrollment\` marker is NOT created by staging.
+UID0 tests use only disposable roots and synthetic signing keys. The
+fixed production-root CLI is compile-only in CI and is not run on a VPS.
+
+This is not actual release publication by a production issuer: no signing
+ceremony, independently authenticated copy to real /root, installed helper
+provenance, Windows root install transport, systemd, reboot or second-device
+File Gate acceptance. Default installed Akula and \`main\` remain unchanged.
