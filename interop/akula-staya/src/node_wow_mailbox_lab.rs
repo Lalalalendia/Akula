@@ -14,7 +14,9 @@ use akula_wire_lab::{custodian_wire, journal_w4::Journal, trust_w3::TrustRegistr
 use aquilum_core::node_v1::NodeHost;
 use ed25519_dalek::SigningKey;
 use policy::VerifiedMailRoleLab;
-pub use policy::{MailRoleClaims, mail_commit_receipt_for_lab, mail_epoch_floor_for_lab, sign_mail_policy_for_lab};
+pub use policy::{
+    MailRoleClaims, mail_commit_receipt_for_lab, mail_epoch_floor_for_lab, sign_mail_policy_for_lab,
+};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::{
     fs::{self, Metadata},
