@@ -205,8 +205,7 @@ async fn authenticated_live_quic_remote_id_then_roster_then_exact_replica() {
     assert_eq!(
         read_from_live_iroh_peer(
             &inbound,
-            &roster,
-            &roster_pin,
+            (&roster, &roster_pin),
             &grant,
             &grant_pin,
             &proof,
@@ -218,8 +217,7 @@ async fn authenticated_live_quic_remote_id_then_roster_then_exact_replica() {
     assert_eq!(
         read_from_live_iroh_peer(
             &inbound,
-            &roster,
-            &roster_pin,
+            (&roster, &roster_pin),
             &grant,
             &grant_pin,
             &proof,
@@ -238,8 +236,7 @@ async fn authenticated_live_quic_remote_id_then_roster_then_exact_replica() {
     assert_eq!(
         read_from_live_iroh_peer(
             &rogue_connection,
-            &roster,
-            &roster_pin,
+            (&roster, &roster_pin),
             &grant,
             &grant_pin,
             &proof,
@@ -259,8 +256,7 @@ async fn authenticated_live_quic_remote_id_then_roster_then_exact_replica() {
     assert_eq!(
         read_from_live_iroh_peer(
             &inbound,
-            &revoked,
-            &revoked_pin,
+            (&revoked, &revoked_pin),
             &grant,
             &grant_pin,
             &proof,
@@ -275,8 +271,7 @@ async fn authenticated_live_quic_remote_id_then_roster_then_exact_replica() {
     assert_eq!(
         read_from_live_iroh_peer(
             &inbound,
-            &roster,
-            &stale,
+            (&roster, &stale),
             &grant,
             &grant_pin,
             &proof,
@@ -292,8 +287,7 @@ async fn authenticated_live_quic_remote_id_then_roster_then_exact_replica() {
     assert_eq!(
         read_from_live_iroh_peer(
             &inbound,
-            &roster,
-            &roster_pin,
+            (&roster, &roster_pin),
             &wrong_revision,
             &grant_pin,
             &proof,
