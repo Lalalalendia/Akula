@@ -53,6 +53,10 @@ jobs:
         shell: bash
         run: |
           cargo test --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features p2p-attachment-grant-lab p2p_attachment_grant_lab -- --nocapture
+      - name: Durable one-use signed grant journal (including cold reopen)
+        shell: bash
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features p2p-attachment-grant-spend-lab p2p_attachment_grant_spend_lab -- --nocapture
       - name: Test actual Staya offset and manifest adapter
         shell: bash
         run: |
