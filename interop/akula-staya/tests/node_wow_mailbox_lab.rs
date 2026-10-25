@@ -195,7 +195,11 @@ impl Fixture {
         fs::write(&policy_file, &signed).unwrap();
         fs::set_permissions(&policy_file, fs::Permissions::from_mode(0o600)).unwrap();
         let floor = mail_policy_dir.join("owner-mail-epoch-floor.bin");
-        fs::write(&floor, mail_epoch_floor_for_lab(&signed, policy.policy_epoch)).unwrap();
+        fs::write(
+            &floor,
+            mail_epoch_floor_for_lab(&signed, policy.policy_epoch),
+        )
+        .unwrap();
         fs::set_permissions(&floor, fs::Permissions::from_mode(0o600)).unwrap();
         Self {
             _tmp: tmp,
@@ -409,7 +413,10 @@ fn independently_pinned_operator_signature_rejects_untrusted_mail_roles() {
     // The same valid-looking policy signed by an unrelated key cannot
     // become an active WOW trust registry.
     let attacker = SigningKey::from_bytes(&[99; 32]);
-    fixture.provision_mail_policy(&sign_mail_policy_for_lab(&attacker, fixture.signed_claims()), 1);
+    fixture.provision_mail_policy(
+        &sign_mail_policy_for_lab(&attacker, fixture.signed_claims()),
+        1,
+    );
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
     fixture.provision_mail_policy(&baseline, 1);
 
@@ -557,7 +564,6 @@ fn signed_mail_scope_must_match_durable_sqlite_grants_exactly() {
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
 }
 
-
 #[test]
 fn epoch_floor_cannot_silently_rollback_one_signed_policy() {
     let fixture = Fixture::new();
@@ -573,7 +579,10 @@ fn epoch_floor_cannot_silently_rollback_one_signed_policy() {
         live.serve_one(&fixture.node, &listener, 3),
         Err(MailRoleHold::MailPolicy)
     ));
-    assert!(fixture.role().is_ok(), "explicitly provisioned new epoch is authorized");
+    assert!(
+        fixture.role().is_ok(),
+        "explicitly provisioned new epoch is authorized"
+    );
     // Reverting only the signed manifest does not restore old permissions.
     fs::write(fixture.mail_policy_file(), &original).unwrap();
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
