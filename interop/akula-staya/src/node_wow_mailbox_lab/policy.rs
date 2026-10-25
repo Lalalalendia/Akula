@@ -20,6 +20,7 @@ use std::{
     io::Read,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 
 const DOMAIN: &[u8] = b"Akula/NodeV1/WOW/OwnerMailRole/lab-v1\0";
@@ -98,7 +99,9 @@ pub(super) struct VerifiedMailRoleLab {
     inode: (u64, u64),
     pinned_digest: [u8; 32],
     floor_inode: (u64, u64),
-    commit_inode: Option<(u64, u64)>,
+    // Hold the original kernel file description open: inode numbers alone
+    // can be recycled immediately after unlink/replace.
+    commit_fd: Option<Arc<File>>,
     authority: PolicyFileAuthority,
 }
 
@@ -136,7 +139,7 @@ fn read_exact_private_file(
     if dir_meta.dev() != dir_opened.dev() || dir_meta.ino() != dir_opened.ino() {
         return Err(MailRoleHold::MailPolicy);
     }
-    let handle = File::from(
+    let mut handle = File::from(
         openat(
             &dir,
             filename,
@@ -157,7 +160,7 @@ fn read_exact_private_file(
     }
     let inode = (metadata.dev(), metadata.ino());
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    handle
+    (&mut handle)
         .take(limit + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| MailRoleHold::MailPolicy)?;
@@ -173,11 +176,11 @@ fn read_exact_private_file(
 /// writable root ancestors, nonroot owners, and directory substitution.
 /// This never reads secrets or writes /etc; only the privileged installer
 /// is permitted to create or rotate these files.
-fn read_root_owned_mail_file(
+fn read_root_owned_mail_file_with_handle(
     folder: &Path,
     filename: &str,
     limit: u64,
-) -> Result<(Vec<u8>, (u64, u64)), MailRoleHold> {
+) -> Result<(Vec<u8>, File), MailRoleHold> {
     if !folder.is_absolute() || rustix::process::geteuid().as_raw() == 0 {
         return Err(MailRoleHold::MailPolicy);
     }
@@ -250,7 +253,21 @@ fn read_root_owned_mail_file(
     if result.len() as u64 != meta.len() {
         return Err(MailRoleHold::MailPolicy);
     }
-    Ok((result, (meta.dev(), meta.ino())))
+    let after = handle.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
+    if (meta.dev(),meta.ino(),meta.len()) != (after.dev(),after.ino(),after.len()) {
+        return Err(MailRoleHold::MailPolicy);
+    }
+    Ok((result, handle))
+}
+
+fn read_root_owned_mail_file(
+    folder: &Path,
+    filename: &str,
+    limit: u64,
+) -> Result<(Vec<u8>, (u64, u64)), MailRoleHold> {
+    let (bytes, handle) = read_root_owned_mail_file_with_handle(folder, filename, limit)?;
+    let m = handle.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
+    Ok((bytes, (m.dev(),m.ino())))
 }
 
 fn read_authorized_mail_file(
@@ -307,13 +324,13 @@ fn require_no_root_pending(folder: &Path) -> Result<(), MailRoleHold> {
     Ok(())
 }
 
-fn root_commit_inode(
+fn root_commit_file(
     folder: &Path,
     signed_policy: &[u8],
     floor_epoch: u64,
-) -> Result<(u64, u64), MailRoleHold> {
+) -> Result<Arc<File>, MailRoleHold> {
     require_no_root_pending(folder)?;
-    let (receipt, inode) = read_root_owned_mail_file(folder, COMMIT_FILE, COMMIT_LEN as u64)?;
+    let (receipt, file) = read_root_owned_mail_file_with_handle(folder, COMMIT_FILE, COMMIT_LEN as u64)?;
     if receipt.len() != COMMIT_LEN
         || receipt
             != mail_commit_receipt_for_lab(
@@ -324,7 +341,7 @@ fn root_commit_inode(
     {
         return Err(MailRoleHold::MailPolicy);
     }
-    Ok(inode)
+    Ok(Arc::new(file))
 }
 
 /// Lab provisioning fixture only. The floor MUST be protected by a
@@ -533,10 +550,10 @@ impl VerifiedMailRoleLab {
         if floor.epoch != claims.policy_epoch || floor.digest != digest {
             return Err(MailRoleHold::MailPolicy);
         }
-        let commit_inode = match authority {
+        let commit_fd = match authority {
             PolicyFileAuthority::SameUidLab => None,
             PolicyFileAuthority::RootOwnedReadOnly => {
-                Some(root_commit_inode(folder, &input, floor.epoch)?)
+                Some(root_commit_file(folder, &input, floor.epoch)?)
             }
         };
         Ok(Self {
@@ -545,7 +562,7 @@ impl VerifiedMailRoleLab {
             inode,
             pinned_digest: digest,
             floor_inode: floor.inode,
-            commit_inode,
+            commit_fd,
             authority,
         })
     }
@@ -565,8 +582,14 @@ impl VerifiedMailRoleLab {
         {
             return Err(MailRoleHold::MailPolicy);
         }
-        if let Some(original_receipt) = self.commit_inode {
-            if root_commit_inode(&self.folder, &input, floor.epoch)? != original_receipt {
+        if let Some(original_fd) = &self.commit_fd {
+            let current_fd = root_commit_file(&self.folder, &input, floor.epoch)?;
+            let before = original_fd.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
+            let after = current_fd.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
+            if (before.dev(), before.ino()) != (after.dev(), after.ino())
+                || before.nlink() != 1
+                || after.nlink() != 1
+            {
                 return Err(MailRoleHold::MailPolicy);
             }
         }
