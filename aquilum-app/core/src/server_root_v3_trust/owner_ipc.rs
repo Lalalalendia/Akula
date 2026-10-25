@@ -21,6 +21,8 @@ pub(crate) enum OwnerIpcError {
     WrongPeer,
     InvalidPeerPin,
     PeerEnrollment(enrollment::PeerEnrollError),
+    FirstRelease(FirstReleaseError),
+    Witness(crate::server_installer_os_witness_lab::OsWitnessError),
     InvalidFrame,
     Io(std::io::Error),
 }
@@ -129,6 +131,7 @@ pub(crate) fn preview_provisioned_once(
     preview_from_trust_fd(stream, &trust, now)
 }
 
+mod commit_intent;
 mod enrollment;
 pub use enrollment::admin_enroll_first_peer_uid_fixed_root_once;
 

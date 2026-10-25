@@ -112,6 +112,9 @@ jobs:
           # One inert AF_UNIX owner-frame PREVIEW. A real setuid-nobody
           # child is checked using kernel SO_PEERCRED against an
           # independently root-owned allowed UID file; no /opt changes.
+          # New exact owner+canonical-plan IPC data framing, without CAS.
+          "$test_bin" server_root_v3_trust::owner_ipc::commit_intent::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::owner_ipc::commit_intent::tests --nocapture
           "$test_bin" server_root_v3_trust::owner_ipc::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::owner_ipc::tests --nocapture
           # One-use root-owned peer UID registration; read-only OS-account
@@ -221,6 +224,7 @@ jobs:
             aquilum-app/core/src/server_root_v3_trust/owner_frame.rs
             aquilum-app/core/src/server_root_v3_trust/owner_frame/tests.rs
             aquilum-app/core/src/server_root_v3_trust/owner_ipc.rs
+            aquilum-app/core/src/server_root_v3_trust/owner_ipc/commit_intent.rs
             aquilum-app/core/src/server_root_v3_trust/owner_ipc/tests.rs
             aquilum-app/core/src/server_root_v3_trust/owner_ipc/enrollment.rs
             aquilum-app/core/src/server_root_v3_trust/owner_ipc/enrollment/tests.rs
