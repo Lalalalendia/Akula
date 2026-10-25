@@ -34,7 +34,7 @@ jobs:
         run: cargo check --locked -p aquilum-core --no-default-features
       - name: Verify 3 codec modes, independent siblings and adversarial bounds
         working-directory: aquilum-app
-        run: cargo test --manifest-path modules/text-delta-codec/Cargo.toml codec::tests -- --nocapture
+        run: cargo test --manifest-path ../modules/text-delta-codec/Cargo.toml codec::tests -- --nocapture
       - name: Measure Rust modes on genuine successive Git revisions
         if: github.event_name == 'workflow_dispatch'
         working-directory: .
