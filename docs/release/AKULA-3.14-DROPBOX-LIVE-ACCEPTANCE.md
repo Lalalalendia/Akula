@@ -69,6 +69,16 @@ The direct native (debug) UIA acceptance above is necessary but not a substitute
 
 - [NSIS-specific UIA preflight](https://github.com/Lalalendia/Akula/commit/df0a0926be7331f9862241502604050a67e660ec) requires an ephemeral GitHub-hosted Windows runner, the exact `%LOCALAPPDATA%/Akula/akula-app.exe` path, Akula uninstall registration and SHA-256 equality with the compiled release `akula-app.exe`.
 - [Windows beta acceptance integration](https://github.com/Lalalendia/Akula/commit/b6b8ad60b75540f5f74151e5853cb7f940e9904a) runs that same no-credential button-click/browser-window witness **after** edit/save/restart UIA and before uninstall, without granting consent or logging URLs/tokens.
-- [NSIS candidate workflow #40201337194](https://github.com/Lalalendia/Akula/actions/runs/40201337194) — **PENDING** at recording time. Do not mark PASS or reuse a prior installer SHA until an exact-run `AKULA_DROPBOX_SYSTEM_BROWSER_UIA_PASS`, installed UIA/persistence PASS and artifact provenance manifest are present.
-- A temporary branch-only trigger was added to `.github/workflows/windows-beta.yml` strictly for this isolated acceptance. **Remove it** after the result, keeping normal `workflow_call` and `workflow_dispatch`.
+- [NSIS candidate workflow #40201337194](https://github.com/Lalalalendia/Akula/actions/runs/40201337194) — **PASS** at exact tested checkout `147a28c5efe836f82e97e2aedb11691625d6f7bf` (completed 2026-10-25). Logs: `AKULA_DROPBOX_SYSTEM_BROWSER_UIA_PASS browser_window=1 explorer_only=0 consent=0 tokens=0 sync_disabled=1`, `AKULA_WINDOWS_BETA_REOPEN_GUI_READBACK_PASS`, `AKULA_WINDOWS_BETA_GUI_EDIT_PASS` and `AKULA_WINDOWS_BETA_PROVENANCE_PASS`. The CI manifest reports installer SHA-256 `628725545330091fa955318f06b1129130cc0b00c2d8408e0fbcbcc094994ff6`. Artifact: `akula-windows-beta-candidate-40201337194-1` (ID `12602851688`). The earlier v0.3.14 test candidate in section F is a different binary.
+- The temporary branch-only `push` trigger in `.github/workflows/windows-beta.yml` was removed after this passing run by [`deae9a5d`](https://github.com/Lalalalendia/Akula/commit/deae9a5d1bbb82a98a65e3c141f0db8e41c621d0). The original `workflow_call` and `workflow_dispatch` events remain; `scripts/test-windows-beta.ps1` retains the actual installed Dropbox browser test.
 - This checks an **unsigned** CI-only NSIS candidate; even a passing run does not prove real Dropbox consent, account/session persistence in Windows Credential Manager or production OAuth app approval. No public v0.3.14 artifacts are changed.
+
+## I. Integration decision following browser acceptance
+
+**Native and NSIS-installed Windows browser UIA: PASS. Live Dropbox account and public release: HOLD.**
+
+The Windows launcher correction and scope-bound re-consent are on the same development branch. The actual NSIS-installed candidate opened a new system browser window in ephemeral GitHub-hosted Windows, without submitting credentials or granting consent. This establishes the original *File Explorer instead of browser* defect is fixed for that candidate, not for the already published signed v0.3.14.
+
+The required main-targeted PR `Main PR gate` is not yet passed. Preserve branch isolation and perform security review, exact-head CI and dependency checks without exceeding the repository's open-PR policy or pushing directly to `main`.
+
+Production release is separately blocked on owner verification of Dropbox app callback/scopes, Development-authorized consent in an installed Windows candidate, cold restart/refresh from Windows Credential Manager, and rejection of a different account/root without token replacement. A signed public release needs its own provenance and acceptance evidence; none is claimed here.
