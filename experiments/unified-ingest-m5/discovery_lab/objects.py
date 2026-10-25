@@ -189,11 +189,27 @@ class S3ObjectSink:
                 raise  # Preserve 404 and permanent failures for publisher/quality gates.
             raise ObjectWriteUncertain("S3 read unavailable") from exc
         body = result["Body"]
+        limit = 2 * 1024 * 1024
+        expected = result.get("ContentLength")
+        if expected is not None and (not isinstance(expected, int) or expected < 0 or expected > limit):
+            if hasattr(body, "close"):
+                body.close()
+            raise ObjectConflict("invalid or oversized S3 ContentLength")
+        output = bytearray()
         try:
             try:
-                return body.read(2 * 1024 * 1024 + 1)
+                while len(output) <= limit:
+                    block = body.read(min(256 * 1024, limit + 1 - len(output)))
+                    if not block:
+                        break
+                    output.extend(block)
             except Exception as exc:
                 raise ObjectWriteUncertain("S3 body read interrupted") from exc
+            if len(output) > limit:
+                raise ObjectConflict("S3 object exceeds small object cap")
+            if expected is not None and len(output) != expected:
+                raise ObjectWriteUncertain("S3 GET truncated: ContentLength mismatch")
+            return bytes(output)
         finally:
             if hasattr(body, "close"):
                 body.close()
