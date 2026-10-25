@@ -19,9 +19,14 @@ pub(super) fn append(
         label, |t|t.text_muted,None,Leading::Times(1.3),
     ));
     if stage==Stage::Ready && !draft.frozen {
+        // single_line() normalizes newlines; that would corrupt an unchanged
+        // imported rich_text cell on Save. Use a true document for text.
+        let widget=match draft.kind {
+            EditKind::Text=>TextEditor::new(&draft.value),
+            EditKind::Number=>TextEditor::single_line(&draft.value),
+        };
         let field=NewWidget::new(
-            TextEditor::single_line(&draft.value)
-                .styled(||style::ui_text(size::INPUT_CONTENT_HEIGHT as f32))
+            widget.styled(||style::ui_text(size::INPUT_CONTENT_HEIGHT as f32))
         ).with_class(style::FIELD);
         bindings.insert(field.id(),Binding::BasesDraft);
         column=column.with_fixed(field);
