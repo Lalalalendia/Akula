@@ -39,8 +39,7 @@ impl App {
         };
         let bucket = self.workspace.core.settings.get_config().s3_onboarding.bucket;
         Context {
-            workspace: workspace.clone(),
-            #[cfg(feature = "notion-offline-preview")] notion_bases: self.notion_bases.view(),
+            workspace: workspace.clone(), #[cfg(feature = "notion-offline-preview")] notion_bases: self.notion_bases.view(),
             sync_recovery,
             #[cfg(feature = "s3-e2e01-review-preview")]
             s3_bound_publications,
