@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'experiments/unified-ingest-m5/tests/live_m11_minio_chaos.py'
+      - 'experiments/unified-ingest-m5/discovery_lab/objects.py'
+      - 'experiments/unified-ingest-m5/discovery_lab/multipart.py'
       - 'experiments/unified-ingest-m5/tests/m11_fault_proxy.py'
       - 'experiments/unified-ingest-m5/tests/test_m11_fault_proxy.py'
       - 'experiments/unified-ingest-m5/M11-NETWORK-ACCEPTANCE.md'
