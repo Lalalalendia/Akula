@@ -17,6 +17,9 @@ pub struct SelectedCell {
 }
 
 impl BasesSession {
+    pub fn has_pending_draft(&self) -> bool {
+        self.view.draft.is_some() || self.view.schema_draft.is_some()
+    }
     /// Selection must belong to the currently visible bounded grid window.
     /// Arbitrary IDs from an old popup cannot select another source/row.
     pub fn select_cell(&mut self, row_id: &str, property_id: &str) -> bool {
