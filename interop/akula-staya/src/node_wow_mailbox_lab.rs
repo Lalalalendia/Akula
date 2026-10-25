@@ -185,13 +185,21 @@ impl NodeWowMailboxLab {
         if now_ms <= 0 || now_ms < self.last_now_ms {
             return Err(MailRoleHold::ClockRollback);
         }
+        // Check the exact filesystem object before opening SQLite by path;
+        // a replaced/symlinked DB is an unsafe-file error, never a policy row.
+        let info = private_existing_db(&self.state)?;
+        if (info.dev(), info.ino()) != self.db_inode {
+            return Err(MailRoleHold::UnsafeDatabase);
+        }
         self.policy.require_current(node, now_ms)?;
         require_exact_mailbox(&self.state, &self.policy)?;
         if self.policy.claims.custodian_public != self.custodian_signer.verifying_key().to_bytes() {
             return Err(MailRoleHold::UnpinnedTrust);
         }
-        let info = private_existing_db(&self.state)?;
-        if (info.dev(), info.ino()) != self.db_inode {
+        // The path must still refer to the original inode after the SQL
+        // query; the lab gate does not permit path replacement during use.
+        let rechecked = private_existing_db(&self.state)?;
+        if (rechecked.dev(), rechecked.ino()) != self.db_inode {
             return Err(MailRoleHold::UnsafeDatabase);
         }
         Ok(())
