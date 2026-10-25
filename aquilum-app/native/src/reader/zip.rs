@@ -1,5 +1,4 @@
-mod limited;
-use std::collections::HashMap;
+use std::collections::HashMap; mod limited;
 use std::io::Read;
 
 const END: u32 = 0x0605_4b50;
