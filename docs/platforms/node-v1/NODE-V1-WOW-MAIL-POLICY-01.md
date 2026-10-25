@@ -56,6 +56,32 @@ quota must additionally match the durable SQLite mailbox-policy row
 (`custodian_mailbox_policy`). A second mailbox or broader SQLite quota
 is refused.
 
+### Transaction-bound SQLite mail-role fence
+
+The default-off Node bridge additionally binds `MailRoleGate` from the
+already verified and independent operator signature: exact
+`MailboxPolicy`, signed manifest BLAKE3, and mail policy epoch.
+This requires an already provisioned matching
+`custodian_mail_role_guard` row in the **same WOW SQLite database**
+(no silent creation on open).
+
+WOW's `load_policy(..., role_gate)` now checks this row and the exact
+stored mailbox quota/recipient/issuer values while holding the SAME
+`BEGIN IMMEDIATE` transaction as reservation, W3+W12 COMMIT,
+recipient LIST/FETCH and encrypted W4 register/deposit/fetch. A
+separate operator connection that sets `revoked=1` serializes
+against those writes/reads. Binding is single-use per Journal and
+cannot automatically adopt a new epoch. Explicit operator-only
+provisioning enforces strictly increasing epochs after revocation.
+
+The historical standalone WOW lab defaults to `role_gate=None` for
+compatibility. The Akula Node lab **always** binds a verified gate
+before serving any request; an absent/stale/mismatched SQLite witness
+is HOLD. The local operator-provisioning method must never be exposed
+over the network. This feature is pinned to
+[`66ec8ec3`](https://github.com/calex794/wow/commit/66ec8ec37a6f6f622971ee87733f25ef08c3a463)
+in WOW #95 and has independent exact-head CI gates.
+
 The role **still only accepts loopback TCP** via the WOW signed
 protocol; Akula's installed Node Iroh service, ALPN, fixed CLI modes,
 root-owned installer, app File Gate and shipping Cargo workspace remain
@@ -80,10 +106,14 @@ restart test still passes.
 This lab does **not** load a truly root-owned production mail policy:
 test fixtures are SAME-UID and the time is supplied by the caller.
 It lacks a root-protected monotonic epoch/rollback floor and
-production custodian signing-key enrollment. The DB/policy comparison
-is a **preflight**, NOT an atomic authorization inside the same SQLite
-commit. It must not be exposed over public QUIC or activated through
-the installed signed Node until those are independently implemented.
+production custodian signing-key enrollment. The original DB/policy comparison remains a preflight, but a new SQLite
+role gate additionally checks the pinned digest, policy epoch and revocation
+**inside the same local WOW transaction**. This still does NOT make
+external root-owned policy-file changes atomic with a SQLite COMMIT:
+the operator-signed root manifest and monotonic witness must be protected
+by a production root authority with a defined revocation/commit boundary.
+The lab must not be exposed over public QUIC or activated through the
+installed signed Node until those are independently implemented.
 
 Also required: independent operator approval and release signing,
 versioned root-owned mail-role policy, revocation/currentness at
