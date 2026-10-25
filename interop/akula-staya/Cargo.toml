@@ -20,7 +20,7 @@ p2p-one-file-lan-beta = ["p2p-live-identity", "dep:tokio", "dep:akula-inbox-ledg
 # Off by default; inert Core + real Staya manifest, no file read/grant.
 p2p-attachment-contract = ["aquilum-core/p2p-attachment-contract"]
 # Explicit non-shipping signed-and-encrypted WOW W3 attachment notice.
-p2p-wow-w3-lab = ["p2p-attachment-contract", "dep:akula-wow-w3-crypto", "dep:ed25519-dalek"]
+p2p-wow-w3-lab = ["p2p-attachment-contract", "aquilum-core/p2p-attachment-replay-lab", "dep:akula-wow-w3-crypto", "dep:ed25519-dalek"]
 
 [[bin]]
 name = "akula-p2p-one-file-beta"
