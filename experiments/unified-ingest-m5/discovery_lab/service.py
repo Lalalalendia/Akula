@@ -294,16 +294,58 @@ class JobStore:
                                (time.time(),)).rowcount
             return count
 
-    def claim(self) -> tuple[dict, bytes, str] | None:
+    def claim(self, job_id: str | None = None) -> tuple[dict, bytes, str] | None:
+        """Atomically claim one queued task; an optional ID avoids changing jobs under a lock."""
         with self.transaction() as db:
-            row = db.execute("SELECT * FROM ingest_jobs WHERE status='QUEUED' ORDER BY created_at LIMIT 1").fetchone()
+            if job_id is None:
+                row = db.execute("SELECT * FROM ingest_jobs WHERE status='QUEUED' ORDER BY created_at LIMIT 1").fetchone()
+            else:
+                row = db.execute("SELECT * FROM ingest_jobs WHERE job_id=? AND status='QUEUED'", (job_id,)).fetchone()
             if not row:
                 return None
             token = uuid.uuid4().hex
-            db.execute("""UPDATE ingest_jobs SET status='RUNNING',attempt=attempt+1,lease_token=?,
+            updated = db.execute("""UPDATE ingest_jobs SET status='RUNNING',attempt=attempt+1,lease_token=?,
                          error_code=NULL,updated_at=? WHERE job_id=? AND status='QUEUED'""",
-                       (token, time.time(), row["job_id"]))
+                       (token, time.time(), row["job_id"])).rowcount
+            if updated != 1:
+                return None
             return self._public(db.execute("SELECT * FROM ingest_jobs WHERE job_id=?", (row["job_id"],)).fetchone()), bytes(row["plan"]), token
+
+    def candidates(self, limit: int = 100) -> list[tuple[str, str]]:
+        """Include orphan candidates, but only a holder of that job's OS lock may reclaim."""
+        with self.connection() as db:
+            return [(r["job_id"], r["status"]) for r in db.execute(
+                """SELECT job_id,status FROM ingest_jobs WHERE status IN ('RUNNING','QUEUED')
+                   ORDER BY CASE status WHEN 'RUNNING' THEN 0 ELSE 1 END,created_at LIMIT ?""",
+                (limit,))]
+
+    def recover_job(self, job_id: str) -> bool:
+        """Caller MUST own the per-job flock before reclaiming RUNNING.
+
+        Never blanket-reset all RUNNING rows while other live workers exist.
+        """
+        with self.transaction() as db:
+            return db.execute("""UPDATE ingest_jobs SET status='QUEUED',lease_token=NULL,updated_at=?
+                WHERE job_id=? AND status='RUNNING'""", (time.time(), job_id)).rowcount == 1
+
+    def configure_worker_slots(self, max_workers: int) -> None:
+        """Immutable on-disk concurrency cap: all processes sharing state must agree."""
+        if type(max_workers) is not int or not 1 <= max_workers <= 8:
+            raise ValueError("M9 permits 1..8 workers per shared POSIX state")
+        with self.transaction() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS ingest_settings (name TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            old = db.execute("SELECT value FROM ingest_settings WHERE name='worker_slots'").fetchone()
+            if old is None:
+                db.execute("INSERT INTO ingest_settings(name,value) VALUES('worker_slots',?)", (str(max_workers),))
+            elif int(old["value"]) != max_workers:
+                raise JobConflict("worker slot configuration mismatch for shared state")
+
+    def counts(self) -> dict[str,int]:
+        with self.connection() as db:
+            rows=db.execute("SELECT status,COUNT(*) AS n FROM ingest_jobs GROUP BY status").fetchall()
+        result={s:0 for s in ('QUEUED','RUNNING','COMPLETED','NEEDS_REVIEW','CANCELLED')}
+        result.update({r['status']:r['n'] for r in rows})
+        return result
 
     def finish(self, job_id: str, token: str, *, result: dict | None = None,
                error_code: str | None = None) -> None:
@@ -321,21 +363,48 @@ class JobStore:
 
 class IngestWorker:
     def __init__(self, jobs: JobStore, *, s3_bucket: str | None = None,
-                 s3_endpoint: str | None = None, s3_prefix: str = "unified-lab/") -> None:
+                 s3_endpoint: str | None = None, s3_prefix: str = "unified-lab/",
+                 max_workers: int = 1) -> None:
         self.jobs = jobs
         self.s3_bucket, self.s3_endpoint, self.s3_prefix = s3_bucket, s3_endpoint, s3_prefix
         if s3_endpoint and not s3_bucket:
             raise ValueError("S3 endpoint requires explicit operator-owned bucket")
+        self.max_workers = max_workers
+        self.jobs.configure_worker_slots(max_workers)
+        (self.jobs.state / "worker-slots").mkdir(exist_ok=True, mode=0o700)
+        (self.jobs.state / "job-locks").mkdir(exist_ok=True, mode=0o700)
 
     @contextmanager
     def _exclusive(self):
-        path = self.jobs.state / "worker.lock"
+        """Reserve one capacity slot across processes. M8 one-worker mode remains valid."""
+        for n in range(self.max_workers):
+            path = self.jobs.state / "worker-slots" / f"slot-{n}.lock"
+            fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(fd)
+                continue
+            try:
+                yield
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+            return
+        raise WorkerBusy("all configured worker slots are occupied")
+
+    @contextmanager
+    def _job_exclusive(self, job_id: str):
+        """An OS lock for each work; never overlap recovery and active processing."""
+        if not _ID.fullmatch(job_id):
+            raise InvalidJob("invalid job ID")
+        path = self.jobs.state / "job-locks" / (job_id + ".lock")
         fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
-                raise WorkerBusy("another worker already owns the queue") from exc
+                raise WorkerBusy("job owned by another executor") from exc
             yield
         finally:
             os.close(fd)
@@ -370,20 +439,26 @@ class IngestWorker:
 
     def run_once(self) -> dict | None:
         with self._exclusive():
-            self.jobs.recover_orphaned()
-            work = self.jobs.claim()
-            if not work:
-                return None
-            info, manifest, token = work
-            try:
-                result = self._process(info, manifest)
-            except Exception as exc:
-                # Only a stable classification is returned through the API.
-                # Never include source text, secret credentials or remote URLs.
-                self.jobs.finish(info["job_id"], token, error_code=type(exc).__name__)
-            else:
-                self.jobs.finish(info["job_id"], token, result=result)
-            return self.jobs.get(info["job_id"])
+            # Only a worker holding this job's OS lock may requeue an orphan.
+            for job_id, _ in self.jobs.candidates():
+                try:
+                    with self._job_exclusive(job_id):
+                        self.jobs.recover_job(job_id)  # no-op unless abandoned RUNNING
+                        work = self.jobs.claim(job_id)
+                        if not work:
+                            continue
+                        info, manifest, token = work
+                        try:
+                            result = self._process(info, manifest)
+                        except Exception as exc:
+                            # Return only stable classification, not source or credentials.
+                            self.jobs.finish(info["job_id"], token, error_code=type(exc).__name__)
+                        else:
+                            self.jobs.finish(info["job_id"], token, result=result)
+                        return self.jobs.get(info["job_id"])
+                except WorkerBusy:
+                    continue
+            return None
 
     def run_loop(self, stop: threading.Event, *, poll_interval: float = 0.5) -> None:
         while not stop.is_set():
@@ -438,6 +513,9 @@ def make_handler(jobs: JobStore, token: str):
                 return self.answer(200, {"status": "ok", "service": "ingest-m8"})
             if not self.authorized():
                 return
+            if path == "/v1/queue":
+                return self.answer(200, {"counts": jobs.counts(), "lease_strategy": "per-job-flock",
+                                         "live_crawling": False})
             if path == "/v1/adapters":
                 return self.answer(200, {"profiles": jobs.adapters.names(), "live_crawling": False})
             if path == "/v1/jobs":
@@ -489,20 +567,26 @@ def make_handler(jobs: JobStore, token: str):
 
 
 def serve(jobs: JobStore, token: str, *, port: int, worker: IngestWorker | None = None,
-          bind: str = "127.0.0.1") -> None:
+          bind: str = "127.0.0.1", worker_count: int = 1) -> None:
     if bind != "127.0.0.1":
         raise ValueError("M8 experiment listens on loopback only; use authenticated TLS proxy for remote use")
     if not 0 <= port <= 65535:
         raise ValueError("invalid listening port")
+    if type(worker_count) is not int or not 1 <= worker_count <= 8:
+        raise ValueError("worker_count must be 1..8")
+    if worker and worker_count > worker.max_workers:
+        raise ValueError("requested worker threads exceed shared configured capacity")
     stop = threading.Event()
-    thread = None
+    threads = []
     with ThreadingHTTPServer((bind, port), make_handler(jobs, token)) as server:
         if worker:
-            thread = threading.Thread(target=worker.run_loop, args=(stop,), daemon=True)
-            thread.start()
+            for _ in range(worker_count):
+                thread = threading.Thread(target=worker.run_loop, args=(stop,), daemon=True)
+                thread.start()
+                threads.append(thread)
         try:
             server.serve_forever(poll_interval=0.2)
         finally:
             stop.set()
-            if thread:
+            for thread in threads:
                 thread.join(timeout=2)
