@@ -21,6 +21,8 @@ def generate(root: Path, pages: int = 160, size: int = 128 * 1024):
         manifest[name] = {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
         links.append(f'<a href="/pages/{name}">page {i}</a>')
     (root / "index.html").write_text("<!doctype html><html><body>" + "\n".join(links) + "</body></html>", encoding="utf-8")
+    # The bounded Rust worker uses a disk-spooled allowlisted URL manifest.
+    (root / "urls.tsv").write_text("".join(f"{i:05d}.html\t/pages/{i:05d}.html\n" for i in range(pages)), encoding="utf-8")
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest
 
