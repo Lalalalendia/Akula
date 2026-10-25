@@ -4,6 +4,11 @@ use aquilum_core::sync::NativeRecoveryDecision;
 pub enum Action {
     OpenCloudProvider(CloudProvider),
     #[cfg(feature = "notion-offline-preview")] NotionOpenRoot(String),
+    #[cfg(feature = "notion-offline-preview")] NotionBasesOpen(String),
+    #[cfg(feature = "notion-offline-preview")] NotionBasesSelect(String, String),
+    #[cfg(feature = "notion-offline-preview")] NotionBasesPage(usize, usize),
+    #[cfg(feature = "notion-offline-preview")] NotionBasesChange(String, String, bool),
+    #[cfg(feature = "notion-offline-preview")] NotionBasesReload,
     #[cfg(feature = "notion-offline-preview")] NotionConnect,
     #[cfg(feature = "notion-offline-preview")] NotionRefresh(String),
     #[cfg(feature = "notion-offline-preview")] NotionForget(String),
