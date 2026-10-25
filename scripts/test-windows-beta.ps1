@@ -85,7 +85,14 @@ if ((Get-FileHash -LiteralPath $installedPdfium[0]).Hash -ne (Get-FileHash -Lite
 $rendered = Join-Path $probeDir 'real-page.png'
 $renderStatus = Join-Path $probeDir 'real-page.status'
 & $exe --pdf-worker $sourcePdf 0 900 0 $rendered $renderStatus
-if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $rendered -PathType Leaf)) { throw 'Installed PDFium page rendering failed' }
+if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $rendered -PathType Leaf)) {
+  $workerStatus = if (Test-Path -LiteralPath $renderStatus -PathType Leaf) {
+    (Get-Content -LiteralPath $renderStatus -Raw).Trim()
+  } else { 'status_file_missing' }
+  if ($workerStatus.Length -gt 300) { $workerStatus = $workerStatus.Substring(0, 300) }
+  $workerStatus = $workerStatus -replace '[^A-Za-z0-9 .,;:=_()/-]', '?'
+  throw "Installed PDFium page rendering failed: exit=$LASTEXITCODE;status=$workerStatus"
+}
 $reply = (Get-Content -LiteralPath $renderStatus -Raw).Trim()
 if ($reply -notmatch '^PDF_VIEW_V1 [1-9][0-9]* [1-9][0-9]* [1-9][0-9]*$') { throw "Invalid PDF page renderer reply: $reply" }
 $png = [IO.File]::ReadAllBytes($rendered)
