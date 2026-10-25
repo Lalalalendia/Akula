@@ -141,7 +141,7 @@ mod tests {
     use serde_json::json;
     #[test]
     fn text_draft_is_full_length_and_not_a_truncated_preview() {
-        let original="Длинное значение ".repeat(20);
+        let original="Длинное значение с переносом\nвторой строки ".repeat(20);
         let input=EffectiveValue::Source(json!({
             "type":"rich_text","rich_text":[{"plain_text":original}]
         }));
