@@ -9,9 +9,13 @@
 //!
 //! A future product role requires an independently owner-approved mail policy
 //! pinned by root before any network exposure. This feature is lab-only.
+mod approval;
 mod policy;
 mod root_publish;
 use akula_wire_lab::{custodian_wire, journal_w4::Journal, trust_w3::TrustRegistry};
+pub use approval::{
+    InertMailCasProposal, MailFirstApprovalClaims, sign_first_mail_approval_for_lab,
+};
 use aquilum_core::node_v1::NodeHost;
 use ed25519_dalek::SigningKey;
 use policy::VerifiedMailRoleLab;
@@ -84,6 +88,29 @@ fn private_existing_db(state: &Path) -> Result<Metadata, MailRoleHold> {
         return Err(MailRoleHold::UnsafeDatabase);
     }
     Ok(info)
+}
+
+/// Detached owner consent, verified against a CURRENT separately pinned Node
+/// operator identity and previously verified signed mail policy. Inert until
+/// a separate CAS witness actually consumes its one-use nonce/revision.
+pub fn first_mail_approval_proposal_for_lab(
+    node: &NodeHost,
+    signed_mail_folder: &Path,
+    expected_endpoint: [u8; 32],
+    approval_bytes: &[u8],
+    expected_witness_revision: u64,
+    now_ms: i64,
+) -> Result<InertMailCasProposal, MailRoleHold> {
+    let policy = VerifiedMailRoleLab::open(signed_mail_folder, node, expected_endpoint, now_ms)?;
+    approval::verify_first_mail_approval(
+        approval_bytes,
+        policy.signed_digest(),
+        policy.claims,
+        policy.claims.operator_public,
+        expected_witness_revision,
+        now_ms,
+    )
+    .map_err(|_| MailRoleHold::MailPolicy)
 }
 
 /// Fail closed if the durable WOW schema grants a different mailbox,
