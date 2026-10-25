@@ -16,6 +16,8 @@ pub mod attachment_contract;
 pub mod wow_attachment_w3;
 #[cfg(feature = "p2p-granted-quic-lab")]
 pub mod granted_quic_lab;
+#[cfg(feature = "p2p-granted-inbox-lab")]
+pub mod granted_inbox_lab;
 
 // The one-file source is compiled both as a standalone binary and as a
 // module inside this library. Keep its existing absolute crate path valid.

@@ -23,6 +23,22 @@ use uuid::Uuid;
 #[path = "p2p_one_file_beta/inbox.rs"]
 mod inbox;
 
+/// Reuse the existing private Native Inbox authority. This explicit
+/// metadata-only shim starts no listener and issues no signed W4 receipt.
+#[cfg(feature = "p2p-granted-inbox-lab")]
+pub(crate) fn persist_granted_private_inbox(
+    verified_full: &[u8],
+    private_root: &std::path::Path,
+    size: u64,
+    root: [u8; 32],
+    sender: [u8; 32],
+    receiver: [u8; 32],
+) -> Result<akula_inbox_ledger_lab::ExpectedTransfer, String> {
+    inbox::persist_received_payload(
+        verified_full, private_root, size, root, sender, receiver
+    )
+}
+
 #[cfg(test)]
 #[path = "p2p_one_file_beta/resume_lab.rs"]
 mod resume_lab;

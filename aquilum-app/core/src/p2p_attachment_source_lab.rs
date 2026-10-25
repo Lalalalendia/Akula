@@ -258,11 +258,19 @@ mod tests {
                 File::open(&path).unwrap(),n),
             Err(SourceServeError::InvalidSource)
         ));
-        assert!(matches!(
-            SelectedSourceSnapshotLab::from_core_selected_file(
-                File::open(dir.path()).unwrap(),n),
-            Err(SourceServeError::InvalidSource)
-        ));
+        // Unix allows opening a directory handle (which the boundary must
+        // reject); Windows may refuse File::open on a directory entirely.
+        match File::open(dir.path()) {
+            Ok(directory) => assert!(matches!(
+                SelectedSourceSnapshotLab::from_core_selected_file(directory,n),
+                Err(SourceServeError::InvalidSource)
+            )),
+            Err(error) => assert!(matches!(
+                error.kind(),
+                std::io::ErrorKind::PermissionDenied |
+                std::io::ErrorKind::IsADirectory
+            )),
+        }
     }
 
     #[test]

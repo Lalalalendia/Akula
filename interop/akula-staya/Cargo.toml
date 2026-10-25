@@ -22,6 +22,8 @@ p2p-attachment-contract = ["aquilum-core/p2p-attachment-contract"]
 # Explicit non-shipping signed-and-encrypted WOW W3 attachment notice.
 p2p-wow-w3-lab = ["p2p-attachment-contract", "aquilum-core/p2p-attachment-replay-lab", "dep:akula-wow-w3-crypto", "dep:ed25519-dalek"]
 p2p-granted-quic-lab = ["p2p-attachment-contract", "aquilum-core/p2p-attachment-source-lab", "dep:tokio", "dep:ring"]
+# Off by default; reuse the real native private Inbox and cold SQLite receipt.
+p2p-granted-inbox-lab = ["p2p-granted-quic-lab", "p2p-one-file-lan-beta"]
 
 [[bin]]
 name = "akula-p2p-one-file-beta"

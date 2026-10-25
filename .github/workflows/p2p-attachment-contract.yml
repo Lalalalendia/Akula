@@ -17,6 +17,7 @@ on:
       - 'interop/akula-staya/src/attachment_contract.rs'
       - 'interop/akula-staya/src/wow_attachment_w3.rs'
       - 'interop/akula-staya/src/granted_quic_lab.rs'
+      - 'interop/akula-staya/src/granted_inbox_lab.rs'
       - 'interop/akula-staya/src/lib.rs'
       - 'interop/akula-staya/Cargo.toml'
       - '.github/workflows/p2p-attachment-contract.yml'
@@ -76,6 +77,10 @@ jobs:
         shell: bash
         run: |
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-granted-quic-lab granted_quic_lab -- --nocapture
+      - name: Verify signed QUIC suffix enters only private cold-verified Inbox
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-granted-inbox-lab granted_inbox_lab -- --nocapture
       - name: Test real WOW W3 HPKE Ed25519 trust and expiry
         shell: bash
         run: |
