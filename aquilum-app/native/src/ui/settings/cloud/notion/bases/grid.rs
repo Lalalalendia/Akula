@@ -154,6 +154,88 @@ mod tests {
                 if row=="row-10")));
     }
     #[test]
+    fn real_pointer_release_on_grid_cell_dispatches_selected_identity() {
+        use std::sync::{Arc, Mutex};
+        use masonry::app::{RenderRoot, RenderRootOptions, RenderRootSignal, WindowSizePolicy};
+        use masonry::core::{
+            PointerButton, PointerButtonEvent, PointerEvent, PointerId, PointerInfo,
+            PointerState, PointerType, PointerUpdate,
+        };
+        use masonry::dpi::{PhysicalPosition, PhysicalSize};
+        use masonry::theme::default_property_set;
+
+        let mut view = BasesView::default();
+        view.total_rows = 1;
+        view.total_columns = 1;
+        view.columns.push(ColumnView {
+            name: "Название".into(), property_id: "c".into(),
+            kind: "rich_text".into(), local_only: false,
+        });
+        view.rows.push(crate::notion_bases::RowView {
+            row_id: "r".into(), label: "Строка".into(),
+            cells: vec![CellView {
+                row_id: "r".into(), property_id: "c".into(),
+                text: "Изменение только после отдельного подтверждения".into(),
+                toggle_to: None, edit_text: true, revert: false,
+            }],
+        });
+        let mut bindings = HashMap::new();
+        let widget = NewWidget::new(append(Flex::column(), &view, &mut bindings));
+        let signals = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&signals);
+        let opts = RenderRootOptions {
+            default_properties: Arc::new(default_property_set()),
+            use_system_fonts: true,
+            size_policy: WindowSizePolicy::User,
+            size: PhysicalSize::new(640, 280),
+            scale_factor: 1.0,
+            test_font: None,
+        };
+        let mut root = RenderRoot::new(widget, move |signal| {
+            if let RenderRootSignal::Action(_, id) = signal {
+                captured.lock().unwrap().push(id);
+            }
+        }, opts);
+        let _ = root.redraw();
+        let pointer = PointerInfo {
+            pointer_id: Some(PointerId::PRIMARY), persistent_device_id: None,
+            pointer_type: PointerType::Mouse,
+        };
+        // Probe actual native widget layout rather than assuming a fixed
+        // font height or accessibility hit rectangle across Windows hosts.
+        let mut found = false;
+        'probe: for x in (175..350).step_by(20) {
+            for y in (25..180).step_by(10) {
+                let mut state = PointerState {
+                    position: PhysicalPosition::new(f64::from(x),f64::from(y)),
+                    count: 1, scale_factor: 1.0, ..PointerState::default()
+                };
+                root.handle_pointer_event(PointerEvent::Move(PointerUpdate {
+                    pointer: pointer.clone(), current: state.clone(),
+                    coalesced: vec![], predicted: vec![],
+                }));
+                state.buttons.insert(PointerButton::Primary);
+                root.handle_pointer_event(PointerEvent::Down(PointerButtonEvent {
+                    pointer: pointer.clone(), button: Some(PointerButton::Primary),
+                    state: state.clone(),
+                }));
+                state.buttons.remove(PointerButton::Primary);
+                root.handle_pointer_event(PointerEvent::Up(PointerButtonEvent {
+                    pointer: pointer.clone(), button: Some(PointerButton::Primary), state,
+                }));
+                let _ = root.redraw();
+                let emitted = std::mem::take(&mut *signals.lock().unwrap());
+                found = emitted.into_iter().any(|id| matches!(
+                    bindings.get(&id),
+                    Some(Binding::Button(Action::NotionBasesSelectCell(row,col)))
+                        if row=="r" && col=="c"
+                ));
+                if found {break 'probe;}
+            }
+        }
+        assert!(found, "real native pointer events must hit the bounded Akula Bases cell");
+    }
+    #[test]
     fn grid_abbreviation_is_unicode_safe() {
         assert_eq!(abbreviate("Привет"),"Привет");
         let long = "🍂".repeat(CELL_LABEL_CHARS+1);
