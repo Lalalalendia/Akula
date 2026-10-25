@@ -167,9 +167,7 @@ impl NodeWowMailboxLab {
         custodian_signer: SigningKey,
         now_ms: i64,
     ) -> Result<Self, MailRoleHold> {
-        let policy = VerifiedMailRoleLab::open_root_provisioned(
-            node, node_endpoint, now_ms,
-        )?;
+        let policy = VerifiedMailRoleLab::open_root_provisioned(node, node_endpoint, now_ms)?;
         Self::open_bound(node, state, custodian_signer, policy, now_ms)
     }
 
