@@ -322,7 +322,8 @@ mod tests {
             assert_eq!(ledger.retry_w3_if_pending(&notice,132),Ok(Some(w3.clone())));
             assert_eq!(ledger.retry_w3_if_pending(&notice,500),Ok(None));
             let mut altered=w3.clone();
-            altered[altered.len()-1]^=1;
+            let index=altered.len()-1;
+            altered[index]^=1;
             assert_eq!(ledger.enqueue_exact_w3(&notice,&altered,140),Err(OutboxError::Conflict));
             assert_eq!(ledger.state(&notice),Ok(FileSendState::Pending));
         }
