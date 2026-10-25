@@ -8,7 +8,7 @@ use masonry::core::{
     PointerInfo,PointerState,PointerType,PointerUpdate,WidgetId,
 };
 use masonry::dpi::{PhysicalPosition,PhysicalSize};
-use masonry::theme::default_property_set;
+use crate::ui::theme;
 use std::sync::{Arc,Mutex};
 
 fn mouse()->PointerInfo {
@@ -74,7 +74,7 @@ fn real_native_pointer_dispatches_scan_and_exact_archived_cell_identity() {
     let signals=Arc::new(Mutex::new(Vec::<WidgetId>::new()));
     let sink=Arc::clone(&signals);
     let options=RenderRootOptions {
-        default_properties:Arc::new(default_property_set()),
+        default_properties:Arc::new(theme::default_properties()),
         use_system_fonts:true,
         size_policy:WindowSizePolicy::User,
         size:PhysicalSize::new(1700,1100),
@@ -85,6 +85,7 @@ fn real_native_pointer_dispatches_scan_and_exact_archived_cell_identity() {
             sink.lock().unwrap().push(id);
         }
     },options);
+    theme::register_fonts(&mut root);
     let _=root.redraw();
     click(&mut root,scan,&signals);
     click(&mut root,restore,&signals);
