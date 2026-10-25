@@ -40,9 +40,7 @@ fn read_bounded_intent(stream: &mut UnixStream) -> Result<(Vec<u8>, Vec<u8>), Ow
     let pos = INTENT_DOMAIN.len();
     let plan_len = u16::from_be_bytes([header[pos], header[pos + 1]]) as usize;
     let owner_len = u16::from_be_bytes([header[pos + 2], header[pos + 3]]) as usize;
-    if !(2..=MAX_PLAN_BYTES).contains(&plan_len)
-        || !(65..=MAX_OWNER_BYTES).contains(&owner_len)
-    {
+    if !(2..=MAX_PLAN_BYTES).contains(&plan_len) || !(65..=MAX_OWNER_BYTES).contains(&owner_len) {
         return Err(OwnerIpcError::InvalidFrame);
     }
     let mut plan = vec![0u8; plan_len];
@@ -110,11 +108,8 @@ pub(super) fn prepare_provisioned_commit_intent_once(
         .map_err(|_| OwnerIpcError::Trust(RootEnrollmentError::InvalidOwnerClock))?
         .as_secs();
     let (canonical_plan, signed_owner_frame) = read_bounded_intent(stream)?;
-    let owner = super::super::owner_frame::verify_from_trust_fd(
-        &trust,
-        &signed_owner_frame,
-        now_unix,
-    )?;
+    let owner =
+        super::super::owner_frame::verify_from_trust_fd(&trust, &signed_owner_frame, now_unix)?;
     let frame = SignedOwnerWireFrame::decode(&signed_owner_frame)
         .map_err(RootEnrollmentError::OwnerFrame)?;
     check_canonical_owner_binding(&canonical_plan, &frame)?;
@@ -122,8 +117,7 @@ pub(super) fn prepare_provisioned_commit_intent_once(
     // A signed plan is not a release signer or witness. Independently open
     // the registered B1a FD and current protected, monotonic witness state.
     let pinned = open_provisioned_first_b1a_release().map_err(OwnerIpcError::FirstRelease)?;
-    let actor = OsWitnessLab::open_provisioned_first_install()
-        .map_err(OwnerIpcError::Witness)?;
+    let actor = OsWitnessLab::open_provisioned_first_install().map_err(OwnerIpcError::Witness)?;
     let observed = actor.current_checkpoint().map_err(OwnerIpcError::Witness)?;
     if observed != WitnessCheckpoint::genesis()
         || owner.claim.previous_head != observed.accepted_floor
