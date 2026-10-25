@@ -100,7 +100,7 @@ fn read_exact_private_file(folder: &Path) -> Result<(Vec<u8>, (u64, u64)), MailR
     if dir_meta.dev() != dir_opened.dev() || dir_meta.ino() != dir_opened.ino() {
         return Err(MailRoleHold::MailPolicy);
     }
-    let mut handle = File::from(
+    let handle = File::from(
         openat(
             &dir,
             FILE,
@@ -186,8 +186,8 @@ fn decode_and_verify(
     // A single allowed signer cannot simultaneously be a sender, recipient
     // or custodian under another ID and bypass domain-separated access.
     let ids = [p.issuer, p.custodian, p.sender, p.recipient];
-    for i in 0..ids.len() {
-        if ids[i + 1..].contains(&ids[i]) {
+    for (i, identity) in ids.iter().enumerate() {
+        if ids[i + 1..].contains(identity) {
             return Err(MailRoleHold::MailPolicy);
         }
     }
