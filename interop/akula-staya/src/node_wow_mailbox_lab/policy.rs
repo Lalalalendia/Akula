@@ -20,6 +20,9 @@ use std::{
 
 const DOMAIN: &[u8] = b"Akula/NodeV1/WOW/OwnerMailRole/lab-v1\0";
 const FILE: &str = "owner-mail-policy.bin";
+const FLOOR_FILE: &str = "owner-mail-epoch-floor.bin";
+const FLOOR_MAGIC: &[u8; 8] = b"WOWMLF01";
+const FLOOR_LEN: usize = 8 + 8 + 32;
 const MAX_FILE_BYTES: u64 = 4096;
 const MAX_OFFERS: u32 = 64;
 const PERMISSIONS: u8 = 0b0000_1111; // STORE/LIST/FETCH/RETURN
@@ -68,6 +71,7 @@ pub(super) struct VerifiedMailRoleLab {
     folder: PathBuf,
     inode: (u64, u64),
     pinned_digest: [u8; 32],
+    floor_inode: (u64, u64),
 }
 
 pub fn sign_mail_policy_for_lab(signer: &SigningKey, claims: MailRoleClaims) -> Vec<u8> {
@@ -79,7 +83,11 @@ pub fn sign_mail_policy_for_lab(signer: &SigningKey, claims: MailRoleClaims) -> 
     postcard::to_stdvec(&SignedPolicy { claims, signature }).expect("fixed-size policy + signature")
 }
 
-fn read_exact_private_file(folder: &Path) -> Result<(Vec<u8>, (u64, u64)), MailRoleHold> {
+fn read_exact_private_file(
+    folder: &Path,
+    filename: &str,
+    limit: u64,
+) -> Result<(Vec<u8>, (u64, u64)), MailRoleHold> {
     let dir_meta = fs::symlink_metadata(folder).map_err(|_| MailRoleHold::MailPolicy)?;
     let uid = rustix::process::geteuid().as_raw();
     if !dir_meta.is_dir()
@@ -103,7 +111,7 @@ fn read_exact_private_file(folder: &Path) -> Result<(Vec<u8>, (u64, u64)), MailR
     let handle = File::from(
         openat(
             &dir,
-            FILE,
+            filename,
             OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::empty(),
         )
@@ -115,20 +123,47 @@ fn read_exact_private_file(folder: &Path) -> Result<(Vec<u8>, (u64, u64)), MailR
         || metadata.nlink() != 1
         || metadata.permissions().mode() & 0o7777 != FILE_MODE
         || metadata.len() == 0
-        || metadata.len() > MAX_FILE_BYTES
+        || metadata.len() > limit
     {
         return Err(MailRoleHold::MailPolicy);
     }
     let inode = (metadata.dev(), metadata.ino());
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     handle
-        .take(MAX_FILE_BYTES + 1)
+        .take(limit + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| MailRoleHold::MailPolicy)?;
-    if bytes.len() as u64 != metadata.len() || bytes.len() as u64 > MAX_FILE_BYTES {
+    if bytes.len() as u64 != metadata.len() || bytes.len() as u64 > limit {
         return Err(MailRoleHold::MailPolicy);
     }
     Ok((bytes, inode))
+}
+
+/// Lab provisioning fixture only. The floor MUST be protected by a
+/// separate root-controlled anti-rollback authority in production. A
+/// same-UID attacker could replace BOTH lab files; the test never claims
+/// otherwise. Never self-increment this file in the running service.
+pub fn mail_epoch_floor_for_lab(signed_policy: &[u8], epoch: u64) -> Vec<u8> {
+    let mut result = Vec::with_capacity(FLOOR_LEN);
+    result.extend_from_slice(FLOOR_MAGIC);
+    result.extend_from_slice(&epoch.to_be_bytes());
+    result.extend_from_slice(blake3::hash(signed_policy).as_bytes());
+    result
+}
+
+fn read_epoch_floor(
+    folder: &Path,
+) -> Result<((u64, [u8; 32]), (u64, u64)), MailRoleHold> {
+    let (bytes, inode) = read_exact_private_file(folder, FLOOR_FILE, FLOOR_LEN as u64)?;
+    if bytes.len() != FLOOR_LEN || &bytes[..8] != FLOOR_MAGIC {
+        return Err(MailRoleHold::MailPolicy);
+    }
+    let epoch = u64::from_be_bytes(bytes[8..16].try_into().map_err(|_| MailRoleHold::MailPolicy)?);
+    let digest: [u8; 32] = bytes[16..].try_into().map_err(|_| MailRoleHold::MailPolicy)?;
+    if epoch == 0 || digest == [0; 32] {
+        return Err(MailRoleHold::MailPolicy);
+    }
+    Ok(((epoch, digest), inode))
 }
 
 fn decode_and_verify(
@@ -214,13 +249,19 @@ impl VerifiedMailRoleLab {
         expected_endpoint: [u8; 32],
         now_ms: i64,
     ) -> Result<Self, MailRoleHold> {
-        let (input, inode) = read_exact_private_file(folder)?;
+        let (input, inode) = read_exact_private_file(folder, FILE, MAX_FILE_BYTES)?;
         let claims = decode_and_verify(&input, node, expected_endpoint, now_ms)?;
+        let ((floor_epoch, floor_digest), floor_inode) = read_epoch_floor(folder)?;
+        let digest = *blake3::hash(&input).as_bytes();
+        if floor_epoch != claims.policy_epoch || floor_digest != digest {
+            return Err(MailRoleHold::MailPolicy);
+        }
         Ok(Self {
             claims,
             folder: folder.to_path_buf(),
             inode,
-            pinned_digest: *blake3::hash(&input).as_bytes(),
+            pinned_digest: digest,
+            floor_inode,
         })
     }
 
@@ -228,8 +269,14 @@ impl VerifiedMailRoleLab {
     /// and node policy change on EVERY request. A new policy requires an
     /// explicit reviewed restart; never hot-adopt a newer/malicious file.
     pub(super) fn require_current(&self, node: &NodeHost, now_ms: i64) -> Result<(), MailRoleHold> {
-        let (input, inode) = read_exact_private_file(&self.folder)?;
-        if inode != self.inode || *blake3::hash(&input).as_bytes() != self.pinned_digest {
+        let (input, inode) = read_exact_private_file(&self.folder, FILE, MAX_FILE_BYTES)?;
+        let ((floor_epoch, floor_digest), floor_inode) = read_epoch_floor(&self.folder)?;
+        if inode != self.inode
+            || *blake3::hash(&input).as_bytes() != self.pinned_digest
+            || floor_inode != self.floor_inode
+            || floor_epoch != self.claims.policy_epoch
+            || floor_digest != self.pinned_digest
+        {
             return Err(MailRoleHold::MailPolicy);
         }
         if decode_and_verify(&input, node, self.claims.node_endpoint, now_ms)? != self.claims {
