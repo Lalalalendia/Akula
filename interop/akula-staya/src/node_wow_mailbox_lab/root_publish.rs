@@ -187,9 +187,10 @@ pub fn first_mail_publish_ci(
         *blake3::hash(signed).as_bytes(),
         claims,
         claims.operator_public, // verified against fixed root-owned RootTrust
-        0, // disposable CI genesis; NOT a production witness observation
+        0,                      // disposable CI genesis; NOT a production witness observation
         now_ms,
-    ).map_err(|_| PublishHold::InvalidOwnerApproval)?;
+    )
+    .map_err(|_| PublishHold::InvalidOwnerApproval)?;
     if proposal.required_next_revision != 1 || !proposal.requires_independent_cas_commit {
         return Err(PublishHold::InvalidOwnerApproval);
     }
