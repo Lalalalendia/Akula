@@ -700,6 +700,7 @@ fn root_mail_cas_publisher_ci_child() {
     assert_eq!(rustix::process::geteuid().as_raw(), 0);
     let source = std::env::var("AKULA_WOW_ROOT_CAS_SOURCE").unwrap();
     let bytes = fs::read(source).unwrap();
+    let action = fs::read(std::env::var("AKULA_WOW_ROOT_CAS_APPROVAL").unwrap()).unwrap();
     let which = std::env::var("AKULA_WOW_ROOT_CAS_STOP").unwrap();
     let (point, expected) = match which.as_str() {
         "pending" => (
@@ -719,10 +720,11 @@ fn root_mail_cas_publisher_ci_child() {
             Err(PublishHold::InjectedStop),
         ),
         "existing" => (PublishStop::None, Err(PublishHold::ExistingOrInterrupted)),
+        "forged" => (PublishStop::None, Err(PublishHold::InvalidOwnerApproval)),
         "none" => (PublishStop::None, Ok(())),
         _ => panic!("invalid CI-only crash point"),
     };
-    assert_eq!(first_mail_publish_ci(&bytes, 1, point), expected);
+    assert_eq!(first_mail_publish_ci(&bytes, &action, 1, point), expected);
 }
 
 #[test]
@@ -803,6 +805,32 @@ fn root_owned_mail_policy_is_read_only_and_current() {
         fixture.node_policy.to_str().unwrap(),
         ROOT_POLICY,
     ]);
+    let signed_bytes = fs::read(&signed_source).unwrap();
+    let action_claims = MailFirstApprovalClaims {
+        version: 1,
+        operation: 1,
+        node_public: fixture.node.public_key(),
+        node_endpoint: NODE_ENDPOINT,
+        signed_policy_digest: *blake3::hash(&signed_bytes).as_bytes(),
+        policy_epoch: 1,
+        expected_witness_revision: 0,
+        approval_nonce: [91; 16],
+        helper_challenge: [92; 32],
+        issued_at_ms: 0,
+        valid_until_ms: 200_000,
+    };
+    let approval_source = fixture._tmp.path().join("owner-action-approval.bin");
+    fs::write(
+        &approval_source,
+        sign_first_mail_approval_for_lab(&fixture.owner, action_claims),
+    ).unwrap();
+    let forged_approval = fixture._tmp.path().join("forged-owner-action.bin");
+    fs::write(
+        &forged_approval,
+        sign_first_mail_approval_for_lab(
+            &SigningKey::from_bytes(&[99; 32]), action_claims,
+        ),
+    ).unwrap();
     let root_child = |stop: &str| {
         eprintln!("ROOT_MAIL_CI: root subprocess start {stop}");
         let exe = std::env::current_exe().unwrap();
@@ -818,6 +846,10 @@ fn root_owned_mail_policy_is_read_only_and_current() {
                 "AKULA_WOW_ROOT_CAS_SOURCE={}",
                 signed_source.display()
             ))
+            .arg(format!(
+                "AKULA_WOW_ROOT_CAS_APPROVAL={}",
+                if stop == "forged" { &forged_approval } else { &approval_source }.display()
+            ))
             .arg(format!("AKULA_WOW_ROOT_CAS_STOP={stop}"))
             .arg(exe)
             .arg("--exact")
@@ -828,6 +860,12 @@ fn root_owned_mail_policy_is_read_only_and_current() {
         assert!(status.success(), "root-only publisher subprocess: {stop}");
         eprintln!("ROOT_MAIL_CI: root subprocess done {stop}");
     };
+    // Wrong detached owner approval must FAIL BEFORE ANY root files exist.
+    root_child("forged");
+    for path in [POLICY, FLOOR, RECEIPT, PENDING, PENDING_FLOOR, PENDING_RECEIPT] {
+        assert!(fs::symlink_metadata(path).is_err(), "forged approval created a root mail file");
+    }
+
     // All three early crash points must refuse admission. A privileged
     // human repair is simulated only by clearing the disposable CI tree.
     for crash in ["pending", "policy", "floor"] {
