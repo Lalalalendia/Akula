@@ -271,8 +271,15 @@ fn local_columns_have_stable_ids_and_project_effective_values() {
             name:"Private notes".into()}],true).unwrap();
     assert_eq!(second.revision,2);
     assert_eq!(second.local_columns,1);
-    let _=fs::remove_file(f.app.join("ui-state.sqlite3"));
-    let offline=read_effective_base(&f.vault,A,&f.digest,&base).unwrap();
+    // A physically separate portable Vault has no appdata/cache or token.
+    // Removing an open SQLite file is not reliable on Windows; copying only
+    // the autonomous bundle and overlay is a stronger offline assertion.
+    let portable=tempfile::tempdir().unwrap();
+    fs::create_dir(portable.path().join("Notion-import")).unwrap();
+    fs::copy(f.vault.join(&f.bundle),portable.path().join(&f.bundle)).unwrap();
+    fs::copy(f.edited_path(),portable.path().join(relative(A))).unwrap();
+    assert!(!portable.path().join("ui-state.sqlite3").exists());
+    let offline=read_effective_base(portable.path(),A,&f.digest,&base).unwrap();
     assert_eq!(offline.local_revision,2);
     assert!(offline.columns.iter().any(|c|c.property_id==local_id
         &&c.name=="Private notes"));
