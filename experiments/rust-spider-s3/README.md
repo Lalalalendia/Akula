@@ -9,7 +9,7 @@ python3 -m pip install -r requirements.txt
 python3 -m unittest discover -s tests -v
 docker run -d --name rust-spider-minio -p 127.0.0.1:9000:9000 \
   -e MINIO_ROOT_USER=trial-access -e MINIO_ROOT_PASSWORD=trial-secret-2026 \
-  quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+  dappros/minio:RELEASE.2025-09-07T16-13-09Z server /data
 export S3_ENDPOINT=http://127.0.0.1:9000
 export AWS_ACCESS_KEY_ID=trial-access AWS_SECRET_ACCESS_KEY=trial-secret-2026
 cargo build --release -j 2
@@ -37,3 +37,6 @@ The GitHub Actions workflow `exp-rust-spider-s3.yml` also starts a real MinIO co
 - `tests/`: fixture assertions, no external dependencies beyond `unittest`.
 
 **Never place real credentials in the repo.** The credentials above are disposable values scoped to the transient MinIO container.
+
+## Diagnostics and fairness
+Both clients use ListObjectsV2 and HeadObject for existing S3 objects and a maximum of four parallel uploads. Scrapy fails if scraped count differs from expected. The Rust broadcast subscription is sized to all 160 synthetic pages plus slack, and explicitly errors on Lagged. This is a benchmark workaround; memory can scale with fixture size and should not be represented as production-grade backpressure. `results.json` records failure type and message. A third-party MinIO Docker image is limited to this isolated CI test.
