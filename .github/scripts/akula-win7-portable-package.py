@@ -222,7 +222,7 @@ def main() -> None:
     (args.out / "START-WIN7-LAB.cmd").write_text(LAUNCHER, encoding="ascii")
     (args.out / "SMOKE-PDF-WIN7.cmd").write_text(PDF_SMOKE, encoding="ascii")
     (args.out / "PREPARE-SHIVA-FONTS.cmd").write_text(FONT_PREP, encoding="ascii")
-    (args.out / "pdf-smoke-input.txt").write_text(PDF_SMOKE_INPUT, encoding="ascii")
+    (args.out / "pdf-smoke-input.txt").write_bytes(PDF_SMOKE_INPUT.encode("ascii"))
     provenance = (
         "source_sha=" + args.revision + "\n"
         "patched_exe_sha256=" + digest + "\n"
