@@ -54,7 +54,7 @@ pub(super) fn append(
             bases.column_start+bases.columns.len(), bases.total_columns),
         |t| t.text_muted, None, Leading::Times(1.3),
     ));
-    let mut grid = Flex::column().cross_axis_alignment(CrossAxisAlignment::Start)
+    let mut grid = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch)
         .with_fixed(header_row(&bases.columns));
     for (i, record) in bases.rows.iter().enumerate() {
         let label = format!("{}  {}", bases.row_start+i+1, abbreviate(&record.label));
