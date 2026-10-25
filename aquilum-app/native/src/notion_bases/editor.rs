@@ -18,6 +18,7 @@ pub struct DraftView {
     pub column_name: String,
     pub kind: EditKind,
     pub value: String,
+    original: String,
     /// A rejected CAS operation must never become an automatic retry.
     /// Keep the user's text visible, but require cancel + fresh selection.
     pub frozen: bool,
@@ -44,8 +45,8 @@ fn prefill(value: &EffectiveValue, kind: &str) -> Result<String, ()> {
                         item.get("plain_text").and_then(|v|v.as_str())
                             .ok_or(())).collect::<Result<String,()>>(),
                 "number" => raw.get("number").filter(|v|!v.is_null())
-                    .map_or(Ok(String::new()),|v|v.as_f64()
-                        .map(|n|n.to_string()).ok_or(())),
+                    .map_or(Ok(String::new()),|v|v.as_number()
+                        .map(ToString::to_string).ok_or(())),
                 "url" | "email" | "phone_number" => raw.get(kind)
                     .map_or(Err(()),|v|if v.is_null(){Ok(String::new())}
                         else{v.as_str().map(str::to_owned).ok_or(())}),
@@ -83,7 +84,7 @@ impl BasesSession {
         let value=prefill(&cell.value,&col.kind)?;
         self.view.draft=Some(DraftView {
             row_id:row.to_owned(),property_id:property.to_owned(),
-            column_name:col.name.clone(),kind,value,frozen:false,
+            column_name:col.name.clone(),kind,original:value.clone(),value,frozen:false,
         });
         self.view.notice=None;
         Ok(())
@@ -113,6 +114,10 @@ impl BasesSession {
         if self.view.busy || self.view.stage!=Stage::Ready{return Err(());}
         let draft=self.view.draft.as_ref().ok_or(())?;
         if draft.frozen {return Err(());}
+        if draft.value==draft.original {
+            self.view.notice=Some("Значение не изменилось: запись не требуется");
+            return Err(());
+        }
         let value=match parse(draft.kind,&draft.value) {
             Ok(v)=>v,
             Err(reason)=>{self.view.notice=Some(reason);return Err(());}
@@ -186,6 +191,7 @@ mod tests {
         let mut session=editable_session();
         assert!(session.begin_draft("row","name").is_ok());
         assert_eq!(session.view().draft.as_ref().unwrap().value,"Источник");
+        assert_eq!(session.view().draft.as_ref().unwrap().original,"Источник");
         assert!(!session.page(0,0));
         assert!(session.begin_draft("row","name").is_err());
         assert!(session.update_draft("Изменено локально").is_ok());
