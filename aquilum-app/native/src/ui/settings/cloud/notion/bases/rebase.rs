@@ -24,7 +24,7 @@ pub(super) fn append(
     let (Some(base_id), Some(old_digest)) =
         (bases.base_id.as_deref(),bases.digest.as_deref()) else {return column;};
     column=column.with_fixed(selectable(
-        "C5b4 · предварительное сравнение Notion; перенос возможен только после подтверждения и при отсутствии конфликтов",
+        "C5b4 · сравнение снимков и ручное разрешение совместимых конфликтов, с подтверждением",
         |t|t.text_secondary,None,Leading::Times(1.3),
     ));
     let mut candidates=BTreeSet::new();

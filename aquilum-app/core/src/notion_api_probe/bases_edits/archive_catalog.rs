@@ -107,9 +107,13 @@ pub fn discover_restore_archives(
         let archived_hash=blake3::hash(&bytes).to_hex().to_string();
         let previous:Edits=serde_json::from_slice(&bytes)
             .map_err(|_|"malformed prior Akula Bases archive")?;
-        if previous.source_root!=source ||
-            previous.baseline_digest==current_digest {
+        if previous.source_root!=source {
             return Err("invalid archived source identity".into());
+        }
+        if previous.baseline_digest==current_digest {
+            // A backup made before switching AWAY from this snapshot cannot
+            // restore a value into the same unmodified source snapshot.
+            continue;
         }
         let expected_relative=archive_relative(
             source,&previous.baseline_digest,current_digest,&archived_hash);
