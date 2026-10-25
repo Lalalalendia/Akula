@@ -220,3 +220,131 @@ fn corrupt_existing_file_is_not_replaced_or_treated_as_new() {
             value:LocalValue::Number(12.0)}],true).is_err());
     assert_eq!(fs::read(f.edited_path()).unwrap(),bytes);
 }
+
+#[test]
+fn local_columns_have_stable_ids_and_project_effective_values() {
+    let f=Fixture::new();
+    let original=fs::read(f.vault.join(&f.bundle)).unwrap();
+    let base=f.model().bases.iter().find(|s|s.notion_id==DS1).unwrap().akula_id.clone();
+    let row_a=f.row(A);
+    let row_c=f.row(C);
+    let local_uuid="55555555-5555-4555-8555-555555555555";
+    let local_id=local_property(A,&base,local_uuid);
+    let score=f.prop(DS1,"score");
+    let formula=f.prop(DS1,"calc");
+    let batch=vec![
+        Change::AddColumn{base_id:base.clone(),local_id:local_uuid.into(),
+            name:"Priority note".into(),kind:LocalKind::Text},
+        Change::Set{row_id:row_a.clone(),property_id:local_id.clone(),
+            value:LocalValue::Text("Local only".into())},
+        Change::Set{row_id:row_a.clone(),property_id:score.clone(),
+            value:LocalValue::Number(34.0)},
+    ];
+    let first=apply_approved(&f.core,&f.vault,A,&f.digest,None,&batch,true).unwrap();
+    assert_eq!(first.revision,1);
+    assert_eq!(first.local_columns,1);
+    assert_eq!(first.overrides,2);
+    assert_eq!(fs::read(f.vault.join(&f.bundle)).unwrap(),original);
+    let effective=read_effective_base(&f.vault,A,&f.digest,&base).unwrap();
+    assert_eq!(effective.rows.len(),2,"multiple views never duplicate rows");
+    assert_eq!(effective.local_revision,1);
+    assert!(!effective.native_views_supported);
+    assert!(effective.columns.iter().any(|c|c.property_id==local_id
+        &&c.local_only&&c.editable_locally&&c.name=="Priority note"));
+    assert!(effective.columns.iter().any(|c|c.property_id==formula
+        &&!c.editable_locally));
+    let row=effective.rows.iter().find(|r|r.akula_id==row_a).unwrap();
+    assert_eq!(row.cells.iter().find(|c|c.property_id==local_id).unwrap().value,
+        EffectiveValue::Local(LocalValue::Text("Local only".into())));
+    assert_eq!(row.cells.iter().find(|c|c.property_id==score).unwrap().value,
+        EffectiveValue::Local(LocalValue::Number(34.0)));
+    assert!(matches!(row.cells.iter().find(|c|c.property_id==formula).unwrap().value,
+        EffectiveValue::Source(_)),"formula remains raw inert Notion JSON");
+    let other=effective.rows.iter().find(|r|r.akula_id==row_c).unwrap();
+    assert_eq!(other.cells.iter().find(|c|c.property_id==local_id).unwrap().value,
+        EffectiveValue::EmptyLocal);
+    assert!(matches!(other.cells.iter().find(|c|c.property_id==score).unwrap().value,
+        EffectiveValue::Source(_)));
+    // Changes to local column display name cannot change its identity.
+    let second=apply_approved(&f.core,&f.vault,A,&f.digest,Some(&first.disk_hash),
+        &[Change::RenameLocalColumn{property_id:local_id.clone(),
+            name:"Private notes".into()}],true).unwrap();
+    assert_eq!(second.revision,2);
+    assert_eq!(second.local_columns,1);
+    let _=fs::remove_file(f.app.join("ui-state.sqlite3"));
+    let offline=read_effective_base(&f.vault,A,&f.digest,&base).unwrap();
+    assert_eq!(offline.local_revision,2);
+    assert!(offline.columns.iter().any(|c|c.property_id==local_id
+        &&c.name=="Private notes"));
+    assert_eq!(offline.rows.iter().find(|r|r.akula_id==row_a).unwrap()
+        .cells.iter().find(|c|c.property_id==local_id).unwrap().value,
+        EffectiveValue::Local(LocalValue::Text("Local only".into())));
+    assert_eq!(fs::read(f.vault.join(&f.bundle)).unwrap(),original);
+}
+#[test]
+fn schema_name_collisions_duplicate_local_ids_and_source_rename_fail_atomically() {
+    let f=Fixture::new();
+    let base=f.model().bases.iter().find(|s|s.notion_id==DS1).unwrap().akula_id.clone();
+    let uuid="66666666-6666-4666-8666-666666666666";
+    let make=|name:&str|Change::AddColumn{
+        base_id:base.clone(),local_id:uuid.into(),name:name.into(),kind:LocalKind::Text,
+    };
+    assert!(apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[make("name")],true).is_err(),"source Name column collision");
+    assert!(apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[make("Scratch"),make("Scratch 2")],true).is_err(),"same local UUID");
+    assert!(apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[make("Scratch"),Change::AddColumn{
+            base_id:base.clone(),local_id:"77777777-7777-4777-8777-777777777777".into(),
+            name:"SCRATCH".into(),kind:LocalKind::Number}],true).is_err());
+    assert!(apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::RenameLocalColumn{property_id:f.prop(DS1,"score"),
+            name:"Changed by local overlay".into()}],true).is_err());
+    assert!(!f.edited_path().exists(),"invalid batch must create no file");
+    let ok=apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[make("Scratch")],true).unwrap();
+    let before=fs::read(f.edited_path()).unwrap();
+    assert!(apply_approved(&f.core,&f.vault,A,&f.digest,Some(&ok.disk_hash),
+        &[Change::RenameLocalColumn{
+            property_id:local_property(A,&base,uuid),name:"Name".into()}],true).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),before);
+}
+#[test]
+fn local_column_type_checks_fail_entire_batch_before_publication() {
+    let f=Fixture::new();
+    let base=f.model().bases.iter().find(|s|s.notion_id==DS1).unwrap().akula_id.clone();
+    let uuid="88888888-8888-4888-8888-888888888888";
+    let prop=local_property(A,&base,uuid);
+    let add=Change::AddColumn{base_id:base.clone(),local_id:uuid.into(),
+        name:"Local number".into(),kind:LocalKind::Number};
+    assert!(apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[add,Change::Set{row_id:f.row(A),property_id:prop,
+            value:LocalValue::Text("wrong type".into())}],true).is_err());
+    assert!(!f.edited_path().exists());
+    let unknown=Change::AddColumn{
+        base_id:"unknown-source".into(),local_id:uuid.into(),
+        name:"Misplaced".into(),kind:LocalKind::Checkbox};
+    assert!(apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[unknown],true).is_err());
+    assert!(!f.edited_path().exists());
+}
+#[test]
+fn existing_v1_overlay_without_local_columns_remains_readable() {
+    let f=Fixture::new();
+    let row=f.row(A);
+    let score=f.prop(DS1,"score");
+    apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::Set{row_id:row.clone(),property_id:score.clone(),
+            value:LocalValue::Number(25.0)}],true).unwrap();
+    let mut legacy:Value=serde_json::from_slice(&fs::read(f.edited_path()).unwrap()).unwrap();
+    legacy.as_object_mut().unwrap().remove("local_columns");
+    fs::write(f.edited_path(),serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let state=open(&f.vault,A,&f.digest).unwrap().unwrap();
+    assert!(state.state.local_columns.is_empty());
+    assert_eq!(state.state.local_value(&row,&score),Some(&LocalValue::Number(25.0)));
+    let next=apply_approved(&f.core,&f.vault,A,&f.digest,Some(&state.expected_disk_hash),
+        &[Change::Set{row_id:row,property_id:score,
+            value:LocalValue::Number(26.0)}],true).unwrap();
+    assert_eq!(next.revision,2);
+    assert_eq!(next.local_columns,0);
+}
