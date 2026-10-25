@@ -6,7 +6,11 @@
 //! a trusted OS clock, protected custodian key enrollment, and a different
 //! separately consented Node service activation/installer gate.
 use super::MailRoleHold;
-use akula_wire_lab::{MAX_MESSAGE_BYTES, trust_w3::TrustRegistry};
+use akula_wire_lab::{
+    MAX_MESSAGE_BYTES,
+    custodian_mailbox::{MailRoleGate, MailboxPolicy},
+    trust_w3::TrustRegistry,
+};
 use aquilum_core::node_v1::NodeHost;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rustix::fs::{Mode, OFlags, open, openat};
@@ -297,6 +301,27 @@ impl VerifiedMailRoleLab {
             return Err(MailRoleHold::MailPolicy);
         }
         Ok(())
+    }
+
+    /// The signed manifest was authenticated through the current Node
+    /// root-pinned operator key and independent epoch floor. Bind its exact
+    /// digest and mailbox limits to WOW's SQLite transaction-time guard.
+    pub(super) fn sqlite_gate(&self) -> MailRoleGate {
+        let p = self.claims;
+        MailRoleGate {
+            mailbox_policy: MailboxPolicy {
+                mailbox: p.mailbox,
+                issuer: p.issuer,
+                issuer_epoch: p.issuer_epoch,
+                custodian: p.custodian,
+                scope: p.scope,
+                recipient: p.recipient,
+                max_message_bytes: p.max_message_bytes,
+                max_offers: p.max_offers,
+            },
+            policy_epoch: p.policy_epoch,
+            signed_policy_digest: self.pinned_digest,
+        }
     }
 
     pub(super) fn registry(&self) -> Result<TrustRegistry, MailRoleHold> {
