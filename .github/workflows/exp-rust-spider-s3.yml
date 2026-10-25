@@ -7,6 +7,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   benchmark:
     runs-on: ubuntu-24.04
@@ -17,7 +20,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: trial-secret-2026
       AWS_REGION: us-east-1
       AWS_EC2_METADATA_DISABLED: 'true'
-      MINIO_IMAGE: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+      MINIO_IMAGE: dappros/minio:RELEASE.2025-09-07T16-13-09Z
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
