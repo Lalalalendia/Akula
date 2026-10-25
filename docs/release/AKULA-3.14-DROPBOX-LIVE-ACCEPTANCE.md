@@ -48,3 +48,15 @@ Record only Windows version, exact tested SHA/build, test step, PASS/FAIL/BLOCKE
 - Temporary push triggers used to obtain the three checks were removed in the subsequent branch-only commit `87621017b67c6b32f5f5e393cf1d422acdfef242`. Final source code for the launcher and account binding is unchanged; workflow definitions again match `main`. Required PR `Main PR gate` has **not** run.
 
 **Remaining HOLD:** Perform C1–C5 with a real Development-authorized Dropbox account on this exact test candidate. Record browser-vs-Explorer, callback acceptance, cold-start keyring resume, fail-closed wrong-account handling and local Forget (without any secret in logs). Then pass the protected PR gate and independent signed release acceptance. Until then, do not describe Dropbox login or public Dropbox availability as fully accepted.
+
+## G. No-account Windows browser UIA (new gate)
+
+An additional UIA probe was added in `scripts/windows-dropbox-browser-uia.ps1` to close the gap between a successful `ShellExecuteW` return and a **real visible browser window**. It runs the installed-feature native executable on an ephemeral GitHub-hosted Windows runner, opens Dropbox settings and invokes the real account login button.
+
+The probe snapshots visible top-level Edge/Chrome/Firefox/etc. browser HWNDs *before* the click and requires a **new browser window** afterward. It deliberately does not inspect URLs, process command lines, account identities or OAuth tokens; it never grants Dropbox consent. The existing code-level URL allowlist is tested separately.
+
+- [Browser UIA source commit](https://github.com/Lalalalendia/Akula/commit/d90b7bccc139afb660fd1dcb30f416447a329929)
+- [Existing Windows Dropbox workflow integration](https://github.com/Lalalalendia/Akula/commit/1627f3719d8a3d1ca0a40ff634e621c8fd213320)
+- [First Windows browser UIA CI #40195949867](https://github.com/Lalalalendia/Akula/actions/runs/40195949867) — **PENDING** at recording time; do not mark as PASS until an actual `AKULA_DROPBOX_SYSTEM_BROWSER_UIA_PASS` witness is observed on the exact tested SHA.
+
+The branch-only `push` subscription in `dropbox-native-313.yml` is temporary for this non-PR test. Remove it after the exact-head test is accepted, retaining the test in the existing workflow's `pull_request` and manual paths. This probe does not establish real Dropbox account consent or signed/installed production release approval.
