@@ -116,17 +116,16 @@ class S3ObjectSink:
                                                 "text/html; charset=utf-8" if key.endswith(".html") else
                                                 "application/json"),
                                    IfNoneMatch="*")
-        except Exception as exc:
-            # A pre-existing immutable object may be read back and compared.
-            code = (getattr(exc, "response", None) or {}).get("Error", {}).get("Code")
-            if code not in ("PreconditionFailed", "412"):
-                raise ObjectWriteUncertain("S3 put outcome unknown; requires readback") from exc
+        except Exception:
+            # The write may already have completed despite a lost response.
+            # Readback below is the only proof; never issue a second write here.
+            pass
         try:
             received = self.get(key)
         except Exception as exc:
             raise ObjectWriteUncertain("S3 readback failed after put") from exc
         if received != data or hashlib.sha256(received).hexdigest() != digest:
-            raise ObjectConflict("S3 conditional put/readback mismatch")
+            raise ObjectConflict("S3 immutable key exists with different bytes")
         return digest
 
     def cas_verified(self, key: str, data: bytes, expected: bytes | None) -> str:
@@ -161,7 +160,15 @@ class S3ObjectSink:
             code = (getattr(exc, "response", None) or {}).get("Error", {}).get("Code")
             if code in ("PreconditionFailed", "412", "ConditionalRequestConflict", "409"):
                 raise ObjectConflict("S3 CAS precondition rejected") from exc
-            raise ObjectWriteUncertain("S3 pointer write outcome unknown") from exc
+            # A CAS acknowledgement can be lost AFTER the pointer was stored.
+            # Never replay a possibly-committed pointer update blindly.
+            try:
+                present = self.get(key)
+            except Exception as check_exc:
+                raise ObjectWriteUncertain("S3 pointer acknowledgement/readback unavailable") from check_exc
+            if present != data:
+                raise ObjectWriteUncertain("S3 pointer changed or was not committed") from exc
+            return hashlib.sha256(data).hexdigest()
         try:
             readback = self.get(key)
         except Exception as exc:
@@ -173,10 +180,20 @@ class S3ObjectSink:
     def get(self, key: str) -> bytes:
         if key.startswith("/") or ".." in key.split("/") or "\\" in key:
             raise ValueError("unsafe key")
-        result = self.client.get_object(Bucket=self.bucket, Key=self.prefix + key)
+        try:
+            result = self.client.get_object(Bucket=self.bucket, Key=self.prefix + key)
+        except Exception as exc:
+            code = (getattr(exc, "response", None) or {}).get("Error", {}).get("Code")
+            if code in ("NoSuchKey", "NoSuchBucket", "404", "NotFound", "AccessDenied",
+                        "InvalidAccessKeyId", "SignatureDoesNotMatch"):
+                raise  # Preserve 404 and permanent failures for publisher/quality gates.
+            raise ObjectWriteUncertain("S3 read unavailable") from exc
         body = result["Body"]
         try:
-            return body.read(2 * 1024 * 1024 + 1)
+            try:
+                return body.read(2 * 1024 * 1024 + 1)
+            except Exception as exc:
+                raise ObjectWriteUncertain("S3 body read interrupted") from exc
         finally:
             if hasattr(body, "close"):
                 body.close()
