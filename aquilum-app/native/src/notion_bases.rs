@@ -10,7 +10,7 @@ use std::{fs, path::{Path, PathBuf}, sync::{Arc, mpsc::{self, Sender, Receiver}}
 mod editor;
 mod schema_editor;
 mod grid;
-mod rebase;
+pub(crate) mod rebase;
 pub use grid::SelectedCell;
 pub use editor::{DraftView, EditKind};
 pub use schema_editor::{SchemaDraftView, SchemaMode};
