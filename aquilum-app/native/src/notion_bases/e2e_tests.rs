@@ -62,7 +62,7 @@ fn native_reimport_accept_archive_cold_reopen_and_restore_via_cas() {
     let old=SnapshotStore::open(&db).unwrap()
         .publish(&source(5),25).unwrap().digest;
     let first=structured_bundle::prepare_from_cached(&db,ROOT,&old).unwrap();
-    let core=Arc::new(Core::open(&app,Arc::new(|_|{})));
+    let core=Core::open(&app,Arc::new(|_:aquilum_core::CoreEvent|{}));
     core.ui_state.resolve_workspace(vault.to_str().unwrap(),1).unwrap();
     let old_bundle=structured_bundle::publish_approved(&core,&vault,&first,true)
         .unwrap().relative_path;
@@ -114,7 +114,7 @@ fn native_reimport_accept_archive_cold_reopen_and_restore_via_cas() {
 
     // Construct a new process-equivalent Core and GUI session, with no old
     // session state or cached archive list carried in memory.
-    let reopened=Arc::new(Core::open(&app,Arc::new(|_|{})));
+    let reopened=Core::open(&app,Arc::new(|_:aquilum_core::CoreEvent|{}));
     reopened.ui_state.resolve_workspace(vault.to_str().unwrap(),2).unwrap();
     let mut session=BasesSession::new(Arc::new(||{}));
     session.open(vault.clone(),ROOT.into()).unwrap();finish(&mut session);
