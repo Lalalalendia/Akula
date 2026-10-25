@@ -9,6 +9,9 @@ on:
       - 'interop/akula-staya/src/lib.rs'
       - 'interop/akula-staya/src/node_wow_mailbox_lab.rs'
       - 'interop/akula-staya/src/node_wow_mailbox_lab/policy.rs'
+      - 'interop/akula-staya/src/node_live_read.rs'
+      - 'interop/akula-staya/src/node_v1_runtime/server.rs'
+      - 'interop/akula-staya/tests/node_live_identity.rs'
       - 'aquilum-app/core/src/node_v1/mod.rs'
       - 'aquilum-app/core/src/node_v1/trust.rs'
       - 'interop/akula-staya/tests/node_wow_mailbox_lab.rs'
@@ -35,9 +38,12 @@ jobs:
           MODULE=interop/akula-staya/src/node_wow_mailbox_lab.rs
           TEST=interop/akula-staya/tests/node_wow_mailbox_lab.rs
           POLICY=interop/akula-staya/src/node_wow_mailbox_lab/policy.rs
-          rustfmt --edition 2024 "$MODULE" "$TEST" "$POLICY"
-          if ! git diff --quiet -- "$MODULE" "$TEST" "$POLICY"; then
-            for target in "$MODULE" "$TEST" "$POLICY"; do
+          LIVE=interop/akula-staya/src/node_live_read.rs
+          SERVER=interop/akula-staya/src/node_v1_runtime/server.rs
+          LIVE_TEST=interop/akula-staya/tests/node_live_identity.rs
+          rustfmt --edition 2024 "$MODULE" "$TEST" "$POLICY" "$LIVE" "$SERVER" "$LIVE_TEST"
+          if ! git diff --quiet -- "$MODULE" "$TEST" "$POLICY" "$LIVE" "$SERVER" "$LIVE_TEST"; then
+            for target in "$MODULE" "$TEST" "$POLICY" "$LIVE" "$SERVER" "$LIVE_TEST"; do
               echo "RUSTFMT_BASE64_START:${target}"
               base64 -w 0 "$target"
               echo
@@ -50,6 +56,8 @@ jobs:
         run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features node-wow-mailbox-lab --lib
       - name: Test separate Node root policy and mail trust / persisted read
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-wow-mailbox-lab --test node_wow_mailbox_lab -- --nocapture
+      - name: Re-test existing live-Iroh roster and grant identity behavior
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-wow-mailbox-lab --test node_live_identity -- --nocapture
       - name: Enforce strict warnings for the isolated module
         run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features node-wow-mailbox-lab --test node_wow_mailbox_lab -- -D warnings
       - name: Check Rust formatting
