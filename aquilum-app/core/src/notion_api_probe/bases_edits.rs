@@ -14,6 +14,8 @@ mod rebase_preview;
 mod rebase_apply;
 mod rebase_archive;
 mod rebase_restore;
+mod archive_catalog;
+pub use archive_catalog::{discover_restore_archives, RestoreArchive, RestoreCell};
 pub use rebase_restore::restore_archived_cell_approved;
 pub use rebase_apply::{apply_rebase_approved, apply_rebase_resolved_approved,
     apply_rebase_decisions_approved, RebaseDecision, RebaseReceipt};
