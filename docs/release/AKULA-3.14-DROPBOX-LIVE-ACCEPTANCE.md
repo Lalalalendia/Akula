@@ -1,76 +1,36 @@
-# Akula 0.3.14 — Dropbox live OAuth acceptance (owner only)
+# Akula Dropbox OAuth — owner-only Windows acceptance
 
-## Release boundary
+## Separate the released build from the candidate
 
-Windows signed [v0.3.14](https://github.com/Lalalalendia/Akula/releases/tag/v0.3.14)
-includes the native Dropbox account-only flow and read-only Vault proof. It does
-**not** include Dropbox write/delete, background sync, trusted publisher policy
-or a publicly approved OAuth app. The signed installer, SHA-256 and source are
-already fixed; this document does not modify the published release.
+**Public signed v0.3.14 is a known failing baseline.** Its Windows OAuth launcher uses `explorer.exe`, which can open File Explorer instead of a browser. The public installer is immutable. Login, stored-token recovery, and Dropbox approval have NOT been demonstrated by that release.
 
-## External prerequisites: Dropbox developer owns these settings
+**Candidate**: branch `fix/dropbox-account-relogin-scope-20261024` at `290606a665f76c49585dabd88411bd5bf190ed28`. Source changes use the system HTTPS handler via `ShellExecuteW`, initialize STA COM on the worker, and reject re-consent for a different saved account/root before storing credentials. Candidate is neither CI-accepted nor publicly released.
 
-In the [Dropbox App Console](https://www.dropbox.com/developers/apps), select
-Akula's app `gzrirdrrx4tarly`, Scoped access **App folder** (folder `Akula`).
-Verify that the **saved** OAuth Redirect URIs list contains exactly
-`http://127.0.0.1:47219/dropbox/callback`; typing the URI without clicking
-**Add** does not register it. Enable and save only `account_info.read`,
-`files.metadata.read`, `files.content.read`; do not request write scopes.
-This is a **Development** app until Dropbox independently approves Production
-and cannot be advertised as generally available. Never send its secret key
-or real account tokens in a PR, issue, chat, screenshot or CI log.
+Both builds are account-only / read-only; Dropbox sync, writes, deletes, and trusted publisher approval remain disabled. `SYNC_DISABLED` must remain true after successful account login.
 
-## Live acceptance (not possible in repository CI)
+## A. Reproduce published 0.3.14 (do not mark PASS)
 
-Use a disposable Windows 10/11 test user + browser and the **ordinary signed
-Akula v0.3.14**, with one installed Akula, no user Vault or real notes.
-Enable Windows Credential Manager. Use a Dropbox account that the developer
-has authorized for Development testing. Do **not** run this against valuable
-files or impersonate a production user.
+1. On a disposable Windows test profile install ordinary signed v0.3.14, open Settings → Cloud → Dropbox, click `Войти в Dropbox`.
+2. Record whether File Explorer, a browser or neither opens. `WAITING_FOR_DROPBOX_ACCOUNT_CONSENT / SYNC_DISABLED` without an actual browser is **not** OAuth acceptance.
+3. Do not infer successful consent or refresh-token storage. Do not paste OAuth callback URLs or secrets into reports.
 
-1. Open Akula → Settings → Cloud → Dropbox. Confirm the modal opens and starts
-   `DISCONNECTED / SYNC_DISABLED`.
-2. Click `Войти в Dropbox`. The **default HTTPS browser** must open the
-   `https://www.dropbox.com/oauth2/authorize` page, never File Explorer.
-   The original signed v0.3.14 still uses `explorer.exe`; this corrected
-   Win32 ShellExecuteW behavior applies only to a future reviewed build.
-   Complete consent in the system browser within
-   120 seconds. Confirm a status `ACCOUNT_AUTHORIZED / VAULT_NOT_APPROVED /
-   SYNC_DISABLED`. No VaultId or independent HEAD pin is required for login.
-3. Close all Akula processes and reopen the **same installed** application.
-   Click `Проверить сохранённый вход`. A successful refresh must show
-   `ACCOUNT_SESSION_RESTORED / VAULT_NOT_APPROVED / SYNC_DISABLED`, with no
-   browser. This proves read-back through the OS secret store plus live Dropbox
-   account/root verification; it does **not** prove publisher trust.
-4. Re-enter `Войти в Dropbox` using a **different** Dropbox account while
-   the first identity is still configured. The next code patch must return
-   `DROPBOX_ACCOUNT_OR_ROOT_MISMATCH / SYNC_DISABLED` and must not replace
-   the account or store a second refresh token. To switch accounts, use
-   `Забыть аккаунт на этом устройстве` **first**. Record behavior without
-   recording IDs or secrets.
-5. Click `Забыть аккаунт на этом устройстве`. Verify
-   `LOCAL_CREDENTIAL_FORGOTTEN / SYNC_DISABLED`, then restart; recovery
-   must not succeed without a fresh login. Local forget is **not** remote
-   revocation. To revoke on Dropbox, use Connected apps.
-6. Optionally validate a separately trusted Vault using real independent
-   VaultId/profile and out-of-band BLAKE3 HEAD. A successful read-only proof
-   remains `PUBLISHER_NOT_APPROVED / SYNC_DISABLED`; never infer a file
-   download, upload, delete or sync guarantee from account login.
+## B. Owner-only Dropbox App Console prerequisite
 
-## Evidence and release gate
+Use [Dropbox App Console](https://www.dropbox.com/developers/apps), app `gzrirdrrx4tarly`, scoped App Folder `Akula`. Verify the saved callback `http://127.0.0.1:47219/dropbox/callback` (press **Add** and save). Verify only `account_info.read`, `files.metadata.read`, `files.content.read`; never add write permissions. Development-mode test accounts require owner approval. Production status requires independent Dropbox approval and is not established by CI.
 
-Record only: Windows version, Akula release/commit, outcome of each step,
-safe public status codes, and whether OS keyring was used after restart.
-Do not collect OAuth callback URLs, login codes, access/refresh tokens,
-secret-store values or account identifiers. **No authentic Dropbox consent,
-scope verification, keyring restore, or Production approval has been completed
-merely by merging this change or passing synthetic CI tests.**
+## C. Fixed installed candidate — actual acceptance
 
-The account-switch binding fix in the following development PR is a **future
-release** change: it does not retroactively modify the published v0.3.14 bytes.
-If tests use installed v0.3.14 before that fix ships, do not expect step 4's
-new fail-closed behavior. Record that limitation explicitly.
+Only after an exact-head Windows installed-feature build and CI, test a **separately identified installed candidate** on a disposable Windows 10/11 profile and Development-authorized Dropbox test accounts.
 
-Dropbox references:
-- https://www.dropbox.com/developers/reference/getting-started
-- https://www.dropbox.com/developers/reference/developer-guide
+1. Click `Войти в Dropbox`. Observe a real **default HTTPS browser** opening `https://www.dropbox.com/oauth2/authorize`, **not** Explorer. Successful `ShellExecuteW` return alone is insufficient. No browser is FAIL.
+2. Consent within the 120-second callback deadline. Expect `ACCOUNT_AUTHORIZED / VAULT_NOT_APPROVED / SYNC_DISABLED`. Timeout, wrong redirect/scopes, or denied consent are FAIL/BLOCKED, not PASS.
+3. Quit **all** Akula processes, restart the same installed candidate and click `Проверить сохранённый вход`. Expect `ACCOUNT_SESSION_RESTORED / VAULT_NOT_APPROVED / SYNC_DISABLED` without a browser. This checks OS keyring refresh and current Dropbox identity, not publisher trust.
+4. With the first identity configured, attempt `Войти в Dropbox` as a different test account. Expect `DROPBOX_ACCOUNT_OR_ROOT_MISMATCH / SYNC_DISABLED`; no new token or changed identity. To switch intentionally, first click `Забыть аккаунт на этом устройстве`.
+5. Forget the saved account. Expect `LOCAL_CREDENTIAL_FORGOTTEN / SYNC_DISABLED`; after restart, no recovery until new consent. Forget is local, not a remote Dropbox revocation.
+6. Optional independently pinned read-only Vault HEAD proof can report `PUBLISHER_NOT_APPROVED / SYNC_DISABLED`. Never infer upload, download, delete, sync or trust from OAuth consent.
+
+## D. Exact-head promotion gate
+
+Require Windows installed-feature `cargo check --locked`, Rust formatting, Dropbox account and secret-store tests (including rejected URLs, account mismatch, missing keyring), Main PR gate and existing installed cloud dialog UIA. Mock UIA confirms the button exists; **it does not prove the real browser or live OAuth**. Before public release, owner must verify B and C on the reviewed installed binary. No source merge automatically updates 0.3.14.
+
+Record only Windows version, exact tested SHA/build, test step, PASS/FAIL/BLOCKED, safe public status codes, actual browser-vs-Explorer observation and post-restart keyring recovery. Never log OAuth URLs with query strings, callback data, access/refresh tokens, credential-store values, account IDs or private Vault details.
