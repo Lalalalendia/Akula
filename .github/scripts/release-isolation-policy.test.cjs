@@ -130,9 +130,10 @@ test('signed Windows beta may publish only after manually approved independent v
 test('single published Akula installer includes opt-in S3 feature', () => {
   const signed = file('.github/workflows/akula-windows-signed-candidate.yml');
   const active = signed.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
-  assert.match(active,
-    /^\s*cargo build --release --locked -p aquilum-native --features installed,s3-pair-beta\s*$/m,
-    'the signed update must compile the S3 feature into the ordinary Akula EXE');
+  assert.match(active, /scripts\/akula-win7-signed-stage\.ps1/);
+  assert.match(file('scripts/akula-win7-signed-stage.ps1'),
+    /cargo \+nightly build[^\n]*--features installed,s3-pair-beta[^\n]*--target \$target[^\n]*-Z build-std=std,panic_abort/,
+    'the one signed EXE must include opt-in S3 and use the audited Windows 7 target');
   assert.match(active, /scripts\/test-windows-beta\.ps1/);
   assert.match(active, /--title "Akula v\$\{version\}" --latest/);
   assert.doesNotMatch(active, /--features installed,s3-pair-beta\s+--bin\s+different-app/);
