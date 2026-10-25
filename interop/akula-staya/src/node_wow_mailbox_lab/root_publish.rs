@@ -2,7 +2,7 @@
 //! ROOT-ONLY CI LAB: not a release installer, root IPC opcode or mail daemon.
 //! An independently signed owner manifest is checked against the fixed
 //! RootTrust before any mutation. There is NO auto-enrolment, update or retry.
-use super::{MailRoleHold, policy};
+use super::policy;
 use rustix::fs::{FlockOperation, Mode, OFlags, RenameFlags, flock, openat, renameat_with};
 use std::{
     fs::{File, Metadata, Permissions},
@@ -74,7 +74,7 @@ fn open_enrolled_mail() -> Result<(File, u32), PublishHold> {
         .map_err(err)?,
     );
     let m = dir.metadata().map_err(err)?;
-    if !root_dir_ok(&m, 0o750) || m.gid() == 0 {
+    if !root_dir_ok(&m, 0o750) || m.gid() == 0 || m.gid() == u32::MAX {
         return Err(PublishHold::RootAuthority);
     }
     Ok((dir, m.gid()))
@@ -107,7 +107,9 @@ fn staged(dir: &File, gid: u32, name: &str, data: &[u8]) -> Result<(), PublishHo
     rustix::fs::fchown(
         &f,
         Some(rustix::process::Uid::ROOT),
-        Some(rustix::process::Gid::from_raw(gid)),
+        // SAFETY: gid came from verified kernel stat metadata and was
+        // explicitly checked against the invalid -1 sentinel above.
+        Some(unsafe { rustix::process::Gid::from_raw(gid) }),
     )
     .map_err(err)?;
     f.set_permissions(Permissions::from_mode(0o640))
