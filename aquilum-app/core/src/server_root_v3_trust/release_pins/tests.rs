@@ -41,7 +41,11 @@ fn fixture() -> (TempDir, FirstReleaseApproval) {
 
     let manifest = ReleaseManifestV1 {
         platform: TargetPlatform::LinuxX86_64,
-        version: Version { major: 0, minor: 3, patch: 13 },
+        version: Version {
+            major: 0,
+            minor: 3,
+            patch: 13,
+        },
         release_sequence: 1,
         package_size: NODE_BYTES.len() as u64,
         package_sha256: node_sha,
@@ -55,19 +59,25 @@ fn fixture() -> (TempDir, FirstReleaseApproval) {
         .try_into()
         .unwrap();
     let verified = verify_signed_release(
-        &SignedRelease { manifest: manifest.clone(), signature: sig },
+        &SignedRelease {
+            manifest: manifest.clone(),
+            signature: sig,
+        },
         &TrustedReleaseSigner {
             signer_id: "publisher-e2e".into(),
             ed25519_public: issuer_key,
         },
         ReleaseFloor::initial(),
         NOW,
-    ).unwrap();
+    )
+    .unwrap();
     let approval = FirstReleaseApproval {
         sequence: 1,
         package_size: NODE_BYTES.len() as u64,
         package_sha256: node_sha,
-        manifest_fingerprint: verified.release_floor_candidate().signed_manifest_fingerprint,
+        manifest_fingerprint: verified
+            .release_floor_candidate()
+            .signed_manifest_fingerprint,
     };
     write_protected(&trust.join(FIRST_APPROVAL_FILE), &approval.encode(), 0o600);
     write_protected(
@@ -93,7 +103,9 @@ fn check(folder: &TempDir, time: u64) -> Result<RootVerifiedFd, FirstReleaseErro
 
 #[test]
 fn fixed_root_public_key_and_signed_package_identity_match() {
-    if rustix::process::geteuid().as_raw() != 0 { return; }
+    if rustix::process::geteuid().as_raw() != 0 {
+        return;
+    }
     let (dir, approved) = fixture();
     let verified = check(&dir, NOW).unwrap();
     assert_eq!(verified.receipt.package_sha256, approved.package_sha256);
@@ -105,7 +117,9 @@ fn fixed_root_public_key_and_signed_package_identity_match() {
 
 #[test]
 fn independent_release_approval_rejects_missing_corrupt_and_downgraded_scope() {
-    if rustix::process::geteuid().as_raw() != 0 { return; }
+    if rustix::process::geteuid().as_raw() != 0 {
+        return;
+    }
     for variant in 0..9 {
         let (dir, mut approval) = fixture();
         let root = dir.path().join("trust");
@@ -132,7 +146,8 @@ fn independent_release_approval_rejects_missing_corrupt_and_downgraded_scope() {
                 fs::set_permissions(
                     root.join(FIRST_APPROVAL_FILE),
                     Permissions::from_mode(0o644),
-                ).unwrap();
+                )
+                .unwrap();
             }
             7 => {
                 let mut raw = approval.encode();
@@ -146,13 +161,18 @@ fn independent_release_approval_rejects_missing_corrupt_and_downgraded_scope() {
             }
             _ => unreachable!(),
         }
-        assert!(check(&dir, NOW).is_err(), "bad release approval variant {variant}");
+        assert!(
+            check(&dir, NOW).is_err(),
+            "bad release approval variant {variant}"
+        );
     }
 }
 
 #[test]
 fn stage_mutations_or_wrong_publisher_and_expiry_are_not_accepted() {
-    if rustix::process::geteuid().as_raw() != 0 { return; }
+    if rustix::process::geteuid().as_raw() != 0 {
+        return;
+    }
     for variant in 0..6 {
         let (dir, _) = fixture();
         let root = dir.path().join("trust");
@@ -178,7 +198,10 @@ fn stage_mutations_or_wrong_publisher_and_expiry_are_not_accepted() {
             }
             _ => unreachable!(),
         }
-        assert!(check(&dir, NOW).is_err(), "bad staged B1a variant {variant}");
+        assert!(
+            check(&dir, NOW).is_err(),
+            "bad staged B1a variant {variant}"
+        );
     }
     let (dir, _) = fixture();
     assert!(check(&dir, NOW + 100).is_err(), "expired signed release");
@@ -186,7 +209,9 @@ fn stage_mutations_or_wrong_publisher_and_expiry_are_not_accepted() {
 
 #[test]
 fn without_uid0_even_valid_signed_package_is_inert() {
-    if rustix::process::geteuid().as_raw() == 0 { return; }
+    if rustix::process::geteuid().as_raw() == 0 {
+        return;
+    }
     let (dir, _) = fixture();
     assert!(matches!(
         check(&dir, NOW),

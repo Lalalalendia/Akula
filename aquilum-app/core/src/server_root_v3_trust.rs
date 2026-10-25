@@ -323,9 +323,7 @@ pub use witness_init::admin_initialize_first_root_witness;
 mod destination_init;
 pub use destination_init::admin_enroll_fixed_opt_once;
 mod release_pins;
-pub use release_pins::{
-    open_provisioned_first_b1a_release, FirstReleaseError,
-};
+pub use release_pins::{open_provisioned_first_b1a_release, FirstReleaseError};
 
 #[cfg(test)]
 mod bootstrap_sequence_tests;

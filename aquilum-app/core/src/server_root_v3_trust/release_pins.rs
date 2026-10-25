@@ -47,9 +47,7 @@ struct FirstReleaseApproval {
 impl FirstReleaseApproval {
     fn decode(data: &[u8]) -> Result<Self, FirstReleaseError> {
         const BODY: usize = 1 + 8 + 8 + 32 + 32;
-        if data.len() != APPROVAL_DOMAIN.len() + BODY
-            || !data.starts_with(APPROVAL_DOMAIN)
-        {
+        if data.len() != APPROVAL_DOMAIN.len() + BODY || !data.starts_with(APPROVAL_DOMAIN) {
             return Err(FirstReleaseError::InvalidApproval);
         }
         let mut pos = APPROVAL_DOMAIN.len();
@@ -97,9 +95,7 @@ fn verify_first_from_trust_fd(
         return Err(FirstReleaseError::Trust(RootEnrollmentError::NotRoot));
     }
     let policy = RootEnrolledV3::from_trust_fd(trust)?;
-    if read_root_file(trust, FIRST_APPROVAL_MARKER, 128)?
-        != FIRST_APPROVAL_MARKER_BYTES
-    {
+    if read_root_file(trust, FIRST_APPROVAL_MARKER, 128)? != FIRST_APPROVAL_MARKER_BYTES {
         return Err(FirstReleaseError::InvalidApproval);
     }
     let raw = read_root_file(trust, FIRST_APPROVAL_FILE, 256)?;

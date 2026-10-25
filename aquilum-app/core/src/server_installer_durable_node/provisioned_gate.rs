@@ -5,8 +5,7 @@ use super::*;
 use crate::server_owner_approval_wire::{OwnerApprovalWireV1, OwnerFloorWire};
 use crate::server_root_v3_guard::CheckedRootV3Scope;
 use crate::server_root_v3_trust::{
-    load_provisioned_root_v3_policy, observed_root_host,
-    open_provisioned_first_b1a_release,
+    load_provisioned_root_v3_policy, observed_root_host, open_provisioned_first_b1a_release,
 };
 
 #[cfg(feature = "server-root-b0v3-gate-lab")]
@@ -29,8 +28,7 @@ pub(crate) fn commit_first_provisioned_opt(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| DurableError::UntrustedRoot)?
         .as_secs();
-    let pinned = open_provisioned_first_b1a_release()
-        .map_err(DurableError::FirstRelease)?;
+    let pinned = open_provisioned_first_b1a_release().map_err(DurableError::FirstRelease)?;
     // B1d0 OS witness identity and durable floor are registered by OS root,
     // never supplied as a request property from the Windows SSH peer.
     let actor = OsWitnessLab::open_provisioned_first_install().map_err(DurableError::Witness)?;
