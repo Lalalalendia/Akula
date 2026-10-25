@@ -17,6 +17,8 @@ default = []
 p2p-live-identity = ["aquilum-core/p2p-device-identity"]
 # Isolated one-file Windows LAN beta; explicit opt-in, no installed startup.
 p2p-one-file-lan-beta = ["p2p-live-identity", "dep:tokio", "dep:akula-inbox-ledger-lab"]
+# Off by default; inert Core + real Staya manifest, no file read/grant.
+p2p-attachment-contract = ["aquilum-core/p2p-attachment-contract"]
 
 [[bin]]
 name = "akula-p2p-one-file-beta"
