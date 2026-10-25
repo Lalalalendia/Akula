@@ -4,9 +4,7 @@
 //! verified on enrollment and on every production preview admission.
 use super::*;
 use crate::server_installer_os_witness_lab::{OsWitnessError, OsWitnessLab};
-use rustix::fs::{
-    flock, open, openat, renameat_with, FlockOperation, Mode, OFlags, RenameFlags,
-};
+use rustix::fs::{flock, open, openat, renameat_with, FlockOperation, Mode, OFlags, RenameFlags};
 use std::io::{Read, Write};
 
 const ADMIN_CANDIDATE: &str = "akula-b1d0-peer-uid.candidate";
@@ -77,7 +75,10 @@ fn parse_local_account(passwd: &[u8], uid: u32) -> Result<(), PeerEnrollError> {
                 || gid == 0
                 || fields[1] != "x"
                 || fields[5] != SERVICE_HOME
-                || !matches!(fields[6], "/usr/sbin/nologin" | "/sbin/nologin" | "/bin/false")
+                || !matches!(
+                    fields[6],
+                    "/usr/sbin/nologin" | "/sbin/nologin" | "/bin/false"
+                )
             {
                 return Err(PeerEnrollError::AccountMismatch);
             }
@@ -135,7 +136,9 @@ pub(super) fn fixed_service_account_matches(uid: u32) -> Result<(), PeerEnrollEr
         return Err(PeerEnrollError::AccountMismatch);
     }
     let mut bytes = Vec::new();
-    (&passwd).take(MAX_PASSWD_BYTES + 1).read_to_end(&mut bytes)?;
+    (&passwd)
+        .take(MAX_PASSWD_BYTES + 1)
+        .read_to_end(&mut bytes)?;
     if bytes.len() as u64 != before.len() || !stable(&before, &passwd.metadata()?) {
         return Err(PeerEnrollError::AccountMismatch);
     }

@@ -121,8 +121,7 @@ pub(crate) fn preview_provisioned_once(
     let uid = read_allowed_peer(&trust)?;
     // A numeric UID may be reassigned after enrollment. Reconfirm the
     // dedicated local non-login account on EVERY production preview.
-    enrollment::fixed_service_account_matches(uid)
-        .map_err(OwnerIpcError::PeerEnrollment)?;
+    enrollment::fixed_service_account_matches(uid).map_err(OwnerIpcError::PeerEnrollment)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| RootEnrollmentError::InvalidOwnerClock)?
