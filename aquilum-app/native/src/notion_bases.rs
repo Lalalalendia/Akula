@@ -75,11 +75,13 @@ pub struct BasesView {
     pub keep_local: Vec<(String,String)>,
     pub accept_notion: Vec<(String,String)>,
     pub last_archive: Option<rebase::ArchiveContext>,
+    pub archives: Vec<bases_edits::RestoreArchive>,
 }
 enum Payload {
     Catalog(Vec<BaseChoice>),
     Loaded(EffectiveBase, Option<String>),
     Rebase(bases_edits::RebasePreview),
+    Archives(Vec<bases_edits::RestoreArchive>, String),
     Rebased(EffectiveBase, Option<String>, Option<rebase::ArchiveContext>),
     Restored(EffectiveBase, Option<String>, String, String),
 }
@@ -298,6 +300,7 @@ impl BasesSession {
         self.view.row_start=0;self.view.column_start=0;
         self.view.selected=None;self.view.rebase_preview=None;
         self.view.last_archive=None;
+        self.view.archives.clear();
         self.view.keep_local.clear();self.view.accept_notion.clear();
         self.effective=None;self.disk_hash=None;
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base_id))
@@ -322,6 +325,7 @@ impl BasesSession {
         let base=self.view.base_id.clone().ok_or(())?;
         self.effective=None; self.disk_hash=None;
         self.view.selected=None;self.view.rebase_preview=None;
+        self.view.archives.clear();
         self.view.keep_local.clear();
         self.view.accept_notion.clear();
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base))
@@ -385,6 +389,7 @@ impl BasesSession {
                         archive.accepted.retain(|(r,p)|r!=&row || p!=&property);
                     }
                     self.view.rebase_preview=None;self.view.selected=None;
+                    self.view.archives.clear();
                     self.view.stage=Stage::Ready;
                     self.view.notice=Some("Локальное значение восстановлено из проверенного архива через File Gate CAS");
                 }
@@ -393,6 +398,7 @@ impl BasesSession {
                 {
                     self.view.digest=Some(base.source_digest.clone());
                     self.view.last_archive=archive;
+                    self.view.archives.clear();
                     self.view.rebase_preview=None;
                     self.view.keep_local.clear();
                     self.view.accept_notion.clear();
@@ -401,6 +407,13 @@ impl BasesSession {
                     self.effective=Some(base);self.disk_hash=hash;
                     self.view.stage=Stage::Ready;
                     self.view.notice=Some("Новый снимок принят локально через File Gate CAS. Исходный Notion не изменён.");
+                }
+                Ok(Payload::Archives(archives, expected)) if reviewing
+                    && self.disk_hash.as_deref()==Some(expected.as_str()) =>
+                {
+                    self.view.archives=archives;
+                    self.view.stage=Stage::Ready;
+                    self.view.notice=Some("Архивы проверены; восстановление требует подтверждения");
                 }
                 Ok(Payload::Rebase(report)) if reviewing
                     && self.view.digest.as_deref()==Some(report.old_digest.as_str())
@@ -417,7 +430,7 @@ impl BasesSession {
                     // erase the currently valid old local projection.
                     self.view.rebase_preview=None;
                     self.view.stage=Stage::Ready;
-                    self.view.notice=Some("Не удалось сравнить снимки. Старая база не изменена.");
+                    self.view.notice=Some("Не удалось проверить снимки или архивы; локальные данные не изменены.");
                 }
                 _=>{
                     self.effective=None; self.disk_hash=None;
