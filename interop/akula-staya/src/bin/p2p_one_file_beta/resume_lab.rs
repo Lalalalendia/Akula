@@ -151,6 +151,16 @@ async fn real_quic_five_mib_photo_resumes_after_interruption_without_false_deliv
                 let mut receipt = connection.accept_uni().await.unwrap();
                 let ack = receipt.read_to_end(64).await.unwrap();
                 assert_eq!(ack, LOCAL_VERIFIED);
+                // Under kernel rate limits an application close can discard
+                // the sender's observed result unless consumption is
+                // acknowledged on a distinct stream.
+                let mut observed = connection.open_uni().await.unwrap();
+                observed.write_all(b"VERIFIED_RECEIPT_OBSERVED").await.unwrap();
+                observed.finish().unwrap();
+                let mut synced = tokio::time::timeout(
+                    Duration::from_secs(30), connection.accept_uni()
+                ).await.expect("receipt consumption deadline").unwrap();
+                assert_eq!(synced.read_to_end(64).await.unwrap(), b"RECEIPT_SYNCED");
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
             connection.close(0u8.into(), b"bounded resume lab session");
@@ -242,7 +252,14 @@ async fn real_quic_five_mib_photo_resumes_after_interruption_without_false_deliv
     let mut ack = second.open_uni().await.unwrap();
     ack.write_all(LOCAL_VERIFIED).await.unwrap();
     ack.finish().unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    let mut observed = tokio::time::timeout(
+        Duration::from_secs(30), second.accept_uni()
+    ).await.expect("sender receipt observation deadline").unwrap();
+    assert_eq!(observed.read_to_end(64).await.unwrap(), b"VERIFIED_RECEIPT_OBSERVED");
+    let mut synced = second.open_uni().await.unwrap();
+    synced.write_all(b"RECEIPT_SYNCED").await.unwrap();
+    synced.finish().unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
     second.close(0u8.into(), b"local private Inbox receipt observed");
     receiver.close().await;
     tokio::time::timeout(Duration::from_secs(60), sender_job)
