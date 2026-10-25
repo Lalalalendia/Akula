@@ -7,12 +7,14 @@ on:
       - lab/node-v1-wow-root-owned-policy-20261025
       - lab/node-v1-wow-policy-cas-20261025
       - lab/node-v1-wow-root-publisher-20261025
+      - lab/node-v1-wow-mail-approval-20261025
     paths:
       - 'interop/akula-staya/Cargo.toml'
       - 'interop/akula-staya/src/lib.rs'
       - 'interop/akula-staya/src/node_wow_mailbox_lab.rs'
       - 'interop/akula-staya/src/node_wow_mailbox_lab/policy.rs'
       - 'interop/akula-staya/src/node_wow_mailbox_lab/root_publish.rs'
+      - 'interop/akula-staya/src/node_wow_mailbox_lab/approval.rs'
       - 'interop/akula-staya/src/node_live_read.rs'
       - 'interop/akula-staya/src/node_v1_runtime/server.rs'
       - 'interop/akula-staya/tests/node_live_identity.rs'
@@ -43,12 +45,13 @@ jobs:
           TEST=interop/akula-staya/tests/node_wow_mailbox_lab.rs
           POLICY=interop/akula-staya/src/node_wow_mailbox_lab/policy.rs
           PUBLISH=interop/akula-staya/src/node_wow_mailbox_lab/root_publish.rs
+          APPROVAL=interop/akula-staya/src/node_wow_mailbox_lab/approval.rs
           LIVE=interop/akula-staya/src/node_live_read.rs
           SERVER=interop/akula-staya/src/node_v1_runtime/server.rs
           LIVE_TEST=interop/akula-staya/tests/node_live_identity.rs
-          rustfmt --edition 2024 "$MODULE" "$TEST" "$POLICY" "$PUBLISH" "$LIVE" "$SERVER" "$LIVE_TEST"
-          if ! git diff --quiet -- "$MODULE" "$TEST" "$POLICY" "$PUBLISH" "$LIVE" "$SERVER" "$LIVE_TEST"; then
-            for target in "$MODULE" "$TEST" "$POLICY" "$PUBLISH" "$LIVE" "$SERVER" "$LIVE_TEST"; do
+          rustfmt --edition 2024 "$MODULE" "$TEST" "$POLICY" "$PUBLISH" "$APPROVAL" "$LIVE" "$SERVER" "$LIVE_TEST"
+          if ! git diff --quiet -- "$MODULE" "$TEST" "$POLICY" "$PUBLISH" "$APPROVAL" "$LIVE" "$SERVER" "$LIVE_TEST"; then
+            for target in "$MODULE" "$TEST" "$POLICY" "$PUBLISH" "$APPROVAL" "$LIVE" "$SERVER" "$LIVE_TEST"; do
               echo "RUSTFMT_BASE64_START:${target}"
               base64 -w 0 "$target"
               echo
