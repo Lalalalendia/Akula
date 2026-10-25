@@ -131,9 +131,7 @@ impl App {
             self.show_page(root, 0);
             return;
         }
-        if crate::docx::is_docx_path(&path) {
-            return self.show_docx_tab(root, path);
-        }
+        if crate::docx::is_docx_path(&path) { return self.show_docx_tab(root, path); }
         if is_structured_file(&path) {
             self.leave_note();
             self.show_structured_readonly(root, &path);
@@ -330,6 +328,7 @@ impl App {
         if image && self.tree.root().and_then(|vault| super::super::media::local_image_preview(vault, &path)).is_none() {
             return false;
         }
+        if crate::docx::is_docx_path(&path) && self.tree.root().and_then(|v| crate::docx::admit(v, &path).ok()).is_none() { return false; }
         if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {
             self.navigation.push(&current);
         }
