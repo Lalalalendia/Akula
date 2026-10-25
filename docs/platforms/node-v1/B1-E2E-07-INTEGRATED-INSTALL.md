@@ -481,3 +481,29 @@ or change the Windows client. The executable is compile-only in CI and
 requires an externally authenticated signed release and independent
 administrator consent before it may be used on a real VPS. The normal
 Akula install button and B1-E2E-07 status stay HOLD.
+
+### One CI acceptance for the three first-root administrator ceremonies
+
+After independent root-owned witness genesis, B0 v3 policy enrollment and
+empty `/opt/akula-node` enrollment were separately implemented, add an
+actual **single disposable UID0 acceptance** for their composition. It
+uses only temporary root-owned `var/lib` and `opt` directory FDs,
+while retaining the real production B1d0 witness enrollment marker and
+the same production `OsWitnessLab::open_enrolled` implementation through
+a test-only path adapter. The run starts with no files, generates a fresh
+OS CSPRNG Ed25519 witness, reads the genesis checkpoint with the
+production marker, refuses B0 v3 review until the independent policy
+is registered, publishes exact B0 v3 owner/publisher/helper/host pins,
+creates the empty protected Node destination, reopens all state after
+dropping the initial FDs, and verifies that all three administrator
+commands refuse any replay. The witness checkpoint remains genesis and
+the Node directory contains only its enrollment marker; no release
+package, privileged RPC, network transfer, service or activation is used.
+
+Only this dedicated root-only test is added to the existing
+`signed-review-contract` job; no new workflow or broad fanout. The
+test-only adapter is not available in a production Core build. All
+signers/hosts in this test are disposable CI identities, not
+production authorization. This is **evidence of composable initial
+root state**, NOT a genuine live VPS E2E or permission to enable the
+Windows Install Node control. B1-E2E-07 remains HOLD.

@@ -80,7 +80,7 @@ fn publish_one(
 /// This private transactional primitive is tested in a disposable root-owned
 /// directory. Production may call it ONLY after verifying the fixed /root
 /// candidate, OS-owned witness and independently authorized administrator.
-fn enroll_once_from_admin_bytes(trust: &File, candidate: &[u8]) -> Result<(), AdminEnrollError> {
+pub(super) fn enroll_once_from_admin_bytes(trust: &File, candidate: &[u8]) -> Result<(), AdminEnrollError> {
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(AdminEnrollError::Read(RootEnrollmentError::NotRoot));
     }

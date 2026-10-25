@@ -325,3 +325,5 @@ pub use destination_init::admin_enroll_fixed_opt_once;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod bootstrap_sequence_tests;

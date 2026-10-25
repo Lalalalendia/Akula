@@ -86,7 +86,7 @@ fn write_new(parent: &File, leaf: &str, bytes: &[u8]) -> Result<(), WitnessGenes
     Ok(())
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Stop {
+pub(super) enum Stop {
     Never,
     AfterDirectories,
     AfterSeed,
@@ -95,7 +95,7 @@ enum Stop {
 
 /// The only test-injectable part accepts a directory FD *already* controlled
 /// by root; production's path selection is fixed outside this function.
-fn initialize_once(lib: &File, stop: Stop) -> Result<(), WitnessGenesisError> {
+pub(super) fn initialize_once(lib: &File, stop: Stop) -> Result<(), WitnessGenesisError> {
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(WitnessGenesisError::NotRoot);
     }

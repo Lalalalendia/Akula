@@ -27,7 +27,7 @@ fn syscall(error: rustix::io::Errno) -> OptFirstEnrollError {
 
 /// Testable only by passing a preauthenticated disposable /opt-shaped
 /// directory FD. Production alone opens the real fixed absolute /opt.
-fn first_opt_destination(opt: &File) -> Result<(), OptFirstEnrollError> {
+pub(super) fn first_opt_destination(opt: &File) -> Result<(), OptFirstEnrollError> {
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(OptFirstEnrollError::NotRoot);
     }
