@@ -1,0 +1,105 @@
+name: Akula isolated QUIC kernel-level UDP impairment
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta.rs'
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta/**'
+      - 'interop/akula-staya/Cargo.toml'
+      - '.github/workflows/p2p-photo-netem.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p2p-photo-netem-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  netem-linux:
+    name: Linux QUIC actual kernel UDP loss, reordering, throttle and outage
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'lab/akula-wow-staya-photo-resume-5m-20261025'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Pin exact source tree
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile before altering loopback networking
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml \
+            --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta --no-run
+      - name: Real kernel-impaired QUIC, controlled outage and statistics
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v tc || { echo 'tc not installed: cannot claim network impairment'; exit 1; }
+          cleanup() {
+            sudo tc qdisc del dev lo root 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          check_drops() {
+            label="$1"
+            sudo tc -s qdisc show dev lo | tee "/tmp/netem-${label}.txt"
+            if ! grep -Eq 'dropped [1-9][0-9]*' "/tmp/netem-${label}.txt"; then
+              echo "Kernel netem did not drop any UDP packets in ${label}"
+              exit 1
+            fi
+          }
+
+          # The kernel applies these restrictions to loopback UDP even if Iroh
+          # discovers a different local path. This is NOT a two-host LTE test.
+          sudo tc qdisc replace dev lo root netem \
+            delay 30ms 10ms loss 6% reorder 5% 30% rate 12mbit
+          sudo tc qdisc show dev lo | grep -q 'netem'
+          cargo test --manifest-path interop/akula-staya/Cargo.toml \
+            --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta \
+            unstable_network_lab -- --nocapture
+          check_drops profile_a
+
+          # High loss and 80ms base delay, with 4 Mbit/s link. This exercises
+          # the existing real two-connection 5 MiB partial-to-complete path.
+          sudo tc qdisc replace dev lo root netem \
+            delay 80ms 30ms loss 15% reorder 20% 30% rate 4mbit
+          cargo test --manifest-path interop/akula-staya/Cargo.toml \
+            --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta \
+            resume_lab::real_quic_five_mib_photo_resumes_after_interruption_without_false_delivery -- --nocapture
+          check_drops profile_b
+
+          # A full, observable blackout during an active 5-MiB transmission:
+          # force loss=100% for 3 seconds, then restore an impaired slow link.
+          # Initial 1Mbit/s prevents all bytes completing before blackout.
+          sudo tc qdisc replace dev lo root netem \
+            delay 60ms loss 8% rate 1mbit
+          (
+            sleep 1
+            sudo tc qdisc replace dev lo root netem loss 100%
+            echo 'NETEM_BLACKOUT_BEGIN'
+            sleep 3
+            check_drops blackout
+            sudo tc qdisc replace dev lo root netem \
+              delay 50ms loss 10% rate 4mbit
+            echo 'NETEM_BLACKOUT_END'
+          ) &
+          chaos_pid=$!
+          start_time=$(date +%s)
+          cargo test --manifest-path interop/akula-staya/Cargo.toml \
+            --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta \
+            unstable_network_lab -- --nocapture
+          wait "$chaos_pid"
+          elapsed=$(( $(date +%s) - start_time ))
+          if (( elapsed < 4 )); then
+            echo "Outage not exercised while file transfer was active"
+            exit 1
+          fi
+          check_drops restored
+          echo "NETEM_ACTUAL_KERNEL_LOSS=true NETEM_BLACKOUT_3S=true ELAPSED=${elapsed}s"

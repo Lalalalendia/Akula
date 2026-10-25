@@ -1,0 +1,72 @@
+name: Akula five-MiB QUIC checkpoint-resume lab
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta.rs'
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta/resume_lab.rs'
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta/resume_checkpoint_lab.rs'
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta/unstable_network_lab.rs'
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta/resume_process_lab.rs'
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta/udp_impairment_lab.rs'
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta/lost_ack_reconcile_lab.rs'
+      - 'interop/akula-staya/Cargo.toml'
+      - '.github/workflows/p2p-photo-resume-lab.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p2p-photo-resume-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  photo-resume:
+    if: github.event.pull_request.head.ref == 'lab/akula-wow-staya-photo-resume-5m-20261025'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Validate exact tested revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Isolated five-MiB resumption test and forged-checkpoint denial
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta resume_lab -- --nocapture
+      - name: Verify fsynced cold recovery and malicious checkpoint rejection
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta resume_checkpoint_lab -- --nocapture
+      - name: Simulate repeated drops and changing application throughput
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta unstable_network_lab -- --nocapture
+      - name: Force-kill the checkpoint process and cold-recover verified bytes
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta resume_process_lab::force_kill_after_checkpoint -- --nocapture
+      - name: Exercise actual UDP datagram loss reordering latency bandwidth and route switch
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta udp_impairment_lab -- --nocapture
+      - name: Lost partial ACK and lost final ACK are recovered by cold status query
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta lost_ack_reconcile_lab -- --nocapture
+      - name: Verify ordinary one-file tests are still unchanged
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta exact_frame_has_length_and_digest -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta real_quic_lost_ack_retries_same_inbox_without_duplicate -- --nocapture
