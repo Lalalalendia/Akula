@@ -6,7 +6,7 @@ pub enum Action {
     #[cfg(feature = "notion-offline-preview")] NotionOpenRoot(String),
     #[cfg(feature = "notion-offline-preview")] NotionBasesOpen(String),
     #[cfg(feature = "notion-offline-preview")] NotionBasesSelect(String, String),
-    #[cfg(feature = "notion-offline-preview")] NotionBasesPage(usize, usize),
+    #[cfg(feature = "notion-offline-preview")] NotionBasesPage(usize, usize), #[cfg(feature = "notion-offline-preview")] NotionBasesSelectCell(String, String),
     #[cfg(feature = "notion-offline-preview")] NotionBasesChange(String, String, bool),
     #[cfg(feature = "notion-offline-preview")] NotionBasesReload, #[cfg(feature = "notion-offline-preview")] NotionBasesBeginEdit(String, String), #[cfg(feature = "notion-offline-preview")] NotionBasesSaveDraft, #[cfg(feature = "notion-offline-preview")] NotionBasesCancelDraft, #[cfg(feature = "notion-offline-preview")] NotionBasesNewColumn(aquilum_core::notion_api_probe::bases_edits::LocalKind), #[cfg(feature = "notion-offline-preview")] NotionBasesRenameColumn(String), #[cfg(feature = "notion-offline-preview")] NotionBasesSaveSchema, #[cfg(feature = "notion-offline-preview")] NotionBasesCancelSchema,
     #[cfg(feature = "notion-offline-preview")] NotionConnect,
