@@ -28,7 +28,7 @@ pub(super) fn append(
                     crate::notion_bases::Stage::Loading=>"Читаю независимые базы в рабочем потоке...",
                     crate::notion_bases::Stage::Ready=>"Локальная модель Akula Bases",
                     crate::notion_bases::Stage::Saving=>"Сохраняю через File Gate CAS...",
-                    crate::notion_bases::Stage::Reviewing=>"Проверяю второй снимок без записи...",
+                    crate::notion_bases::Stage::Reviewing=>"Проверяю снимки и локальные архивы без записи...",
                     crate::notion_bases::Stage::NeedsReview=>"База или ревизия изменилась. Требуется проверка.",
                 },|t|t.text_secondary,None,Leading::Times(1.3),
             ));

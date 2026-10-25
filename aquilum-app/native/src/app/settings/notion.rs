@@ -73,6 +73,40 @@ impl App {
                 let _=self.notion_bases.toggle_keep_local(row,property);
                 true
             }
+            Action::NotionBasesScanArchives => {
+                if self.notion_bases.view().target.as_deref()
+                    == self.workspace.root.as_deref() {
+                    let _=self.notion_bases.discover_archives();
+                }
+                true
+            }
+            Action::NotionBasesRestoreListed(path,row,property) => {
+                let view=self.notion_bases.view();
+                if view.target.as_deref()==self.workspace.root.as_deref()
+                    && !view.busy
+                    && let Some(cell)=view.archives.iter().find(|arch|
+                        &arch.path==path).and_then(|arch|
+                            arch.cells.iter().find(|cell|
+                                &cell.row_id==row && &cell.property_id==property))
+                {
+                    let confirmed=rfd::MessageDialog::new()
+                        .set_title("Akula Bases — восстановление после перезапуска")
+                        .set_description(format!(
+                            "Восстановить прежнее локальное значение для {} / {}?\nЗначение: {}\nАрхив: {}\n\nИзменяется только одна локальная ячейка через File Gate CAS. Снимок Notion остаётся неизменным.",
+                            row,property,cell.value_preview,path,
+                        ))
+                        .set_level(rfd::MessageLevel::Warning)
+                        .set_buttons(rfd::MessageButtons::YesNo)
+                        .show()==rfd::MessageDialogResult::Yes;
+                    if confirmed {
+                        let _=self.notion_bases.restore_listed_archive(
+                            std::sync::Arc::clone(&self.workspace.core),
+                            path,row,property,
+                        );
+                    }
+                }
+                true
+            }
             Action::NotionBasesRestoreArchived(row,property) => {
                 let view=self.notion_bases.view();
                 if view.target.as_deref()==self.workspace.root.as_deref()

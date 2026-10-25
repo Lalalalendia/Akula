@@ -133,7 +133,33 @@ pub(super) fn append(
             ));
         }
     }
+    column=column.with_fixed(action_button(
+        "Найти архивы локальных правок для восстановления".into(),
+        Action::NotionBasesScanArchives,bindings,
+    ));
+    for archive in &bases.archives {
+        column=column.with_fixed(selectable(
+            &format!("Проверенный архив: {} · исходный снимок {}",
+                archive.path,archive.old_digest.chars().take(10).collect::<String>()),
+            |t|t.text_secondary,None,Leading::Times(1.3),
+        ));
+        for cell in &archive.cells {
+            column=column.with_fixed(selectable(
+                &format!("Прежнее локальное значение: {}",cell.value_preview),
+                |t|t.text_primary,None,Leading::Times(1.3),
+            ));
+            column=column.with_fixed(action_button(
+                format!("Восстановить из архива · {} / {}",
+                    cell.row_id.chars().take(10).collect::<String>(),
+                    cell.property_id.chars().take(10).collect::<String>()),
+                Action::NotionBasesRestoreListed(
+                    archive.path.clone(),cell.row_id.clone(),
+                    cell.property_id.clone()),bindings,
+            ));
+        }
+    }
     if let Some(archive)=&bases.last_archive {
+        if !bases.archives.iter().any(|listed|listed.path==archive.path) {
         column=column.with_fixed(selectable(
             &format!("Архив прежних локальных правок: {} (в Vault; не удалять)",
                 archive.path),
@@ -146,6 +172,7 @@ pub(super) fn append(
                     prop.chars().take(10).collect::<String>()),
                 Action::NotionBasesRestoreArchived(row.clone(),prop.clone()),bindings,
             ));
+        }
         }
     }
     column
