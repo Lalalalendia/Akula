@@ -507,3 +507,63 @@ signers/hosts in this test are disposable CI identities, not
 production authorization. This is **evidence of composable initial
 root state**, NOT a genuine live VPS E2E or permission to enable the
 Windows Install Node control. B1-E2E-07 remains HOLD.
+
+### First B1a release — approved Node identity derived only from root enrollment
+
+The previously existing `verify_root_staged` correctly authenticated a
+Linux root-owned signed B1a package FD, but its `RootPinnedReleaseTrust`
+(expected publisher key, package digest, signed manifest fingerprint and
+release sequence) was an argument supplied by the caller. A production
+root installer must not be allowed to substitute that expected authority.
+
+The new non-shipping `server_root_v3_trust::release_pins` read-only
+entrypoint instead opens the SAME fixed root-owned trust directory as B0 v3.
+It requires both independent owner/publisher B0 v3 enrollment and the
+separate root-owned `b1a.first.enrollment` marker plus a strict versioned
+`b1a.first.approval` record. The approval pins a positive release sequence,
+exact signed-manifest fingerprint, Node SHA-256 and byte count. The only
+accepted candidate directory is the root-owned 0700
+`/var/lib/akula/server-bootstrap/trust/b1a-first-stage`, opened
+`O_NOFOLLOW` relative to the already verified root-owned directory FD.
+The B1a publisher ID and Ed25519 key come ONLY from the independently
+registered B0 v3 policy. The existing B1a signature/manifest/FD verifier
+has an additional FD-based entrypoint to avoid allowing client-supplied
+ancestor paths, and returns an inert `RootVerifiedFd` only when the
+approved SHA256/fingerprint/sequence, signed issuer, package size, inode,
+owner and file modes all agree.
+
+There is NO root writer for these release-approval files, and no path,
+candidate, expected hash, trusted key or time parameter in the production
+public entrypoint: current Unix time is obtained on the root host.
+Until out-of-band trustworthy publication of approved release files
+and real production signing material exists this loader will fail closed.
+Root-owned disposable CI fixtures prove acceptance of an actually
+Ed25519-signed B1a package and rejection of a changed enrolled signer,
+wrong fingerprint/hash/size/sequence, missing/altered approval marker,
+tampered file, expired signed release, unsafe file mode and symlink stage.
+The tests do NOT execute a Node ELF or commit CAS and remain HOLD.
+
+### B1d0 cannot accept caller-provided release authority or a request clock
+
+The opt-in fixed-root `commit_first_provisioned_opt` previously received
+a `RootVerifiedFd` from a caller and a caller-selected `now_unix`.
+Even though it compared the verified FD's signing key to the enrolled
+publisher, the caller could choose a different genuinely signed release,
+and a remote request time could be used to manipulate owner-expiry checks.
+
+That interface has been tightened: the provisioned B1d0 entrypoint no
+longer accepts any `RootVerifiedFd`, `RootPinnedReleaseTrust`,
+publisher public key, approval fingerprint, package digest or timestamp.
+It obtains time directly from the host OS, opens the fixed root-owned B1a
+first-release approval and pinned stage via the new release-pins loader,
+reconstructs the same owner wire and B0 v3 scope, then passes the exact
+same verified FD and local clock to the existing destination-locked B1d0
+CAS and fixed Node writer. Any missing approved release, changed signed
+manifest, package hash, publisher identity, stale approval or invalid
+owner signature fails *before* that write transaction.
+
+This change does not introduce an SSH command, production helper
+distribution, root activation authority, systemd or owner consent by
+itself. The out-of-band operator procedure to safely publish
+`b1a.first.approval` and the actual root staging files does not yet
+exist, so default behaviour remains fail-closed and **HOLD**.

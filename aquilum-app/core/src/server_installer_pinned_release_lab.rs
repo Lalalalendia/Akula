@@ -186,6 +186,18 @@ pub fn verify_root_staged(
     let dir=File::from(open(dir_path,
         OFlags::RDONLY|OFlags::DIRECTORY|OFlags::NOFOLLOW|OFlags::CLOEXEC,
         Mode::empty()).map_err(os)?);
+    verify_root_staged_dir(&dir, trust, now_unix)
+}
+
+/// Verify a root-owned, O_NOFOLLOW-opened directory FD. Callers that
+/// need trusted ancestors must open them component-by-component before
+/// supplying this FD; the staged Node path itself grants no authority.
+pub(crate) fn verify_root_staged_dir(
+    dir: &File, trust: &RootPinnedReleaseTrust, now_unix: u64,
+)->Result<RootVerifiedFd,PinError>{
+    if rustix::process::geteuid().as_raw()!=0 {
+        return Err(PinError::BadOwnerOrMode);
+    }
     let d=dir.metadata()?;
     if !d.is_dir()||d.uid()!=0||d.nlink()==0||
         d.permissions().mode()&0o7777!=0o700
@@ -198,11 +210,11 @@ pub fn verify_root_staged(
        trust.approved_release_sequence==0{
         return Err(PinError::BadTrustAnchor);
     }
-    let (mut mf,_)=open_fixed(&dir,"manifest",0o400,MAX_MANIFEST as u64)?;
+    let (mut mf,_)=open_fixed(dir,"manifest",0o400,MAX_MANIFEST as u64)?;
     let mut raw=Vec::new();
     mf.read_to_end(&mut raw)?;
     let manifest=decode_b1a_wire(&raw)?;
-    let (mut sf,_)=open_fixed(&dir,"signature",0o400,64)?;
+    let (mut sf,_)=open_fixed(dir,"signature",0o400,64)?;
     let mut sig=[0u8;64];
     sf.read_exact(&mut sig)?;
     let auth=verify_signed_release(
@@ -216,7 +228,7 @@ pub fn verify_root_staged(
         auth.manifest().package_sha256!=trust.approved_package_sha256{
         return Err(PinError::WrongPolicyScope);
     }
-    let (mut file,before)=open_fixed(&dir,"node",0o400,MAX_NODE_PACKAGE_BYTES)?;
+    let (mut file,before)=open_fixed(dir,"node",0o400,MAX_NODE_PACKAGE_BYTES)?;
     if before.len()!=auth.manifest().package_size{
         return Err(PinError::Release(ReleaseError::SizeMismatch));
     }

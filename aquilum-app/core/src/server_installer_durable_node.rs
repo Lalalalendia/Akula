@@ -62,6 +62,8 @@ pub enum DurableError {
     FileCommit(FixedNodeError),
     #[cfg(feature = "server-root-b0v3-gate-lab")]
     OwnerReview(crate::server_root_v3_trust::RootEnrollmentError),
+    #[cfg(feature = "server-root-b0v3-gate-lab")]
+    FirstRelease(crate::server_root_v3_trust::FirstReleaseError),
     InjectedStop,
 }
 impl From<std::io::Error> for DurableError {

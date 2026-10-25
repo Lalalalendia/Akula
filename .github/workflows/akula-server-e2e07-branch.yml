@@ -109,6 +109,10 @@ jobs:
           # publication and /opt identity in ONE disposable UID0 fixture.
           # No actual VPS /var/lib or /opt directories are modified.
           sudo -n -- "$test_bin" server_root_v3_trust::bootstrap_sequence_tests --nocapture
+          # First B1a release: same independently enrolled publisher key,
+          # approved fingerprint and SHA256, and root-pinned stage directory.
+          "$test_bin" server_root_v3_trust::release_pins::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::release_pins::tests --nocapture
       - name: Compile fixed administrator-only B0 v3 enrollment binary (do not run)
         shell: bash
         run: |
@@ -148,6 +152,8 @@ jobs:
             aquilum-app/core/src/server_root_v3_trust/destination_init.rs
             aquilum-app/core/src/server_root_v3_trust/destination_init/tests.rs
             aquilum-app/core/src/server_root_v3_trust/bootstrap_sequence_tests.rs
+            aquilum-app/core/src/server_root_v3_trust/release_pins.rs
+            aquilum-app/core/src/server_root_v3_trust/release_pins/tests.rs
             aquilum-app/core/src/bin/akula_root_opt_enroll_lab.rs
             aquilum-app/core/src/bin/akula_root_witness_init_lab.rs
             aquilum-app/core/src/bin/akula_root_b0v3_enroll_lab.rs
