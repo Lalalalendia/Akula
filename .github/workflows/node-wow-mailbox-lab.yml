@@ -24,6 +24,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Check and diagnose isolated Rust formatting before Cargo compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODULE=interop/akula-staya/src/node_wow_mailbox_lab.rs
+          TEST=interop/akula-staya/tests/node_wow_mailbox_lab.rs
+          rustfmt --edition 2024 "$MODULE" "$TEST"
+          if ! git diff --quiet -- "$MODULE" "$TEST"; then
+            for target in "$MODULE" "$TEST"; do
+              echo "RUSTFMT_BASE64_START:${target}"
+              base64 -w 0 "$target"
+              echo
+              echo "RUSTFMT_BASE64_END:${target}"
+            done
+            echo 'Formatting differences detected: fail before expensive build'
+            exit 1
+          fi
       - name: Build feature-gated library without changing the signed Node ELF
         run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features node-wow-mailbox-lab --lib
       - name: Test separate Node root policy and mail trust / persisted read
