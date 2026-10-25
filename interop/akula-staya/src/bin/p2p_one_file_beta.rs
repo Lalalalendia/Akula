@@ -35,6 +35,10 @@ mod resume_checkpoint_lab;
 #[path = "p2p_one_file_beta/unstable_network_lab.rs"]
 mod unstable_network_lab;
 
+#[cfg(test)]
+#[path = "p2p_one_file_beta/resume_process_lab.rs"]
+mod resume_process_lab;
+
 const ALPN: &[u8] = b"akula/p2p-one-file-lan-beta/1";
 const REQUEST: &[u8] = b"AKP2_GET_ONE_V1";
 const ACK: &[u8] = b"AKP2_VERIFIED_NEW_FILE_V1";
