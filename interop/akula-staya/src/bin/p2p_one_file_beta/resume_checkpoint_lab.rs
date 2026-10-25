@@ -29,7 +29,7 @@ pub(super) struct Checkpoint {
 }
 
 impl Checkpoint {
-    fn wire(self) -> [u8; WIRE_BYTES] {
+    pub(super) fn wire(self) -> [u8; WIRE_BYTES] {
         let mut bytes = [0; WIRE_BYTES];
         bytes[..8].copy_from_slice(MAGIC);
         bytes[8..40].copy_from_slice(&self.identity.sender);
@@ -41,7 +41,7 @@ impl Checkpoint {
         bytes
     }
 
-    fn decode(raw: &[u8]) -> Result<Self, &'static str> {
+    pub(super) fn decode(raw: &[u8]) -> Result<Self, &'static str> {
         if raw.len() != WIRE_BYTES || &raw[..8] != MAGIC {
             return Err("invalid checkpoint version or length");
         }
