@@ -1,7 +1,7 @@
 //! Opt-in WOW W3 cryptographic envelope for one already-approved Akula
 //! attachment notice. The byte payload is not a read grant and this adapter
 //! neither sends bytes nor claims a W4/Inbox/File Gate receipt.
-use akula_wire_lab::{crypto_w3, trust_w3::TrustRegistry};
+use akula_wow_w3_crypto::{crypto_w3, trust_w3::TrustRegistry};
 use aquilum_core::p2p_attachment_contract::{AttachmentNoticeV1, AttachmentError, NOTICE_BYTES};
 use aquilum_core::p2p_offer_lab::{OfferV1, DecisionV1, PeerBinding};
 use ed25519_dalek::{SigningKey, VerifyingKey};
