@@ -1,0 +1,34 @@
+name: Node WOW mailbox bridge lab (isolated)
+on:
+  push:
+    branches:
+      - lab/node-v1-wow-mailbox-bridge-20261025
+    paths:
+      - 'interop/akula-staya/Cargo.toml'
+      - 'interop/akula-staya/src/lib.rs'
+      - 'interop/akula-staya/src/node_wow_mailbox_lab.rs'
+      - 'interop/akula-staya/tests/node_wow_mailbox_lab.rs'
+      - 'docs/platforms/node-v1/NODE-V1-WOW-MAILBOX-LAB.md'
+      - '.github/workflows/node-wow-mailbox-lab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: node-wow-mailbox-lab-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    name: Non-shipping Node/WOW mailbox gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build feature-gated library without changing the signed Node ELF
+        run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features node-wow-mailbox-lab --lib
+      - name: Test separate Node root policy and mail trust / persisted read
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-wow-mailbox-lab --test node_wow_mailbox_lab -- --nocapture
+      - name: Enforce strict warnings for the isolated module
+        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features node-wow-mailbox-lab --test node_wow_mailbox_lab -- -D warnings
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
