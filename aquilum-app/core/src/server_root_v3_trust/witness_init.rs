@@ -40,15 +40,18 @@ fn syscall(err: rustix::io::Errno) -> WitnessGenesisError {
 fn new_dir(parent: &File, leaf: &str) -> Result<File, WitnessGenesisError> {
     // EXCLUSIVE mkdir. An existing empty directory, dangling symlink or
     // remnant of a crashed attempt is a HARD refusal, never a retry.
-    mkdirat(
-        parent, leaf, Mode::RUSR | Mode::WUSR | Mode::XUSR,
-    ).map_err(|_| WitnessGenesisError::ExistingOrInterrupted)?;
+    mkdirat(parent, leaf, Mode::RUSR | Mode::WUSR | Mode::XUSR)
+        .map_err(|_| WitnessGenesisError::ExistingOrInterrupted)?;
     parent.sync_all()?;
-    let dir = File::from(openat(
-        parent, leaf,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ).map_err(syscall)?);
+    let dir = File::from(
+        openat(
+            parent,
+            leaf,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(syscall)?,
+    );
     if !root_dir_ok(&dir.metadata()?, 0o700) {
         return Err(WitnessGenesisError::UntrustedParent);
     }
@@ -56,12 +59,15 @@ fn new_dir(parent: &File, leaf: &str) -> Result<File, WitnessGenesisError> {
 }
 fn write_new(parent: &File, leaf: &str, bytes: &[u8]) -> Result<(), WitnessGenesisError> {
     let pending = format!("{leaf}.pending");
-    let mut fd = File::from(openat(
-        parent, pending.as_str(),
-        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL
-            | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::RUSR | Mode::WUSR,
-    ).map_err(|_| WitnessGenesisError::ExistingOrInterrupted)?);
+    let mut fd = File::from(
+        openat(
+            parent,
+            pending.as_str(),
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::RUSR | Mode::WUSR,
+        )
+        .map_err(|_| WitnessGenesisError::ExistingOrInterrupted)?,
+    );
     if !root_file_ok(&fd.metadata()?, 0o600, 128) {
         return Err(WitnessGenesisError::UntrustedParent);
     }
@@ -69,8 +75,13 @@ fn write_new(parent: &File, leaf: &str, bytes: &[u8]) -> Result<(), WitnessGenes
     fd.sync_all()?;
     drop(fd);
     renameat_with(
-        parent, pending.as_str(), parent, leaf, RenameFlags::NOREPLACE,
-    ).map_err(|_| WitnessGenesisError::ExistingOrInterrupted)?;
+        parent,
+        pending.as_str(),
+        parent,
+        leaf,
+        RenameFlags::NOREPLACE,
+    )
+    .map_err(|_| WitnessGenesisError::ExistingOrInterrupted)?;
     parent.sync_all()?;
     Ok(())
 }
@@ -103,15 +114,20 @@ fn initialize_once(lib: &File, stop: Stop) -> Result<(), WitnessGenesisError> {
         // Entropy comes from the host OS, NEVER a client-provided seed or CI
         // fixture. The private seed is stored only on a 0600 UID0 inode.
         let mut seed = [0u8; 32];
-        SystemRandom::new().fill(&mut seed)
+        SystemRandom::new()
+            .fill(&mut seed)
             .map_err(|_| WitnessGenesisError::Entropy)?;
         if seed == [0; 32] {
             seed.zeroize();
             return Err(WitnessGenesisError::Entropy);
         }
         let pair = Ed25519KeyPair::from_seed_unchecked(&seed);
-        let public = pair.as_ref().map_err(|_| WitnessGenesisError::Entropy)?
-            .public_key().as_ref().to_vec();
+        let public = pair
+            .as_ref()
+            .map_err(|_| WitnessGenesisError::Entropy)?
+            .public_key()
+            .as_ref()
+            .to_vec();
         let stored = write_new(&trust, SEED, &seed);
         seed.zeroize();
         stored?;
@@ -129,22 +145,23 @@ fn initialize_once(lib: &File, stop: Stop) -> Result<(), WitnessGenesisError> {
         }
         // Reopen both root-owned files and independently rederive the key
         // before the final marker is allowed to exist.
-        let mut seed_readback = read_root_file(&trust, SEED, 32)
-            .map_err(|_| WitnessGenesisError::InvalidWitness)?;
+        let mut seed_readback =
+            read_root_file(&trust, SEED, 32).map_err(|_| WitnessGenesisError::InvalidWitness)?;
         let matches_seed = Ed25519KeyPair::from_seed_unchecked(&seed_readback)
             .map(|pair| pair.public_key().as_ref() == public.as_slice())
             .unwrap_or(false);
         seed_readback.zeroize();
-        if !matches_seed || read_root_file(&trust, PUB, 32)
-            .map_err(|_| WitnessGenesisError::InvalidWitness)? != public
+        if !matches_seed
+            || read_root_file(&trust, PUB, 32).map_err(|_| WitnessGenesisError::InvalidWitness)?
+                != public
         {
             return Err(WitnessGenesisError::InvalidWitness);
         }
         // Marker last: no interrupted key or directory is ever accepted as
         // an authorized signing witness by OsWitnessLab.
         write_new(&trust, MARKER, WITNESS_ENROLLMENT)?;
-        if read_root_file(&trust, MARKER, 128)
-            .map_err(|_| WitnessGenesisError::InvalidWitness)? != WITNESS_ENROLLMENT
+        if read_root_file(&trust, MARKER, 128).map_err(|_| WitnessGenesisError::InvalidWitness)?
+            != WITNESS_ENROLLMENT
         {
             return Err(WitnessGenesisError::InvalidWitness);
         }
@@ -166,27 +183,38 @@ pub fn admin_initialize_first_root_witness() -> Result<(), WitnessGenesisError> 
     // Refuse before creating /var/lib/akula on unsupported hosts,
     // including containers without an active systemd manager.
     observed_root_host().map_err(|_| WitnessGenesisError::UnsupportedHost)?;
-    let slash = File::from(open(
-        Path::new("/"),
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ).map_err(syscall)?);
+    let slash = File::from(
+        open(
+            Path::new("/"),
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(syscall)?,
+    );
     if !root_dir_ok(&slash.metadata()?, 0o755) {
         return Err(WitnessGenesisError::UntrustedParent);
     }
-    let var = File::from(openat(
-        &slash, "var",
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ).map_err(syscall)?);
+    let var = File::from(
+        openat(
+            &slash,
+            "var",
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(syscall)?,
+    );
     if !root_dir_ok(&var.metadata()?, 0o755) {
         return Err(WitnessGenesisError::UntrustedParent);
     }
-    let lib = File::from(openat(
-        &var, "lib",
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ).map_err(syscall)?);
+    let lib = File::from(
+        openat(
+            &var,
+            "lib",
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(syscall)?,
+    );
     initialize_once(&lib, Stop::Never)
 }
 

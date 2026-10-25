@@ -31,15 +31,20 @@ fn initial_witness_requires_preexisting_root_authority() {
 
 #[test]
 fn fresh_uid0_witness_genesis_has_random_key_and_empty_cas() {
-    if rustix::process::geteuid().as_raw() != 0 { return; }
+    if rustix::process::geteuid().as_raw() != 0 {
+        return;
+    }
     let tmp = tempdir().unwrap();
     let lib = lib_dir(tmp.path());
     initialize_once(&lib, Stop::Never).unwrap();
 
     let (trust, journal) = witness_files(tmp.path());
-    for directory in [tmp.path().join("lib/akula"),
-                      tmp.path().join("lib/akula/server-bootstrap"),
-                      trust.clone(), journal.clone()] {
+    for directory in [
+        tmp.path().join("lib/akula"),
+        tmp.path().join("lib/akula/server-bootstrap"),
+        trust.clone(),
+        journal.clone(),
+    ] {
         let m = fs::metadata(directory).unwrap();
         assert!(root_dir_ok(&m, 0o700));
     }
@@ -51,11 +56,18 @@ fn fresh_uid0_witness_genesis_has_random_key_and_empty_cas() {
     assert_eq!(pubkey.as_slice(), pair.public_key().as_ref());
     assert_eq!(fs::read(trust.join(MARKER)).unwrap(), WITNESS_ENROLLMENT);
     for name in [SEED, PUB, MARKER] {
-        assert!(root_file_ok(&fs::metadata(trust.join(name)).unwrap(), 0o600, 128));
+        assert!(root_file_ok(
+            &fs::metadata(trust.join(name)).unwrap(),
+            0o600,
+            128
+        ));
         assert!(!trust.join(format!("{name}.pending")).exists());
     }
     let journal_actor = InertWitnessLedgerLab::open(&journal).unwrap();
-    assert_eq!(journal_actor.current_checkpoint().unwrap(), WitnessCheckpoint::genesis());
+    assert_eq!(
+        journal_actor.current_checkpoint().unwrap(),
+        WitnessCheckpoint::genesis()
+    );
 
     assert!(matches!(
         initialize_once(&lib, Stop::Never),
@@ -67,7 +79,9 @@ fn fresh_uid0_witness_genesis_has_random_key_and_empty_cas() {
 
 #[test]
 fn interrupted_root_genesis_is_hard_hold_with_no_rerun_or_marker() {
-    if rustix::process::geteuid().as_raw() != 0 { return; }
+    if rustix::process::geteuid().as_raw() != 0 {
+        return;
+    }
     for stop in [Stop::AfterDirectories, Stop::AfterSeed, Stop::AfterPublic] {
         let tmp = tempdir().unwrap();
         let lib = lib_dir(tmp.path());
@@ -89,7 +103,9 @@ fn interrupted_root_genesis_is_hard_hold_with_no_rerun_or_marker() {
 
 #[test]
 fn foreign_directory_symlink_and_nonroot_owned_parent_refuse_without_writes() {
-    if rustix::process::geteuid().as_raw() != 0 { return; }
+    if rustix::process::geteuid().as_raw() != 0 {
+        return;
+    }
     let tmp = tempdir().unwrap();
     let lib = lib_dir(tmp.path());
     let destination = tmp.path().join("elsewhere");
@@ -103,8 +119,7 @@ fn foreign_directory_symlink_and_nonroot_owned_parent_refuse_without_writes() {
 
     let tmp = tempdir().unwrap();
     let lib = lib_dir(tmp.path());
-    fs::set_permissions(tmp.path().join("lib"),
-                        fs::Permissions::from_mode(0o777)).unwrap();
+    fs::set_permissions(tmp.path().join("lib"), fs::Permissions::from_mode(0o777)).unwrap();
     assert!(matches!(
         initialize_once(&lib, Stop::Never),
         Err(WitnessGenesisError::UntrustedParent),
