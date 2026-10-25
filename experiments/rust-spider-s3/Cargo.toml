@@ -12,6 +12,7 @@ anyhow = "1"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1"
 hex = "0.4"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 sha2 = "0.10"
 spider = { version = "=2.53.9", default-features = false, features = ["sync", "reqwest_rustls_tls"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
