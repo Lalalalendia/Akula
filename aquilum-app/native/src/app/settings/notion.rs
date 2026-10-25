@@ -110,6 +110,7 @@ impl App {
                 true
             }
             Action::NotionOpenRoot(root) => {
+                if self.notion_bases.has_pending_draft() { return true; }
                 let catalog = crate::notion_offline::NotionOfflineView::read(&self.workspace.data_dir);
                 if catalog.error.is_none() && catalog.roots.iter().any(|item| &item.id == root) {
                     self.notion_session.open(self.workspace.data_dir.clone(), root.clone());
