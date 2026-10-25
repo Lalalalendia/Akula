@@ -1,6 +1,9 @@
 name: Akula Core attachment notice and Staya range contract
 
 on:
+  push:
+    branches:
+      - feature/ak-p2p-attachment-core-wow-staya-v1-20261025
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
@@ -8,6 +11,7 @@ on:
       - 'aquilum-app/core/src/lib.rs'
       - 'aquilum-app/core/Cargo.toml'
       - 'interop/akula-staya/src/attachment_contract.rs'
+      - 'interop/akula-staya/src/wow_attachment_w3.rs'
       - 'interop/akula-staya/src/lib.rs'
       - 'interop/akula-staya/Cargo.toml'
       - '.github/workflows/p2p-attachment-contract.yml'
@@ -18,7 +22,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   core-staya:
-    if: github.event.pull_request.head.ref == 'feature/ak-p2p-attachment-core-wow-staya-v1-20261025'
+    if: github.ref_name == 'feature/ak-p2p-attachment-core-wow-staya-v1-20261025' || github.event.pull_request.head.ref == 'feature/ak-p2p-attachment-core-wow-staya-v1-20261025'
     strategy:
       fail-fast: false
       matrix:
@@ -28,11 +32,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Source revision gate
         shell: bash
-        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+        run: test "$(git rev-parse HEAD)" = "${{ github.sha }}"
       - uses: dtolnay/rust-toolchain@stable
       - name: Test bounded Akula receiver-selected attachment contract
         shell: bash
@@ -47,3 +51,7 @@ jobs:
         run: |
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-attachment-contract real_staya_queue_excludes_unselected_roots -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-attachment-contract forged_or_wrong_peer_decision_cannot_create_staya_queue -- --nocapture
+      - name: Test real WOW W3 HPKE Ed25519 trust and expiry
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-wow-w3-lab wow_attachment_w3 -- --nocapture
