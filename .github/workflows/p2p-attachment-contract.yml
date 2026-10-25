@@ -16,6 +16,7 @@ on:
       - 'aquilum-app/core/Cargo.toml'
       - 'interop/akula-staya/src/attachment_contract.rs'
       - 'interop/akula-staya/src/wow_attachment_w3.rs'
+      - 'interop/akula-staya/src/granted_quic_lab.rs'
       - 'interop/akula-staya/src/lib.rs'
       - 'interop/akula-staya/Cargo.toml'
       - '.github/workflows/p2p-attachment-contract.yml'
