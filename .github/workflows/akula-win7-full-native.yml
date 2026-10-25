@@ -7,6 +7,7 @@ on:
       - 'aquilum-app/native/src/output/soft/present.rs'
       - 'aquilum-app/native/src/host/window_events/restore.rs'
       - 'aquilum-app/native/src/touchpad/compat.rs'
+      - 'scripts/akula-win7-nsis-candidate.ps1'
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -16,7 +17,7 @@ permissions:
 jobs:
   compile:
     runs-on: windows-2022
-    timeout-minutes: 115
+    timeout-minutes: 155
     steps:
       - uses: actions/checkout@v4
         with:
@@ -194,6 +195,24 @@ jobs:
           if ($imports -notcontains 'CoCreateFreeThreadedMarshaler' -or $imports -notcontains 'CoTaskMemFree') { throw 'Win7 COM fallbacks missing from OLE32 imports' }
           Get-Content "$out/full-audit.md" | Add-Content $env:GITHUB_STEP_SUMMARY
 
+      - name: Install pinned packager for normal Windows installer candidate
+        shell: pwsh
+        run: |
+          cargo install cargo-packager --version 0.11.8 --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned cargo-packager installation failed' }
+
+      - name: Stage PE-audited Win7 binaries in one ordinary Akula NSIS (not published)
+        shell: pwsh
+        run: ./scripts/akula-win7-nsis-candidate.ps1
+
+      - name: Install and exercise Win7-target NSIS on hosted Windows Server 2022
+        shell: pwsh
+        timeout-minutes: 35
+        run: |
+          # A real installed NSIS+GUI+PDF test, NOT a Windows 7 OS test.
+          ./scripts/test-windows-beta.ps1
+          Write-Host 'AKULA_WIN7_NSIS_INSTALLED_GUI_SMOKE_PASS tested_os=windows2022 win7_runtime_tested=false'
+
       - name: Upload actual Win7 test archive (NOT production release)
         uses: actions/upload-artifact@v4
         with:
@@ -203,6 +222,7 @@ jobs:
             win7-lab-output/PROVENANCE.txt
             win7-lab-output/pe-audit/full-audit.md
             win7-lab-output/pe-audit/full-audit.json
+            dist/Akula_*-setup.exe
             win7-full-results/shiva-audit/full-audit.md
             win7-full-results/shiva-audit/full-audit.json
           if-no-files-found: error
