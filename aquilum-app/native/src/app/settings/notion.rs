@@ -18,6 +18,10 @@ impl App {
                 self.notion_bases.page(*rows, *columns);
                 true
             }
+            Action::NotionBasesSelectCell(row,property) => {
+                self.notion_bases.select_cell(row,property);
+                true
+            }
             Action::NotionBasesBeginEdit(row,property) => {
                 let _ = self.notion_bases.begin_draft(row, property);
                 true
