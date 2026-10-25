@@ -14,6 +14,9 @@ pub mod live_identity;
 pub mod node_live_read;
 #[cfg(all(target_os = "linux", feature = "node-v1-runtime"))]
 pub mod node_v1_runtime;
+// Non-shipping, intentionally separate from Node-V1's installed Iroh ALPN.
+#[cfg(all(target_os = "linux", feature = "node-wow-mailbox-lab"))]
+pub mod node_wow_mailbox_lab;
 #[cfg(feature = "p2p-live-identity")]
 pub mod roster_observation_lab;
 #[cfg(feature = "sender-arm-lab")]
