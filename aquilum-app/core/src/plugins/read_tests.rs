@@ -305,3 +305,119 @@ fn replacing_a_selected_file_with_identical_bytes_cannot_reuse_old_handle() {
     note(&f.root,"Private/selected.md",b"same contents");
     assert_eq!(reader.read_note_bounded(inst,&selected,200,ctx),Err(PluginReadError::Unavailable));
 }
+
+#[test]
+fn pinned_note_binding_requires_read_grant_and_exact_sync_blob() {
+    use crate::sync::{DocumentId, RevisionDag, RevisionId, RevisionOperation, RevisionRecord, SyncRelativePath};
+    let f = fixture();
+    note(&f.root, "notes/a.md", b"known content");
+    let broker = PermissionBroker::new();
+    let reader = HostPluginVaultReader::open_registered(&f.core, &broker, &f.root).unwrap();
+    let handle = reader.bind_host_note("notes/a.md").unwrap();
+    let installed = plugin(&broker, reader.host_vault_id());
+    let live = || HostContext::from_host_state(reader.host_vault_id(), Some(handle.host_note_id()));
+    let document = DocumentId::new();
+    let mut dag = RevisionDag::new();
+    let current = RevisionId::new();
+    dag.ingest(RevisionRecord {
+        id: current, document_id: document, parents: vec![],
+        operation: RevisionOperation::Content {
+            path: SyncRelativePath::parse("notes/a.md").unwrap(),
+            blob_hash: blake3::hash(b"known content").to_hex().to_string(),
+        },
+    }).unwrap();
+    assert!(reader.bind_current_sync_note(installed, &handle, &dag, 2048, live).is_err());
+    broker.grant_host_approved(installed, Capability::NotesRead, GrantScope::WholeVault).unwrap();
+    assert!(reader.bind_current_sync_note(installed, &handle, &dag, 2048, live).is_ok());
+    note(&f.root, "notes/a.md", b"changed content");
+    assert!(reader.bind_current_sync_note(installed, &handle, &dag, 2048, live).is_err());
+}
+
+#[test]
+fn pinned_note_binding_rejects_other_dag_path_and_stale_instance() {
+    use crate::sync::{DocumentId, RevisionDag, RevisionId, RevisionOperation, RevisionRecord, SyncRelativePath};
+    let f = fixture();
+    note(&f.root, "notes/a.md", b"known content");
+    let broker = PermissionBroker::new();
+    let reader = HostPluginVaultReader::open_registered(&f.core, &broker, &f.root).unwrap();
+    let handle = reader.bind_host_note("notes/a.md").unwrap();
+    let installed = plugin(&broker, reader.host_vault_id());
+    broker.grant_host_approved(installed, Capability::NotesRead, GrantScope::WholeVault).unwrap();
+    let live = || HostContext::from_host_state(reader.host_vault_id(), Some(handle.host_note_id()));
+    let mut dag = RevisionDag::new();
+    dag.ingest(RevisionRecord {
+        id: RevisionId::new(), document_id: DocumentId::new(), parents: vec![],
+        operation: RevisionOperation::Content {
+            path: SyncRelativePath::parse("notes/other.md").unwrap(),
+            blob_hash: blake3::hash(b"known content").to_hex().to_string(),
+        },
+    }).unwrap();
+    assert!(reader.bind_current_sync_note(installed, &handle, &dag, 2048, live).is_err());
+    broker.revoke_all_for_host(installed).unwrap();
+    assert!(reader.bind_current_sync_note(installed, &handle, &dag, 2048, live).is_err());
+}
+
+#[test]
+fn pinned_note_to_sync_to_vector_search_respects_separate_grants() {
+    use crate::search::semantic_probe::{
+        self, Chunk, ProbeError,
+    };
+    use crate::sync::{DocumentId, RevisionDag, RevisionId, RevisionOperation, RevisionRecord, SyncRelativePath};
+    let f = fixture();
+    let bytes = b"verified document bytes";
+    note(&f.root, "notes/e2e.md", bytes);
+    let broker = PermissionBroker::new();
+    let reader = HostPluginVaultReader::open_registered(&f.core, &broker, &f.root).unwrap();
+    let handle = reader.bind_host_note("notes/e2e.md").unwrap();
+
+    // Fixture declares only notes.read. Search authority is deliberately
+    // separate and cannot be inferred from a successful protected file read.
+    let installed = plugin(&broker, reader.host_vault_id());
+    broker.grant_host_approved(installed, Capability::NotesRead, GrantScope::WholeVault).unwrap();
+    let live = || HostContext::from_host_state(reader.host_vault_id(), Some(handle.host_note_id()));
+
+    let doc = DocumentId::new();
+    let rev = RevisionId::new();
+    let mut dag = RevisionDag::new();
+    dag.ingest(RevisionRecord {
+        id: rev, document_id: doc, parents: vec![],
+        operation: RevisionOperation::Content {
+            path: SyncRelativePath::parse("notes/e2e.md").unwrap(),
+            blob_hash: blake3::hash(bytes).to_hex().to_string(),
+        },
+    }).unwrap();
+    let selection = reader.bind_current_sync_note(installed, &handle, &dag, 4096, live).unwrap();
+    assert_eq!(selection.sync_document_id().unwrap(), doc);
+
+    let mut db = rusqlite::Connection::open_in_memory().unwrap();
+    semantic_probe::prepare(&db).unwrap();
+    let scope = reader.host_vault_id().as_uuid().to_string();
+    semantic_probe::register_source(&db, &scope, &doc.to_string()).unwrap();
+    let source_hash = blake3::hash(bytes).to_hex().to_string();
+    let text_hash = blake3::hash(b"fragment").to_hex().to_string();
+    semantic_probe::replace_revision_chunks(
+        &mut db, &scope, &doc.to_string(), 1, &rev.to_string(), &source_hash,
+        "e2e-fixture@1", 2,
+        &[Chunk {locator: "p:1", text_hash: &text_hash, embedding: &[1.0, 0.0]}],
+    ).unwrap();
+
+    // The verified selection is enough for an internal owner query, but NOT
+    // for any plugin disclosure without an independent NotesSearch lease.
+    let local = semantic_probe::search_sync_verified(
+        &db, &scope, 1, &selection, "e2e-fixture@1", &[1.0, 0.0], 5,
+    ).unwrap();
+    assert_eq!(local.hits.len(), 1);
+    assert_eq!(local.hits[0].revision_id, rev.to_string());
+    assert_eq!(local.hits[0].source_hash, source_hash);
+
+    // Altering the file invalidates a new protected binding, even when the
+    // previously generated vector cache still contains old results.
+    note(&f.root, "notes/e2e.md", b"modified after indexing");
+    assert!(reader.bind_current_sync_note(installed, &handle, &dag, 4096, live).is_err());
+    assert!(matches!(
+        semantic_probe::search_sync_verified(
+            &db, &scope, 2, &selection, "e2e-fixture@1", &[1.0, 0.0], 5,
+        ),
+        Err(ProbeError::StaleSource)
+    ));
+}
