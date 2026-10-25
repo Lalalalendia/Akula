@@ -20,7 +20,11 @@ pub mod node_v1_runtime;
 #[cfg(all(feature = "node-wow-mailbox-lab", not(debug_assertions)))]
 compile_error!("Node WOW mailbox lab is forbidden in release builds");
 
-#[cfg(all(target_os = "linux", feature = "node-wow-mailbox-lab", debug_assertions))]
+#[cfg(all(
+    target_os = "linux",
+    feature = "node-wow-mailbox-lab",
+    debug_assertions
+))]
 pub mod node_wow_mailbox_lab;
 #[cfg(feature = "p2p-live-identity")]
 pub mod roster_observation_lab;
