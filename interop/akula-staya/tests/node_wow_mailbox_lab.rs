@@ -803,9 +803,12 @@ fn root_owned_mail_policy_is_read_only_and_current() {
         ROOT_POLICY,
     ]);
     let root_child = |stop: &str| {
+        eprintln!("ROOT_MAIL_CI: root subprocess start {stop}");
         let exe = std::env::current_exe().unwrap();
         let status = Command::new("sudo")
             .arg("-n")
+            .arg("timeout")
+            .arg("45s")
             .arg("env")
             .arg("GITHUB_ACTIONS=true")
             .arg("AKULA_WOW_ROOT_CAS_CI=1")
@@ -822,6 +825,7 @@ fn root_owned_mail_policy_is_read_only_and_current() {
             .status()
             .unwrap();
         assert!(status.success(), "root-only publisher subprocess: {stop}");
+        eprintln!("ROOT_MAIL_CI: root subprocess done {stop}");
     };
     // All three early crash points must refuse admission. A privileged
     // human repair is simulated only by clearing the disposable CI tree.
@@ -861,6 +865,7 @@ fn root_owned_mail_policy_is_read_only_and_current() {
         mail_commit_receipt_for_lab(&signed_bytes, &floor_bytes, 1),
     )
     .unwrap();
+    eprintln!("ROOT_MAIL_CI: final signed root bundle published");
     let meta = fs::metadata(POLICY).unwrap();
     assert_eq!(meta.uid(), 0);
     assert_eq!(meta.gid(), rustix::process::getegid().as_raw());
@@ -881,6 +886,7 @@ fn root_owned_mail_policy_is_read_only_and_current() {
             1,
         )
     };
+    eprintln!("ROOT_MAIL_CI: verifying nonroot mailbox reader");
     let mut running = open().expect("root-owned policy and SQLite witness must match");
     let proof = fixture.list_proof();
     let listed = exchange(&fixture.node, &mut running, move |sock| {
@@ -895,6 +901,7 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     })
     .unwrap();
     assert_eq!(retrieved, Some(fixture.packet.clone()));
+    eprintln!("ROOT_MAIL_CI: root-owned LIST/FETCH PASS");
 
     // A new pending file is an unresolved root transaction and must not
     // be treated as a valid previous receipt.
