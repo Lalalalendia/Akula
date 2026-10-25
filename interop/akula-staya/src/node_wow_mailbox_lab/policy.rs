@@ -505,6 +505,10 @@ fn decode_verified_claims(
 }
 
 impl VerifiedMailRoleLab {
+    pub(super) fn signed_digest(&self) -> [u8; 32] {
+        self.pinned_digest
+    }
+
     pub(super) fn open(
         folder: &Path,
         node: &NodeHost,
