@@ -23,11 +23,16 @@ def main():
     ap.add_argument("--s3-endpoint")
     ap.add_argument("--s3-prefix", default="unified-lab/")
     ap.add_argument("--no-worker", action="store_true", help="serve API but run worker in separate process")
+    ap.add_argument("--max-workers", type=int, default=1, help="1..8 shared worker slots, fixed per state root")
     opt = ap.parse_args()
     approved = opt.approved_root or (opt.state / "approved")
     store = JobStore(opt.state, approved)
-    worker = IngestWorker(store, s3_bucket=opt.s3_bucket,
-                          s3_endpoint=opt.s3_endpoint, s3_prefix=opt.s3_prefix)
+    # Read-only and submission commands must not freeze the service-wide worker cap.
+    worker = (IngestWorker(store, s3_bucket=opt.s3_bucket,
+                           s3_endpoint=opt.s3_endpoint, s3_prefix=opt.s3_prefix,
+                           max_workers=opt.max_workers)
+              if opt.command in ("once", "worker", "serve") and
+              (opt.command != "serve" or not opt.no_worker) else None)
     if opt.command == "submit":
         if not opt.plan:
             ap.error("--plan is required for operator submission")
@@ -52,7 +57,8 @@ def main():
         token = os.environ.get("INGEST_API_TOKEN", "")
         if not token:
             ap.error("set INGEST_API_TOKEN (at least 24 characters) before starting HTTP API")
-        serve(store, token, port=opt.port, worker=None if opt.no_worker else worker)
+        serve(store, token, port=opt.port, worker=None if opt.no_worker else worker,
+              worker_count=opt.max_workers)
 
 
 if __name__ == "__main__":
