@@ -59,36 +59,9 @@ pub struct Updater {
     wake: Arc<dyn Fn() + Send + Sync>,
 }
 
-/// Until the signed Windows release metadata states a tested minimum OS,
-/// a Windows 7 test build must not replace itself with the ordinary Windows
-/// installer. A valid signature proves origin, not operating-system support.
-#[cfg(target_os = "windows")]
-fn windows_7_or_earlier() -> bool {
-    // GetVersion is available on Windows 7 and does not introduce new imports.
-    // On newer, unmanifested Windows it can report an *older* version, which
-    // is safe here: a false legacy result only disables automatic updating.
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn GetVersion() -> u32;
-    }
-    let value = unsafe { GetVersion() };
-    let major = value & 0xff;
-    let minor = (value >> 8) & 0xff;
-    major < 6 || (major == 6 && minor <= 1)
-}
-
 pub fn available() -> bool {
-    // Laboratory packages are isolated from the public update channel even
-    // when they are built with the "installed" feature. The launcher sets this
-    // variable; real Win7 also fails closed if the EXE is launched directly.
-    if std::env::var_os("AKULA_LAB_DISABLE_UPDATES").is_some() {
-        return false;
-    }
-    #[cfg(target_os = "windows")]
-    if windows_7_or_earlier() {
-        return false;
-    }
-    // A signed public release currently means windows-x86_64, not Win7-tested.
+    // Akula has no dedicated signed release channel yet. Installed builds must
+    // never offer an upstream Aquilum package as an Akula update.
     cfg!(feature = "installed") && apply::supported() && release::channel_ready()
 }
 
