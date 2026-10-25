@@ -36,6 +36,7 @@ pub struct CellView {
     pub text: String,
     pub toggle_to: Option<bool>,
     pub revert: bool,
+    pub edit_text: bool,
 }
 #[derive(Clone, Debug)]
 pub struct RowView {
@@ -220,6 +221,8 @@ impl BasesSession {
                         text:current.map(label).unwrap_or_else(||"—".into()),
                         toggle_to:if can_toggle { current.and_then(checkbox).map(|b|!b) } else { None },
                         revert:matches!(current,Some(EffectiveValue::Local(_))),
+                        edit_text:col.editable_locally && current.is_some() &&
+                            matches!(col.kind.as_str(),"title"|"rich_text"|"url"| "email"| "phone_number"|"number"),
                     });
                 }
                 out.rows.push(RowView{row_id:row.akula_id.clone(),
