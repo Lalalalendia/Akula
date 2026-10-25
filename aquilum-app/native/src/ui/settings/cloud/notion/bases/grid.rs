@@ -55,7 +55,7 @@ pub(super) fn append(
         |t| t.text_muted, None, Leading::Times(1.3),
     ));
     let mut grid = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch)
-        .with_fixed(header_row(&bases.columns));
+        .with_fixed(NewWidget::new(header_row(&bases.columns)));
     for (i, record) in bases.rows.iter().enumerate() {
         let label = format!("{}  {}", bases.row_start+i+1, abbreviate(&record.label));
         let mut line = Flex::row()
@@ -66,7 +66,7 @@ pub(super) fn append(
                 v.row_id==cell.row_id && v.property_id==cell.property_id);
             line = line.with_fixed(grid_cell(cell, selected, bindings));
         }
-        grid = grid.with_fixed(line);
+        grid = grid.with_fixed(NewWidget::new(line));
     }
     // The provider modal itself is vertically scrollable. Only the bounded
     // grid scrolls horizontally; it never renders off-page rows or columns.
