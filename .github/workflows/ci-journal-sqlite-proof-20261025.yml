@@ -4,6 +4,7 @@ on:
     branches: [refactor/journal-sqlite-lifecycle-20261025]
     paths:
       - '.github/workflows/ci-journal-sqlite-proof-20261025.yml'
+      - 'aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs'
 permissions:
   contents: read
 jobs:
