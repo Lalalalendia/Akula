@@ -1,5 +1,6 @@
 //! Experimental local Akula Bases panel. Never reads the Notion API.
 use super::*;
+mod editor;
 
 pub(super) fn append(
     mut column: Flex, ctx: &Context,
@@ -9,7 +10,7 @@ pub(super) fn append(
     // Independent offline Akula Bases, separate from the Notion API cache.
     if let (Some(source), Some(target)) = (selected_root,ctx.workspace.as_deref()) {
         let bases=&ctx.notion_bases;
-        if !bases.busy {
+        if !bases.busy && bases.draft.is_none() {
             column=column.with_fixed(action_button(
                 "Открыть локальные Akula Bases".into(),
                 Action::NotionBasesOpen(source.clone()),bindings,
@@ -33,6 +34,9 @@ pub(super) fn append(
                 ));
             }
             if bases.stage==crate::notion_bases::Stage::Ready {
+                if let Some(draft)=&bases.draft {
+                    column=editor::append(column,draft,bases.stage,bindings);
+                } else {
                 for choice in &bases.choices {
                     column=column.with_fixed(action_button(
                         format!("{} · {}",choice.label,&choice.digest[..10]),
@@ -60,6 +64,13 @@ pub(super) fn append(
                                 column=column.with_fixed(action_button(
                                     "Изменить флажок локально".into(),
                                     Action::NotionBasesChange(cell.row_id.clone(),cell.property_id.clone(),false),bindings,
+                                ));
+                            }
+                            if cell.edit_text {
+                                column=column.with_fixed(action_button(
+                                    "Редактировать значение".into(),
+                                    Action::NotionBasesBeginEdit(cell.row_id.clone(),cell.property_id.clone()),
+                                    bindings,
                                 ));
                             }
                             if cell.revert {
@@ -99,7 +110,11 @@ pub(super) fn append(
                         Action::NotionBasesReload,bindings,
                     ));
                 }
+                }
             } else if bases.stage==crate::notion_bases::Stage::NeedsReview {
+                if let Some(draft)=&bases.draft {
+                    column=editor::append(column,draft,bases.stage,bindings);
+                }
                 column=column.with_fixed(action_button(
                     "Проверить локальную базу повторно".into(),Action::NotionBasesReload,bindings,
                 ));
