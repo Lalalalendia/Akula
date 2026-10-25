@@ -164,7 +164,8 @@ impl NodeWowMailboxLab {
         require_exact_mailbox(state, &policy)?;
         // A correct signed owner policy is NOT enough if SQLite has been
         // revoked, rolled back, or provisioned for another policy digest.
-        journal.bind_mail_role_gate(policy.sqlite_gate())
+        journal
+            .bind_mail_role_gate(policy.sqlite_gate())
             .map_err(|_| MailRoleHold::MailPolicy)?;
         let reopened = private_existing_db(state)?;
         if (db_info.dev(), db_info.ino()) != (reopened.dev(), reopened.ino()) {
@@ -197,7 +198,8 @@ impl NodeWowMailboxLab {
         }
         self.policy.require_current(node, now_ms)?;
         require_exact_mailbox(&self.state, &self.policy)?;
-        self.journal.require_mail_role_gate_current()
+        self.journal
+            .require_mail_role_gate_current()
             .map_err(|_| MailRoleHold::MailPolicy)?;
         if self.policy.claims.custodian_public != self.custodian_signer.verifying_key().to_bytes() {
             return Err(MailRoleHold::UnpinnedTrust);
