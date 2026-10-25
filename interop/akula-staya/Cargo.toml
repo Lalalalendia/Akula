@@ -20,7 +20,7 @@ p2p-one-file-lan-beta = ["p2p-live-identity", "dep:tokio", "dep:akula-inbox-ledg
 # Off by default; inert Core + real Staya manifest, no file read/grant.
 p2p-attachment-contract = ["aquilum-core/p2p-attachment-contract"]
 # Explicit non-shipping signed-and-encrypted WOW W3 attachment notice.
-p2p-wow-w3-lab = ["p2p-attachment-contract", "dep:akula-wire-lab", "dep:ed25519-dalek"]
+p2p-wow-w3-lab = ["p2p-attachment-contract", "dep:akula-wow-w3-crypto", "dep:ed25519-dalek"]
 
 [[bin]]
 name = "akula-p2p-one-file-beta"
@@ -32,7 +32,7 @@ aquilum-core = { path = "../../aquilum-app/core", features = ["p2p-inbox-lab"] }
 akula-inbox-ledger-lab = { path = "../../modules/drop-inbox-ledger", optional = true }
 staya-transfer = { git = "https://github.com/Lalalalendia/staya-transfer", rev = "ccfe82dc6125e2810e95043a6a4ac55954b710e0", default-features = false }
 blake3 = "=1.8.5"
-akula-wire-lab = { git = "https://github.com/calex794/wow", rev = "206f2e6cbbac36fa0821d679de6c66766ddc5bbd", optional = true, default-features = false }
+akula-wow-w3-crypto = { git = "https://github.com/calex794/wow", rev = "9053c5e38b659a578039e6c27f5a58f99270730c", optional = true }
 ed25519-dalek = { version = "2.2", optional = true }
 iroh = "=1.3.0"
 postcard = { version = "=1.1.3", features = ["use-std"] }
