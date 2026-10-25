@@ -47,6 +47,9 @@ jobs:
           python -m pip install beautifulsoup4
           PYTHONPATH=/tmp/erida-m6/src python experiments/unified-ingest-m5/tests/verify_real_erida_import.py \
             experiments/unified-ingest-m5/m6-import/*-import.json
+      - name: Test M5-M7 offline integrated pipeline
+        working-directory: experiments/unified-ingest-m5
+        run: python -m unittest discover -s tests -p 'test_m[567]*.py' -v
       - name: Run all-stages discovery / parse / publish / handoff
         working-directory: experiments/unified-ingest-m5
         run: |
