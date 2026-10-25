@@ -1,0 +1,49 @@
+name: Akula Core attachment notice and Staya range contract
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'aquilum-app/core/src/p2p_attachment_contract.rs'
+      - 'aquilum-app/core/src/lib.rs'
+      - 'aquilum-app/core/Cargo.toml'
+      - 'interop/akula-staya/src/attachment_contract.rs'
+      - 'interop/akula-staya/src/lib.rs'
+      - 'interop/akula-staya/Cargo.toml'
+      - '.github/workflows/p2p-attachment-contract.yml'
+permissions:
+  contents: read
+concurrency:
+  group: p2p-attachment-contract-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  core-staya:
+    if: github.event.pull_request.head.ref == 'feature/ak-p2p-attachment-core-wow-staya-v1-20261025'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Source revision gate
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test bounded Akula receiver-selected attachment contract
+        shell: bash
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features p2p-attachment-contract p2p_attachment_contract -- --nocapture
+      - name: Test actual Staya offset and manifest adapter
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-attachment-contract attachment_contract -- --nocapture
+      - name: Existing offer to Staya bridge regressions
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-attachment-contract real_staya_queue_excludes_unselected_roots -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-attachment-contract forged_or_wrong_peer_decision_cannot_create_staya_queue -- --nocapture
