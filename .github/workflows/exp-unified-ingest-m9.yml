@@ -32,6 +32,9 @@ jobs:
       - name: Test all offline pipeline and multi-worker cases
         working-directory: experiments/unified-ingest-m5
         run: python -m unittest discover -s tests -p 'test_m[56789]*.py' -q
+      - name: M10 S3 fault and operator recovery tests
+        working-directory: experiments/unified-ingest-m5
+        run: python -m unittest discover -s tests -p 'test_m10*.py' -v
       - name: Start isolated S3-compatible MinIO
         run: |
           docker run -d --name ingest-m9-minio -p 127.0.0.1:9000:9000 \
