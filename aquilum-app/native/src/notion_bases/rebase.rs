@@ -38,6 +38,49 @@ pub fn manual_choices_complete(view:&BasesView)->bool{
 }
 
 impl BasesSession {
+    pub fn discover_archives(&mut self)->Result<(),()> {
+        if self.view.busy || self.view.stage!=Stage::Ready
+            || self.has_pending_draft() || !self.view.keep_local.is_empty()
+            || !self.view.accept_notion.is_empty(){return Err(());}
+        let source=self.view.source.clone().ok_or(())?;
+        let digest=self.view.digest.clone().ok_or(())?;
+        let base=self.view.base_id.clone().ok_or(())?;
+        let vault=self.view.target.clone().ok_or(())?;
+        let expected=self.disk_hash.clone().ok_or(())?;
+        self.view.archives.clear();
+        self.start(Stage::Reviewing,move ||{
+            bases_edits::discover_restore_archives(&vault,&source,
+                &digest,&expected,&base)
+                .map(|items|Payload::Archives(items,expected)).map_err(|_|())
+        })
+    }
+    pub fn restore_listed_archive(&mut self,core:Arc<Core>,
+        archive_path:&str,row:&str,property:&str)->Result<(),()>
+    {
+        if self.view.busy || self.view.stage!=Stage::Ready
+            || self.has_pending_draft(){return Err(());}
+        let archive=self.view.archives.iter().find(|archive|
+            archive.path==archive_path && archive.cells.iter().any(|cell|
+                cell.row_id==row && cell.property_id==property)).ok_or(())?.clone();
+        let row=row.to_owned();let property=property.to_owned();
+        let target=self.view.target.clone().ok_or(())?;
+        let source=self.view.source.clone().ok_or(())?;
+        let base=self.view.base_id.clone().ok_or(())?;
+        let digest=self.view.digest.clone().ok_or(())?;
+        if archive.new_digest!=digest {return Err(());}
+        let expected=self.disk_hash.clone().ok_or(())?;
+        self.start(Stage::Saving,move ||{
+            bases_edits::restore_archived_cell_approved(&core,&target,
+                &source,&archive.old_digest,&archive.new_digest,
+                &archive.archived_hash,&expected,&archive.path,
+                &row,&property,true).map_err(|_|())?;
+            match load(&target,&source,&digest,&base)? {
+                Payload::Loaded(effective,hash)=>
+                    Ok(Payload::Restored(effective,hash,row,property)),
+                _=>Err(()),
+            }
+        })
+    }
     /// For QA scope the UI exposes explicit Keep Local only when every
     /// conflict is a source value edit with unchanged schema and identity.
     /// A conflicted cell is never implicitly selected.
