@@ -11,7 +11,7 @@ use akula_wire_lab::{
     custodian_mailbox::{MailRoleGate, MailboxPolicy},
     trust_w3::TrustRegistry,
 };
-use aquilum_core::node_v1::NodeHost;
+use aquilum_core::node_v1::{NodeHost, RootTrust};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rustix::fs::{Mode, OFlags, open, openat};
 use serde::{Deserialize, Serialize};
@@ -378,6 +378,45 @@ fn decode_and_verify(
     expected_endpoint: [u8; 32],
     now_ms: i64,
 ) -> Result<MailRoleClaims, MailRoleHold> {
+    node.verify_iroh_endpoint(expected_endpoint)
+        .map_err(|_| MailRoleHold::NodePolicy)?;
+    let operator = node.mail_operator_key_for_lab()
+        .map_err(|_| MailRoleHold::NodePolicy)?;
+    decode_verified_claims(
+        input, node.public_key(), expected_endpoint, operator, now_ms,
+    )
+}
+
+/// The privileged CI publisher must independently anchor to the real fixed
+/// RootTrust OS policy, never to a caller supplied Ed25519 verifying key.
+/// This validates the same domain-separated mail-role bytes as the reader.
+pub(super) fn decode_root_verified_claims(
+    input: &[u8],
+    now_ms: i64,
+) -> Result<MailRoleClaims, MailRoleHold> {
+    let signed: SignedPolicy = postcard::from_bytes(input).map_err(|_| MailRoleHold::MailPolicy)?;
+    if postcard::to_stdvec(&signed).map_err(|_| MailRoleHold::MailPolicy)? != input {
+        return Err(MailRoleHold::MailPolicy);
+    }
+    let p = signed.claims;
+    let root = RootTrust::open_provisioned(p.node_public)
+        .map_err(|_| MailRoleHold::NodePolicy)?;
+    root.require_iroh_endpoint(p.node_endpoint)
+        .map_err(|_| MailRoleHold::NodePolicy)?;
+    let operator = root.witnessed_roster()
+        .map_err(|_| MailRoleHold::NodePolicy)?.owner_public_key;
+    decode_verified_claims(
+        input, p.node_public, p.node_endpoint, operator, now_ms,
+    )
+}
+
+fn decode_verified_claims(
+    input: &[u8],
+    expected_node_public: [u8;32],
+    expected_endpoint: [u8;32],
+    operator_public: [u8;32],
+    now_ms: i64,
+) -> Result<MailRoleClaims, MailRoleHold> {
     let signed: SignedPolicy = postcard::from_bytes(input).map_err(|_| MailRoleHold::MailPolicy)?;
     // Reject alternate encodings and trailing/unknown data.
     if postcard::to_stdvec(&signed).map_err(|_| MailRoleHold::MailPolicy)? != input {
@@ -386,14 +425,11 @@ fn decode_and_verify(
     let p = signed.claims;
     if p.version != 1
         || p.policy_epoch == 0
-        || p.node_public != node.public_key()
+        || p.node_public != expected_node_public
         || p.node_endpoint != expected_endpoint
         || expected_endpoint == [0; 32]
         || p.operator_public == [0; 32]
-        || p.operator_public
-            != node
-                .mail_operator_key_for_lab()
-                .map_err(|_| MailRoleHold::NodePolicy)?
+        || p.operator_public != operator_public
         || p.issuer == [0; 16]
         || p.issuer_epoch == 0
         || p.custodian == [0; 16]
@@ -432,8 +468,6 @@ fn decode_and_verify(
             return Err(MailRoleHold::MailPolicy);
         }
     }
-    node.verify_iroh_endpoint(expected_endpoint)
-        .map_err(|_| MailRoleHold::NodePolicy)?;
     let verifying =
         VerifyingKey::from_bytes(&p.operator_public).map_err(|_| MailRoleHold::MailPolicy)?;
     let body = postcard::to_stdvec(&p).map_err(|_| MailRoleHold::MailPolicy)?;
