@@ -71,8 +71,7 @@ fn private_dir(dir: &Path) -> Result<Metadata, MailRoleHold> {
 
 fn private_existing_db(state: &Path) -> Result<Metadata, MailRoleHold> {
     private_dir(state)?;
-    let info = fs::symlink_metadata(state.join(DB))
-        .map_err(|_| MailRoleHold::UnsafeDatabase)?;
+    let info = fs::symlink_metadata(state.join(DB)).map_err(|_| MailRoleHold::UnsafeDatabase)?;
     if !info.is_file()
         || info.uid() != current_uid()
         || info.nlink() != 1
@@ -104,17 +103,16 @@ impl NodeWowMailboxLab {
         }
         node.verify_iroh_endpoint(node_endpoint)
             .map_err(|_| MailRoleHold::NodePolicy)?;
-        if custodian_id == [0; 16]
-            || custodian_epoch == 0
-            || custodian_epoch > i64::MAX as u64
-        {
+        if custodian_id == [0; 16] || custodian_epoch == 0 || custodian_epoch > i64::MAX as u64 {
             return Err(MailRoleHold::InvalidIdentity);
         }
-        trust.verify(
-            custodian_id,
-            custodian_epoch,
-            &custodian_signer.verifying_key(),
-        ).map_err(|_| MailRoleHold::UnpinnedTrust)?;
+        trust
+            .verify(
+                custodian_id,
+                custodian_epoch,
+                &custodian_signer.verifying_key(),
+            )
+            .map_err(|_| MailRoleHold::UnpinnedTrust)?;
         let db_info = private_existing_db(state)?;
         let db_path = state.join(DB);
         let journal = Journal::open(&db_path).map_err(|_| MailRoleHold::Journal)?;
@@ -139,19 +137,19 @@ impl NodeWowMailboxLab {
     /// identity AND to the distinct enrolled WOW custodian identity.
     /// These checks are necessary, NOT sufficient for production mailbox
     /// activation; a separate root/owner mail-policy gate is still required.
-    fn require_current(&self, node: &NodeHost, now_ms: i64)
-        -> Result<(), MailRoleHold>
-    {
+    fn require_current(&self, node: &NodeHost, now_ms: i64) -> Result<(), MailRoleHold> {
         if now_ms <= 0 || now_ms < self.last_now_ms {
             return Err(MailRoleHold::ClockRollback);
         }
         node.verify_iroh_endpoint(self.expected_node_endpoint)
             .map_err(|_| MailRoleHold::NodePolicy)?;
-        self.trust.verify(
-            self.custodian_id,
-            self.custodian_epoch,
-            &self.custodian_signer.verifying_key(),
-        ).map_err(|_| MailRoleHold::UnpinnedTrust)?;
+        self.trust
+            .verify(
+                self.custodian_id,
+                self.custodian_epoch,
+                &self.custodian_signer.verifying_key(),
+            )
+            .map_err(|_| MailRoleHold::UnpinnedTrust)?;
         let info = private_existing_db(&self.state)?;
         if (info.dev(), info.ino()) != self.db_inode {
             return Err(MailRoleHold::UnsafeDatabase);
