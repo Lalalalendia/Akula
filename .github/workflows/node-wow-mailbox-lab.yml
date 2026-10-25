@@ -5,6 +5,7 @@ on:
       - lab/node-v1-wow-mailbox-bridge-20261025
       - lab/node-v1-wow-owner-mail-policy-20261025
       - lab/node-v1-wow-root-owned-policy-20261025
+      - lab/node-v1-wow-policy-cas-20261025
     paths:
       - 'interop/akula-staya/Cargo.toml'
       - 'interop/akula-staya/src/lib.rs'
