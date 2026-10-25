@@ -12,7 +12,8 @@ fn main() {
         std::process::exit(2);
     }
     let accepted =
-        aquilum_core::server_root_v3_trust::root_helper_entry::authenticated_owner_preview_once_fd0();
+        aquilum_core::server_root_v3_trust::root_helper_entry::authenticated_owner_preview_once_fd0(
+        );
     if accepted {
         println!("AKULA_B1D0_SIGNED_OWNER_PREVIEW_ONLY_INSTALL_HOLD");
     } else {
