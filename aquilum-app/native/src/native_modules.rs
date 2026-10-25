@@ -8,6 +8,7 @@ mod graph;
 mod reader;
 mod video;
 mod dates;
+mod docx;
 mod disk;
 mod file_ops;
 mod fling;
