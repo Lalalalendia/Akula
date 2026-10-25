@@ -11,8 +11,26 @@ if ($PSVersionTable.PSEdition -ne 'Desktop' -or
     [Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA) {
     throw 'Dropbox browser UIA requires Windows PowerShell 5.1 STA'
 }
-$expected = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\debug\aquilum-native.exe'
-if ([IO.Path]::GetFullPath($ExePath) -cne [IO.Path]::GetFullPath($expected) -or
+# CI can invoke cargo from the repository root (workspace/target) or from
+# aquilum-app/ (the workspace .cargo/config redirects into .artifacts).
+# Resolve the actual target from Cargo and admit only these repository-owned
+# build directories. Do not accept an arbitrary path or an external EXE.
+$manifest = Join-Path $env:GITHUB_WORKSPACE 'aquilum-app\Cargo.toml'
+$metadata = & cargo metadata --locked --no-deps --format-version 1 --manifest-path $manifest |
+    ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($metadata.target_directory)) {
+    throw 'Cannot resolve the exact candidate target directory via Cargo'
+}
+$targetDir = [IO.Path]::GetFullPath([string]$metadata.target_directory)
+$allowedTargets = @(
+    [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE 'aquilum-app\target')),
+    [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native'))
+)
+if ($allowedTargets -notcontains $targetDir) {
+    throw 'Refusing a Cargo target directory outside approved Akula build paths'
+}
+$expected = Join-Path $targetDir 'debug\aquilum-native.exe'
+if ([IO.Path]::GetFullPath($ExePath) -ne [IO.Path]::GetFullPath($expected) -or
     !(Test-Path -LiteralPath $expected -PathType Leaf)) {
     throw 'Refusing a non-candidate or missing Akula executable'
 }
