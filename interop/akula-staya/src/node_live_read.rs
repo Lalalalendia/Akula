@@ -37,8 +37,7 @@ pub struct NodeReadDenied;
 /// network GET or proof of a durable server-side identity/key store.
 pub fn read_from_live_iroh_peer(
     connection: &Connection,
-    roster: &OwnerSignedRoster,
-    roster_pin: &IndependentlyPinnedOwner,
+    (roster, roster_pin): (&OwnerSignedRoster, &IndependentlyPinnedOwner),
     grant: &OwnerReadGrant,
     grant_pin: &IndependentReadTrust,
     device_proof: &DeviceReadProof,
