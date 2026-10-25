@@ -11,7 +11,6 @@
 //! pinned by root before any network exposure. This feature is lab-only.
 mod policy;
 mod root_publish;
-pub use root_publish::{PublishHold, PublishStop, first_mail_publish_ci};
 use akula_wire_lab::{custodian_wire, journal_w4::Journal, trust_w3::TrustRegistry};
 use aquilum_core::node_v1::NodeHost;
 use ed25519_dalek::SigningKey;
@@ -19,6 +18,7 @@ use policy::VerifiedMailRoleLab;
 pub use policy::{
     MailRoleClaims, mail_commit_receipt_for_lab, mail_epoch_floor_for_lab, sign_mail_policy_for_lab,
 };
+pub use root_publish::{PublishHold, PublishStop, first_mail_publish_ci};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::{
     fs::{self, Metadata},
