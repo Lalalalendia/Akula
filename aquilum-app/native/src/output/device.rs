@@ -29,7 +29,6 @@ pub(super) struct Gpu {
 pub(super) fn capacity(need: u32, have: u32) -> u32 {
     if need <= have { have } else { need.next_multiple_of(GROWTH) }
 }
-
 fn device(driver: D3D_DRIVER_TYPE) -> windows::core::Result<(ID3D11Device, ID3D11DeviceContext)> {
     let (mut device, mut context) = (None, None);
     unsafe {
@@ -70,13 +69,7 @@ pub(super) fn create(hwnd: HWND, width: u32, height: u32) -> Result<Gpu, String>
     #[cfg(not(feature = "memory-probe"))]
     let first = D3D_DRIVER_TYPE_WARP;
     let (device, context) = device(first).or_else(|_| device(D3D_DRIVER_TYPE_HARDWARE)).map_err(|e| format!("D3D11: {e}"))?;
-    // CreateDXGIFactory2 is a mandatory Windows 8.1 import, so the loader
-    // rejects an otherwise Win7-compatible executable before main().
-    // Microsoft documents querying IDXGIFactory2 from CreateDXGIFactory1.
-    // On Windows 7 without DXGI 1.2 this cast fails normally, allowing
-    // the caller to choose the GDI software backend at runtime.
-    let factory1: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.map_err(|e| format!("DXGI 1.1: {e}"))?;
-    let factory: IDXGIFactory2 = factory1.cast().map_err(|e| format!("DXGI 1.2 unavailable: {e}"))?;
+    let factory: IDXGIFactory2 = unsafe { CreateDXGIFactory1() }.and_then(|f: IDXGIFactory1| f.cast()).map_err(|e| format!("DXGI 1.2: {e}"))?;
     let desc = DXGI_SWAP_CHAIN_DESC1 {
         Width: width,
         Height: height,

@@ -1,5 +1,5 @@
+mod restore;
 use super::*;
-
 fn masonry_ime(ime: Ime) -> Option<MasonryIme> {
     match ime {
         Ime::Enabled => Some(MasonryIme::Enabled),
@@ -42,18 +42,7 @@ impl Host {
                 self.close(event_loop);
                 return;
             }
-            WindowEvent::RedrawRequested => {
-                // Win32 WM_PAINT also fires when another application uncovers
-                // previously covered parts of our window. Those exposed pixels
-                // are not part of the scene's internal damage tracking.
-                // Force full raster damage once so GDI and DXGI present the
-                // entire retained image, even if the scene is unchanged.
-                #[cfg(target_os = "windows")]
-                {
-                    self.full_next = true;
-                }
-                self.redraw();
-            },
+            WindowEvent::RedrawRequested => self.expose_redraw(),
             WindowEvent::DragEntered { id, .. } => {
                 use winit::data_transfer::TypeHint;
                 use winit::event_loop::DndAction;
@@ -85,16 +74,7 @@ impl Host {
                     ui::rescale(root, scale);
                 }
             }
-            WindowEvent::Focused(focused) => {
-                self.text_event(TextEvent::WindowFocusChange(focused));
-                // Some older window managers/drivers do not consistently send
-                // an expose paint when focus returns. Invalidate just once.
-                #[cfg(target_os = "windows")]
-                if focused {
-                    self.full_next = true;
-                    self.request_redraw();
-                }
-            },
+            WindowEvent::Focused(focused) => self.expose_focus(focused),
             WindowEvent::ModifiersChanged(m) => self.modifiers = masonry_modifiers(m.state()),
             WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => self.keyboard(event),
             WindowEvent::Ime(ime) => {

@@ -1,11 +1,8 @@
-// Both implementations must be available in the same Windows executable.
-// A future runtime dispatcher selects DXGI where available and GDI otherwise.
 #[cfg(target_os = "windows")]
 mod device;
 #[cfg(target_os = "windows")]
 mod dxgi;
 mod soft;
-
 #[cfg(target_os = "windows")]
 mod dispatch;
 #[cfg(target_os = "windows")]
