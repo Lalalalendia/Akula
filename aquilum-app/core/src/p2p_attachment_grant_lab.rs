@@ -79,6 +79,9 @@ pub struct VerifiedOwnerRead {
     allowed_end: u64,
     owner: PeerBinding,
     receiver: PeerBinding,
+    owner_epoch: u64,
+    nonce: [u8; 16],
+    expires_unix: u64,
 }
 impl VerifiedOwnerRead {
     pub fn message_id(&self) -> [u8; 16] { self.message_id }
@@ -86,6 +89,9 @@ impl VerifiedOwnerRead {
     pub fn size(&self) -> u64 { self.total }
     pub fn owner(&self) -> PeerBinding { self.owner }
     pub fn receiver(&self) -> PeerBinding { self.receiver }
+    pub fn nonce(&self) -> [u8; 16] { self.nonce }
+    pub fn owner_epoch(&self) -> u64 { self.owner_epoch }
+    pub fn expires_unix(&self) -> u64 { self.expires_unix }
     pub fn bounds(&self) -> (u64, u64) { (self.allowed_start, self.allowed_end) }
     pub fn permits_exact_range(&self, start: u64, end: u64) -> bool {
         start >= self.allowed_start
@@ -229,6 +235,9 @@ pub fn verify_owner_read_grant(
         allowed_end: w.end,
         owner: approved_notice.sender(),
         receiver: approved_notice.receiver(),
+        owner_epoch: w.owner_key_epoch,
+        nonce: w.nonce,
+        expires_unix: w.expires_unix,
     })
 }
 
