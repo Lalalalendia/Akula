@@ -72,6 +72,31 @@ pub fn open_selected_notice(
     Ok(notice)
 }
 
+/// Admission after successful W3 verification. It is only a durable
+/// *seen* event, not a grant or a full-file receipt.
+pub fn open_and_record_selected_notice(
+    packet: &[u8],
+    recipient_secret: &crypto_w3::RecipientSecret,
+    enrolled_sender_key: &VerifyingKey,
+    trust: &TrustRegistry,
+    enrolled_sender_epoch: u64,
+    offer: &OfferV1,
+    decision: &DecisionV1,
+    authenticated_sender: PeerBinding,
+    enrolled_receiver: PeerBinding,
+    now: u64,
+    ledger: &mut aquilum_core::p2p_attachment_replay_lab::AttachmentReplayLedgerLab,
+) -> Result<AttachmentNoticeV1, WowAttachmentError> {
+    let notice = open_selected_notice(
+        packet, recipient_secret, enrolled_sender_key, trust,
+        enrolled_sender_epoch, offer, decision,
+        authenticated_sender, enrolled_receiver, now
+    )?;
+    ledger.record_verified(&notice, enrolled_sender_epoch, packet, now)
+        .map_err(|_| WowAttachmentError::UntrustedOrInvalidNotice)?;
+    Ok(notice)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
