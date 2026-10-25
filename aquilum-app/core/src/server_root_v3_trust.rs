@@ -319,7 +319,7 @@ fn open_fixed_trust_fd() -> Result<File, RootEnrollmentError> {
 }
 
 pub(crate) mod bootstrap_helper;
-pub(crate) use bootstrap_helper::inspect_provisioned_bootstrap_helper_hold;
+pub(crate) use bootstrap_helper::inspect_provisioned_running_helper_hold;
 mod owner_frame;
 pub(crate) use owner_frame::load_verified_owner_frame;
 mod enrollment;

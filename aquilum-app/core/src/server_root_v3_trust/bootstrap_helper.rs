@@ -243,5 +243,23 @@ pub(crate) fn inspect_provisioned_bootstrap_helper_hold(
     inspect_from_trust_fd(&trust, now)
 }
 
+/// Independent positive admission of the actual running root-helper image.
+/// A signed, staged package alone is insufficient; compare the executable
+/// inode of the running process with an exact fixed root-owned install.
+pub(crate) fn inspect_provisioned_running_helper_hold(
+) -> Result<BootstrapHelperHold, BootstrapHelperError> {
+    let trust = open_fixed_trust_fd()?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| BootstrapHelperError::InvalidStage)?
+        .as_secs();
+    let approved = inspect_from_trust_fd(&trust, now)?;
+    running::verify_installed_self_image(&approved)
+        .map_err(|_| BootstrapHelperError::InvalidStage)?;
+    Ok(approved)
+}
+
+mod running;
+
 #[cfg(test)]
 mod tests;

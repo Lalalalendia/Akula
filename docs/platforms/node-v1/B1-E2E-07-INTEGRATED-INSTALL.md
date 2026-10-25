@@ -801,3 +801,41 @@ signer key has been provisioned: Core still has
 it does not authenticate the binary currently running as root, issue
 a privileged IPC install opcode, enable systemd or constitute VPS
 acceptance. Default installed Akula and main remain unchanged.
+
+
+### 25 October 2026 — actual running privileged helper inode must match signed B0v3 bytes (HOLD)
+
+A staged signed 0400 helper in \`bootstrap-v1/helper.staged\` proves data
+custody but **not** which process presently runs as root. This
+non-shipping increment makes an additional read-only check mandatory
+on the existing root B1d0 production CAS admission path.
+
+Root must open fixed directories \`/usr\` (0755),
+\`/usr/libexec\` (0755), \`/usr/libexec/akula\` (0700) with
+NOFOLLOW and exact UID0 ownership, then open the exact installed
+\`/usr/libexec/akula/akula-root-b1d0-helper\` (root-owned regular
+single-link 0500). It obtains the kernel's \`/proc/self/exe\` target
+FD **of the actually running privileged process**, requires identical
+device/inode identity to the fixed file, stable metadata, exact
+signed helper size/hash, Linux x86-64 ELF and no trailing bytes.
+A signed but unrelated executable, deleted/replaced inode, hardlink,
+wrong mode, wrong digest, fake process identity or missing fixed path
+returns HOLD. The staged helper still must independently pass B1a
+signature and B0v3 digest verification; that stage remains 0400,
+not executable, and cannot itself launch the helper.
+
+No binary is installed or executed by these checks. No signing key,
+systemd socket, elevated SSH command or privileged IPC opcode is
+introduced. A real future independent release/install ceremony MUST
+disclose and authorize this fixed executable path in the B0 v3 plan
+and separately install signed root-owned 0500 bytes; the current plan
+does not implicitly authorize writes under \`/usr/libexec\`.
+The existing service installation and both Windows clients remain
+unchanged; user-facing Install Node remains disabled.
+
+Root-only disposable tests inspect two independently opened FDs
+pointing to the same fixture ELF, reject another identically signed
+inode, wrong permission/digest/size/links and symlink path; production
+path also requires the trusted fixed /proc/self/exe and cannot accept
+an injected test FD. This is a **process provenance gate**, not
+a root-helper release, deployment, B1d0 activation or production acceptance.

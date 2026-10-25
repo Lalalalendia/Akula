@@ -115,6 +115,10 @@ jobs:
           # root-enrolled B0v3 helper SHA, signature, inode and HOLD marker.
           "$test_bin" server_root_v3_trust::bootstrap_helper::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::bootstrap_helper::tests --nocapture
+          # An independently staged signed helper must ALSO be the current
+          # root-owned running executable at the hard-coded install path.
+          "$test_bin" server_root_v3_trust::bootstrap_helper::running::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::bootstrap_helper::running::tests --nocapture
           # One-time admin enrollment uses root-owned disposable directories.
           "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
@@ -192,6 +196,8 @@ jobs:
             aquilum-app/core/src/server_root_v3_trust/owner_ipc/enrollment/shadow/tests.rs
             aquilum-app/core/src/server_root_v3_trust/bootstrap_helper.rs
             aquilum-app/core/src/server_root_v3_trust/bootstrap_helper/tests.rs
+            aquilum-app/core/src/server_root_v3_trust/bootstrap_helper/running.rs
+            aquilum-app/core/src/server_root_v3_trust/bootstrap_helper/running/tests.rs
             aquilum-app/core/src/bin/akula_root_b1d0_peer_enroll_lab.rs
             aquilum-app/core/src/server_installer_durable_node/provisioned_gate.rs
             aquilum-app/core/src/server_root_v3_trust/enrollment.rs
