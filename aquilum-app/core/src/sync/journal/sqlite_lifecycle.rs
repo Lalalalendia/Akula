@@ -59,7 +59,7 @@ impl SqliteSyncJournal {
         Self::prepare(Connection::open_in_memory()?)
     }
 
-    fn prepare(connection: Connection) -> JournalResult<Self> {
+    pub(super) fn prepare(connection: Connection) -> JournalResult<Self> {
         connection.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = FULL;
