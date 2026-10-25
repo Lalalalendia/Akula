@@ -18,6 +18,8 @@ test('owner changes, unknown and mixed changes fail closed',()=>{
  yes([b],{[b]:patch(['-            tree,','+            tree, yandex_probe: foo(),'])},'shared edit');
  yes([b],{},'diff unavailable');
  yes([b,'aquilum-app/native/src/pdf_worker.rs'],{...d,'aquilum-app/native/src/pdf_worker.rs':patch(['+yandex_s3_connection_preview()'])},'sensitive outside');
+ yes([b,'aquilum-app/native/src/app/mod.rs'],{...d,'aquilum-app/native/src/app/mod.rs':patch(['+pdf_view::State'])},'shared app state cannot skip');
+ yes([b,'scripts/test-windows-beta.ps1'],{...d,'scripts/test-windows-beta.ps1':patch(['+pdf'])},'non-PDF integration cannot skip');
  yes([b,'.github/workflows/yandex-s3-native-preview.yml'],{...d,'.github/workflows/yandex-s3-native-preview.yml':patch(['+foo'])},'workflow');
 });
 test('no unknown file or empty changes can disable required proof',()=>{
