@@ -10,6 +10,8 @@ use std::{collections::BTreeSet, fs, io::ErrorKind, path::{Path, PathBuf}};
 use uuid::Uuid;
 
 mod effective;
+mod rebase_preview;
+pub use rebase_preview::{preview_rebase, RebasePreview, RebaseDisposition};
 pub use effective::{read_effective_base, EffectiveBase, EffectiveCell,
     EffectiveColumn, EffectiveRow, EffectiveValue};
 
