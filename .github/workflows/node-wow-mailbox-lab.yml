@@ -3,10 +3,14 @@ on:
   push:
     branches:
       - lab/node-v1-wow-mailbox-bridge-20261025
+      - lab/node-v1-wow-owner-mail-policy-20261025
     paths:
       - 'interop/akula-staya/Cargo.toml'
       - 'interop/akula-staya/src/lib.rs'
       - 'interop/akula-staya/src/node_wow_mailbox_lab.rs'
+      - 'interop/akula-staya/src/node_wow_mailbox_lab/policy.rs'
+      - 'aquilum-app/core/src/node_v1/mod.rs'
+      - 'aquilum-app/core/src/node_v1/trust.rs'
       - 'interop/akula-staya/tests/node_wow_mailbox_lab.rs'
       - 'docs/platforms/node-v1/NODE-V1-WOW-MAILBOX-LAB.md'
       - '.github/workflows/node-wow-mailbox-lab.yml'
@@ -30,9 +34,10 @@ jobs:
           set -euo pipefail
           MODULE=interop/akula-staya/src/node_wow_mailbox_lab.rs
           TEST=interop/akula-staya/tests/node_wow_mailbox_lab.rs
-          rustfmt --edition 2024 "$MODULE" "$TEST"
-          if ! git diff --quiet -- "$MODULE" "$TEST"; then
-            for target in "$MODULE" "$TEST"; do
+          POLICY=interop/akula-staya/src/node_wow_mailbox_lab/policy.rs
+          rustfmt --edition 2024 "$MODULE" "$TEST" "$POLICY"
+          if ! git diff --quiet -- "$MODULE" "$TEST" "$POLICY"; then
+            for target in "$MODULE" "$TEST" "$POLICY"; do
               echo "RUSTFMT_BASE64_START:${target}"
               base64 -w 0 "$target"
               echo
