@@ -270,11 +270,7 @@ fn read_authorized_mail_file(
 /// The final root-owned receipt is published LAST. It is not another grant:
 /// it prevents a crash between the two public root-owned file renames from
 /// looking like a complete policy update. The record binds both exact bytes.
-pub fn mail_commit_receipt_for_lab(
-    signed_policy: &[u8],
-    floor: &[u8],
-    epoch: u64,
-) -> Vec<u8> {
+pub fn mail_commit_receipt_for_lab(signed_policy: &[u8], floor: &[u8], epoch: u64) -> Vec<u8> {
     let mut record = Vec::with_capacity(COMMIT_LEN);
     record.extend_from_slice(COMMIT_MAGIC);
     record.extend_from_slice(&epoch.to_be_bytes());
@@ -294,7 +290,8 @@ fn require_no_root_pending(folder: &Path) -> Result<(), MailRoleHold> {
             folder,
             OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::empty(),
-        ).map_err(|_| MailRoleHold::MailPolicy)?,
+        )
+        .map_err(|_| MailRoleHold::MailPolicy)?,
     );
     for name in PENDING_FILES {
         match openat(
@@ -303,7 +300,7 @@ fn require_no_root_pending(folder: &Path) -> Result<(), MailRoleHold> {
             OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
             Mode::empty(),
         ) {
-            Err(rustix::io::Errno::NOENT) => {},
+            Err(rustix::io::Errno::NOENT) => {}
             _ => return Err(MailRoleHold::MailPolicy),
         }
     }
@@ -316,15 +313,14 @@ fn root_commit_inode(
     floor_epoch: u64,
 ) -> Result<(u64, u64), MailRoleHold> {
     require_no_root_pending(folder)?;
-    let (receipt, inode) = read_root_owned_mail_file(
-        folder, COMMIT_FILE, COMMIT_LEN as u64,
-    )?;
+    let (receipt, inode) = read_root_owned_mail_file(folder, COMMIT_FILE, COMMIT_LEN as u64)?;
     if receipt.len() != COMMIT_LEN
-        || receipt != mail_commit_receipt_for_lab(
-            signed_policy,
-            &mail_epoch_floor_for_lab(signed_policy, floor_epoch),
-            floor_epoch,
-        )
+        || receipt
+            != mail_commit_receipt_for_lab(
+                signed_policy,
+                &mail_epoch_floor_for_lab(signed_policy, floor_epoch),
+                floor_epoch,
+            )
     {
         return Err(MailRoleHold::MailPolicy);
     }
