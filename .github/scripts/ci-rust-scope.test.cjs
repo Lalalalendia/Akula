@@ -415,3 +415,34 @@ test('Linux first-GUI ACK real-process security moved into the required owner fa
   assert.match(app,/needs: \[classify, required-tests, native-frames, shared-labs\]/,
     'security stage continues to block Main PR gate on failure');
 });
+
+
+test('every standalone Rust module has a direct PR owner and executable Cargo test',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  // Explicitly approved owned standalone packages. Adding a module without
+  // a direct PR test owner is unsafe: Main PR gate otherwise sees mode=none.
+  const owners={
+    'bootstrap-b0':'bootstrap-b0-isolated.yml',
+    'bootstrap-b1a':'core-server-bootstrap-b1a-release.yml',
+    'bootstrap-b1b0':'core-server-bootstrap-b1b0-staging.yml',
+    'node-catalog':'node-catalog-isolated.yml',
+    'dropbox-t0':'dropbox-t0-isolated.yml',
+    'dropbox-auth-lab':'dropbox-t0-isolated.yml',
+    'dropbox-secret-store':'dropbox-t0-isolated.yml',
+    'dropbox-connect-lab':'dropbox-t0-isolated.yml',
+  };
+  const moduleRoot=path.join(__dirname,'../../modules');
+  const found=fs.readdirSync(moduleRoot,{withFileTypes:true})
+    .filter(entry=>entry.isDirectory()&&fs.existsSync(path.join(moduleRoot,entry.name,'Cargo.toml')))
+    .map(entry=>entry.name).sort();
+  assert.deepEqual(found,Object.keys(owners).sort(),
+    'new standalone Cargo module must have a reviewed direct CI owner');
+  for(const [name,workflowName] of Object.entries(owners)){
+    const manifest='modules/'+name+'/Cargo.toml';
+    const workflow=fs.readFileSync(path.join(__dirname,'../workflows',workflowName),'utf8');
+    const policy=parse(workflow);
+    assert.equal(matches(policy,manifest),true,'missing direct PR subscription: '+manifest);
+    const testLine=new RegExp('^\\s*(?:run:\\s*)?cargo test --manifest-path modules/'+name+'/Cargo\\.toml(?:\\s|$)','m');
+    assert.match(workflow,testLine,'standalone crate test must run in owner workflow: '+name);
+  }
+});
