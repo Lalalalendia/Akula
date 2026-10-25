@@ -55,6 +55,14 @@ impl Output {
         }
     }
 
+    /// WM_PAINT/expose needs a full GDI blit; app damage is not OS damage.
+    /// Keep modern DXGI and ordinary animation/frame updates unchanged.
+    pub fn restore_exposed_pixels(&mut self) {
+        if let Backend::Software(output) = &mut self.backend {
+            output.present(&[]);
+        }
+    }
+
     pub fn present(&mut self, dirty: &[Area]) {
         match &mut self.backend {
             Backend::Modern(output) => output.present(dirty),

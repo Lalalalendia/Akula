@@ -6,6 +6,13 @@ impl Host {
         #[cfg(target_os = "windows")]
         { self.full_next = true; }
         self.redraw();
+        // RedrawRequested is an OS expose, not necessarily a scene mutation.
+        // A Win7 GDI surface must re-present retained pixels even if the
+        // renderer reports only partial damage after another window moves.
+        #[cfg(target_os = "windows")]
+        if let Some(output) = self.output.as_mut() {
+            output.restore_exposed_pixels();
+        }
     }
 
     pub(super) fn expose_focus(&mut self, focused: bool) {
