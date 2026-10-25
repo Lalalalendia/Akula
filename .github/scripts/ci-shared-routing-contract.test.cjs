@@ -293,6 +293,7 @@ test('Pinned Read keeps 46 exact sources on both OS, main required and non-main 
   "aquilum-app/core/src/sync/sealed_archive.rs",
   "aquilum-app/core/src/sync/local_create_tests.rs",
   "aquilum-app/core/src/sync/journal.rs",
+    "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
   "aquilum-app/core/src/sync/core_scan.rs",
   "aquilum-app/core/src/sync/path.rs",
   "aquilum-app/core/src/search/paths.rs",
@@ -325,10 +326,10 @@ test('Pinned Read keeps 46 exact sources on both OS, main required and non-main 
   "aquilum-app/core/src/sync/mod.rs",
   ".github/workflows/sync-pinned-read.yml"
 ];
-  assert.equal(originalPaths.length,46);
+  assert.equal(originalPaths.length,47);
   assert.deepEqual(configured,originalPaths,'all former paths still trigger non-main PR acceptance');
   assert.deepEqual(route.OWNED_SUITES.owned_pinned_read,originalPaths,
-    'all 46 paths also trigger mandatory main-branch OS checks');
+    'all 47 paths also trigger mandatory main-branch OS checks');
   assert.equal(parse(body).t,'paths');
   for(const source of originalPaths){
     assert.equal(matches(parse(body),source),true,source+' direct for non-main PR');
@@ -441,6 +442,7 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   "aquilum-app/core/src/sync/s3_preimage_capture.rs",
   "aquilum-app/core/src/sync/host_custody_registry.rs",
   "aquilum-app/core/src/sync/journal.rs",
+    "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
   "aquilum-app/core/src/sync/local_create_tests.rs",
   "aquilum-app/core/src/sync/local_create.rs",
   "aquilum-app/core/src/sync/s3_transport/**",
@@ -471,7 +473,7 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   assert.deepEqual(parse(body),{t:'paths',p:oldPaths},
     'non-main pull_request.paths must retain all original patterns');
   assert.deepEqual(owned.OWNED_SUITES.owned_s3_minio,oldPaths,
-    'required Main route owns exact same 23 path patterns');
+    'required Main route owns exact same 24 path patterns');
   for(const entry of oldPaths){
     assert.equal(matches(parse(body),entry),true,entry+' direct non-main match');
     assert.equal(owned.assess({paths:[entry]}).owned_s3_minio,true,entry+' required main source-only');
