@@ -2,7 +2,9 @@
 //! No installed service, production owner policy v4, or public networking.
 #![cfg(all(target_os = "linux", feature = "node-wow-mailbox-lab"))]
 
-use akula_staya_integration::node_wow_mailbox_lab::{MailRoleHold, NodeWowMailboxLab};
+use akula_staya_integration::node_wow_mailbox_lab::{
+    MailRoleClaims, MailRoleHold, NodeWowMailboxLab, sign_mail_policy_for_lab,
+};
 use akula_wire_lab::{
     crypto_identity_w3::SignedHeader,
     crypto_w3,
@@ -42,11 +44,11 @@ struct Fixture {
     _tmp: tempfile::TempDir,
     node: NodeHost,
     node_policy: PathBuf,
+    mail_policy_dir: PathBuf,
     mail_state: PathBuf,
     owner: SigningKey,
     recipient: SigningKey,
     custodian: SigningKey,
-    trust: TrustRegistry,
     packet: Vec<u8>,
 }
 
@@ -56,11 +58,13 @@ impl Fixture {
         let node_state = tmp.path().join("node");
         let node_policy = tmp.path().join("root-policy");
         let mail_state = tmp.path().join("separate-wow-state");
-        for dir in [&node_state, &node_policy, &mail_state] {
+        let mail_policy_dir = tmp.path().join("signed-mail-owner-policy");
+        for dir in [&node_state, &node_policy, &mail_state, &mail_policy_dir] {
             private_folder(dir);
         }
+        let owner = SigningKey::from_bytes(&[1; 32]);
         let key = NodeIdentity::open_or_create(&node_state).unwrap();
-        let owner_public = [9u8; 32];
+        let owner_public = owner.verifying_key().to_bytes();
         let roster_digest = [10u8; 32];
         let grant_digest = [11u8; 32];
         let put_grant_digest = [12u8; 32];
@@ -81,7 +85,6 @@ impl Fixture {
         let node = NodeHost::open_integration_fixture(&node_state, &node_policy).unwrap();
         node.verify_iroh_endpoint(NODE_ENDPOINT).unwrap();
 
-        let owner = SigningKey::from_bytes(&[1; 32]);
         let recipient = SigningKey::from_bytes(&[3; 32]);
         let custodian = SigningKey::from_bytes(&[8; 32]);
         let sender = SigningKey::from_bytes(&[7; 32]);
@@ -158,37 +161,92 @@ impl Fixture {
             .unwrap();
         drop(journal);
         fs::set_permissions(&db_file, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let policy = MailRoleClaims {
+            version: 1,
+            policy_epoch: 1,
+            node_public: node.public_key(),
+            node_endpoint: NODE_ENDPOINT,
+            operator_public: owner.verifying_key().to_bytes(),
+            issuer: OWNER,
+            issuer_epoch: 1,
+            issuer_public: owner.verifying_key().to_bytes(),
+            custodian: CUSTODIAN,
+            custodian_epoch: 1,
+            custodian_public: custodian.verifying_key().to_bytes(),
+            sender: [7; 16],
+            sender_epoch: 1,
+            sender_public: sender.verifying_key().to_bytes(),
+            recipient: RECIPIENT,
+            recipient_epoch: 1,
+            recipient_public: recipient.verifying_key().to_bytes(),
+            mailbox: MAILBOX,
+            scope: SCOPE,
+            permissions: 0b0000_1111,
+            max_message_bytes: 1024,
+            max_offers: 2,
+            valid_from_ms: 1,
+            valid_until_ms: EXPIRY,
+        };
+        let signed = sign_mail_policy_for_lab(&owner, policy);
+        let policy_file = mail_policy_dir.join("owner-mail-policy.bin");
+        fs::write(&policy_file, signed).unwrap();
+        fs::set_permissions(&policy_file, fs::Permissions::from_mode(0o600)).unwrap();
         Self {
             _tmp: tmp,
             node,
-            node_policy: policy_file,
+            node_policy: node_policy.join("owner-policy.json"),
+            mail_policy_dir,
             mail_state,
             owner,
             recipient,
             custodian,
-            trust,
             packet,
         }
     }
 
     fn role(&self) -> Result<NodeWowMailboxLab, MailRoleHold> {
-        let mut trust = TrustRegistry::new();
-        for (id, key) in [
-            (OWNER, &self.owner),
-            (RECIPIENT, &self.recipient),
-            (CUSTODIAN, &self.custodian),
-        ] {
-            trust.enroll(id, 1, key.verifying_key()).unwrap();
-        }
         NodeWowMailboxLab::open_existing(
             &self.node,
             &self.mail_state,
+            &self.mail_policy_dir,
             NODE_ENDPOINT,
-            CUSTODIAN,
-            1,
             self.custodian.clone(),
-            trust,
+            1,
         )
+    }
+
+    fn mail_policy_file(&self) -> PathBuf {
+        self.mail_policy_dir.join("owner-mail-policy.bin")
+    }
+
+    fn signed_claims(&self) -> MailRoleClaims {
+        MailRoleClaims {
+            version: 1,
+            policy_epoch: 1,
+            node_public: self.node.public_key(),
+            node_endpoint: NODE_ENDPOINT,
+            operator_public: self.owner.verifying_key().to_bytes(),
+            issuer: OWNER,
+            issuer_epoch: 1,
+            issuer_public: self.owner.verifying_key().to_bytes(),
+            custodian: CUSTODIAN,
+            custodian_epoch: 1,
+            custodian_public: self.custodian.verifying_key().to_bytes(),
+            sender: [7;16],
+            sender_epoch: 1,
+            sender_public: SigningKey::from_bytes(&[7;32]).verifying_key().to_bytes(),
+            recipient: RECIPIENT,
+            recipient_epoch: 1,
+            recipient_public: self.recipient.verifying_key().to_bytes(),
+            mailbox: MAILBOX,
+            scope: SCOPE,
+            permissions: 0b0000_1111,
+            max_message_bytes: 1024,
+            max_offers: 2,
+            valid_from_ms: 1,
+            valid_until_ms: EXPIRY,
+        }
     }
 
     fn list_proof(&self) -> Vec<u8> {
@@ -312,11 +370,10 @@ fn missing_world_readable_or_wrong_signing_key_fails_closed() {
         NodeWowMailboxLab::open_existing(
             &fixture.node,
             &fixture.mail_state,
+            &fixture.mail_policy_dir,
             NODE_ENDPOINT,
-            CUSTODIAN,
-            1,
             SigningKey::from_bytes(&[96; 32]),
-            fixture.trust,
+            1,
         ),
         Err(MailRoleHold::UnpinnedTrust)
     ));
