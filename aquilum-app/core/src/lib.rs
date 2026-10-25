@@ -61,5 +61,7 @@ pub mod node_catalog_lab;
 pub mod p2p_offer_lab;
 #[cfg(feature = "p2p-inbox-lab")]
 pub mod p2p_inbox_lab;
+#[cfg(feature = "p2p-attachment-contract")]
+pub mod p2p_attachment_contract;
 #[cfg(feature = "p2p-device-identity")]
 pub mod p2p_device_identity;
