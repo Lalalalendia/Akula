@@ -77,7 +77,7 @@ fn native_reimport_accept_archive_cold_reopen_and_restore_via_cas() {
             row_id:row.clone(),property_id:property.clone(),
             value:LocalValue::Number(721.0),
         }],true).unwrap();
-    let local_before=fs::read(vault.join(format!("Notion-import/{ROOT}.akula-bases-edits.json")));
+    let local_before=fs::read(vault.join(format!("Notion-import/{ROOT}.akula-bases-edits.json"))).unwrap();
     // Validate old bundle and overlay independently of the GUI.
     assert_eq!(local.revision,1);
     let old_bytes=fs::read(vault.join(&old_bundle)).unwrap();
@@ -106,6 +106,7 @@ fn native_reimport_accept_archive_cold_reopen_and_restore_via_cas() {
     assert_eq!(session.view().digest.as_deref(),Some(new.as_str()));
     let archive=session.view().last_archive.unwrap().path;
     assert!(vault.join(&archive).is_file());
+    assert_eq!(fs::read(vault.join(&archive)).unwrap(),local_before);
     assert_eq!(fs::read(vault.join(&old_bundle)).unwrap(),old_bytes);
     assert_eq!(fs::read(vault.join(&new_bundle)).unwrap(),new_bytes);
     drop(session);
