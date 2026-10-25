@@ -378,3 +378,92 @@ fn missing_world_readable_or_wrong_signing_key_fails_closed() {
         Err(MailRoleHold::UnpinnedTrust)
     ));
 }
+
+
+#[test]
+fn independently_pinned_operator_signature_rejects_untrusted_mail_roles() {
+    let fixture = Fixture::new();
+    let file = fixture.mail_policy_file();
+    let baseline = fs::read(&file).unwrap();
+    assert!(fixture.role().is_ok());
+
+    // The same valid-looking policy signed by an unrelated key cannot
+    // become an active WOW trust registry.
+    let attacker = SigningKey::from_bytes(&[99; 32]);
+    fs::write(&file, sign_mail_policy_for_lab(&attacker, fixture.signed_claims())).unwrap();
+    assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
+    fs::write(&file, &baseline).unwrap();
+
+    // Binding mail to a different Akula Node endpoint is a hard refusal.
+    let mut wrong_endpoint = fixture.signed_claims();
+    wrong_endpoint.node_endpoint = [88; 32];
+    fs::write(&file, sign_mail_policy_for_lab(&fixture.owner, wrong_endpoint)).unwrap();
+    assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
+    fs::write(&file, &baseline).unwrap();
+
+    // A broad permission bit or an unexpectedly enlarged quota cannot
+    // silently upgrade the schema/role, even when signed.
+    let mut unknown_right = fixture.signed_claims();
+    unknown_right.permissions |= 0b1000_0000;
+    fs::write(&file, sign_mail_policy_for_lab(&fixture.owner, unknown_right)).unwrap();
+    assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
+    fs::write(&file, &baseline).unwrap();
+
+    let mut too_many = fixture.signed_claims();
+    too_many.max_offers = 100;
+    fs::write(&file, sign_mail_policy_for_lab(&fixture.owner, too_many)).unwrap();
+    assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
+    fs::write(&file, &baseline).unwrap();
+    assert!(fixture.role().is_ok());
+}
+
+#[test]
+fn mail_policy_change_revocation_and_expiry_fence_before_socket_accept() {
+    let fixture = Fixture::new();
+    let mut role = fixture.role().unwrap();
+    let file = fixture.mail_policy_file();
+
+    let mut revised = fixture.signed_claims();
+    revised.policy_epoch += 1;
+    fs::write(&file, sign_mail_policy_for_lab(&fixture.owner, revised)).unwrap();
+    let listener = bind_test_loopback().unwrap();
+    assert!(matches!(
+        role.serve_one(&fixture.node, &listener, 3),
+        Err(MailRoleHold::MailPolicy)
+    ));
+
+    // A well-signed replacement still needs explicit review and restart.
+    // There is no in-place elevated authority or silent key rotation.
+    let restarted = fixture.role().unwrap();
+    drop(restarted);
+    // This signed fixture is short-lived. An expired one cannot serve.
+    let mut role = fixture.role().unwrap();
+    let listener = bind_test_loopback().unwrap();
+    assert!(matches!(
+        role.serve_one(&fixture.node, &listener, EXPIRY),
+        Err(MailRoleHold::MailPolicy)
+    ));
+}
+
+#[test]
+fn unsafe_mail_role_policy_file_never_bootstraps_keys_or_mailbox() {
+    let fixture = Fixture::new();
+    let path = fixture.mail_policy_file();
+    let original = fs::read(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+    let hardlink = fixture.mail_policy_dir.join("extra-hardlink");
+    fs::hard_link(&path, &hardlink).unwrap();
+    assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
+    fs::remove_file(hardlink).unwrap();
+
+    fs::remove_file(&path).unwrap();
+    symlink("/etc/passwd", &path).unwrap();
+    assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
+    fs::remove_file(&path).unwrap();
+    fs::write(&path, original).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(fixture.role().is_ok());
+}
