@@ -122,6 +122,37 @@ pub(super) fn append(
 mod tests {
     use super::*;
     #[test]
+    fn mounted_grid_creates_actions_only_for_the_bounded_visible_window() {
+        use crate::notion_bases::{ColumnView, RowView};
+        let mut view = BasesView::default();
+        view.total_rows = 1000;
+        view.total_columns = 100;
+        view.columns = (0..6).map(|i| ColumnView {
+            name: format!("Column {i}"), property_id: format!("column-{i}"),
+            kind: "rich_text".into(), local_only: false,
+        }).collect();
+        view.rows = (0..10).map(|i| {
+            let row_id = format!("row-{i}");
+            RowView {
+                row_id: row_id.clone(), label: format!("Row {i}"),
+                cells: view.columns.iter().map(|col| CellView {
+                    row_id: row_id.clone(), property_id: col.property_id.clone(),
+                    text: format!("{row_id}:{}", col.property_id),
+                    toggle_to: None, revert: false, edit_text: true,
+                }).collect(),
+            }
+        }).collect();
+        let mut bindings = HashMap::new();
+        let _ = append(Flex::column(), &view, &mut bindings);
+        assert_eq!(bindings.len(),60, "only ten by six visible cells are mounted");
+        assert!(bindings.values().any(|action|matches!(action,
+            Binding::Button(Action::NotionBasesSelectCell(row,col))
+                if row=="row-9" && col=="column-5")));
+        assert!(!bindings.values().any(|action|matches!(action,
+            Binding::Button(Action::NotionBasesSelectCell(row,_))
+                if row=="row-10")));
+    }
+    #[test]
     fn grid_abbreviation_is_unicode_safe() {
         assert_eq!(abbreviate("Привет"),"Привет");
         let long = "🍂".repeat(CELL_LABEL_CHARS+1);
