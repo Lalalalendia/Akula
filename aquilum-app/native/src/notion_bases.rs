@@ -10,6 +10,7 @@ use std::{fs, path::{Path, PathBuf}, sync::{Arc, mpsc::{self, Sender, Receiver}}
 mod editor;
 mod schema_editor;
 mod grid;
+mod rebase;
 pub use grid::SelectedCell;
 pub use editor::{DraftView, EditKind};
 pub use schema_editor::{SchemaDraftView, SchemaMode};
@@ -20,7 +21,7 @@ const MAX_BUNDLES: usize = 32;
 const MAX_BASES: usize = 128;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Stage { #[default] Idle, Loading, Ready, Saving, NeedsReview }
+pub enum Stage { #[default] Idle, Loading, Ready, Saving, Reviewing, NeedsReview }
 #[derive(Clone, Debug)]
 pub struct BaseChoice {
     pub digest: String,
@@ -70,10 +71,12 @@ pub struct BasesView {
     pub draft: Option<DraftView>,
     pub schema_draft: Option<SchemaDraftView>,
     pub selected: Option<SelectedCell>,
+    pub rebase_preview: Option<bases_edits::RebasePreview>,
 }
 enum Payload {
     Catalog(Vec<BaseChoice>),
     Loaded(EffectiveBase, Option<String>),
+    Rebase(bases_edits::RebasePreview),
 }
 struct Completion {
     generation: u64,
@@ -271,6 +274,7 @@ impl BasesSession {
                 if tx.send(Completion{generation,source,target,result}).is_ok(){wake();}
             }).map_err(|_| ())?;
         self.view.stage=stage; self.view.busy=true; self.view.notice=None;
+        if stage==Stage::Saving { self.view.rebase_preview=None; }
         Ok(())
     }
     pub fn open(&mut self, target:PathBuf, source:String) -> Result<(),()> {
@@ -286,7 +290,8 @@ impl BasesSession {
         let source=self.view.source.clone().ok_or(())?;
         let target=self.view.target.clone().ok_or(())?;
         self.view.digest=Some(digest.clone());self.view.base_id=Some(base_id.clone());
-        self.view.row_start=0;self.view.column_start=0;self.view.selected=None;
+        self.view.row_start=0;self.view.column_start=0;
+        self.view.selected=None;self.view.rebase_preview=None;
         self.effective=None;self.disk_hash=None;
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base_id))
     }
@@ -308,7 +313,8 @@ impl BasesSession {
         let target=self.view.target.clone().ok_or(())?;
         let digest=self.view.digest.clone().ok_or(())?;
         let base=self.view.base_id.clone().ok_or(())?;
-        self.effective=None; self.disk_hash=None;self.view.selected=None;
+        self.effective=None; self.disk_hash=None;
+        self.view.selected=None;self.view.rebase_preview=None;
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base))
     }
     pub fn change(&mut self, core:Arc<Core>, row:&str, property:&str,
@@ -339,6 +345,7 @@ impl BasesSession {
                 || self.view.source.as_deref()!=Some(&reply.source)
                 || self.view.target.as_deref()!=Some(reply.target.as_path()) {continue;}
             let saving=self.view.stage==Stage::Saving;
+            let reviewing=self.view.stage==Stage::Reviewing;
             self.view.busy=false;
             match reply.result {
                 Ok(Payload::Catalog(choices))=>{
@@ -351,11 +358,27 @@ impl BasesSession {
                     && self.view.digest.as_deref()==Some(&base.source_digest) =>
                 {
                     self.effective=Some(base); self.disk_hash=hash;
+                    self.view.rebase_preview=None;
                     self.view.stage=Stage::Ready;
                     if saving { self.view.draft=None; self.view.schema_draft=None;
                         self.view.selected=None; }
                     self.view.notice=if saving{Some("Правка сохранена локально через File Gate CAS")}
                         else{None};
+                }
+                Ok(Payload::Rebase(report)) if reviewing
+                    && self.view.digest.as_deref()==Some(report.old_digest.as_str())
+                    && self.disk_hash.as_deref()==Some(report.expected_local_hash.as_str()) =>
+                {
+                    self.view.rebase_preview=Some(report);
+                    self.view.stage=Stage::Ready;
+                    self.view.notice=Some("Сравнение снимков завершено: это только анализ, без переноса правок");
+                }
+                _ if reviewing => {
+                    // An invalid, unreadable or stale new snapshot does not
+                    // erase the currently valid old local projection.
+                    self.view.rebase_preview=None;
+                    self.view.stage=Stage::Ready;
+                    self.view.notice=Some("Не удалось сравнить снимки. Старая база не изменена.");
                 }
                 _=>{
                     self.effective=None; self.disk_hash=None;
