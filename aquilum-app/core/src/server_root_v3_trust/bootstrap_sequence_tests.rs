@@ -61,7 +61,10 @@ fn clean_root_genesis_to_owner_policy_to_empty_node_destination_persists() {
     assert_eq!(generated.public_key().as_ref(), signer_public.as_slice());
     let actor = OsWitnessLab::open_provisioned_fixture(&trust, &journal)
         .expect("real B1d0 signer and protected ledger reopen");
-    assert_eq!(actor.current_checkpoint().unwrap(), WitnessCheckpoint::genesis());
+    assert_eq!(
+        actor.current_checkpoint().unwrap(),
+        WitnessCheckpoint::genesis()
+    );
     assert!(!destination.exists());
 
     let trust_fd = File::open(&trust).unwrap();
@@ -74,17 +77,24 @@ fn clean_root_genesis_to_owner_policy_to_empty_node_destination_persists() {
     let reloaded = RootEnrolledV3::from_trust_fd(&File::open(&trust).unwrap()).unwrap();
     assert_eq!(reloaded.owner_id, "owner-e2e-ci");
     assert_eq!(reloaded.release_signer_id, "publisher-e2e-ci");
-    assert_eq!(reloaded.helper_sha256.as_slice(),
-        digest(&SHA256, b"isolated-ci-verified-root-helper").as_ref());
+    assert_eq!(
+        reloaded.helper_sha256.as_slice(),
+        digest(&SHA256, b"isolated-ci-verified-root-helper").as_ref()
+    );
     assert_eq!(fs::read(trust.join("b0v3.policy")).unwrap(), policy);
 
     // Step 3: empty /opt root-owned destination. No ELF, service or CAS.
     destination_init::first_opt_destination(&opt_fd).unwrap();
     assert!(root_dir_ok(&fs::metadata(&destination).unwrap(), 0o755));
-    assert_eq!(fs::read(destination.join("enrollment")).unwrap(),
-        b"AKULA-B1D0-PROVISIONED-FIRST-INSTALL-V1\n");
+    assert_eq!(
+        fs::read(destination.join("enrollment")).unwrap(),
+        b"AKULA-B1D0-PROVISIONED-FIRST-INSTALL-V1\n"
+    );
     assert_eq!(fs::read_dir(&destination).unwrap().count(), 1);
-    assert_eq!(actor.current_checkpoint().unwrap(), WitnessCheckpoint::genesis());
+    assert_eq!(
+        actor.current_checkpoint().unwrap(),
+        WitnessCheckpoint::genesis()
+    );
 
     // Simulate an independent process reopening after reboot; nothing
     // depends on the original admin File descriptors or in-memory keys.
@@ -93,7 +103,10 @@ fn clean_root_genesis_to_owner_policy_to_empty_node_destination_persists() {
     drop(opt_fd);
     drop(lib_fd);
     let reopened = OsWitnessLab::open_provisioned_fixture(&trust, &journal).unwrap();
-    assert_eq!(reopened.current_checkpoint().unwrap(), WitnessCheckpoint::genesis());
+    assert_eq!(
+        reopened.current_checkpoint().unwrap(),
+        WitnessCheckpoint::genesis()
+    );
     assert!(RootEnrolledV3::from_trust_fd(&File::open(&trust).unwrap()).is_ok());
 
     // Re-executing ANY administrator ceremony is not a grant, not an
@@ -101,12 +114,15 @@ fn clean_root_genesis_to_owner_policy_to_empty_node_destination_persists() {
     let lib_fd = File::open(&lib).unwrap();
     let opt_fd = File::open(&opt).unwrap();
     assert!(witness_init::initialize_once(&lib_fd, witness_init::Stop::Never).is_err());
-    assert!(enrollment::enroll_once_from_admin_bytes(
-        &File::open(&trust).unwrap(), &policy,
-    ).is_err());
+    assert!(
+        enrollment::enroll_once_from_admin_bytes(&File::open(&trust).unwrap(), &policy,).is_err()
+    );
     assert!(destination_init::first_opt_destination(&opt_fd).is_err());
     assert_eq!(fs::read(trust.join("witness.pub")).unwrap(), signer_public);
     assert_eq!(fs::read_dir(&destination).unwrap().count(), 1);
-    assert_eq!(reopened.current_checkpoint().unwrap(), WitnessCheckpoint::genesis());
+    assert_eq!(
+        reopened.current_checkpoint().unwrap(),
+        WitnessCheckpoint::genesis()
+    );
     println!("B1_E2E07_CLEAN_ROOT_WITNESS_POLICY_OPT_CHAIN_HOLD_PASS");
 }
