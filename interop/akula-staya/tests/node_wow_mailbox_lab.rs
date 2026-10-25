@@ -3,7 +3,8 @@
 #![cfg(all(target_os = "linux", feature = "node-wow-mailbox-lab"))]
 
 use akula_staya_integration::node_wow_mailbox_lab::{
-    MailRoleClaims, MailRoleHold, NodeWowMailboxLab, sign_mail_policy_for_lab,
+    MailRoleClaims, MailRoleHold, NodeWowMailboxLab, mail_epoch_floor_for_lab,
+    sign_mail_policy_for_lab,
 };
 use akula_wire_lab::{
     crypto_identity_w3::SignedHeader,
@@ -191,8 +192,11 @@ impl Fixture {
         };
         let signed = sign_mail_policy_for_lab(&owner, policy);
         let policy_file = mail_policy_dir.join("owner-mail-policy.bin");
-        fs::write(&policy_file, signed).unwrap();
+        fs::write(&policy_file, &signed).unwrap();
         fs::set_permissions(&policy_file, fs::Permissions::from_mode(0o600)).unwrap();
+        let floor = mail_policy_dir.join("owner-mail-epoch-floor.bin");
+        fs::write(&floor, mail_epoch_floor_for_lab(&signed, policy.policy_epoch)).unwrap();
+        fs::set_permissions(&floor, fs::Permissions::from_mode(0o600)).unwrap();
         Self {
             _tmp: tmp,
             node,
@@ -219,6 +223,21 @@ impl Fixture {
 
     fn mail_policy_file(&self) -> PathBuf {
         self.mail_policy_dir.join("owner-mail-policy.bin")
+    }
+
+    fn floor_file(&self) -> PathBuf {
+        self.mail_policy_dir.join("owner-mail-epoch-floor.bin")
+    }
+
+    // Simulate the separate privileged operator provisioning step.
+    // This same-UID fixture is NOT a production anti-rollback authority.
+    fn provision_mail_policy(&self, signed: &[u8], epoch: u64) {
+        let file = self.mail_policy_file();
+        let floor = self.floor_file();
+        fs::write(&file, signed).unwrap();
+        fs::write(&floor, mail_epoch_floor_for_lab(signed, epoch)).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::set_permissions(&floor, fs::Permissions::from_mode(0o600)).unwrap();
     }
 
     fn signed_claims(&self) -> MailRoleClaims {
@@ -390,42 +409,30 @@ fn independently_pinned_operator_signature_rejects_untrusted_mail_roles() {
     // The same valid-looking policy signed by an unrelated key cannot
     // become an active WOW trust registry.
     let attacker = SigningKey::from_bytes(&[99; 32]);
-    fs::write(
-        &file,
-        sign_mail_policy_for_lab(&attacker, fixture.signed_claims()),
-    )
-    .unwrap();
+    fixture.provision_mail_policy(&sign_mail_policy_for_lab(&attacker, fixture.signed_claims()), 1);
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
-    fs::write(&file, &baseline).unwrap();
+    fixture.provision_mail_policy(&baseline, 1);
 
     // Binding mail to a different Akula Node endpoint is a hard refusal.
     let mut wrong_endpoint = fixture.signed_claims();
     wrong_endpoint.node_endpoint = [88; 32];
-    fs::write(
-        &file,
-        sign_mail_policy_for_lab(&fixture.owner, wrong_endpoint),
-    )
-    .unwrap();
+    fixture.provision_mail_policy(&sign_mail_policy_for_lab(&fixture.owner, wrong_endpoint), 1);
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
-    fs::write(&file, &baseline).unwrap();
+    fixture.provision_mail_policy(&baseline, 1);
 
     // A broad permission bit or an unexpectedly enlarged quota cannot
     // silently upgrade the schema/role, even when signed.
     let mut unknown_right = fixture.signed_claims();
     unknown_right.permissions |= 0b1000_0000;
-    fs::write(
-        &file,
-        sign_mail_policy_for_lab(&fixture.owner, unknown_right),
-    )
-    .unwrap();
+    fixture.provision_mail_policy(&sign_mail_policy_for_lab(&fixture.owner, unknown_right), 1);
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
-    fs::write(&file, &baseline).unwrap();
+    fixture.provision_mail_policy(&baseline, 1);
 
     let mut too_many = fixture.signed_claims();
     too_many.max_offers = 100;
-    fs::write(&file, sign_mail_policy_for_lab(&fixture.owner, too_many)).unwrap();
+    fixture.provision_mail_policy(&sign_mail_policy_for_lab(&fixture.owner, too_many), 1);
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
-    fs::write(&file, &baseline).unwrap();
+    fixture.provision_mail_policy(&baseline, 1);
     assert!(fixture.role().is_ok());
 }
 
@@ -437,15 +444,24 @@ fn mail_policy_change_revocation_and_expiry_fence_before_socket_accept() {
 
     let mut revised = fixture.signed_claims();
     revised.policy_epoch += 1;
-    fs::write(&file, sign_mail_policy_for_lab(&fixture.owner, revised)).unwrap();
+    let signed_epoch_two = sign_mail_policy_for_lab(&fixture.owner, revised);
+    fs::write(&file, &signed_epoch_two).unwrap();
     let listener = bind_test_loopback().unwrap();
     assert!(matches!(
         role.serve_one(&fixture.node, &listener, 3),
         Err(MailRoleHold::MailPolicy)
     ));
+    // Even a valid owner signature is rejected on cold open while the
+    // independently provisioned monotonic witness remains at epoch one.
+    assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
 
-    // A well-signed replacement still needs explicit review and restart.
-    // There is no in-place elevated authority or silent key rotation.
+    // Explicit operator action updates the separate witness. Live
+    // instances must NOT auto-adopt the new signed policy.
+    fixture.provision_mail_policy(&signed_epoch_two, 2);
+    assert!(matches!(
+        role.serve_one(&fixture.node, &listener, 3),
+        Err(MailRoleHold::MailPolicy)
+    ));
     let restarted = fixture.role().unwrap();
     drop(restarted);
     // This signed fixture is short-lived. An expired one cannot serve.
