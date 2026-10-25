@@ -120,7 +120,9 @@ pub(super) fn enroll_once_from_reviewed_bytes(
         if verified.receipt.byte_length != approval.package_size {
             return Err(FirstReleaseError::InvalidApproval.into());
         }
-        verified.valid_at(now_unix).map_err(FirstReleaseError::Verify)?;
+        verified
+            .valid_at(now_unix)
+            .map_err(FirstReleaseError::Verify)?;
         // Strict publication order: approval fully durable BEFORE marker.
         // A crash or preexisting pending name cannot silently retry.
         publish_one(trust, APPROVAL_PENDING, FIRST_APPROVAL_FILE, candidate)?;
