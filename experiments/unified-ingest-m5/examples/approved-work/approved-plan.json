@@ -1,0 +1,46 @@
+{
+  "schema": "selected-work-v1",
+  "source_id": "demo-story",
+  "title": "A Synthetic Story",
+  "author": "Fixture Author",
+  "source_url": "https://fixture.invalid/s/demo-story",
+  "language": "en",
+  "tags": [
+    "source/lab"
+  ],
+  "source_tags": [
+    "Synthetic"
+  ],
+  "source_categories": [
+    "Testing"
+  ],
+  "chapters": [
+    {
+      "ordinal": 1,
+      "title": "Chapter 1",
+      "pages": [
+        {
+          "number": 1,
+          "source_url": "https://fixture.invalid/s/chapter-1?page=1",
+          "fixture_file": "chapter-1-page-1.html"
+        },
+        {
+          "number": 2,
+          "source_url": "https://fixture.invalid/s/chapter-1?page=2",
+          "fixture_file": "chapter-1-page-2.html"
+        }
+      ]
+    },
+    {
+      "ordinal": 2,
+      "title": "Chapter 2",
+      "pages": [
+        {
+          "number": 1,
+          "source_url": "https://fixture.invalid/s/chapter-2?page=1",
+          "fixture_file": "chapter-2-page-1.html"
+        }
+      ]
+    }
+  ]
+}
