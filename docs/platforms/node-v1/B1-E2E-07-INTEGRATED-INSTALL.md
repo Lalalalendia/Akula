@@ -567,3 +567,28 @@ distribution, root activation authority, systemd or owner consent by
 itself. The out-of-band operator procedure to safely publish
 `b1a.first.approval` and the actual root staging files does not yet
 exist, so default behaviour remains fail-closed and **HOLD**.
+
+
+### 25 October 2026 — first B1a signed-release root enrollment (experimental)
+
+A new **non-shipping** one-shot UID0 CLI \`akula-root-b1a-enroll-lab\` reads
+only a previously independently reviewed root-owned 0600
+\`/root/akula-b1a-first.approval.candidate\`. A separately authorized
+administrator must already have populated the fixed root-owned 0700
+\`/var/lib/akula/server-bootstrap/trust/b1a-first-stage\` with the B1a
+\`manifest\`, \`signature\` and \`node\` files (root-owned 0400).
+
+Before publishing any authority, it checks the existing enrolled witness and
+B0 v3 policy, exact candidate format, the policy's independently pinned release
+publisher Ed25519 key, valid signed manifest, Node SHA256/size, manifest
+fingerprint, sequence and root-host clock. It refuses symlinks and interrupted,
+partial or replayed enrollment. The root trust directory is locked; exclusive
+0600 approval and fsync precede publication of the enrollment marker LAST.
+A fresh read through the original production B1a verifier closes the
+transaction. Only disposable UID0 test fixtures and CLI compile-only are run
+in CI. Neither normal installed Akula nor any real VPS is changed.
+
+This does NOT provide independent production signing key/artifact publication,
+safe staging of release files on a real VPS, a reviewed human-admin ceremony,
+protected installation transport, root IPC, systemd activation, reboot recovery
+or a two-installed-Windows acceptance. Install Node / B1-E2E-07 remain HOLD.

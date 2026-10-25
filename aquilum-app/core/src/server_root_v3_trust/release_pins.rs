@@ -130,12 +130,15 @@ fn verify_first_from_trust_fd(
     Ok(verified)
 }
 
+mod enrollment;
+pub use enrollment::admin_enroll_first_b1a_fixed_root_once;
+
 /// Fixed production entry point. No path, verifier key, expected fingerprint
 /// or clock value is accepted from caller/SSH. Privileged state must already
 /// have been independently enrolled by the operator.
 ///
 /// The result is only an already-verified pinned FD. It is NOT install,
-/// activation or owner authorization, and no release enrollment writer exists.
+/// activation or owner authorization, and no SSH-accessible release enrollment writer exists.
 #[allow(dead_code)]
 pub fn open_provisioned_first_b1a_release() -> Result<RootVerifiedFd, FirstReleaseError> {
     if rustix::process::geteuid().as_raw() != 0 {

@@ -15,7 +15,7 @@ fn write_protected(path: &Path, bytes: &[u8], mode: u32) {
     fs::write(path, bytes).unwrap();
     fs::set_permissions(path, Permissions::from_mode(mode)).unwrap();
 }
-fn fixture() -> (TempDir, FirstReleaseApproval) {
+pub(super) fn fixture() -> (TempDir, FirstReleaseApproval) {
     let folder = tempdir().unwrap();
     let trust = folder.path().join("trust");
     fs::create_dir(&trust).unwrap();

@@ -113,6 +113,8 @@ jobs:
           # approved fingerprint and SHA256, and root-pinned stage directory.
           "$test_bin" server_root_v3_trust::release_pins::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::release_pins::tests --nocapture
+          "$test_bin" server_root_v3_trust::release_pins::enrollment::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::release_pins::enrollment::tests --nocapture
       - name: Compile fixed administrator-only B0 v3 enrollment binary (do not run)
         shell: bash
         run: |
@@ -126,6 +128,9 @@ jobs:
           cargo check --locked --manifest-path aquilum-app/Cargo.toml \
             -p aquilum-core --features server-root-b0v3-gate-lab \
             --bin akula-root-opt-enroll-lab
+          cargo check --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab \
+            --bin akula-root-b1a-enroll-lab
       - name: Confirm default Core compiles without installer authority
         shell: bash
         run: |
@@ -154,6 +159,9 @@ jobs:
             aquilum-app/core/src/server_root_v3_trust/bootstrap_sequence_tests.rs
             aquilum-app/core/src/server_root_v3_trust/release_pins.rs
             aquilum-app/core/src/server_root_v3_trust/release_pins/tests.rs
+            aquilum-app/core/src/server_root_v3_trust/release_pins/enrollment.rs
+            aquilum-app/core/src/server_root_v3_trust/release_pins/enrollment/tests.rs
+            aquilum-app/core/src/bin/akula_root_b1a_enroll_lab.rs
             aquilum-app/core/src/bin/akula_root_opt_enroll_lab.rs
             aquilum-app/core/src/bin/akula_root_witness_init_lab.rs
             aquilum-app/core/src/bin/akula_root_b0v3_enroll_lab.rs
