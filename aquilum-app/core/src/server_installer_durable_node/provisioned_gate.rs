@@ -8,6 +8,69 @@ use crate::server_root_v3_trust::{
     load_provisioned_root_v3_policy, observed_root_host, open_provisioned_first_b1a_release,
 };
 
+/// Non-shipping root-only bridge for ONE Windows/Linux canonical signed
+/// B1b1b frame. Root first authenticates the frame under the independently
+/// enrolled owner identity, then delegates to the ORIGINAL B0v3/B1d0 writer.
+/// Neither the frame nor this function is exposed over an SSH/IPC opcode.
+#[cfg(feature = "server-root-b0v3-gate-lab")]
+#[allow(dead_code, clippy::too_many_arguments)]
+pub(crate) fn commit_first_provisioned_signed_frame(
+    signed_frame: &[u8],
+    canonical_b0_v3: &[u8],
+    scope: ExternalApprovalScope,
+    staged: &StageReceipt,
+    proposed: ProposedFloor,
+    expected_before: WitnessCheckpoint,
+    challenge: [u8; 32],
+) -> Result<DurableStatus, DurableError> {
+    if rustix::process::geteuid().as_raw() != 0 {
+        return Err(DurableError::NotRoot);
+    }
+    // Frame fields are not install authority. All expected OS, owner,
+    // release, plan, CAS and witness identities are verified AGAIN by
+    // commit_first_provisioned_opt before any file can be committed.
+    let owner = crate::server_root_v3_trust::load_verified_owner_frame(signed_frame)
+        .map_err(DurableError::OwnerReview)?;
+    if !frame_matches_b1d0_inputs(&owner, scope, staged, proposed, expected_before) {
+        return Err(DurableError::Unenrolled);
+    }
+    commit_first_provisioned_opt(
+        &owner,
+        canonical_b0_v3,
+        scope,
+        staged,
+        proposed,
+        expected_before,
+        challenge,
+    )
+}
+
+#[cfg(feature = "server-root-b0v3-gate-lab")]
+fn frame_matches_b1d0_inputs(
+    owner: &SignedOwnerApproval,
+    scope: ExternalApprovalScope,
+    staged: &StageReceipt,
+    proposed: ProposedFloor,
+    expected_before: WitnessCheckpoint,
+) -> bool {
+    let c = &owner.claim;
+    c.scope_binding.install_id == scope.install_id
+        && c.scope_binding.plan_digest == scope.approved_plan_digest
+        && c.scope_binding.pinned_host_key_sha256 == scope.pinned_host_key_sha256
+        && c.previous_head == scope.independently_pinned_previous_head
+        && c.previous_head == expected_before.accepted_floor
+        && c.expected_witness_revision == scope.expected_witness_revision
+        && c.expected_witness_revision == expected_before.revision
+        && c.proposed_head == proposed.proposed_head
+        && c.staged_package_sha256 == staged.verified_package.package_sha256
+        && c.staged_package_size == staged.verified_package.byte_length
+        && c.scope_binding.signed_manifest_fingerprint
+            == staged.verified_package.signed_manifest_fingerprint
+        && c.proposed_head.floor == staged.verified_package.proposed_floor
+        && staged.install_id == scope.install_id
+        && staged.approved_plan_digest == scope.approved_plan_digest
+}
+
 #[cfg(feature = "server-root-b0v3-gate-lab")]
 #[allow(dead_code, clippy::too_many_arguments)]
 pub(crate) fn commit_first_provisioned_opt(
@@ -187,6 +250,47 @@ mod root_production_gate_tests {
         };
         assert!(checked_matches_b1d0_scope(
             checked, &owner, scope, [0x66; 32]
+        ));
+        let verified_package = crate::server_release_lab::VerifiedPackageReceipt {
+            signed_manifest_fingerprint: [0x44; 32],
+            byte_length: 1024,
+            package_sha256: [0x66; 32],
+            proposed_floor: owner.claim.proposed_head.floor,
+        };
+        let stage = StageReceipt {
+            install_id: scope.install_id,
+            approved_plan_digest: scope.approved_plan_digest,
+            verified_package,
+            idempotent_replay: false,
+        };
+        let proposed = ProposedFloor {
+            proposed_head: owner.claim.proposed_head,
+            idempotent_replay: false,
+            requires_external_witness: true,
+        };
+        let before = WitnessCheckpoint::genesis();
+        assert!(frame_matches_b1d0_inputs(
+            &owner, scope, &stage, proposed, before
+        ));
+        let mut bad_stage = stage.clone();
+        bad_stage.verified_package.package_sha256[0] ^= 1;
+        assert!(!frame_matches_b1d0_inputs(
+            &owner, scope, &bad_stage, proposed, before
+        ));
+        let mut bad_scope = scope;
+        bad_scope.approved_plan_digest.0[0] ^= 1;
+        assert!(!frame_matches_b1d0_inputs(
+            &owner, bad_scope, &stage, proposed, before
+        ));
+        let mut bad_before = before;
+        bad_before.revision += 1;
+        assert!(!frame_matches_b1d0_inputs(
+            &owner, scope, &stage, proposed, bad_before
+        ));
+        let mut bad_proposed = proposed;
+        bad_proposed.proposed_head.floor.sequence += 1;
+        assert!(!frame_matches_b1d0_inputs(
+            &owner, scope, &stage, bad_proposed, before
         ));
         for mutation in 0..6 {
             let mut different = checked;

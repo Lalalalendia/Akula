@@ -194,6 +194,9 @@ fn decoded_frame_converts_to_exact_existing_linux_b1b1b_claim() {
     let restored = SignedOwnerWireFrame::decode(&bytes)
         .unwrap()
         .into_inert_linux_claim();
-    assert_eq!(restored.claim.canonical_bytes(), candidate.canonical_bytes());
+    assert_eq!(
+        restored.claim.canonical_bytes(),
+        candidate.canonical_bytes()
+    );
     assert_eq!(restored.signature, signature);
 }

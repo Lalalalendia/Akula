@@ -641,3 +641,25 @@ for the existing B1b1b/CAS checks. Tests cover canonical parity on
 Windows/Linux, forged scope, changed identity, replay time limits,
 truncation, UTF-8 and oversized input. No SSH installation dispatch,
 privileged permission, systemd or actual VPS is enabled; release HOLD.
+
+
+### 25 October 2026 — root-enrolled owner-frame admission to EXISTING B1d0
+
+A narrow non-shipping root-only adapter connects the canonical
+Windows owner-signed B1b1b frame to the existing B0 v3/B1d0 transaction.
+The fixed root-owned trust directory supplies the publisher-independent
+owner ID and Ed25519 public key and root host supplies the clock.
+A bounded parser refuses altered or malformed frames. Only an exact,
+signature-verified immutable \`SignedOwnerApproval\` reaches the
+**existing** \`commit_first_provisioned_opt\` root gate; it still validates
+the host's B0 v3 plan, independently approved B1a release and real
+Node FD, witness checkpoint, signed owner scope and durable CAS.
+No new RPC or SSH command, helper privilege, systemd unit activation or
+Node installer is exposed by this change.
+
+Disposable UID0 tests verify acceptance of a root-enrolled signing key,
+bad key/identity, missing witness/policy marker, wrong file type or
+symlink, tampered or truncated frames, expiry and nonroot refusal.
+Additional pure B1d0 correspondence tests reject modified package,
+plan, proposed floor and witness revision. The default Windows Akula
+and actual VPS remain unchanged. Full installed end-to-end = HOLD.

@@ -32,6 +32,8 @@ pub enum RootEnrollmentError {
     ReleaseIdentityMismatch,
     InvalidVerifiedRelease,
     UnsupportedHost,
+    InvalidOwnerClock,
+    OwnerFrame(crate::server_owner_approval_wire::WireError),
     Review(RootPlanError),
 }
 impl From<std::io::Error> for RootEnrollmentError {
@@ -316,6 +318,8 @@ fn open_fixed_trust_fd() -> Result<File, RootEnrollmentError> {
     Ok(current)
 }
 
+mod owner_frame;
+pub(crate) use owner_frame::load_verified_owner_frame;
 mod enrollment;
 pub use enrollment::admin_enroll_fixed_root_once;
 mod witness_init;

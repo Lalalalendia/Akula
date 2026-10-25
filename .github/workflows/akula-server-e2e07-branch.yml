@@ -94,6 +94,10 @@ jobs:
           test -n "$test_bin" && test -x "$test_bin"
           "$test_bin" server_root_v3_trust::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::tests --nocapture
+          # Independent root-owned owner key, bounded signed-frame decode,
+          # and exact Linux B1b1b claim conversion. Pure read-only HOLD.
+          "$test_bin" server_root_v3_trust::owner_frame::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::owner_frame::tests --nocapture
           # One-time admin enrollment uses root-owned disposable directories.
           "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
@@ -158,6 +162,8 @@ jobs:
             aquilum-app/core/src/server_root_v3_guard/tests.rs
             aquilum-app/core/src/server_root_v3_trust.rs
             aquilum-app/core/src/server_root_v3_trust/tests.rs
+            aquilum-app/core/src/server_root_v3_trust/owner_frame.rs
+            aquilum-app/core/src/server_root_v3_trust/owner_frame/tests.rs
             aquilum-app/core/src/server_installer_durable_node/provisioned_gate.rs
             aquilum-app/core/src/server_root_v3_trust/enrollment.rs
             aquilum-app/core/src/server_root_v3_trust/enrollment/tests.rs
