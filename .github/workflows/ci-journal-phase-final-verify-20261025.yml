@@ -1,0 +1,55 @@
+name: Journal phase split post-fix verification (temporary)
+on:
+  push:
+    branches: [refactor/journal-publication-recovery-20261024]
+    paths:
+      - '.github/workflows/ci-journal-phase-final-verify-20261025.yml'
+permissions:
+  contents: read
+concurrency:
+  group: journal-phase-postfix-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  journal-phase:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-native
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify no-growth and scoped CI routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check 39c159f1724d76b5b5f9453b0404ac7a6f0f248f HEAD
+          node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
+          node .github/scripts/ci-file-ratchet.cjs --base=39c159f1724d76b5b5f9453b0404ac7a6f0f248f --head=HEAD
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Compile Core with default features
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --no-default-features
+      - name: Test crash-safe journal transaction boundaries
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine --lib sync::journal::tests -- --nocapture
+      - name: Check S3-enabled Core
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --features sync-s3
+      - name: Check extracted module rustfmt
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check aquilum-app/core/src/sync/journal/phase_transitions.rs
+          rustfmt --edition 2021 --check aquilum-app/core/src/sync/journal/publication_recovery.rs
+          printf 'JOURNAL_PHASE_POSTFIX_PASS\n'
