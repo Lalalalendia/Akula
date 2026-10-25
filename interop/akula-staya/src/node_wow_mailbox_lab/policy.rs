@@ -380,10 +380,15 @@ fn decode_and_verify(
 ) -> Result<MailRoleClaims, MailRoleHold> {
     node.verify_iroh_endpoint(expected_endpoint)
         .map_err(|_| MailRoleHold::NodePolicy)?;
-    let operator = node.mail_operator_key_for_lab()
+    let operator = node
+        .mail_operator_key_for_lab()
         .map_err(|_| MailRoleHold::NodePolicy)?;
     decode_verified_claims(
-        input, node.public_key(), expected_endpoint, operator, now_ms,
+        input,
+        node.public_key(),
+        expected_endpoint,
+        operator,
+        now_ms,
     )
 }
 
@@ -399,22 +404,21 @@ pub(super) fn decode_root_verified_claims(
         return Err(MailRoleHold::MailPolicy);
     }
     let p = signed.claims;
-    let root = RootTrust::open_provisioned(p.node_public)
-        .map_err(|_| MailRoleHold::NodePolicy)?;
+    let root = RootTrust::open_provisioned(p.node_public).map_err(|_| MailRoleHold::NodePolicy)?;
     root.require_iroh_endpoint(p.node_endpoint)
         .map_err(|_| MailRoleHold::NodePolicy)?;
-    let operator = root.witnessed_roster()
-        .map_err(|_| MailRoleHold::NodePolicy)?.owner_public_key;
-    decode_verified_claims(
-        input, p.node_public, p.node_endpoint, operator, now_ms,
-    )
+    let operator = root
+        .witnessed_roster()
+        .map_err(|_| MailRoleHold::NodePolicy)?
+        .owner_public_key;
+    decode_verified_claims(input, p.node_public, p.node_endpoint, operator, now_ms)
 }
 
 fn decode_verified_claims(
     input: &[u8],
-    expected_node_public: [u8;32],
-    expected_endpoint: [u8;32],
-    operator_public: [u8;32],
+    expected_node_public: [u8; 32],
+    expected_endpoint: [u8; 32],
+    operator_public: [u8; 32],
     now_ms: i64,
 ) -> Result<MailRoleClaims, MailRoleHold> {
     let signed: SignedPolicy = postcard::from_bytes(input).map_err(|_| MailRoleHold::MailPolicy)?;
