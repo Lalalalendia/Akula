@@ -60,6 +60,7 @@ impl GrantSpendLedgerLab {
     ) -> Result<(), GrantSpendError> {
         if signed_wire.len()!=GRANT_BYTES
             || verified.nonce()==[0;16] || verified.owner_epoch()==0
+            || verified.owner_epoch()>i64::MAX as u64
             || now>=verified.expires_unix()
             || start>i64::MAX as u64 || end>i64::MAX as u64
         { return Err(GrantSpendError::Invalid); }
