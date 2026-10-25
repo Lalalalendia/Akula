@@ -3,6 +3,7 @@ use aquilum_core::mcp::McpStatus;
 use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryCasePreview};
 pub struct Context {
     pub workspace: Option<PathBuf>,
+    #[cfg(feature = "notion-offline-preview")] pub notion_bases: crate::notion_bases::BasesView,
     pub scale: f64,
     pub home_page: String,
     pub mcp: Option<McpStatus>,
