@@ -177,7 +177,8 @@ fn read_root_owned_mail_file(
             "/",
             OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::empty(),
-        ).map_err(|_| MailRoleHold::MailPolicy)?,
+        )
+        .map_err(|_| MailRoleHold::MailPolicy)?,
     );
     let mut depth = 0;
     for component in folder.components() {
@@ -188,16 +189,13 @@ fn read_root_owned_mail_file(
                     openat(
                         &dir,
                         Path::new(name),
-                        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW
-                            | OFlags::CLOEXEC,
+                        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
                         Mode::empty(),
-                    ).map_err(|_| MailRoleHold::MailPolicy)?,
+                    )
+                    .map_err(|_| MailRoleHold::MailPolicy)?,
                 );
                 let info = next.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
-                if !info.is_dir()
-                    || info.uid() != 0
-                    || info.permissions().mode() & 0o022 != 0
-                {
+                if !info.is_dir() || info.uid() != 0 || info.permissions().mode() & 0o022 != 0 {
                     return Err(MailRoleHold::MailPolicy);
                 }
                 depth += 1;
@@ -221,7 +219,8 @@ fn read_root_owned_mail_file(
             filename,
             OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::empty(),
-        ).map_err(|_| MailRoleHold::MailPolicy)?,
+        )
+        .map_err(|_| MailRoleHold::MailPolicy)?,
     );
     let meta = handle.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
     if !meta.is_file()
@@ -235,7 +234,9 @@ fn read_root_owned_mail_file(
         return Err(MailRoleHold::MailPolicy);
     }
     let mut result = Vec::with_capacity(meta.len() as usize);
-    handle.take(limit + 1).read_to_end(&mut result)
+    handle
+        .take(limit + 1)
+        .read_to_end(&mut result)
         .map_err(|_| MailRoleHold::MailPolicy)?;
     if result.len() as u64 != meta.len() {
         return Err(MailRoleHold::MailPolicy);
@@ -251,7 +252,9 @@ fn read_authorized_mail_file(
 ) -> Result<(Vec<u8>, (u64, u64)), MailRoleHold> {
     match authority {
         PolicyFileAuthority::SameUidLab => read_exact_private_file(folder, filename, limit),
-        PolicyFileAuthority::RootOwnedReadOnly => read_root_owned_mail_file(folder, filename, limit),
+        PolicyFileAuthority::RootOwnedReadOnly => {
+            read_root_owned_mail_file(folder, filename, limit)
+        }
     }
 }
 
@@ -273,8 +276,12 @@ struct EpochFloor {
     inode: (u64, u64),
 }
 
-fn read_epoch_floor(folder: &Path, authority: PolicyFileAuthority) -> Result<EpochFloor, MailRoleHold> {
-    let (bytes, inode) = read_authorized_mail_file(folder, FLOOR_FILE, FLOOR_LEN as u64, authority)?;
+fn read_epoch_floor(
+    folder: &Path,
+    authority: PolicyFileAuthority,
+) -> Result<EpochFloor, MailRoleHold> {
+    let (bytes, inode) =
+        read_authorized_mail_file(folder, FLOOR_FILE, FLOOR_LEN as u64, authority)?;
     if bytes.len() != FLOOR_LEN || &bytes[..8] != FLOOR_MAGIC {
         return Err(MailRoleHold::MailPolicy);
     }
@@ -380,7 +387,11 @@ impl VerifiedMailRoleLab {
         now_ms: i64,
     ) -> Result<Self, MailRoleHold> {
         Self::open_with_authority(
-            folder, node, expected_endpoint, now_ms, PolicyFileAuthority::SameUidLab,
+            folder,
+            node,
+            expected_endpoint,
+            now_ms,
+            PolicyFileAuthority::SameUidLab,
         )
     }
 
@@ -393,7 +404,10 @@ impl VerifiedMailRoleLab {
         now_ms: i64,
     ) -> Result<Self, MailRoleHold> {
         Self::open_with_authority(
-            Path::new(ROOT_MAIL_PARENT), node, expected_endpoint, now_ms,
+            Path::new(ROOT_MAIL_PARENT),
+            node,
+            expected_endpoint,
+            now_ms,
             PolicyFileAuthority::RootOwnedReadOnly,
         )
     }
@@ -426,9 +440,8 @@ impl VerifiedMailRoleLab {
     /// and node policy change on EVERY request. A new policy requires an
     /// explicit reviewed restart; never hot-adopt a newer/malicious file.
     pub(super) fn require_current(&self, node: &NodeHost, now_ms: i64) -> Result<(), MailRoleHold> {
-        let (input, inode) = read_authorized_mail_file(
-            &self.folder, FILE, MAX_FILE_BYTES, self.authority,
-        )?;
+        let (input, inode) =
+            read_authorized_mail_file(&self.folder, FILE, MAX_FILE_BYTES, self.authority)?;
         let floor = read_epoch_floor(&self.folder, self.authority)?;
         if inode != self.inode
             || *blake3::hash(&input).as_bytes() != self.pinned_digest
