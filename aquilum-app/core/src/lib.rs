@@ -67,5 +67,7 @@ pub mod p2p_attachment_contract;
 pub mod p2p_attachment_replay_lab;
 #[cfg(feature = "p2p-attachment-grant-lab")]
 pub mod p2p_attachment_grant_lab;
+#[cfg(feature = "p2p-attachment-grant-spend-lab")]
+pub mod p2p_attachment_grant_spend_lab;
 #[cfg(feature = "p2p-device-identity")]
 pub mod p2p_device_identity;
