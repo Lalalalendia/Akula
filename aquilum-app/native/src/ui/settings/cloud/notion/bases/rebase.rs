@@ -133,11 +133,20 @@ pub(super) fn append(
             ));
         }
     }
-    if let Some(path)=&bases.last_archive {
+    if let Some(archive)=&bases.last_archive {
         column=column.with_fixed(selectable(
-            &format!("Архив прежних локальных правок: {} (в Vault; не удалять)",path),
+            &format!("Архив прежних локальных правок: {} (в Vault; не удалять)",
+                archive.path),
             |t|t.text_secondary,None,Leading::Times(1.3),
         ));
+        for (row,prop) in &archive.accepted {
+            column=column.with_fixed(action_button(
+                format!("Восстановить локальное значение из архива · {} / {}",
+                    row.chars().take(10).collect::<String>(),
+                    prop.chars().take(10).collect::<String>()),
+                Action::NotionBasesRestoreArchived(row.clone(),prop.clone()),bindings,
+            ));
+        }
     }
     column
 }

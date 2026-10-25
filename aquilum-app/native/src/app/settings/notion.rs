@@ -73,6 +73,29 @@ impl App {
                 let _=self.notion_bases.toggle_keep_local(row,property);
                 true
             }
+            Action::NotionBasesRestoreArchived(row,property) => {
+                let view=self.notion_bases.view();
+                if view.target.as_deref()==self.workspace.root.as_deref()
+                    && !view.busy
+                    && view.last_archive.as_ref().is_some_and(|archive|
+                        archive.accepted.iter().any(|(r,p)|r==row&&p==property))
+                {
+                    let confirmed=rfd::MessageDialog::new()
+                        .set_title("Akula Bases — восстановление локального значения")
+                        .set_description(format!(
+                            "Восстановить прежнее локальное значение ячейки {} / {} из архивного JSON?\n\nТекущий снимок Notion не изменится. Активная локальная ревизия будет обновлена отдельной операцией File Gate CAS. Новые локальные правки других ячеек сохранятся.",
+                            row,property,
+                        ))
+                        .set_level(rfd::MessageLevel::Warning)
+                        .set_buttons(rfd::MessageButtons::YesNo)
+                        .show()==rfd::MessageDialogResult::Yes;
+                    if confirmed {
+                        let _=self.notion_bases.restore_last_accepted(
+                            std::sync::Arc::clone(&self.workspace.core),row,property);
+                    }
+                }
+                true
+            }
             Action::NotionBasesApplyReviewedRebase => {
                 let view=self.notion_bases.view();
                 if view.target.as_deref()==self.workspace.root.as_deref()

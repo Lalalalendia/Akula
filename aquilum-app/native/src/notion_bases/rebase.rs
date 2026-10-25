@@ -6,6 +6,15 @@ use aquilum_core::Core;
 use std::sync::Arc;
 
 
+#[derive(Clone,Debug)]
+pub struct ArchiveContext {
+    pub path:String,
+    pub old_digest:String,
+    pub new_digest:String,
+    pub old_hash:String,
+    pub accepted:Vec<(String,String)>,
+}
+
 /// Pure UI guard; Core repeats this exact-set check before any File Gate CAS.
 pub fn manual_choices_complete(view:&BasesView)->bool{
     let Some(report)=view.rebase_preview.as_ref() else{return false};
@@ -98,9 +107,16 @@ impl BasesSession {
             if reviewed {
                 let receipt=bases_edits::apply_rebase_decisions_approved(&core,&target,
                     &source,&old,&next,&hash,&decisions,true).map_err(|_| ())?;
+                let archive=receipt.pre_rebase_archive.map(|path|ArchiveContext {
+                    path,old_digest:old.clone(),new_digest:next.clone(),
+                    old_hash:hash.clone(),
+                    accepted:decisions.iter().filter(|(_,_,choice)|
+                        *choice==bases_edits::RebaseDecision::AcceptNotion)
+                        .map(|(r,p,_)|(r.clone(),p.clone())).collect(),
+                });
                 return match load(&target,&source,&next,&base)? {
                     Payload::Loaded(effective,disk_hash)=>
-                        Ok(Payload::Rebased(effective,disk_hash,receipt.pre_rebase_archive)),
+                        Ok(Payload::Rebased(effective,disk_hash,archive)),
                     _=>Err(()),
                 };
             } else {
@@ -110,6 +126,34 @@ impl BasesSession {
             match load(&target,&source,&next,&base)? {
                 Payload::Loaded(effective,disk_hash)=>
                     Ok(Payload::Rebased(effective,disk_hash,None)),
+                _=>Err(()),
+            }
+        })
+    }
+    pub fn restore_last_accepted(&mut self, core:Arc<Core>, row:&str, property:&str)
+        ->Result<(),()>
+    {
+        if self.view.stage!=Stage::Ready || self.view.busy
+            || self.has_pending_draft() {return Err(());}
+        let info=self.view.last_archive.as_ref().ok_or(())?;
+        if !info.accepted.iter().any(|(r,p)|r==row&&p==property)
+            || self.view.digest.as_deref()!=Some(info.new_digest.as_str()) {
+            return Err(());
+        }
+        let info=info.clone();
+        let row=row.to_owned();let property=property.to_owned();
+        let target=self.view.target.clone().ok_or(())?;
+        let source=self.view.source.clone().ok_or(())?;
+        let base=self.view.base_id.clone().ok_or(())?;
+        let expected=self.disk_hash.clone().ok_or(())?;
+        self.start(Stage::Saving,move ||{
+            bases_edits::restore_archived_cell_approved(
+                &core,&target,&source,&info.old_digest,&info.new_digest,
+                &info.old_hash,&expected,&info.path,&row,&property,true,
+            ).map_err(|_|())?;
+            match load(&target,&source,&info.new_digest,&base)? {
+                Payload::Loaded(effective,hash)=>
+                    Ok(Payload::Restored(effective,hash,row,property)),
                 _=>Err(()),
             }
         })

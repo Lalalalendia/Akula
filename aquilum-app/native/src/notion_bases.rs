@@ -74,13 +74,14 @@ pub struct BasesView {
     pub rebase_preview: Option<bases_edits::RebasePreview>,
     pub keep_local: Vec<(String,String)>,
     pub accept_notion: Vec<(String,String)>,
-    pub last_archive: Option<String>,
+    pub last_archive: Option<rebase::ArchiveContext>,
 }
 enum Payload {
     Catalog(Vec<BaseChoice>),
     Loaded(EffectiveBase, Option<String>),
     Rebase(bases_edits::RebasePreview),
-    Rebased(EffectiveBase, Option<String>, Option<String>),
+    Rebased(EffectiveBase, Option<String>, Option<rebase::ArchiveContext>),
+    Restored(EffectiveBase, Option<String>, String, String),
 }
 struct Completion {
     generation: u64,
@@ -296,6 +297,7 @@ impl BasesSession {
         self.view.digest=Some(digest.clone());self.view.base_id=Some(base_id.clone());
         self.view.row_start=0;self.view.column_start=0;
         self.view.selected=None;self.view.rebase_preview=None;
+        self.view.last_archive=None;
         self.view.keep_local.clear();self.view.accept_notion.clear();
         self.effective=None;self.disk_hash=None;
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base_id))
@@ -373,6 +375,18 @@ impl BasesSession {
                         self.view.selected=None; }
                     self.view.notice=if saving{Some("Правка сохранена локально через File Gate CAS")}
                         else{None};
+                }
+                Ok(Payload::Restored(base,hash,row,property)) if saving
+                    && self.view.base_id.as_deref()==Some(base.base_id.as_str())
+                    && self.view.digest.as_deref()==Some(base.source_digest.as_str()) =>
+                {
+                    self.effective=Some(base);self.disk_hash=hash;
+                    if let Some(archive)=self.view.last_archive.as_mut() {
+                        archive.accepted.retain(|(r,p)|r!=&row || p!=&property);
+                    }
+                    self.view.rebase_preview=None;self.view.selected=None;
+                    self.view.stage=Stage::Ready;
+                    self.view.notice=Some("Локальное значение восстановлено из проверенного архива через File Gate CAS");
                 }
                 Ok(Payload::Rebased(base, hash, archive)) if saving
                     && self.view.base_id.as_deref()==Some(base.base_id.as_str()) =>
