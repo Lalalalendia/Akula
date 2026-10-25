@@ -66,6 +66,10 @@ jobs:
         shell: bash
         run: |
           cargo test --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features p2p-attachment-source-lab p2p_attachment_source_lab -- --nocapture
+      - name: Durable sender outbox accepts only signed file W4
+        shell: bash
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features p2p-file-sender-outbox-lab p2p_file_sender_outbox_lab -- --nocapture
       - name: Test actual Staya offset and manifest adapter
         shell: bash
         run: |
