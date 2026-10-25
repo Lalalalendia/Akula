@@ -1,14 +1,6 @@
 name: Dropbox T0 isolated contract
 
 on:
-  push:
-    branches: [fix/dropbox-account-relogin-scope-20261024]
-    paths:
-      - 'modules/dropbox-t0/**'
-      - 'modules/dropbox-auth-lab/**'
-      - 'modules/dropbox-secret-store/**'
-      - 'modules/dropbox-connect-lab/**'
-      - '.github/workflows/dropbox-t0-isolated.yml'
   pull_request:
     paths:
       - 'modules/dropbox-t0/**'
