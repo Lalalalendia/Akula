@@ -43,6 +43,19 @@ jobs:
           python experiments/rust-spider-s3/run_benchmark.py wait
       - name: Build real Rust Spider crawler
         run: cargo build --manifest-path experiments/rust-spider-s3/Cargo.toml --release -j 2
+      - name: Bounded transport library tests
+        run: cargo test --manifest-path experiments/rust-spider-s3/Cargo.toml --lib --release -j 2
+      - name: Bounded S3 smoke (20 pages)
+        run: |
+          python experiments/rust-spider-s3/run_scale.py \
+            --bounded-binary experiments/rust-spider-s3/target/release/rust-spider-s3-bounded \
+            --rounds 1 --profile smoke --out experiments/rust-spider-s3/artifacts/scale-smoke
+      - name: Scale bounded S3 to 1000 and 10000 pages
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 's3-scale')
+        run: |
+          python experiments/rust-spider-s3/run_scale.py \
+            --bounded-binary experiments/rust-spider-s3/target/release/rust-spider-s3-bounded \
+            --rounds 1 --profile full --out experiments/rust-spider-s3/artifacts/scale
       - name: Compare real end-to-end S3 PUT with fault recovery
         run: |
           python experiments/rust-spider-s3/run_benchmark.py run \
