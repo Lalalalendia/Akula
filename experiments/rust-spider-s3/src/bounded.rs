@@ -81,7 +81,7 @@ pub async fn run_from_env()->Result<()>{
       .timeout(Duration::from_secs(30)).build()?;
     let shared=aws_config::defaults(BehaviorVersion::latest()).region(Region::new("us-east-1")).load().await;
     let s3=S3::from_conf(aws_sdk_s3::config::Builder::from(&shared).endpoint_url(endpoint).force_path_style(true).build());
-    let file=BufReader::new(File::open(spool)?);
+    let file=BufReader::new(File::open(&spool).with_context(||format!("open URL spool {spool}"))?);
     let (tx,rx)=mpsc::channel::<Page>(QUEUE);
     let writer=tokio::spawn(sink(rx,s3,bucket,prefix,crash));
     let sem=Arc::new(Semaphore::new(FETCH));
