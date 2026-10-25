@@ -127,6 +127,14 @@ async fn real_quic_five_mib_photo_resumes_after_interruption_without_false_deliv
                 let mut observed = connection.open_uni().await.unwrap();
                 observed.write_all(STAGE_OBSERVED).await.unwrap();
                 observed.finish().unwrap();
+                // QUIC stream finish is not proof the other endpoint
+                // consumed the bytes. A bounded test-only handshake keeps
+                // the sender open until the receiver observed the marker.
+                let mut consumed = connection.accept_uni().await.unwrap();
+                assert_eq!(
+                    consumed.read_to_end(64).await.unwrap(),
+                    b"STAGE_OBSERVED_BY_RECEIVER"
+                );
             } else {
                 let mut request = connection.accept_uni().await.unwrap();
                 let claim = request.read_to_end(64).await.unwrap();
@@ -144,6 +152,7 @@ async fn real_quic_five_mib_photo_resumes_after_interruption_without_false_deliv
                 let ack = receipt.read_to_end(64).await.unwrap();
                 assert_eq!(ack, LOCAL_VERIFIED);
             }
+            tokio::time::sleep(Duration::from_millis(250)).await;
             connection.close(0u8.into(), b"bounded resume lab session");
         }
         sender.close().await;
@@ -172,6 +181,13 @@ async fn real_quic_five_mib_photo_resumes_after_interruption_without_false_deliv
     checkpoint.finish().unwrap();
     let mut observed = first.accept_uni().await.unwrap();
     assert_eq!(observed.read_to_end(64).await.unwrap(), STAGE_OBSERVED);
+    let mut consumed = first.open_uni().await.unwrap();
+    consumed
+        .write_all(b"STAGE_OBSERVED_BY_RECEIVER")
+        .await
+        .unwrap();
+    consumed.finish().unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
     first.close(1u8.into(), b"deliberate interruption before complete transfer");
     assert_eq!(fs::read_dir(&inbox_root).unwrap().count(), 0);
 
