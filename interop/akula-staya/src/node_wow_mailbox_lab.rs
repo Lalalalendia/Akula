@@ -10,6 +10,8 @@
 //! A future product role requires an independently owner-approved mail policy
 //! pinned by root before any network exposure. This feature is lab-only.
 mod policy;
+mod root_publish;
+pub use root_publish::{PublishHold, PublishStop, first_mail_publish_ci};
 use akula_wire_lab::{custodian_wire, journal_w4::Journal, trust_w3::TrustRegistry};
 use aquilum_core::node_v1::NodeHost;
 use ed25519_dalek::SigningKey;
