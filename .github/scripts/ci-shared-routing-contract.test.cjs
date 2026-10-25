@@ -293,7 +293,7 @@ test('Pinned Read keeps 46 exact sources on both OS, main required and non-main 
   "aquilum-app/core/src/sync/sealed_archive.rs",
   "aquilum-app/core/src/sync/local_create_tests.rs",
   "aquilum-app/core/src/sync/journal.rs",
-    "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+  "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
   "aquilum-app/core/src/sync/core_scan.rs",
   "aquilum-app/core/src/sync/path.rs",
   "aquilum-app/core/src/search/paths.rs",
@@ -442,7 +442,7 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   "aquilum-app/core/src/sync/s3_preimage_capture.rs",
   "aquilum-app/core/src/sync/host_custody_registry.rs",
   "aquilum-app/core/src/sync/journal.rs",
-    "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+  "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
   "aquilum-app/core/src/sync/local_create_tests.rs",
   "aquilum-app/core/src/sync/local_create.rs",
   "aquilum-app/core/src/sync/s3_transport/**",
@@ -459,7 +459,7 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   "aquilum-app/core/src/sync/mod.rs",
   ".github/workflows/sync-s3-minio.yml"
 ];
-  assert.equal(oldPaths.length,23,'full original source path coverage');
+  assert.equal(oldPaths.length,24,'full original source path coverage');
   assert.deepEqual(oldPaths.filter(p=>p.includes('*')),
     ['aquilum-app/core/src/sync/s3_transport/**'],'preserve exact nested transport glob');
   assert.match(body,/^on:\n  workflow_call:\n  pull_request:\n/m);
