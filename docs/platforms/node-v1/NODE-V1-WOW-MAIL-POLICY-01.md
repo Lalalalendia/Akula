@@ -94,6 +94,42 @@ attestation or remote owner approval. Production root-helper CAS,
 durable ordered rotation, service restart rules, root revocation vs
 SQLite COMMIT synchronization, and installer provenance remain HOLD.
 
+### Root-owned two-file publish fence (receipt-last, recovery HOLD)
+
+As a prerequisite to a trusted root-helper transaction, the nonroot reader
+now requires a **third immutable root-owned file**:
+
+- `owner-mail-commit.bin` (root:service-group, `0640`, single link).
+  Exact fixed record: `WOWMLC01 || u64 epoch || BLAKE3(signed_policy) ||
+  BLAKE3(epoch_floor) || BLAKE3(previous fields)`. It is a
+  **completion receipt, not an authorization grant or signature**.
+- A missing, corrupt, replaced or symlinked receipt refuses the mail role.
+  Its inode is pinned after first opening and rechecked on each request.
+- Any remaining `owner-mail-policy.pending`,
+  `owner-mail-epoch-floor.pending` or `owner-mail-commit.pending`
+  forces HOLD, including before first activation. No automatic repair.
+- This ensures that merely publishing the manifest and its epoch floor
+  after a partial crash is insufficient to admit the mailbox. A future
+  root helper must create and durably read back all the fixed files,
+  publish the receipt LAST, and fsync directory metadata before return.
+- The standalone same-UID test fixtures do **not** obtain production
+  authority by this addition; the three-file check applies only to
+  the fixed root-owned OS path.
+
+The current OS acceptance test deliberately installs the first two
+root-owned files WITHOUT a receipt and verifies HOLD. It then installs
+the receipt and proves authorized LIST/FETCH; later it tests pending
+files, missing receipts, byte-identical replacement (old instance
+HOLD), group-write and symlink refusal.
+
+**Not finished:** writing and publishing all three files under a
+trusted root-exclusive CAS transaction, binding the external B1d0
+owner approval/witness nonce to a particular mail manifest, privileged
+crash recovery, host reboot and root-vs-SQLite revocation ordering.
+The complete B1d0 `/opt` file installer/witness is a related
+mechanism, not a reusable authorization to deploy mailbox policies.
+No user VPS or installed service is changed.
+
 ### Transaction-bound SQLite mail-role fence
 
 The default-off Node bridge additionally binds `MailRoleGate` from the
