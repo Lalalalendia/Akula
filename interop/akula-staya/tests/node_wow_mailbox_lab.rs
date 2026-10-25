@@ -10,7 +10,7 @@ use akula_wire_lab::{
     crypto_identity_w3::SignedHeader,
     crypto_w3,
     custodian_discovery::{ListClaims, sign_list_for_lab},
-    custodian_mailbox::{MailboxPolicy, StoreClaims, StoreLocator, sign_store_for_lab},
+    custodian_mailbox::{MailRoleGate, MailboxPolicy, StoreClaims, StoreLocator, sign_store_for_lab},
     custodian_wire::{WireError, bind_test_loopback, client_fetch_listed, client_list},
     journal_w4::Journal,
     private_route_w3,
@@ -201,6 +201,22 @@ impl Fixture {
         )
         .unwrap();
         fs::set_permissions(&floor, fs::Permissions::from_mode(0o600)).unwrap();
+        let mut witness_journal = Journal::open(&db_file).unwrap();
+        witness_journal.operator_provision_mail_role_gate(MailRoleGate {
+            mailbox_policy: MailboxPolicy {
+                mailbox: policy.mailbox,
+                issuer: policy.issuer,
+                issuer_epoch: policy.issuer_epoch,
+                custodian: policy.custodian,
+                scope: policy.scope,
+                recipient: policy.recipient,
+                max_message_bytes: policy.max_message_bytes,
+                max_offers: policy.max_offers,
+            },
+            policy_epoch: policy.policy_epoch,
+            signed_policy_digest: *blake3::hash(&signed).as_bytes(),
+        }).unwrap();
+        drop(witness_journal);
         Self {
             _tmp: tmp,
             node,
@@ -242,6 +258,24 @@ impl Fixture {
         fs::write(&floor, mail_epoch_floor_for_lab(signed, epoch)).unwrap();
         fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
         fs::set_permissions(&floor, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    fn advance_sqlite_role_witness(&self, signed: &[u8], claims: MailRoleClaims) {
+        let mut journal = Journal::open(&self.mail_state.join("wow-mailbox.sqlite")).unwrap();
+        journal.operator_provision_mail_role_gate(MailRoleGate {
+            mailbox_policy: MailboxPolicy {
+                mailbox: claims.mailbox,
+                issuer: claims.issuer,
+                issuer_epoch: claims.issuer_epoch,
+                custodian: claims.custodian,
+                scope: claims.scope,
+                recipient: claims.recipient,
+                max_message_bytes: claims.max_message_bytes,
+                max_offers: claims.max_offers,
+            },
+            policy_epoch: claims.policy_epoch,
+            signed_policy_digest: *blake3::hash(signed).as_bytes(),
+        }).unwrap();
     }
 
     fn signed_claims(&self) -> MailRoleClaims {
@@ -465,6 +499,7 @@ fn mail_policy_change_revocation_and_expiry_fence_before_socket_accept() {
     // Explicit operator action updates the separate witness. Live
     // instances must NOT auto-adopt the new signed policy.
     fixture.provision_mail_policy(&signed_epoch_two, 2);
+    fixture.advance_sqlite_role_witness(&signed_epoch_two, revised);
     assert!(matches!(
         role.serve_one(&fixture.node, &listener, 3),
         Err(MailRoleHold::MailPolicy)
@@ -574,6 +609,7 @@ fn epoch_floor_cannot_silently_rollback_one_signed_policy() {
     next.policy_epoch += 1;
     let signed_next = sign_mail_policy_for_lab(&fixture.owner, next);
     fixture.provision_mail_policy(&signed_next, 2);
+    fixture.advance_sqlite_role_witness(&signed_next, next);
     let listener = bind_test_loopback().unwrap();
     assert!(matches!(
         live.serve_one(&fixture.node, &listener, 3),
@@ -598,4 +634,37 @@ fn epoch_floor_cannot_silently_rollback_one_signed_policy() {
 
     // The original manifest and the newer authorized epoch floor cannot pair.
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
+}
+
+
+#[test]
+fn revoked_sqlite_mail_role_fences_live_node_even_with_valid_owner_files() {
+    let fixture = Fixture::new();
+    let mut live = fixture.role().unwrap();
+    assert!(fixture.role().is_ok());
+    let db = fixture.mail_state.join("wow-mailbox.sqlite");
+
+    // The operator changes the exact SQLite authority while BOTH signed
+    // files remain unchanged. The live Node bridge must re-check the gate.
+    let mut operator = Journal::open(&db).unwrap();
+    operator.operator_revoke_mail_role_gate(MAILBOX).unwrap();
+    let listener = bind_test_loopback().unwrap();
+    assert!(matches!(
+        live.serve_one(&fixture.node, &listener, 3),
+        Err(MailRoleHold::MailPolicy)
+    ));
+    assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
+
+    // No automatic un-revoke at the same owner epoch.
+    let claims=fixture.signed_claims();
+    let signed=sign_mail_policy_for_lab(&fixture.owner, claims);
+    assert!(operator.operator_provision_mail_role_gate(MailRoleGate {
+        mailbox_policy: MailboxPolicy {
+            mailbox: claims.mailbox, issuer: claims.issuer, issuer_epoch: claims.issuer_epoch,
+            custodian: claims.custodian, scope: claims.scope, recipient: claims.recipient,
+            max_message_bytes: claims.max_message_bytes, max_offers: claims.max_offers,
+        },
+        policy_epoch: claims.policy_epoch,
+        signed_policy_digest: *blake3::hash(&signed).as_bytes(),
+    }).is_err());
 }
