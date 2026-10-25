@@ -8,6 +8,7 @@ on:
       - 'aquilum-app/native/src/host/window_events/restore.rs'
       - 'aquilum-app/native/src/touchpad/compat.rs'
       - 'scripts/akula-win7-nsis-candidate.ps1'
+      - 'scripts/akula-win7-signed-stage.ps1'
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -32,6 +33,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
+      - name: Parse both production Win7 NSIS staging scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in @('scripts/akula-win7-nsis-candidate.ps1', 'scripts/akula-win7-signed-stage.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) { throw "Win7 production staging parse error in $file : $($errors[0])" }
+          }
+          $publisher = Get-Content -LiteralPath '.github/workflows/akula-windows-signed-candidate.yml' -Raw
+          foreach ($token in @('scripts/akula-win7-signed-stage.ps1', 'scripts/akula-win7-nsis-candidate.ps1',
+                              'Sign tested Windows NSIS bytes', 'Verify public key, both detached signatures')) {
+            if (!$publisher.Contains($token)) { throw "Signed Akula workflow lost required Win7 or trust gate: $token" }
+          }
+
       - name: Build entire native Akula for Windows 7
         shell: pwsh
         env:
@@ -41,7 +58,7 @@ jobs:
           New-Item -ItemType Directory -Force win7-full-results | Out-Null
           rustc -Vv | Out-File win7-full-results/compiler.txt
           $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native'
-          & cargo +nightly build --manifest-path aquilum-app/Cargo.toml --release --locked -p aquilum-native --features installed --target x86_64-win7-windows-msvc -Z build-std=std,panic_abort *> win7-full-results/build.log
+          & cargo +nightly build --manifest-path aquilum-app/Cargo.toml --release --locked -p aquilum-native --features installed,s3-pair-beta --target x86_64-win7-windows-msvc -Z build-std=std,panic_abort *> win7-full-results/build.log
           "exit_code=$LASTEXITCODE" | Out-File win7-full-results/status.txt
           Get-Content win7-full-results/build.log -Tail 50 | Write-Host
           if ($LASTEXITCODE -ne 0) { exit 1 }
