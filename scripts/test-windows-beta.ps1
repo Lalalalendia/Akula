@@ -248,6 +248,17 @@ Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
 Assert-LegacyUntouched
 
+# The Dropbox launcher must work in the real NSIS-installed EXE, not just
+# in a direct cargo debug build. The isolated UIA clicks Login but never
+# grants consent, reads OAuth URLs or touches real account credentials.
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass `
+  -File (Join-Path $PSScriptRoot 'windows-dropbox-browser-uia.ps1') `
+  -ExePath $exe -InstalledNsis
+if ($LASTEXITCODE -ne 0) {
+  throw 'NSIS-installed Akula Dropbox default-browser UIA failed'
+}
+Assert-LegacyUntouched
+
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
 if (!(Test-Path $uninstall)) { throw 'Akula uninstaller missing' }
 $removed = Start-Process $uninstall -ArgumentList '/S' -Wait -PassThru
