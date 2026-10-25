@@ -152,3 +152,37 @@ test('optional history and file snapshot performance workflows never subscribe t
   const gate=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
   assert.match(gate,/Run full Rust workspace and sync-engine tests/);
 });
+
+
+test('index worker performance comparisons remain opt-in without losing required watcher tests',()=>{
+  const owners=['index-watcher-batch-perf.yml','index-worker-idle-perf.yml'];
+  const production=[
+    'aquilum-app/core/src/search/worker.rs',
+    'aquilum-app/core/src/search/worker_idle_tests.rs',
+  ];
+  const concurrency=require('./ci-pr-concurrency.cjs');
+  for(const owner of owners){
+    const file='.github/workflows/'+owner;
+    const body=fs.readFileSync(path.join(__dirname,'../workflows',owner),'utf8');
+    const policy=ratchet.parse(body);
+    for(const path of production)assert.equal(ratchet.matches(policy,path),false,
+      'source-only changes cannot schedule optional release benchmarks '+owner+' '+path);
+    assert.equal(ratchet.matches(policy,file),true,
+      'changing the profiler definition must still exercise it: '+owner);
+    assert.match(body,/^  workflow_dispatch:\s*$/m,'manual benchmarking must be available');
+    assert.deepEqual(concurrency.policyErrors(body,file),[],
+      'manual executions must not cancel each other');
+  }
+  const core=fs.readFileSync(path.join(__dirname,'../../aquilum-app/core/src/search/worker.rs'),'utf8');
+  const idle=fs.readFileSync(path.join(__dirname,'../../aquilum-app/core/src/search/worker_idle_tests.rs'),'utf8');
+  assert.match(core,/#\[test\]\s+fn watcher_batch_deduplicates_paths/);
+  assert.match(core,/#\[test\]\s+fn watcher_batch_without_rescan/);
+  assert.match(idle,/#\[test\]\s+fn quiet_window_retains_rescan/);
+  assert.match(idle,/#\[test\]\s+fn quiet_window_is_strictly_smaller/);
+  assert.match(idle,/#\[test\]\s+fn recently_completed_batch/);
+  const app=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(app,/Run full Rust workspace and sync-engine tests/);
+  assert.match(app,/cargo test --workspace --locked/);
+  assert.equal(require('./ci-rust-scope.cjs').classify(production),'workspace',
+    'Core watcher edits must retain required workspace tests');
+});
