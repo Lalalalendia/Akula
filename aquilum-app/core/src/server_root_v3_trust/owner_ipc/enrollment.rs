@@ -142,7 +142,10 @@ pub(super) fn fixed_service_account_matches(uid: u32) -> Result<(), PeerEnrollEr
     if bytes.len() as u64 != before.len() || !stable(&before, &passwd.metadata()?) {
         return Err(PeerEnrollError::AccountMismatch);
     }
-    parse_local_account(&bytes, uid)
+    parse_local_account(&bytes, uid)?;
+    // 'x' in passwd only denotes an external password database. Read the
+    // independently root-owned shadow inode on every production PREVIEW.
+    shadow::fixed_shadow_account_locked(&etc)
 }
 fn absent(dir: &File, leaf: &str) -> Result<(), PeerEnrollError> {
     match openat(
@@ -247,6 +250,8 @@ pub fn admin_enroll_first_peer_uid_fixed_root_once() -> Result<(), PeerEnrollErr
     let trust = open_fixed_trust_fd()?;
     enroll_once_from_admin_bytes(&trust, &candidate)
 }
+
+mod shadow;
 
 #[cfg(test)]
 mod tests;

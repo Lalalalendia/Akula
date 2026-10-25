@@ -737,3 +737,33 @@ pinned, no authorized root IPC install command exists, no installed
 socket listener, systemd activation, reboot/readback or Windows
 A-to-VPS-to-Windows B acceptance. Normal Akula, \`main\` and real VPS
 remain untouched; B1-E2E-07 is not user-installable.
+
+
+### 25 October 2026 — shadow-locked local IPC identity (experimental)
+
+The previously added read-only local account check deliberately did not
+claim that \`x\` in \`/etc/passwd\` proves an unusable password.
+The next non-shipping gate now also reopens the root-owned
+\`/etc/shadow\` via the previously validated \`/etc\` directory
+descriptor on every fixed-root IPC Preview and before one-use UID
+enrollment. No remote/account path is taken from SSH, argv, a frame
+or environment.
+
+It requires a regular single-link UID0 shadow inode with only a
+conservative 0000/0400/0600/0640 permission profile, no symlink,
+bounded size and stable inode/metadata across the read. The fixed
+\`akula-provision\` entry must exist **exactly once** with a password
+field beginning with \`!\` or \`*\` (Linux locked/non-crypt marker).
+Active crypt hashes, empty fields, duplicate/missing/malformed entries,
+unexpected file permissions and changed/symlinked inodes fail HOLD.
+All shadow bytes remain confined to the root process and are never
+printed, returned to an IPC peer or persisted in the trust directory.
+
+Disposable CI tests cover ordinary locked markers, active and empty
+passwords, duplicate and malformed entries, exact metadata permissions,
+hardlinks and an attacker-selected symlink. The tests NEVER modify
+the runner's real /etc/shadow. There is still no privileged IPC
+Install/Commit opcode, no root helper publisher key, systemd service,
+or live VPS deployment. A locked password does not independently prove
+SSH/PAM policy, systemd service restrictions or helper provenance;
+these remain separate production blockers.
