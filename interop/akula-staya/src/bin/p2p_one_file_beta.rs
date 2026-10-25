@@ -43,6 +43,10 @@ mod resume_process_lab;
 #[path = "p2p_one_file_beta/udp_impairment_lab.rs"]
 mod udp_impairment_lab;
 
+#[cfg(test)]
+#[path = "p2p_one_file_beta/lost_ack_reconcile_lab.rs"]
+mod lost_ack_reconcile_lab;
+
 const ALPN: &[u8] = b"akula/p2p-one-file-lan-beta/1";
 const REQUEST: &[u8] = b"AKP2_GET_ONE_V1";
 const ACK: &[u8] = b"AKP2_VERIFIED_NEW_FILE_V1";
