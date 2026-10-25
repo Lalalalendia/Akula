@@ -24,7 +24,7 @@ pub(super) fn append(
     let (Some(base_id), Some(old_digest)) =
         (bases.base_id.as_deref(),bases.digest.as_deref()) else {return column;};
     column=column.with_fixed(selectable(
-        "C5b4 · сравнение снимков Notion (только чтение, запись и перенос выключены)",
+        "C5b4 · предварительное сравнение Notion; перенос возможен только после подтверждения и при отсутствии конфликтов",
         |t|t.text_secondary,None,Leading::Times(1.3),
     ));
     let mut candidates=BTreeSet::new();
@@ -64,8 +64,8 @@ pub(super) fn append(
             .take(10usize.saturating_sub(displayed)) {
             column=column.with_fixed(selectable(
                 &format!("Конфликт {} / {}: {}",
-                    &cell.row_id[..cell.row_id.len().min(12)],
-                    &cell.property_id[..cell.property_id.len().min(12)],
+                    cell.row_id.chars().take(12).collect::<String>(),
+                    cell.property_id.chars().take(12).collect::<String>(),
                     conflict_text(cell.disposition)),
                 |t|t.text_secondary,None,Leading::Times(1.3),
             ));

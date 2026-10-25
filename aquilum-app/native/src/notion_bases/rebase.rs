@@ -1,5 +1,5 @@
 //! C5b4 QA dry-run: compare a selected imported source snapshot with another.
-//! No approve/write action is exported from this module.
+//! Applying a fully compatible snapshot requires explicit user confirmation.
 use super::{bases_edits, load, BasesSession, Payload, Stage};
 use aquilum_core::Core;
 use std::sync::Arc;
@@ -61,6 +61,35 @@ mod tests {
     use crate::notion_bases::{BaseChoice, BasesView};
     use std::{path::PathBuf, sync::Arc};
 
+    #[test]
+    fn approved_worker_receipt_switches_pinned_digest_only_on_success() {
+        use super::super::Completion;
+        use aquilum_core::notion_api_probe::bases_edits::EffectiveBase;
+        let mut s=BasesSession::new(Arc::new(|| {}));
+        let root="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let target=PathBuf::from("test-vault");
+        let next="b".repeat(64);
+        s.generation=9;s.view.busy=true;s.view.stage=Stage::Saving;
+        s.view.source=Some(root.into());s.view.target=Some(target.clone());
+        s.view.base_id=Some("base".into());s.view.digest=Some("a".repeat(64));
+        s.disk_hash=Some("c".repeat(64));
+        let rebased=EffectiveBase {
+            base_id:"base".into(),notion_source_id:"notion".into(),
+            source_root:root.into(),source_digest:next.clone(),
+            local_revision:4,columns:Vec::new(),rows:Vec::new(),
+            saved_source_views:0,native_views_supported:false,
+        };
+        s.tx.send(Completion{
+            generation:9,source:root.into(),target,
+            result:Ok(Payload::Rebased(rebased,Some("d".repeat(64)))),
+        }).unwrap();
+        assert!(s.poll());
+        assert_eq!(s.view.stage,Stage::Ready);
+        assert_eq!(s.view.digest.as_deref(),Some(next.as_str()));
+        assert_eq!(s.disk_hash.as_deref(),Some("d".repeat(64).as_str()));
+        assert_eq!(s.effective.as_ref().unwrap().local_revision,4);
+        assert!(s.view.rebase_preview.is_none());
+    }
     #[test]
     fn invalid_preview_preserves_the_current_verified_local_grid() {
         use super::super::Completion;
