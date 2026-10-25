@@ -50,6 +50,12 @@ jobs:
       - name: Test M5-M7 offline integrated pipeline
         working-directory: experiments/unified-ingest-m5
         run: python -m unittest discover -s tests -p 'test_m[567]*.py' -v
+      - name: M8 durable queue and local API integration
+        working-directory: experiments/unified-ingest-m5
+        run: python -m unittest discover -s tests -p 'test_m8*.py' -v
+      - name: M5-M8 end-to-end integration
+        working-directory: experiments/unified-ingest-m5
+        run: python -m unittest discover -s tests -p 'test_m[5678]*.py' -q
       - name: Run all-stages discovery / parse / publish / handoff
         working-directory: experiments/unified-ingest-m5
         run: |
