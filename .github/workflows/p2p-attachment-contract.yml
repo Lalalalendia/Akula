@@ -18,6 +18,7 @@ on:
       - 'interop/akula-staya/src/wow_attachment_w3.rs'
       - 'interop/akula-staya/src/granted_quic_lab.rs'
       - 'interop/akula-staya/src/granted_inbox_lab.rs'
+      - 'interop/akula-staya/src/file_commit_w4_lab.rs'
       - 'interop/akula-staya/src/lib.rs'
       - 'interop/akula-staya/Cargo.toml'
       - '.github/workflows/p2p-attachment-contract.yml'
