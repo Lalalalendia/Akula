@@ -53,7 +53,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/debug/aquilum-native.exe'
+          $manifest = Join-Path $env:GITHUB_WORKSPACE 'aquilum-app/Cargo.toml'
+          $metadata = cargo metadata --locked --no-deps --format-version 1 --manifest-path $manifest | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($metadata.target_directory)) {
+            throw 'Unable to locate candidate build through Cargo metadata'
+          }
+          $exe = Join-Path $metadata.target_directory 'debug/aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Built Windows Akula binary missing' }
           & "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File './scripts/windows-dropbox-browser-uia.ps1' -ExePath $exe
           if ($LASTEXITCODE -ne 0) { throw 'Installed-feature Dropbox browser UIA failed' }
       - name: Upload generated dependency lockfile for release review
