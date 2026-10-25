@@ -140,6 +140,15 @@ impl RootTrust {
         Ok(Self { parent: parent.to_path_buf(), owner_uid, policy, digest })
     }
 
+    /// Lab-only read of the independently pinned Node operator identity.
+    /// This key authenticates a DISTINCT owner-signed mail-role policy.
+    /// The Node-V1 file policy itself never grants mail STORE/FETCH rights.
+    #[cfg(all(feature = "node-v1-transport-tests", debug_assertions))]
+    pub(super) fn mail_operator_key_for_lab(&self) -> Result<[u8; 32], NodeV1Error> {
+        self.require_current()?;
+        Ok(self.policy.owner_public)
+    }
+
     /// Every remote access checks that a root-only policy update or revoke
     /// has not invalidated the in-memory trusted snapshot.
     pub(super) fn policy_digest(&self) -> [u8; 32] { self.digest }
