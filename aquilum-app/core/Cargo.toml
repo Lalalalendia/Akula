@@ -15,6 +15,7 @@ p2p-offer-lab = []
 p2p-inbox-lab = ["p2p-offer-lab"]
 # Inert, fixed-format attachment control notice; requires authenticated OfferSession.
 p2p-attachment-contract = ["p2p-offer-lab"]
+p2p-attachment-replay-lab = ["p2p-attachment-contract"]
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
