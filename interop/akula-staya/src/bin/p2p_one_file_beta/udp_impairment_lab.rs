@@ -247,7 +247,69 @@ fn test_photo() -> Vec<u8> {
     data
 }
 
+/// Socket-level validation of the deterministic UDP impairment proxy.
+/// Unlike the Iroh case below, the sender uses only the proxy's address:
+/// a direct path cannot be discovered. This proves loss/forwarding/reorder
+/// scheduling in the proxy, NOT QUIC resilience under packet loss.
+/// A separate Linux tc/netem gate exercises the actual Iroh/QUIC path.
+#[test]
+fn raw_udp_socket_loss_is_observed_and_never_claimed_as_quic_evidence() {
+    let server = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    server
+        .set_read_timeout(Some(Duration::from_millis(250)))
+        .unwrap();
+    let proxy = ImpairedPath::start(
+        server.local_addr().unwrap(),
+        Profile {
+            latency: Duration::from_millis(3),
+            extra_reorder_delay: Duration::from_millis(35),
+            bytes_per_second: 320_000,
+            loss_every: 5,
+            reordered_every: 7,
+        },
+    );
+    let receiver = thread::spawn(move || {
+        let mut count = 0usize;
+        let mut last = None;
+        let mut out_of_order = 0usize;
+        let mut buffer = [0u8; 1024];
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            match server.recv_from(&mut buffer) {
+                Ok((len, _)) => {
+                    assert_eq!(len, 512, "fixed datagrams only");
+                    assert!(buffer[4..len].iter().all(|b| *b == 0xa5));
+                    let seq = u32::from_be_bytes(buffer[..4].try_into().unwrap());
+                    if last.is_some_and(|previous| seq < previous) {
+                        out_of_order += 1;
+                    }
+                    last = Some(seq);
+                    count += 1;
+                }
+                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                    if count > 100 { break; }
+                }
+                Err(e) => panic!("UDP receiver unexpectedly failed: {e}"),
+            }
+        }
+        (count, out_of_order)
+    });
+    let client = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    for seq in 0..240u32 {
+        let mut packet = [0xa5u8; 512];
+        packet[..4].copy_from_slice(&seq.to_be_bytes());
+        assert_eq!(client.send_to(&packet, proxy.listen).unwrap(), packet.len());
+        thread::sleep(Duration::from_millis(2));
+    }
+    let (received, reordered_in_receiver) = receiver.join().unwrap();
+    assert!(received > 100, "proxy did not carry enough real UDP datagrams");
+    assert!(received < 240, "deterministic packet-loss profile was not enforced");
+    proxy.assert_injected(80_000);
+    eprintln!("RAW_UDP_PROXY received={received} reordered_receiver={reordered_in_receiver} QUIC_NOT_TESTED=true");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "Iroh may discover a direct QUIC path around the proxy: diagnostic only. Use Linux tc/netem for QUIC loss."]
 async fn actual_udp_packet_loss_throttle_jitter_route_switch_and_cold_inbox() {
     let dir = tempfile::tempdir().unwrap();
     let inbox_root = dir.path().join("inbox");
