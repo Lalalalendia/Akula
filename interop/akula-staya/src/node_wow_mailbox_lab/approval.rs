@@ -62,7 +62,8 @@ pub fn sign_first_mail_approval_for_lab(
     postcard::to_stdvec(&SignedFirstApproval {
         claims,
         signature: owner.sign(&signed).to_bytes().to_vec(),
-    }).expect("fixed-size signature")
+    })
+    .expect("fixed-size signature")
 }
 
 /// Caller MUST have obtained the owner key and mail policy claims from the
@@ -102,7 +103,8 @@ pub(super) fn verify_first_mail_approval(
     {
         return Err(MailApprovalHold::InvalidScope);
     }
-    let validity = claim.valid_until_ms
+    let validity = claim
+        .valid_until_ms
         .checked_sub(claim.issued_at_ms)
         .ok_or(MailApprovalHold::InvalidScope)?;
     if validity > MAX_APPROVAL_WINDOW_MS {
@@ -122,7 +124,8 @@ pub(super) fn verify_first_mail_approval(
     message.extend_from_slice(&body);
     let signature = Signature::from_slice(&signed.signature)
         .map_err(|_| MailApprovalHold::UntrustedOwnerSignature)?;
-    verifying.verify(&message, &signature)
+    verifying
+        .verify(&message, &signature)
         .map_err(|_| MailApprovalHold::UntrustedOwnerSignature)?;
     Ok(InertMailCasProposal {
         approved_digest: claim.signed_policy_digest,
@@ -130,7 +133,8 @@ pub(super) fn verify_first_mail_approval(
         challenge: claim.helper_challenge,
         expected_witness_revision,
         required_next_revision: expected_witness_revision
-            .checked_add(1).ok_or(MailApprovalHold::StaleWitnessRevision)?,
+            .checked_add(1)
+            .ok_or(MailApprovalHold::StaleWitnessRevision)?,
         requires_independent_cas_commit: true,
     })
 }
