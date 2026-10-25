@@ -164,6 +164,7 @@ mod tests {
         use masonry::dpi::{PhysicalPosition, PhysicalSize};
         use masonry::theme::default_property_set;
 
+        let _theme_lock = crate::ui::theme::test_lock();
         let mut view = BasesView::default();
         view.total_rows = 1;
         view.total_columns = 1;
@@ -197,7 +198,7 @@ mod tests {
             }
         }, opts);
         let _ = root.redraw();
-        let pointer = PointerInfo {
+        let mouse = || PointerInfo {
             pointer_id: Some(PointerId::PRIMARY), persistent_device_id: None,
             pointer_type: PointerType::Mouse,
         };
@@ -211,17 +212,17 @@ mod tests {
                     count: 1, scale_factor: 1.0, ..PointerState::default()
                 };
                 root.handle_pointer_event(PointerEvent::Move(PointerUpdate {
-                    pointer: pointer.clone(), current: state.clone(),
+                    pointer: mouse(), current: state.clone(),
                     coalesced: vec![], predicted: vec![],
                 }));
                 state.buttons.insert(PointerButton::Primary);
                 root.handle_pointer_event(PointerEvent::Down(PointerButtonEvent {
-                    pointer: pointer.clone(), button: Some(PointerButton::Primary),
+                    pointer: mouse(), button: Some(PointerButton::Primary),
                     state: state.clone(),
                 }));
                 state.buttons.remove(PointerButton::Primary);
                 root.handle_pointer_event(PointerEvent::Up(PointerButtonEvent {
-                    pointer: pointer.clone(), button: Some(PointerButton::Primary), state,
+                    pointer: mouse(), button: Some(PointerButton::Primary), state,
                 }));
                 let _ = root.redraw();
                 let emitted = std::mem::take(&mut *signals.lock().unwrap());
