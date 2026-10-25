@@ -72,6 +72,10 @@ jobs:
         run: |
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-attachment-contract real_staya_queue_excludes_unselected_roots -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-attachment-contract forged_or_wrong_peer_decision_cannot_create_staya_queue -- --nocapture
+      - name: Real signed-grant QUIC range and replay rejection
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-granted-quic-lab granted_quic_lab -- --nocapture
       - name: Test real WOW W3 HPKE Ed25519 trust and expiry
         shell: bash
         run: |
