@@ -205,6 +205,13 @@ name = "akula-root-b1a-stage-lab"
 path = "src/bin/akula_root_b1a_stage_lab.rs"
 required-features = ["server-root-b0v3-gate-lab"]
 
+# Independently reviewed UID0 ceremony for fixed AF_UNIX local account;
+# no socket listener, install dispatch or executable activation.
+[[bin]]
+name = "akula-root-b1d0-peer-enroll-lab"
+path = "src/bin/akula_root_b1d0_peer_enroll_lab.rs"
+required-features = ["server-root-b0v3-gate-lab"]
+
 [[bin]]
 name = "akula-p2p-identity"
 path = "src/bin/akula_p2p_identity.rs"

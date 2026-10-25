@@ -322,6 +322,7 @@ mod owner_frame;
 pub(crate) use owner_frame::load_verified_owner_frame;
 mod enrollment;
 mod owner_ipc;
+pub use owner_ipc::admin_enroll_first_peer_uid_fixed_root_once;
 pub use enrollment::admin_enroll_fixed_root_once;
 mod witness_init;
 pub use witness_init::admin_initialize_first_root_witness;

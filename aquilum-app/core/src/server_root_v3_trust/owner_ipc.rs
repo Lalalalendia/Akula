@@ -20,6 +20,7 @@ pub(crate) enum OwnerIpcError {
     Peer(PreflightError),
     WrongPeer,
     InvalidPeerPin,
+    PeerEnrollment(enrollment::PeerEnrollError),
     InvalidFrame,
     Io(std::io::Error),
 }
@@ -117,12 +118,20 @@ pub(crate) fn preview_provisioned_once(
     stream: &mut UnixStream,
 ) -> Result<InertOwnerIpcPreview, OwnerIpcError> {
     let trust = open_fixed_trust_fd()?;
+    let uid = read_allowed_peer(&trust)?;
+    // A numeric UID may be reassigned after enrollment. Reconfirm the
+    // dedicated local non-login account on EVERY production preview.
+    enrollment::fixed_service_account_matches(uid)
+        .map_err(OwnerIpcError::PeerEnrollment)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| RootEnrollmentError::InvalidOwnerClock)?
         .as_secs();
     preview_from_trust_fd(stream, &trust, now)
 }
+
+mod enrollment;
+pub use enrollment::admin_enroll_first_peer_uid_fixed_root_once;
 
 #[cfg(test)]
 mod tests;

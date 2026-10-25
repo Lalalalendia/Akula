@@ -697,3 +697,43 @@ is installed onto a real VPS. In particular this admission DOES NOT
 call B1d0 CAS, modify /opt, activate systemd, give SSH/root privileges
 or enable Install Node. Root-helper signer \`PRODUCTION_BOOTSTRAP_PUBKEY\`
 remains unprovisioned and the authorized privileged transport is HOLD.
+
+
+### 25 October 2026 — one-shot privileged registration of local IPC peer identity
+
+The non-shipping administrator-only \`akula-root-b1d0-peer-enroll-lab\`
+command requires UID0 and accepts **no** args, arbitrary paths, SSH
+payloads, account names or stdin. Before any mutation, an independently
+authorized administrator must provide a protected 0600
+\`/root/akula-b1d0-peer-uid.candidate\` record containing exactly the
+canonical root IPC peer domain and four-byte big-endian UID. The
+installed helper, signer and real root witness must already be
+independently authenticated; this command neither provisions them nor
+performs privilege escalation.
+
+Unlike a bare UID pin, production admission also verifies a fixed
+*local* account \`akula-provision\` from root-owned, regular 0644
+\`/etc/passwd\`. It must have exactly the enrolled UID, nonzero GID,
+locked \`x\` password field, \`/nonexistent\` home and a non-login shell.
+The UID cannot be 0, 65534, MAX or shared by a second local username.
+No NSS/LDAP fallback, useradd, SSH-login or environment-supplied user
+is accepted. A production PREVIEW rechecks this mapping on every
+request: deletion or UID recycling HOLD, rather than silently binding
+a different account to the same number.
+
+Under the exclusive root trust directory flock, the existing enrolled
+B0 v3 + witness authority is revalidated; a root-owned 0600 file is
+created with O_EXCL at \`b1d0.peer-uid.pending\`, fsynced, renamed
+NOREPLACE to \`b1d0.peer-uid\`, then parent-fsynced and read back.
+Existing, interrupted, foreign, symlinked and replayed enrollment HOLD.
+No automatic repair or overwrite. UID0 disposable tests cover exact
+publication/replay, wrong mode, missing policy/marker, corrupt bytes,
+pending state, symlink and OS-account aliasing. The fixed production
+CLI is COMPILE-ONLY in CI. It is not executed against the runner's or
+the user's real root state.
+
+**Still HOLD:** no production publisher/root helper trust key is
+pinned, no authorized root IPC install command exists, no installed
+socket listener, systemd activation, reboot/readback or Windows
+A-to-VPS-to-Windows B acceptance. Normal Akula, \`main\` and real VPS
+remain untouched; B1-E2E-07 is not user-installable.

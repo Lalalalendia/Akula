@@ -103,6 +103,10 @@ jobs:
           # independently root-owned allowed UID file; no /opt changes.
           "$test_bin" server_root_v3_trust::owner_ipc::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::owner_ipc::tests --nocapture
+          # One-use root-owned peer UID registration; read-only OS-account
+          # parser rejects UID reuse, login shells and account aliasing.
+          "$test_bin" server_root_v3_trust::owner_ipc::enrollment::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::owner_ipc::enrollment::tests --nocapture
           # One-time admin enrollment uses root-owned disposable directories.
           "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
@@ -147,6 +151,9 @@ jobs:
           cargo check --locked --manifest-path aquilum-app/Cargo.toml \
             -p aquilum-core --features server-root-b0v3-gate-lab \
             --bin akula-root-b1a-stage-lab
+          cargo check --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab \
+            --bin akula-root-b1d0-peer-enroll-lab
       - name: Confirm default Core compiles without installer authority
         shell: bash
         run: |
@@ -171,6 +178,9 @@ jobs:
             aquilum-app/core/src/server_root_v3_trust/owner_frame/tests.rs
             aquilum-app/core/src/server_root_v3_trust/owner_ipc.rs
             aquilum-app/core/src/server_root_v3_trust/owner_ipc/tests.rs
+            aquilum-app/core/src/server_root_v3_trust/owner_ipc/enrollment.rs
+            aquilum-app/core/src/server_root_v3_trust/owner_ipc/enrollment/tests.rs
+            aquilum-app/core/src/bin/akula_root_b1d0_peer_enroll_lab.rs
             aquilum-app/core/src/server_installer_durable_node/provisioned_gate.rs
             aquilum-app/core/src/server_root_v3_trust/enrollment.rs
             aquilum-app/core/src/server_root_v3_trust/enrollment/tests.rs
