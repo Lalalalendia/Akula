@@ -27,6 +27,14 @@ const FILE: &str = "owner-mail-policy.bin";
 const FLOOR_FILE: &str = "owner-mail-epoch-floor.bin";
 const FLOOR_MAGIC: &[u8; 8] = b"WOWMLF01";
 const FLOOR_LEN: usize = 8 + 8 + 32;
+const COMMIT_FILE: &str = "owner-mail-commit.bin";
+const COMMIT_MAGIC: &[u8; 8] = b"WOWMLC01";
+const COMMIT_LEN: usize = 8 + 8 + 32 + 32 + 32;
+const PENDING_FILES: [&str; 3] = [
+    "owner-mail-policy.pending",
+    "owner-mail-epoch-floor.pending",
+    "owner-mail-commit.pending",
+];
 const MAX_FILE_BYTES: u64 = 4096;
 const MAX_OFFERS: u32 = 64;
 const PERMISSIONS: u8 = 0b0000_1111; // STORE/LIST/FETCH/RETURN
@@ -90,6 +98,7 @@ pub(super) struct VerifiedMailRoleLab {
     inode: (u64, u64),
     pinned_digest: [u8; 32],
     floor_inode: (u64, u64),
+    commit_inode: Option<(u64, u64)>,
     authority: PolicyFileAuthority,
 }
 
@@ -256,6 +265,70 @@ fn read_authorized_mail_file(
             read_root_owned_mail_file(folder, filename, limit)
         }
     }
+}
+
+/// The final root-owned receipt is published LAST. It is not another grant:
+/// it prevents a crash between the two public root-owned file renames from
+/// looking like a complete policy update. The record binds both exact bytes.
+pub fn mail_commit_receipt_for_lab(
+    signed_policy: &[u8],
+    floor: &[u8],
+    epoch: u64,
+) -> Vec<u8> {
+    let mut record = Vec::with_capacity(COMMIT_LEN);
+    record.extend_from_slice(COMMIT_MAGIC);
+    record.extend_from_slice(&epoch.to_be_bytes());
+    record.extend_from_slice(blake3::hash(signed_policy).as_bytes());
+    record.extend_from_slice(blake3::hash(floor).as_bytes());
+    let checksum = *blake3::hash(&record).as_bytes();
+    record.extend_from_slice(&checksum);
+    record
+}
+
+/// A pending file (even a symlink or unreadable file) is evidence of an
+/// interrupted transaction. Refuse instead of trying to recover or retry
+/// automatically. Only the trusted root installer may inspect/repair it.
+fn require_no_root_pending(folder: &Path) -> Result<(), MailRoleHold> {
+    let dir = File::from(
+        open(
+            folder,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        ).map_err(|_| MailRoleHold::MailPolicy)?,
+    );
+    for name in PENDING_FILES {
+        match openat(
+            &dir,
+            name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        ) {
+            Err(rustix::io::Errno::NOENT) => {},
+            _ => return Err(MailRoleHold::MailPolicy),
+        }
+    }
+    Ok(())
+}
+
+fn root_commit_inode(
+    folder: &Path,
+    signed_policy: &[u8],
+    floor_epoch: u64,
+) -> Result<(u64, u64), MailRoleHold> {
+    require_no_root_pending(folder)?;
+    let (receipt, inode) = read_root_owned_mail_file(
+        folder, COMMIT_FILE, COMMIT_LEN as u64,
+    )?;
+    if receipt.len() != COMMIT_LEN
+        || receipt != mail_commit_receipt_for_lab(
+            signed_policy,
+            &mail_epoch_floor_for_lab(signed_policy, floor_epoch),
+            floor_epoch,
+        )
+    {
+        return Err(MailRoleHold::MailPolicy);
+    }
+    Ok(inode)
 }
 
 /// Lab provisioning fixture only. The floor MUST be protected by a
@@ -426,12 +499,19 @@ impl VerifiedMailRoleLab {
         if floor.epoch != claims.policy_epoch || floor.digest != digest {
             return Err(MailRoleHold::MailPolicy);
         }
+        let commit_inode = match authority {
+            PolicyFileAuthority::SameUidLab => None,
+            PolicyFileAuthority::RootOwnedReadOnly => {
+                Some(root_commit_inode(folder, &input, floor.epoch)?)
+            }
+        };
         Ok(Self {
             claims,
             folder: folder.to_path_buf(),
             inode,
             pinned_digest: digest,
             floor_inode: floor.inode,
+            commit_inode,
             authority,
         })
     }
@@ -450,6 +530,11 @@ impl VerifiedMailRoleLab {
             || floor.digest != self.pinned_digest
         {
             return Err(MailRoleHold::MailPolicy);
+        }
+        if let Some(original_receipt) = self.commit_inode {
+            if root_commit_inode(&self.folder, &input, floor.epoch)? != original_receipt {
+                return Err(MailRoleHold::MailPolicy);
+            }
         }
         if decode_and_verify(&input, node, self.claims.node_endpoint, now_ms)? != self.claims {
             return Err(MailRoleHold::MailPolicy);
