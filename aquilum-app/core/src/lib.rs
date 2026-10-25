@@ -7,6 +7,8 @@ pub mod files;
 pub mod history;
 pub mod link_title;
 pub mod markdown;
+#[cfg(feature = "messaging-core-lab")]
+pub mod messaging;
 pub mod mcp;
 pub mod plugins;
 pub mod migration;

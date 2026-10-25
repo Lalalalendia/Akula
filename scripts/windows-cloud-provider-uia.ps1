@@ -208,6 +208,19 @@ try {
     }
     Write-Host 'AKULA_CLOUD_CATALOG_UIA_PASS providers=7'
 
+    # Confirm installed Dropbox opens OAuth controls, without invoking a browser.
+    $dropboxNames = @(Labels { param($c) $c.settings.cloud.dropbox })
+    Invoke-Button (Wait-Button -Tree $root -Names $dropboxNames -StartsWith $true)
+    # Windows PowerShell 5.1 reads BOM-less .ps1 as ANSI: use ASCII-only escapes.
+    $dropboxSignIn = [regex]::Unescape('\u0412\u043e\u0439\u0442\u0438 \u0432 Dropbox')
+    $dropboxRevoke = [regex]::Unescape('\u041e\u0442\u043e\u0437\u0432\u0430\u0442\u044c \u0434\u043e\u0441\u0442\u0443\u043f \u043d\u0430 \u0441\u0430\u0439\u0442\u0435 Dropbox')
+    [void](Wait-Button -Tree $root -Names @($dropboxSignIn))
+    [void](Wait-Button -Tree $root -Names @($dropboxRevoke))
+    [void](Wait-Button -Tree $root -Names $saveNames)
+    Invoke-Button (Wait-Button -Tree $root -Names $closeNames)
+    Wait-ButtonGone -Tree $root -Names $saveNames
+    Write-Host 'AKULA_DROPBOX_MODAL_UIA_PASS oauth_entry=1 no_network=1'
+
     Invoke-Button (Wait-Button -Tree $root -Names $yandexNames -StartsWith $true)
     [void](Wait-Button -Tree $root -Names $saveNames)
     $editor = Bucket-Editor $root

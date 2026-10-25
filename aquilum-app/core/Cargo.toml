@@ -1,6 +1,6 @@
 [package]
 name = "aquilum-core"
-version = "0.3.13"
+version = "0.3.14"
 description = "Aquilum core: documents, files, search, history and settings without any UI"
 authors = ["Dmitriy Chaplinskiy"]
 license = "AGPL-3.0-only"
@@ -9,6 +9,8 @@ workspace = ".."
 
 [features]
 default = []
+# Opt-in pure messaging state machine; no network, storage, UI or workers.
+messaging-core-lab = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
 # Opt-in verified receiver staged-file create-new, no Vault apply.

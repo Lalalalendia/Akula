@@ -169,6 +169,14 @@ jobs:
           if (!(Test-Path (Join-Path $out 'latest.json.sig'))) { throw 'Signed release metadata missing' }
           Write-Host "AKULA_WINDOWS_SIGNED_CANDIDATE_CREATED version=$version key_id=D7A66B6D4046F6C5 no_release=1"
 
+      - name: Test v0.3.13 to signed v0.3.14 in-place upgrade before publishing
+        if: ${{ inputs.release_version == '0.3.14' }}
+        shell: pwsh
+        timeout-minutes: 12
+        env:
+          AKULA_0313_CANDIDATE_DISPOSABLE: '1'
+        run: ./scripts/test-windows-0313-to-0314-candidate.ps1
+
       - name: Transfer candidate solely for independent verification
         uses: actions/upload-artifact@v7
         with:
