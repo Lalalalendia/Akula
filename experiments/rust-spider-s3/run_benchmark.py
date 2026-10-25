@@ -187,6 +187,7 @@ def main():
     if args.command == "fixture-only":
         print(f"generated {len(manifest)} pages")
         return
+    args.rust_binary = args.rust_binary.expanduser().resolve()
     if not args.rust_binary.is_file():
         ap.error(f"Rust binary not found: {args.rust_binary}; cargo build --release first")
     wait_for_minio()
