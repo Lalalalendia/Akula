@@ -32,7 +32,7 @@ aquilum-core = { path = "../../aquilum-app/core", features = ["p2p-inbox-lab"] }
 akula-inbox-ledger-lab = { path = "../../modules/drop-inbox-ledger", optional = true }
 staya-transfer = { git = "https://github.com/Lalalalendia/staya-transfer", rev = "ccfe82dc6125e2810e95043a6a4ac55954b710e0", default-features = false }
 blake3 = "=1.8.5"
-akula-wow-w3-crypto = { git = "https://github.com/calex794/wow", rev = "9053c5e38b659a578039e6c27f5a58f99270730c", optional = true }
+akula-wow-w3-crypto = { git = "https://github.com/calex794/wow", rev = "93bc66aa718f095808bd201f36b58db88b6beb2a", optional = true }
 ed25519-dalek = { version = "2.2", optional = true }
 iroh = "=1.3.0"
 postcard = { version = "=1.1.3", features = ["use-std"] }
