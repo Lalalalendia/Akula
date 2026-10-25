@@ -27,6 +27,15 @@ function changed(base,head='HEAD',cwd=process.cwd()) {
   return raw.split('\0').filter(Boolean);
 }
 
+// Standalone Text Delta is outside the main Cargo workspace.
+// Tests are required by Main PR gate rather than a duplicate PR workflow.
+function textDeltaModuleRequired(changedPaths) {
+  if (!Array.isArray(changedPaths)) return true;
+  return changedPaths.some(p => typeof p !== 'string' || !p ||
+    p.startsWith('modules/text-delta-codec/') ||
+    p === '.github/workflows/text-delta-codec-isolated.yml');
+}
+
 const CORE_MANIFEST='aquilum-app/core/Cargo.toml';
 const WORKSPACE_LOCK='aquilum-app/Cargo.lock';
 // Strict fast path: only opt-in local manifest/linkage without changing any
@@ -77,10 +86,10 @@ function main(argv) {
   if(!args.base) throw Error('--base is required');
   const paths=changed(args.base,args.head||'HEAD');
   const mode=requiredMode(paths,args.base,args.head||'HEAD');
-  process.stdout.write('mode='+mode+'\nupdater_security_required='+updaterSecurityAffected(paths)+'\n');
+  process.stdout.write('mode='+mode+'\ntext_delta_module_required='+textDeltaModuleRequired(paths)+'\nupdater_security_required='+updaterSecurityAffected(paths)+'\n');
 }
 if(require.main===module) {
   try {main(process.argv.slice(2));}
   catch(err){console.error(err.message);process.exitCode=1;}
 }
-module.exports={classify,changed,safeManifestOnly,requiredMode,updaterSecurityAffected,main};
+module.exports={classify,changed,safeManifestOnly,requiredMode,textDeltaModuleRequired,updaterSecurityAffected,main};

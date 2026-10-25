@@ -1,10 +1,7 @@
 name: Text Delta standalone wire parity lab (non-production)
 
 on:
-  pull_request:
-    paths:
-      - 'modules/text-delta-codec/**'
-      - '.github/workflows/text-delta-codec-isolated.yml'
+  # PR source owners run in the required Application checks / Main PR gate.
   workflow_dispatch:
 
 permissions:

@@ -5,7 +5,7 @@ const cp=require('node:child_process');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const {classify,changed,safeManifestOnly,updaterSecurityAffected}=require('./ci-rust-scope.cjs');
+const {classify,changed,safeManifestOnly,textDeltaModuleRequired,updaterSecurityAffected}=require('./ci-rust-scope.cjs');
 
 test('pure documentation and CI telemetry do not compile Rust',()=>{
   assert.equal(classify(['README.md','docs/engineering-budgets.md',
@@ -417,7 +417,7 @@ test('Linux first-GUI ACK real-process security moved into the required owner fa
 });
 
 
-test('every standalone Rust module has a direct PR owner and executable Cargo test',()=>{
+test('every standalone Rust module has a protected CI owner and executable Cargo test',()=>{
   const {parse,matches}=require('./ci-file-ratchet.cjs');
   // Explicitly approved owned standalone packages. Adding a module without
   // a direct PR test owner is unsafe: Main PR gate otherwise sees mode=none.
@@ -442,7 +442,14 @@ test('every standalone Rust module has a direct PR owner and executable Cargo te
     const manifest='modules/'+name+'/Cargo.toml';
     const workflow=fs.readFileSync(path.join(__dirname,'../workflows',workflowName),'utf8');
     const policy=parse(workflow);
-    assert.equal(matches(policy,manifest),true,'missing direct PR subscription: '+manifest);
+    if(name==='text-delta-codec'){
+      assert.equal(matches(policy,manifest),false,'no duplicate top-level Text Delta PR workflow');
+      const app=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+      assert.match(app,/text_delta_module_required: \$\{\{ steps\.scope\.outputs\.text_delta_module_required \}\}/);
+      assert.match(app,/name: Require standalone Text Delta wire and hostile-input tests/);
+      assert.match(app,/cargo test --manifest-path modules\/text-delta-codec\/Cargo\.toml -- --nocapture/);
+      assert.match(app,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+    }else assert.equal(matches(policy,manifest),true,'missing direct PR subscription: '+manifest);
     const testLine=new RegExp('^\\s*(?:run:\\s*)?cargo test --manifest-path modules/'+name+'/Cargo\\.toml(?:\\s|$)','m');
     assert.match(workflow,testLine,'standalone crate test must run in owner workflow: '+name);
   }
@@ -507,8 +514,20 @@ test('Text Delta parity lab never duplicates Core source PR workflow runs',()=>{
   }
   assert.equal(require('./ci-shared-manifest-route.cjs').ownedRoutes([corePaths[0]]).owned_text_delta,
     true,'security codec owner must still exercise Core code changes');
-  assert.equal(matches(policy,'modules/text-delta-codec/Cargo.toml'),true);
-  assert.equal(matches(policy,'modules/text-delta-codec/src/lib.rs'),true);
-  assert.equal(matches(policy,workflow),true);
+  assert.equal(matches(policy,'modules/text-delta-codec/Cargo.toml'),false);
+  assert.equal(matches(policy,'modules/text-delta-codec/src/lib.rs'),false);
+  assert.equal(matches(policy,workflow),false);
   assert.match(body,/^  workflow_dispatch:\s*$/m,'manual standalone parity available');
+  const app=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(app,/if: needs\.classify\.outputs\.text_delta_module_required == 'true'/);
+  for(const leaf of ['modules/text-delta-codec/Cargo.toml',
+    'modules/text-delta-codec/src/lib.rs',workflow]){
+    assert.equal(textDeltaModuleRequired([leaf]),true,'required Text Delta owner: '+leaf);
+    assert.equal(classify([leaf]),'none','no redundant workspace test: '+leaf);
+  }
+  for(const other of ['modules/node-catalog/src/catalog.rs',
+    'aquilum-app/core/src/sync/text_delta_codec.rs','docs/ci.md'])
+    assert.equal(textDeltaModuleRequired([other]),false,'no unrelated module route: '+other);
+  assert.equal(textDeltaModuleRequired(null),true,'missing change detection fails closed');
+  assert.equal(textDeltaModuleRequired(['']),true,'bad path fails closed');
 });
