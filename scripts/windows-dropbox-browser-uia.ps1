@@ -1,7 +1,10 @@
 # Windows installed-feature Dropbox OAuth browser launch, no Dropbox credentials.
 # Only for an ephemeral GitHub-hosted Windows runner. The OAuth browser page
 # may open, but this test never consents or reads its address bar/query string.
-param([Parameter(Mandatory = $true)][string]$ExePath)
+param(
+    [Parameter(Mandatory = $true)][string]$ExePath,
+    [switch]$InstalledNsis
+)
 $ErrorActionPreference = 'Stop'
 
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
@@ -11,28 +14,45 @@ if ($PSVersionTable.PSEdition -ne 'Desktop' -or
     [Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA) {
     throw 'Dropbox browser UIA requires Windows PowerShell 5.1 STA'
 }
-# CI can invoke cargo from the repository root (workspace/target) or from
-# aquilum-app/ (the workspace .cargo/config redirects into .artifacts).
-# Resolve the actual target from Cargo and admit only these repository-owned
-# build directories. Do not accept an arbitrary path or an external EXE.
-$manifest = Join-Path $env:GITHUB_WORKSPACE 'aquilum-app\Cargo.toml'
-$metadata = & cargo metadata --locked --no-deps --format-version 1 --manifest-path $manifest |
-    ConvertFrom-Json
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($metadata.target_directory)) {
-    throw 'Cannot resolve the exact candidate target directory via Cargo'
-}
-$targetDir = [IO.Path]::GetFullPath([string]$metadata.target_directory)
-$allowedTargets = @(
-    [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE 'aquilum-app\target')),
-    [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native'))
-)
-if ($allowedTargets -notcontains $targetDir) {
-    throw 'Refusing a Cargo target directory outside approved Akula build paths'
-}
-$expected = Join-Path $targetDir 'debug\aquilum-native.exe'
-if ([IO.Path]::GetFullPath($ExePath) -ne [IO.Path]::GetFullPath($expected) -or
-    !(Test-Path -LiteralPath $expected -PathType Leaf)) {
-    throw 'Refusing a non-candidate or missing Akula executable'
+if ($InstalledNsis) {
+    # The NSIS acceptance has already verified the installer, product name,
+    # uninstall registration, and exact installed-vs-compiled executable hash.
+    # Recheck the exact executable bytes here, before invoking a login control.
+    $expected = Join-Path $env:LOCALAPPDATA 'Akula\akula-app.exe'
+    $compiled = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\akula-app.exe'
+    $registry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Akula'
+    if ([IO.Path]::GetFullPath($ExePath) -ne [IO.Path]::GetFullPath($expected) -or
+        !(Test-Path -LiteralPath $expected -PathType Leaf) -or
+        !(Test-Path -LiteralPath $compiled -PathType Leaf) -or
+        !(Test-Path -LiteralPath $registry) -or
+        ((Get-ItemProperty -LiteralPath $registry -Name DisplayName).DisplayName -cne 'Akula') -or
+        ((Get-FileHash -LiteralPath $expected -Algorithm SHA256).Hash -cne
+            (Get-FileHash -LiteralPath $compiled -Algorithm SHA256).Hash)) {
+        throw 'Installed NSIS Akula executable or signature-of-bytes preflight failed'
+    }
+} else {
+    # CI can invoke cargo from the repo root (workspace/target) or from
+    # aquilum-app/ (the .cargo/config redirects into .artifacts).
+    # Only these source-owned target directories are admitted.
+    $manifest = Join-Path $env:GITHUB_WORKSPACE 'aquilum-app\Cargo.toml'
+    $metadata = & cargo metadata --locked --no-deps --format-version 1 --manifest-path $manifest |
+        ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($metadata.target_directory)) {
+        throw 'Cannot resolve the exact candidate target directory via Cargo'
+    }
+    $targetDir = [IO.Path]::GetFullPath([string]$metadata.target_directory)
+    $allowedTargets = @(
+        [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE 'aquilum-app\target')),
+        [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native'))
+    )
+    if ($allowedTargets -notcontains $targetDir) {
+        throw 'Refusing a Cargo target directory outside approved Akula build paths'
+    }
+    $expected = Join-Path $targetDir 'debug\aquilum-native.exe'
+    if ([IO.Path]::GetFullPath($ExePath) -ne [IO.Path]::GetFullPath($expected) -or
+        !(Test-Path -LiteralPath $expected -PathType Leaf)) {
+        throw 'Refusing a non-candidate or missing Akula executable'
+    }
 }
 
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes -ErrorAction Stop
