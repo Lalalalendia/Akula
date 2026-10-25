@@ -24,7 +24,7 @@ from typing import Iterator, Protocol
 
 from .model import canonical_fixture_url, require_entity_id
 from .literotica_snapshot import story_url, series_url, parse_saved_story_page, SnapshotRejected
-from .objects import FileObjectSink, S3ObjectSink, ObjectConflict
+from .objects import FileObjectSink, S3ObjectSink, ObjectConflict, ObjectWriteUncertain
 from .publisher import IncompleteWork, PublicationUncertain
 from .streaming_publisher import (StreamWork, StreamChapter, StreamPage,
                                   StreamingWorkPublisher)
@@ -353,6 +353,18 @@ class PageLedger:
             db.execute("INSERT OR IGNORE INTO stage_events(work_id,chapter,page,phase,object_key,sha256) VALUES(?,?,?,?,?,?)",
                        (claimed["work_id"], claimed["chapter"], claimed["page"], phase, key, sha))
 
+    def release_uncertain(self, claimed: dict) -> None:
+        with self.tx() as db:
+            state = "READY" if claimed["state"] == "READY" else "RAW"
+            expected = "FETCHING" if state == "READY" else "PARSING"
+            changed = db.execute("""UPDATE source_pages SET state=?,lease_token=NULL,
+                lease_until=0,error=NULL WHERE work_id=? AND chapter=? AND page=?
+                AND state=? AND lease_token=?""",
+                (state, claimed["work_id"], claimed["chapter"], claimed["page"],
+                 expected, claimed["lease_token"])).rowcount
+            if changed != 1:
+                raise NeedsReview("stale lease cannot release uncertain S3 operation")
+
     def fail(self, claimed: dict, exc: Exception) -> None:
         with self.tx() as db:
             db.execute("""UPDATE source_pages SET state='NEEDS_REVIEW',lease_token=NULL,lease_until=0,error=?
@@ -422,6 +434,9 @@ class UnifiedPipeline:
                 count += 1
             except InjectCrash:
                 raise
+            except ObjectWriteUncertain:
+                self.ledger.release_uncertain(claimed)
+                raise
             except Exception as exc:
                 self.ledger.fail(claimed, exc)
                 raise
@@ -458,6 +473,9 @@ class UnifiedPipeline:
                     raise ObjectConflict("PARSED put digest mismatch")
                 self.ledger.commit(claimed, phase="PARSED", key=key, sha=sha)
                 count += 1
+            except ObjectWriteUncertain:
+                self.ledger.release_uncertain(claimed)
+                raise
             except Exception as exc:
                 self.ledger.fail(claimed, exc)
                 raise
