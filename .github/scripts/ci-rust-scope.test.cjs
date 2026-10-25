@@ -446,3 +446,46 @@ test('every standalone Rust module has a direct PR owner and executable Cargo te
     assert.match(workflow,testLine,'standalone crate test must run in owner workflow: '+name);
   }
 });
+
+
+test('ignored Search performance suites are opt-in while Core correctness remains required',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const {policyErrors}=require('./ci-pr-concurrency.cjs');
+  const perWorkflow={
+    'wiki-parser-perf.yml':['aquilum-app/core/src/search/wiki/parser.rs'],
+    'untracked-delete-perf.yml':[
+      'aquilum-app/core/src/search/sync.rs',
+      'aquilum-app/core/src/search/index_document.rs',
+    ],
+    'search-hits-perf.yml':[
+      'aquilum-app/core/src/search/hits/repository.rs',
+      'aquilum-app/core/src/search/index_tests.rs',
+    ],
+  };
+  for(const [name,sourcePaths] of Object.entries(perWorkflow)){
+    const workflow='.github/workflows/'+name;
+    const body=fs.readFileSync(path.join(__dirname,'../workflows',name),'utf8');
+    const rule=parse(body);
+    assert.equal(matches(rule,workflow),true,'self-edits must still test '+name);
+    for(const source of sourcePaths){
+      assert.equal(matches(rule,source),false,'no automatic expensive Search benchmark on '+source);
+      assert.equal(classify([source]),'workspace','required Core tests for '+source);
+    }
+    assert.match(body,/^  workflow_dispatch:\s*$/m,'manual benchmark remains '+name);
+    assert.deepEqual(policyErrors(body,workflow),[],'manual benchmark must not be canceled by unrelated run: '+name);
+    assert.match(body,/--ignored/,'only optional timing measurements are routed: '+name);
+  }
+  const read=source=>fs.readFileSync(path.join(__dirname,'../../',source),'utf8');
+  const parser=read('aquilum-app/core/src/search/wiki/parser.rs');
+  assert.match(parser,/#\[test\]\s+fn fast_path_is_identical_to_the_full_markdown_scanner/);
+  const sync=read('aquilum-app/core/src/search/sync.rs');
+  assert.match(sync,/#\[test\]\s+fn deleting_an_untracked_note_does_not_acquire_writer_or_commit/);
+  assert.match(sync,/#\[test\]\s+fn orphaned_index_document_is_still_deleted_without_sqlite_metadata/);
+  const document=read('aquilum-app/core/src/search/index_document.rs');
+  assert.match(document,/#\[test\]\s+fn a_crlf_note_is_indexed_as_lf/);
+  const indexing=read('aquilum-app/core/src/search/index_tests.rs');
+  assert.match(indexing,/#\[test\]\s+fn disk_index_searches_title_and_body_by_case_insensitive_prefix/);
+  const app=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(app,/Run full Rust workspace and sync-engine tests/);
+  assert.match(app,/cargo test --workspace --locked/);
+});
