@@ -48,6 +48,10 @@ jobs:
         shell: bash
         run: |
           cargo test --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features p2p-attachment-replay-lab p2p_attachment_replay_lab -- --nocapture
+      - name: Verify default-deny signed exact-object read grant
+        shell: bash
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features p2p-attachment-grant-lab p2p_attachment_grant_lab -- --nocapture
       - name: Test actual Staya offset and manifest adapter
         shell: bash
         run: |
