@@ -1,0 +1,61 @@
+name: EXP-RUST-3b Scrapy Spider real S3
+on:
+  pull_request:
+    paths:
+      - 'experiments/rust-spider-s3/**'
+      - '.github/workflows/exp-rust-spider-s3.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      S3_ENDPOINT: http://127.0.0.1:9000
+      AWS_ACCESS_KEY_ID: trial-access
+      AWS_SECRET_ACCESS_KEY: trial-secret-2026
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: 'true'
+      MINIO_IMAGE: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: experiments/rust-spider-s3
+      - name: Install test dependencies
+        run: python -m pip install -r experiments/rust-spider-s3/requirements.txt
+      - name: Fixture self-test
+        run: python -m unittest discover -s experiments/rust-spider-s3/tests -v
+      - name: Start real S3-compatible MinIO
+        run: |
+          docker run -d --name rust-spider-minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
+            -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
+            "$MINIO_IMAGE" server /data
+          python experiments/rust-spider-s3/run_benchmark.py wait
+      - name: Build real Rust Spider crawler
+        run: cargo build --manifest-path experiments/rust-spider-s3/Cargo.toml --release -j 2
+      - name: Compare real end-to-end S3 PUT with fault recovery
+        run: |
+          python experiments/rust-spider-s3/run_benchmark.py run \
+            --rust-binary experiments/rust-spider-s3/target/release/rust-spider-s3-trial \
+            --rounds 3 --out experiments/rust-spider-s3/artifacts
+      - name: Upload complete results, even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-spider-s3-experiment
+          path: experiments/rust-spider-s3/artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Inspect MinIO state on errors
+        if: failure()
+        run: docker logs rust-spider-minio --tail 100 || true
+      - name: Remove test service
+        if: always()
+        run: docker rm -f rust-spider-minio || true
