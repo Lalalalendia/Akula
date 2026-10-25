@@ -1,0 +1,56 @@
+name: SQLite lifecycle extraction verification (temporary)
+on:
+  push:
+    branches: [refactor/journal-sqlite-lifecycle-20261025]
+    paths:
+      - '.github/workflows/ci-journal-sqlite-proof-20261025.yml'
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-native
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: CI ownership and no-growth
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check 641a437005132a4520b3606586d11d112f19fd5a HEAD
+          node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
+          node .github/scripts/ci-file-ratchet.cjs --base=641a437005132a4520b3606586d11d112f19fd5a --head=HEAD
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Check default-feature Core
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --no-default-features
+      - name: Run journal recovery and schema tests
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine --lib sync::journal::tests -- --nocapture
+      - name: Check S3-enabled Core
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --features sync-s3
+      - name: Show exact rustfmt changes if any
+        shell: bash
+        run: |
+          set -euo pipefail
+          P=aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs
+          rustfmt --edition 2021 "$P"
+          printf 'SQLITE_LIFECYCLE_FORMATTED_BEGIN\n'
+          base64 -w0 "$P"
+          printf '\nSQLITE_LIFECYCLE_FORMATTED_END\n'
+          git diff --exit-code -- "$P"
+          printf 'SQLITE_LIFECYCLE_PROOF_PASS\n'
