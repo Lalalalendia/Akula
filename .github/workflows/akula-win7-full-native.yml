@@ -7,6 +7,7 @@ on:
       - '.github/scripts/akula-win7-portable-package.py'
       - '.github/scripts/akula-win7-dumpbin-audit.py'
       - 'aquilum-app/native/src/output/**'
+      - 'aquilum-app/native/src/host/**'
       - 'aquilum-app/native/src/touchpad/**'
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/native/src/main.rs'
@@ -15,6 +16,7 @@ on:
     paths:
       - '.github/workflows/akula-win7-full-native.yml'
       - 'aquilum-app/native/src/output/**'
+      - 'aquilum-app/native/src/host/**'
       - 'aquilum-app/native/src/touchpad/**'
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/native/src/main.rs'
