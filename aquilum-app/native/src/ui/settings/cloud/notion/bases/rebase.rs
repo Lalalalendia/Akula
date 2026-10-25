@@ -177,3 +177,7 @@ pub(super) fn append(
     }
     column
 }
+
+#[cfg(test)]
+#[path = "rebase/tests.rs"]
+mod tests;
