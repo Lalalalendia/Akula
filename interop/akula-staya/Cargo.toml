@@ -24,6 +24,8 @@ p2p-wow-w3-lab = ["p2p-attachment-contract", "aquilum-core/p2p-attachment-replay
 p2p-granted-quic-lab = ["p2p-attachment-contract", "aquilum-core/p2p-attachment-source-lab", "dep:tokio", "dep:ring"]
 # Off by default; reuse the real native private Inbox and cold SQLite receipt.
 p2p-granted-inbox-lab = ["p2p-granted-quic-lab", "p2p-one-file-lan-beta"]
+# W4 content commit is separate from legacy W4 encrypted notice acceptance.
+p2p-file-w4-lab = ["p2p-granted-inbox-lab", "p2p-wow-w3-lab"]
 
 [[bin]]
 name = "akula-p2p-one-file-beta"
@@ -35,7 +37,7 @@ aquilum-core = { path = "../../aquilum-app/core", features = ["p2p-inbox-lab"] }
 akula-inbox-ledger-lab = { path = "../../modules/drop-inbox-ledger", optional = true }
 staya-transfer = { git = "https://github.com/Lalalalendia/staya-transfer", rev = "ccfe82dc6125e2810e95043a6a4ac55954b710e0", default-features = false }
 blake3 = "=1.8.5"
-akula-wow-w3-crypto = { git = "https://github.com/calex794/wow", rev = "93bc66aa718f095808bd201f36b58db88b6beb2a", optional = true }
+akula-wow-w3-crypto = { git = "https://github.com/calex794/wow", rev = "ed59de17955a25e57a75f47f6ad6570c1d000287", optional = true }
 ed25519-dalek = { version = "2.2", optional = true }
 ring = { version = "0.17.14", optional = true }
 iroh = "=1.3.0"
