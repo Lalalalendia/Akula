@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, fs, io::ErrorKind, path::{Path, PathBuf}};
 use uuid::Uuid;
 
+mod effective;
+pub use effective::{read_effective_base, EffectiveBase, EffectiveCell,
+    EffectiveColumn, EffectiveRow, EffectiveValue};
+
 const FORMAT: &str = "akula_bases_local_edits_v1";
 const DIR: &str = "Notion-import";
 const MAX_FILE: usize = 2 * 1024 * 1024;
@@ -22,7 +26,7 @@ pub enum LocalValue {
     Text(String), Number(f64), Checkbox(bool),
     Select(String), MultiSelect(Vec<String>), Relation(Vec<String>),
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all="snake_case")]
 pub enum LocalKind { Text, Number, Checkbox }
 #[derive(Clone, Debug, Serialize, Deserialize)]
