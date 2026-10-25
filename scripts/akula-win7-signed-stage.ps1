@@ -54,7 +54,7 @@ function Get-VerifiedPeAudit {
     if ($LASTEXITCODE -ne 0) { throw "dumpbin failed: $Binary" }
     $hash = (Get-FileHash -LiteralPath $Binary -Algorithm SHA256).Hash
     $size = (Get-Item -LiteralPath $Binary).Length
-    & python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin $importsFile --out $Output --sha256 $hash --bytes $size
+    & python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin $importsFile --out $Output --sha256 $hash --bytes $size | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Win7 PE import audit failed: $Binary" }
     $result = Get-Content -LiteralPath (Join-Path $Output 'full-audit.json') -Raw | ConvertFrom-Json
     if (@($result.known_post_win7_imports).Count -ne 0) { throw 'Forbidden post-Win7 static API' }
