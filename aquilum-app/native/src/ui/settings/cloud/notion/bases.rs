@@ -3,6 +3,7 @@ use super::*;
 mod editor;
 mod schema;
 mod grid;
+mod rebase;
 
 pub(super) fn append(
     mut column: Flex, ctx: &Context,
@@ -27,6 +28,7 @@ pub(super) fn append(
                     crate::notion_bases::Stage::Loading=>"Читаю независимые базы в рабочем потоке...",
                     crate::notion_bases::Stage::Ready=>"Локальная модель Akula Bases",
                     crate::notion_bases::Stage::Saving=>"Сохраняю через File Gate CAS...",
+                    crate::notion_bases::Stage::Reviewing=>"Проверяю второй снимок без записи...",
                     crate::notion_bases::Stage::NeedsReview=>"База или ревизия изменилась. Требуется проверка.",
                 },|t|t.text_secondary,None,Leading::Times(1.3),
             ));
@@ -64,6 +66,9 @@ pub(super) fn append(
                             bases.total_rows,bases.total_columns,bases.local_revision,bases.saved_source_views),
                         |t|t.text_primary,None,Leading::Times(1.3),
                     ));
+                    if bases.local_revision>0 {
+                        column=rebase::append(column,bases,bindings);
+                    }
                     column=grid::append(column,bases,bindings);
                     if bases.row_start>0 {
                         column=column.with_fixed(action_button(
