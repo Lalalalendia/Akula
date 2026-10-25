@@ -2,6 +2,12 @@
 # Isolation is mandatory: no migration from upstream Freaction/Aquilum.
 name: Akula Windows beta candidate
 on:
+  # Temporary isolated candidate probe for the reviewed Dropbox launcher branch.
+  # Remove this branch-only trigger before merging into main.
+  push:
+    branches: [fix/dropbox-account-relogin-scope-20261024]
+    paths:
+      - '.github/workflows/windows-beta.yml'
   workflow_call:
   # Source ownership is enforced by the required Main PR gate.
   workflow_dispatch:
