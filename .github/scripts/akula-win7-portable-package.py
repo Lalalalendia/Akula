@@ -83,7 +83,16 @@ This is the experimental Akula PR #667 binary, not the public Akula release.
 1. Extract all files to a NEW folder on a test PC/VM.
 2. Double-click START-WIN7-LAB.cmd (not the public installer).
 3. Create, edit and save a disposable test note.
-4. Close the app, reopen it, check the note and send any error screenshot.
+4. Open Settings > Interface and check its text and controls.
+5. Put Notepad over Akula, covering 25%, 50%, then 100% of the window.
+   Move or close Notepad; all exposed pixels must be restored. Repeat
+   the cover/uncover cycle at least 20 times.
+6. Also test Alt+Tab, minimize/restore, window resize, Settings reopen.
+   Compare basic Windows theme with Aero (if available).
+7. Close Akula, reopen it, and verify that the test note was saved.
+8. If the interface is erased, capture before/after screenshots and
+   provide Windows version/SP1, DPI scale, display driver and step.
+9. Test the same executable on Windows 10/11 when available.
 
 The launcher uses a test vault and separate data directory beside this file.
 Do not use private files, network sync, or normal automatic updating.
