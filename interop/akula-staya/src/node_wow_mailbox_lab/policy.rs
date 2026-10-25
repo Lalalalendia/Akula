@@ -151,7 +151,13 @@ pub fn mail_epoch_floor_for_lab(signed_policy: &[u8], epoch: u64) -> Vec<u8> {
     result
 }
 
-fn read_epoch_floor(folder: &Path) -> Result<((u64, [u8; 32]), (u64, u64)), MailRoleHold> {
+struct EpochFloor {
+    epoch: u64,
+    digest: [u8; 32],
+    inode: (u64, u64),
+}
+
+fn read_epoch_floor(folder: &Path) -> Result<EpochFloor, MailRoleHold> {
     let (bytes, inode) = read_exact_private_file(folder, FLOOR_FILE, FLOOR_LEN as u64)?;
     if bytes.len() != FLOOR_LEN || &bytes[..8] != FLOOR_MAGIC {
         return Err(MailRoleHold::MailPolicy);
@@ -167,7 +173,7 @@ fn read_epoch_floor(folder: &Path) -> Result<((u64, [u8; 32]), (u64, u64)), Mail
     if epoch == 0 || digest == [0; 32] {
         return Err(MailRoleHold::MailPolicy);
     }
-    Ok(((epoch, digest), inode))
+    Ok(EpochFloor { epoch, digest, inode })
 }
 
 fn decode_and_verify(
@@ -255,9 +261,9 @@ impl VerifiedMailRoleLab {
     ) -> Result<Self, MailRoleHold> {
         let (input, inode) = read_exact_private_file(folder, FILE, MAX_FILE_BYTES)?;
         let claims = decode_and_verify(&input, node, expected_endpoint, now_ms)?;
-        let ((floor_epoch, floor_digest), floor_inode) = read_epoch_floor(folder)?;
+        let floor = read_epoch_floor(folder)?;
         let digest = *blake3::hash(&input).as_bytes();
-        if floor_epoch != claims.policy_epoch || floor_digest != digest {
+        if floor.epoch != claims.policy_epoch || floor.digest != digest {
             return Err(MailRoleHold::MailPolicy);
         }
         Ok(Self {
@@ -265,7 +271,7 @@ impl VerifiedMailRoleLab {
             folder: folder.to_path_buf(),
             inode,
             pinned_digest: digest,
-            floor_inode,
+            floor_inode: floor.inode,
         })
     }
 
@@ -274,12 +280,12 @@ impl VerifiedMailRoleLab {
     /// explicit reviewed restart; never hot-adopt a newer/malicious file.
     pub(super) fn require_current(&self, node: &NodeHost, now_ms: i64) -> Result<(), MailRoleHold> {
         let (input, inode) = read_exact_private_file(&self.folder, FILE, MAX_FILE_BYTES)?;
-        let ((floor_epoch, floor_digest), floor_inode) = read_epoch_floor(&self.folder)?;
+        let floor = read_epoch_floor(&self.folder)?;
         if inode != self.inode
             || *blake3::hash(&input).as_bytes() != self.pinned_digest
-            || floor_inode != self.floor_inode
-            || floor_epoch != self.claims.policy_epoch
-            || floor_digest != self.pinned_digest
+            || floor.inode != self.floor_inode
+            || floor.epoch != self.claims.policy_epoch
+            || floor.digest != self.pinned_digest
         {
             return Err(MailRoleHold::MailPolicy);
         }
