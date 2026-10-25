@@ -622,3 +622,22 @@ This is not actual release publication by a production issuer: no signing
 ceremony, independently authenticated copy to real /root, installed helper
 provenance, Windows root install transport, systemd, reboot or second-device
 File Gate acceptance. Default installed Akula and \`main\` remain unchanged.
+
+
+### 25 October 2026 — one canonical owner-signed B1b1b frame decoder
+
+The existing Windows/Linux B1b1b owner-approval wire has gained a
+strict, bounded, canonical binary decoder. It is not a second signing
+protocol. One frame is the exact original claim followed by 64 detached
+Ed25519 signature bytes; unknown domains or versions, malformed
+identities, truncated or trailing data, invalid shape and altered
+signature are rejected.
+
+\`SignedOwnerWireFrame::verify_pinned_owner\` requires the independently
+enrolled owner identity and key (never a public key from a remote
+request). An optional Linux-only bridge returns an inert
+\`SignedOwnerApproval\` with byte-for-byte unchanged canonical payload,
+for the existing B1b1b/CAS checks. Tests cover canonical parity on
+Windows/Linux, forged scope, changed identity, replay time limits,
+truncation, UTF-8 and oversized input. No SSH installation dispatch,
+privileged permission, systemd or actual VPS is enabled; release HOLD.

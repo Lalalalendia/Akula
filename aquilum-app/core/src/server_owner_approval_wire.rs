@@ -127,6 +127,8 @@ impl OwnerApprovalWireV1 {
     }
 }
 
+pub mod decode;
+
 #[cfg(test)]
 mod tests {
     use super::*;
