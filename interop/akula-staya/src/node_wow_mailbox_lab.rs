@@ -10,7 +10,7 @@
 //! A future product role requires an independently owner-approved mail policy
 //! pinned by root before any network exposure. This feature is lab-only.
 use akula_wire_lab::{
-    custodian_wire::{self, WireError},
+    custodian_wire,
     journal_w4::Journal,
     trust_w3::TrustRegistry,
 };
