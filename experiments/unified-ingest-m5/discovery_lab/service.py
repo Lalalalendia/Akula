@@ -277,6 +277,8 @@ class JobStore:
             if row["status"] not in ("NEEDS_REVIEW", "CANCELLED"):
                 raise JobConflict("only failed or cancelled jobs can be retried")
             if row["status"] == "NEEDS_REVIEW":
+                if row["error_code"] not in ("ObjectWriteUncertain", "PublicationUncertain"):
+                    raise JobConflict("only uncertain S3 transport can be retried without manual repair")
                 path = self.ledger_path(job_id)
                 if path.exists() and PageLedger(path).status(row["work_id"])["issues"]:
                     raise JobConflict("source page requires manual remediation; refusing blind retry")
