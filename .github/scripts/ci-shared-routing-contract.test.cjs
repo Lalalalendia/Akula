@@ -53,7 +53,8 @@ test('ordinary Core PRs schedule no independent perf workflows; opt-in routes re
   const perf=fs.readFileSync(path.join(__dirname,'../workflows/core-perf.yml'),'utf8');
   const compare=fs.readFileSync(path.join(__dirname,'../workflows/core-perf-compare.yml'),'utf8');
   assert.match(perf,/^on:\n  workflow_call:/m);
-  assert.match(perf,/types: \[labeled, edited\]/);
+  assert.match(perf,/types: \[labeled\]/,'label-based opt-in remains');
+  assert.doesNotMatch(perf,/types: \[[^\]]*edited/,'PR description edits must not spawn optional perf workflow');
   assert.doesNotMatch(perf,/types: \[opened, synchronize/);
   assert.match(perf,/^  workflow_dispatch:/m,'manual baseline remains');
   assert.match(perf,/^  paired:\n/m,'paired comparison is called from one baseline workflow');
