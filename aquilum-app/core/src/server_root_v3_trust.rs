@@ -320,6 +320,8 @@ mod enrollment;
 pub use enrollment::admin_enroll_fixed_root_once;
 mod witness_init;
 pub use witness_init::admin_initialize_first_root_witness;
+mod destination_init;
+pub use destination_init::admin_enroll_fixed_opt_once;
 
 #[cfg(test)]
 mod tests;

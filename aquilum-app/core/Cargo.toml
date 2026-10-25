@@ -186,6 +186,13 @@ name = "akula-root-witness-init-lab"
 path = "src/bin/akula_root_witness_init_lab.rs"
 required-features = ["server-root-b0v3-gate-lab"]
 
+# Requires an already independently enrolled B1d0 witness + B0 v3 trust.
+# No Node write, service activation, SSH or UI authority.
+[[bin]]
+name = "akula-root-opt-enroll-lab"
+path = "src/bin/akula_root_opt_enroll_lab.rs"
+required-features = ["server-root-b0v3-gate-lab"]
+
 [[bin]]
 name = "akula-p2p-identity"
 path = "src/bin/akula_p2p_identity.rs"

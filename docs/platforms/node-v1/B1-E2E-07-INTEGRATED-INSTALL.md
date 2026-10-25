@@ -450,3 +450,34 @@ of the root-admin executable, signature/publisher key and safe
 distribution, independent admin consent, real VPS E2E, actual root
 commit/activation authority, systemd and post-reboot two-client proof.
 This remains a non-shipping experiment and **B1-E2E-07 stays HOLD**.
+
+### Fixed administrator-only empty /opt destination enrollment
+
+A further clean-VPS blocker was the preexisting requirement that
+`B1d0::open_root(ProvisionedOpt)` finds an already enrolled root-owned
+`/opt/akula-node` directory, mode 0755, with a precise root-only 0600
+`enrollment` file. The opt-in `akula-root-opt-enroll-lab` now supplies
+a separate **root-administrator** creation step, strictly after
+successful protected witness genesis and separately pinned B0 v3 owner/
+publisher policy enrollment.
+
+Before any filesystem mutation, it requires UID0, a root-owned
+registered B1d0 witness and durable ledger, an independently enrolled
+B0 v3 policy with pinned keys, and locally confirmed supported Linux
+architecture/systemd. It opens only the fixed absolute `/opt` with
+`O_NOFOLLOW`, requires a root-owned 0755 directory, takes an exclusive
+parent lock and creates exactly `/opt/akula-node` (0755) and its root
+0600 `enrollment` marker. The marker is written via O_EXCL to a
+pending name, fsynced, NOREPLACE-renamed and directory-fsynced. Any
+preexisting target, symlink or interrupted publication is a permanent
+HOLD pending independent root inspection, not a silent overwrite or
+repair. Root-only tests exercise exact mode, byte-for-byte B1d0 marker,
+single-use refusal, preexisting partial Node, symlink and untrusted /opt.
+Production /opt is never mutated by CI.
+
+This is an EMPTY INSTALL DESTINATION only: it does not copy or execute
+a Node ELF, advance the witness CAS, create a systemd service, open a port
+or change the Windows client. The executable is compile-only in CI and
+requires an externally authenticated signed release and independent
+administrator consent before it may be used on a real VPS. The normal
+Akula install button and B1-E2E-07 status stay HOLD.
