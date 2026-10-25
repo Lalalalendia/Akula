@@ -76,6 +76,41 @@ if (-not $extracted.Contains('AKULANATIVEPDFNEEDLE')) {
   throw 'Installed Shiva PDF extraction lost native PDF text'
 }
 Write-Host 'AKULA_PDF_SIDECAR_INSTALLED=PASS;source=pinned-shiva;real_pdf=1;external_setup=0'
+
+# Akula's release EXE is linked as a WINDOWS/GUI-subsystem executable.
+# PowerShell's & operator can return before GUI-subsystem processes exit.
+# Synchronize on the real process handle and capture its own exit code.
+function Invoke-InstalledPdfWorker {
+  param(
+    [Parameter(Mandatory = $true)][string]$Source,
+    [Parameter(Mandatory = $true)][int]$Page,
+    [Parameter(Mandatory = $true)][int]$Width,
+    [Parameter(Mandatory = $true)][int]$Rotation,
+    [Parameter(Mandatory = $true)][string]$Output,
+    [Parameter(Mandatory = $true)][string]$Status
+  )
+  $start = [System.Diagnostics.ProcessStartInfo]::new()
+  $start.FileName = $exe
+  $start.UseShellExecute = $false
+  $start.CreateNoWindow = $true
+  foreach ($arg in @('--pdf-worker', $Source, [string]$Page, [string]$Width, [string]$Rotation, $Output, $Status)) {
+    [void]$start.ArgumentList.Add($arg)
+  }
+  $worker = [System.Diagnostics.Process]::new()
+  $worker.StartInfo = $start
+  try {
+    if (-not $worker.Start()) { throw 'Could not start installed Akula PDF worker' }
+    if (-not $worker.WaitForExit(30000)) {
+      $worker.Kill($true)
+      [void]$worker.WaitForExit(5000)
+      throw "Installed PDF worker timed out (page=$Page)"
+    }
+    return [int]$worker.ExitCode
+  } finally {
+    $worker.Dispose()
+  }
+}
+
 # Check the installed native PDFium resource, then render a real PDF through the
 # *installed* Akula executable. This is not a source-only test.
 $installedPdfium = @(@((Join-Path $akulaInstall 'resources/pdfium.dll'), (Join-Path $akulaInstall 'pdfium.dll')) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
@@ -84,14 +119,14 @@ $compiledPdfium = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/relea
 if ((Get-FileHash -LiteralPath $installedPdfium[0]).Hash -ne (Get-FileHash -LiteralPath $compiledPdfium).Hash) { throw 'Installed PDFium differs from pinned binary' }
 $rendered = Join-Path $probeDir 'real-page.png'
 $renderStatus = Join-Path $probeDir 'real-page.status'
-& $exe --pdf-worker $sourcePdf 0 900 0 $rendered $renderStatus
-if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $rendered -PathType Leaf)) {
+$renderExit = Invoke-InstalledPdfWorker -Source $sourcePdf -Page 0 -Width 900 -Rotation 0 -Output $rendered -Status $renderStatus
+if ($renderExit -ne 0 -or !(Test-Path -LiteralPath $rendered -PathType Leaf)) {
   $workerStatus = if (Test-Path -LiteralPath $renderStatus -PathType Leaf) {
     (Get-Content -LiteralPath $renderStatus -Raw).Trim()
   } else { 'status_file_missing' }
   if ($workerStatus.Length -gt 300) { $workerStatus = $workerStatus.Substring(0, 300) }
   $workerStatus = $workerStatus -replace '[^A-Za-z0-9 .,;:=_()/-]', '?'
-  throw "Installed PDFium page rendering failed: exit=$LASTEXITCODE;status=$workerStatus"
+  throw "Installed PDFium page rendering failed: exit=$renderExit;status=$workerStatus"
 }
 $reply = (Get-Content -LiteralPath $renderStatus -Raw).Trim()
 if ($reply -notmatch '^PDF_VIEW_V1 [1-9][0-9]* [1-9][0-9]* [1-9][0-9]*$') { throw "Invalid PDF page renderer reply: $reply" }
@@ -108,14 +143,14 @@ $distinct = @()
 for ($pageIndex = 0; $pageIndex -lt 2; $pageIndex++) {
   $dest = Join-Path $probeDir "two-page-$pageIndex.png"
   $meta = Join-Path $probeDir "two-page-$pageIndex.status"
-  & $exe --pdf-worker $multi $pageIndex 800 0 $dest $meta
-  if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $dest -PathType Leaf)) { throw "Cannot render PDF page $pageIndex" }
+  $pageExit = Invoke-InstalledPdfWorker -Source $multi -Page $pageIndex -Width 800 -Rotation 0 -Output $dest -Status $meta
+  if ($pageExit -ne 0 -or !(Test-Path -LiteralPath $dest -PathType Leaf)) { throw "Cannot render PDF page $pageIndex; exit=$pageExit" }
   if ((Get-Content -LiteralPath $meta -Raw).Trim() -notmatch '^PDF_VIEW_V1 2 [1-9][0-9]* [1-9][0-9]*$') { throw "Wrong PDF page count $pageIndex" }
   $distinct += (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
 }
 if ($distinct[0] -eq $distinct[1]) { throw 'Distinct PDF pages rendered identically' }
-& $exe --pdf-worker $multi 2 800 0 (Join-Path $probeDir 'invalid.png') (Join-Path $probeDir 'invalid.status')
-if ($LASTEXITCODE -eq 0) { throw 'Out-of-range PDF page was accepted' }
+$invalidExit = Invoke-InstalledPdfWorker -Source $multi -Page 2 -Width 800 -Rotation 0 -Output (Join-Path $probeDir 'invalid.png') -Status (Join-Path $probeDir 'invalid.status')
+if ($invalidExit -eq 0) { throw 'Out-of-range PDF page was accepted' }
 if ((Get-FileHash -LiteralPath $multi -Algorithm SHA256).Hash -ne $originalMultiHash) { throw 'Rendering modified the PDF source' }
 Write-Host 'AKULA_PDFIUM_MULTIPAGE=PASS;pages=2;different_pixels=1;invalid_index_rejected=1;source_unchanged=1'
 
@@ -140,8 +175,8 @@ function Invoke-PdfCorpusPage {
   $key = "$($FileName.Replace('.pdf',''))-$Page"
   $out = Join-Path $probeDir "$key.png"
   $status = Join-Path $probeDir "$key.status"
-  & $exe --pdf-worker $src $Page 720 0 $out $status
-  if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $out -PathType Leaf)) {
+  $pageExit = Invoke-InstalledPdfWorker -Source $src -Page $Page -Width 720 -Rotation 0 -Output $out -Status $status
+  if ($pageExit -ne 0 -or !(Test-Path -LiteralPath $out -PathType Leaf)) {
     throw "Installed PDFium failed to render $FileName page $Page"
   }
   $reply = (Get-Content -LiteralPath $status -Raw).Trim()
@@ -169,8 +204,8 @@ foreach ($invalidName in @('native_truncated.pdf', 'native_invalid_magic.pdf')) 
   Assert-PdfCorpusSource $invalidName
   $out = Join-Path $probeDir ($invalidName + '.png')
   $status = Join-Path $probeDir ($invalidName + '.status')
-  & $exe --pdf-worker $src 0 720 0 $out $status
-  if ($LASTEXITCODE -eq 0 -or (Test-Path -LiteralPath $out -PathType Leaf)) {
+  $invalidExit = Invoke-InstalledPdfWorker -Source $src -Page 0 -Width 720 -Rotation 0 -Output $out -Status $status
+  if ($invalidExit -eq 0 -or (Test-Path -LiteralPath $out -PathType Leaf)) {
     throw "Unsafe PDF accepted by installed PDFium: $invalidName"
   }
   Assert-PdfCorpusSource $invalidName
