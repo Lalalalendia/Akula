@@ -80,7 +80,10 @@ fn disposable_uid0_accepts_exact_owner_frame_only_from_enrolled_policy() {
     let (_temp, trust) = fixture(&public);
     let signed = frame(&signer);
     let accepted = verify_from_trust_fd(&trust, &signed, NOW).unwrap();
-    assert_eq!(accepted.claim.canonical_bytes(), signed[..signed.len() - 64]);
+    assert_eq!(
+        accepted.claim.canonical_bytes(),
+        signed[..signed.len() - 64]
+    );
     assert_eq!(accepted.signature.as_slice(), &signed[signed.len() - 64..]);
     // This read-only check creates no B1d0 CAS or Node file.
     assert!(verify_from_trust_fd(&trust, &signed, NOW + 50).is_err());

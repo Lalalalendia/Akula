@@ -290,7 +290,11 @@ mod root_production_gate_tests {
         let mut bad_proposed = proposed;
         bad_proposed.proposed_head.floor.sequence += 1;
         assert!(!frame_matches_b1d0_inputs(
-            &owner, scope, &stage, bad_proposed, before
+            &owner,
+            scope,
+            &stage,
+            bad_proposed,
+            before
         ));
         for mutation in 0..6 {
             let mut different = checked;

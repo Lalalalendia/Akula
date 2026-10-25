@@ -16,8 +16,8 @@ pub(super) fn verify_from_trust_fd(
 ) -> Result<SignedOwnerApproval, RootEnrollmentError> {
     let enrolled = RootEnrolledV3::from_trust_fd(trust)?;
     let owner = enrolled.trusted_owner();
-    let frame = SignedOwnerWireFrame::decode(signed_frame)
-        .map_err(RootEnrollmentError::OwnerFrame)?;
+    let frame =
+        SignedOwnerWireFrame::decode(signed_frame).map_err(RootEnrollmentError::OwnerFrame)?;
     frame
         .verify_pinned_owner(&owner.approver_id, &owner.public_key_ed25519, now_unix)
         .map_err(RootEnrollmentError::OwnerFrame)?;
