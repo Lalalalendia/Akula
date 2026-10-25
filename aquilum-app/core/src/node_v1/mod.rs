@@ -71,25 +71,17 @@ impl NodeHost {
 
     pub fn public_key(&self) -> [u8; 32] { self.identity.public_key() }
 
-    /// Debug/integration-only independent Node operator anchor for a separately
-    /// signed mail-role policy. Does NOT authorize any mail operation itself.
     #[cfg(all(feature = "node-v1-transport-tests", debug_assertions))]
     pub fn mail_operator_key_for_lab(&self) -> Result<[u8; 32], NodeV1Error> {
-        self.trust.mail_operator_key_for_lab()
+        Ok(self.trust.witnessed_roster()?.owner_public_key)
     }
 
-
-
-    /// The public QUIC endpoint is another key, separately pinned by root.
-    /// It must match before the daemon opens a UDP listener.
     pub fn verify_iroh_endpoint(&self, endpoint: [u8; 32])
         -> Result<(), NodeV1Error>
     {
         self.trust.require_iroh_endpoint(endpoint)
     }
 
-    /// This proves the local process owns the enrolled Node key. It does
-    /// not prove remote connectivity, a writable store or a healthy data plane.
     pub fn sign_local_health(&self, challenge: [u8; 32])
         -> Result<[u8; 64], NodeV1Error>
     {
@@ -170,5 +162,4 @@ impl NodeHost {
         self.trust.require_current()?;
         Ok(bytes)
     }
-
 }
