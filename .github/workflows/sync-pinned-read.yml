@@ -21,6 +21,7 @@ on:
       - "aquilum-app/core/src/sync/sealed_archive.rs"
       - "aquilum-app/core/src/sync/local_create_tests.rs"
       - "aquilum-app/core/src/sync/journal.rs"
+      - "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs"
       - "aquilum-app/core/src/sync/core_scan.rs"
       - "aquilum-app/core/src/sync/path.rs"
       - "aquilum-app/core/src/search/paths.rs"
