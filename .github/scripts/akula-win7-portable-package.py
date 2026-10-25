@@ -100,6 +100,10 @@ The launcher uses a test vault and separate data directory beside this file.
 Do not use private files, network sync, or normal automatic updating.
 Do not overwrite your production Akula installation.
 
+Shiva requires an explicit small directory of valid fonts (SHIVA_FONT_DIR).
+The launchers prepare it by copying Arial from the local Windows installation.
+No fonts are redistributed; if the font is missing they stop with a clear error.
+
 The two experimental EXEs were built from independent pinned sources using
 the same Windows 7 target. The Shiva PDF converter belongs next to Akula.
 Both were PE-audited; Shiva passed a text-to-PDF test on Windows Server 2022,
@@ -120,6 +124,9 @@ setlocal
 set "ROOT=%~dp0"
 if not exist "%ROOT%vault" mkdir "%ROOT%vault"
 if not exist "%ROOT%state" mkdir "%ROOT%state"
+set "SHIVA_FONT_DIR=%ROOT%shiva-fonts"
+call "%ROOT%PREPARE-SHIVA-FONTS.cmd"
+if errorlevel 1 exit /b 1
 "%ROOT%akula-app.exe" --vault "%ROOT%vault" --data-dir "%ROOT%state"
 """
 
@@ -127,6 +134,9 @@ PDF_SMOKE = """@echo off
 setlocal
 set "ROOT=%~dp0"
 if not exist "%ROOT%shiva-pdf-preview.exe" (echo ERROR: Shiva EXE missing & exit /b 1)
+set "SHIVA_FONT_DIR=%ROOT%shiva-fonts"
+call "%ROOT%PREPARE-SHIVA-FONTS.cmd"
+if errorlevel 1 exit /b 1
 if exist "%ROOT%pdf-smoke-output.pdf" del /q "%ROOT%pdf-smoke-output.pdf"
 "%ROOT%shiva-pdf-preview.exe" "%ROOT%pdf-smoke-input.txt" "%ROOT%pdf-smoke-output.pdf"
 if errorlevel 1 (echo ERROR: PDF conversion failed & exit /b 1)
@@ -136,8 +146,24 @@ echo PDF conversion completed: pdf-smoke-output.pdf
 exit /b 0
 """
 
-PDF_SMOKE_INPUT = "Akula Windows 7 PDF companion sample.\\r\\nA test of Shiva text-to-PDF.\\r\\n"
+FONT_PREP = """@echo off
+rem Only copy a font supplied by this Windows installation. The lab ZIP
+rem carries no third-party fonts and does not require network access.
+if not defined SHIVA_FONT_DIR (echo ERROR: SHIVA_FONT_DIR not set & exit /b 1)
+if not exist "%SHIVA_FONT_DIR%\" mkdir "%SHIVA_FONT_DIR%" || exit /b 1
+if not exist "%SHIVA_FONT_DIR%\arial.ttf" (
+    if not exist "%WINDIR%\Fonts\arial.ttf" (
+        echo ERROR: Arial not found in the Windows font directory.
+        exit /b 1
+    )
+    copy /b /y "%WINDIR%\Fonts\arial.ttf" "%SHIVA_FONT_DIR%\arial.ttf" >nul
+    if errorlevel 1 (echo ERROR: Could not provision PDF font & exit /b 1)
+)
+if not exist "%SHIVA_FONT_DIR%\arial.ttf" (echo ERROR: PDF font unavailable & exit /b 1)
+exit /b 0
+"""
 
+PDF_SMOKE_INPUT = "Akula Windows 7 PDF companion sample.\r\nA test of Shiva text-to-PDF.\r\n"
 
 
 def main() -> None:
@@ -195,6 +221,7 @@ def main() -> None:
     (args.out / "README-WIN7-LAB.txt").write_text(README, encoding="utf-8")
     (args.out / "START-WIN7-LAB.cmd").write_text(LAUNCHER, encoding="ascii")
     (args.out / "SMOKE-PDF-WIN7.cmd").write_text(PDF_SMOKE, encoding="ascii")
+    (args.out / "PREPARE-SHIVA-FONTS.cmd").write_text(FONT_PREP, encoding="ascii")
     (args.out / "pdf-smoke-input.txt").write_text(PDF_SMOKE_INPUT, encoding="ascii")
     provenance = (
         "source_sha=" + args.revision + "\n"
@@ -213,11 +240,12 @@ def main() -> None:
     archive = args.out / "Akula-Win7-LAB-portable.zip"
     with zipfile.ZipFile(archive, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for name in ("akula-app.exe", "shiva-pdf-preview.exe", "START-WIN7-LAB.cmd",
-                     "SMOKE-PDF-WIN7.cmd", "pdf-smoke-input.txt",
+                     "SMOKE-PDF-WIN7.cmd", "PREPARE-SHIVA-FONTS.cmd",
+                     "pdf-smoke-input.txt",
                      "README-WIN7-LAB.txt", "PROVENANCE.txt"):
             zf.write(args.out / name, arcname=name)
     with zipfile.ZipFile(archive) as zf:
-        if zf.testzip() is not None or len(zf.namelist()) != 7:
+        if zf.testzip() is not None or len(zf.namelist()) != 8:
             fail("portable archive integrity check failed")
         if hashlib.sha256(zf.read("shiva-pdf-preview.exe")).hexdigest() != sidecar_digest:
             fail("PDF sidecar changed in portable archive")
