@@ -3,7 +3,7 @@ use crate::server_release_lab::{ReleaseManifestV1, TargetPlatform, Version};
 use ring::digest::{digest, SHA256};
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use std::fs::{self, Permissions};
-use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::fs::{symlink, MetadataExt, PermissionsExt};
 use tempfile::{tempdir, TempDir};
 
 const NOW: u64 = 1_800_000_000;
@@ -28,6 +28,9 @@ fn marker(sha: &[u8; 32]) -> Vec<u8> {
 }
 fn fixture() -> (TempDir, File, [u8; 32]) {
     let temp = tempdir().unwrap();
+    // The trust parent in production is a fixed UID0 0700 directory.
+    // Tempfile implementations need not inherit the same permission mode.
+    fs::set_permissions(temp.path(), Permissions::from_mode(0o700)).unwrap();
     let trust_path = temp.path().join("trust");
     let stage_path = temp.path().join(STAGE_LEAF);
     fs::create_dir(&trust_path).unwrap();
@@ -119,7 +122,13 @@ fn independently_pinned_root_policy_accepts_only_signed_stage_hold() {
         )
         .unwrap(),
     );
-    assert!(root_dir_ok(&parent.metadata().unwrap(), 0o700), "parent root");
+    let parent_meta = parent.metadata().unwrap();
+    assert!(
+        root_dir_ok(&parent_meta, 0o700),
+        "parent root uid={}, mode={:o}",
+        parent_meta.uid(),
+        parent_meta.permissions().mode() & 0o7777
+    );
     let stage = File::from(
         openat(
             &parent,
