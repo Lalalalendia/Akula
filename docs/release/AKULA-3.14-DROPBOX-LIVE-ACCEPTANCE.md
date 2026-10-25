@@ -57,6 +57,8 @@ The probe snapshots visible top-level Edge/Chrome/Firefox/etc. browser HWNDs *be
 
 - [Browser UIA source commit](https://github.com/Lalalalendia/Akula/commit/d90b7bccc139afb660fd1dcb30f416447a329929)
 - [Existing Windows Dropbox workflow integration](https://github.com/Lalalalendia/Akula/commit/1627f3719d8a3d1ca0a40ff634e621c8fd213320)
-- [First Windows browser UIA CI #40195949867](https://github.com/Lalalalendia/Akula/actions/runs/40195949867) — **PENDING** at recording time; do not mark as PASS until an actual `AKULA_DROPBOX_SYSTEM_BROWSER_UIA_PASS` witness is observed on the exact tested SHA.
+- [First Windows browser UIA CI #40195949867](https://github.com/Lalalalendia/Akula/actions/runs/40195949867) — **FAIL: TEST HARNESS PATH**, not a browser defect. Native `cargo check`, 16 native tests, 5 config tests, 31 isolated onboarding tests and `cargo build` passed; the UIA script aborted *before clicking* because it expected `.artifacts/cargo-native/debug` while this workflow compiles from the repository root. No browser verdict was obtained.
+- [Resolved-path test fix](https://github.com/Lalalendia/Akula/commit/a4e0c56a287e657986abbeb088b3eaa9bef5e429) and [workflow fix](https://github.com/Lalalendia/Akula/commit/4a81d22167c15267c6a3ad0974f407be96d04633) use `cargo metadata` and check that the executable is inside one of two approved Akula build output directories.
+- [Re-run Windows browser UIA CI #40199126430](https://github.com/Lalalendia/Akula/actions/runs/40199126430) — **PENDING** when recorded; do not report PASS without an actual `AKULA_DROPBOX_SYSTEM_BROWSER_UIA_PASS` witness on the tested commit.
 
 The branch-only `push` subscription in `dropbox-native-313.yml` is temporary for this non-PR test. Remove it after the exact-head test is accepted, retaining the test in the existing workflow's `pull_request` and manual paths. This probe does not establish real Dropbox account consent or signed/installed production release approval.
