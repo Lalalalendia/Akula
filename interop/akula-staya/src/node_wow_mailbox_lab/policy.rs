@@ -254,7 +254,7 @@ fn read_root_owned_mail_file_with_handle(
         return Err(MailRoleHold::MailPolicy);
     }
     let after = handle.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
-    if (meta.dev(),meta.ino(),meta.len()) != (after.dev(),after.ino(),after.len()) {
+    if (meta.dev(), meta.ino(), meta.len()) != (after.dev(), after.ino(), after.len()) {
         return Err(MailRoleHold::MailPolicy);
     }
     Ok((result, handle))
@@ -267,7 +267,7 @@ fn read_root_owned_mail_file(
 ) -> Result<(Vec<u8>, (u64, u64)), MailRoleHold> {
     let (bytes, handle) = read_root_owned_mail_file_with_handle(folder, filename, limit)?;
     let m = handle.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
-    Ok((bytes, (m.dev(),m.ino())))
+    Ok((bytes, (m.dev(), m.ino())))
 }
 
 fn read_authorized_mail_file(
@@ -330,7 +330,8 @@ fn root_commit_file(
     floor_epoch: u64,
 ) -> Result<Arc<File>, MailRoleHold> {
     require_no_root_pending(folder)?;
-    let (receipt, file) = read_root_owned_mail_file_with_handle(folder, COMMIT_FILE, COMMIT_LEN as u64)?;
+    let (receipt, file) =
+        read_root_owned_mail_file_with_handle(folder, COMMIT_FILE, COMMIT_LEN as u64)?;
     if receipt.len() != COMMIT_LEN
         || receipt
             != mail_commit_receipt_for_lab(
@@ -584,8 +585,12 @@ impl VerifiedMailRoleLab {
         }
         if let Some(original_fd) = &self.commit_fd {
             let current_fd = root_commit_file(&self.folder, &input, floor.epoch)?;
-            let before = original_fd.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
-            let after = current_fd.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
+            let before = original_fd
+                .metadata()
+                .map_err(|_| MailRoleHold::MailPolicy)?;
+            let after = current_fd
+                .metadata()
+                .map_err(|_| MailRoleHold::MailPolicy)?;
             if (before.dev(), before.ino()) != (after.dev(), after.ino())
                 || before.nlink() != 1
                 || after.nlink() != 1
