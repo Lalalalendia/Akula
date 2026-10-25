@@ -34,10 +34,11 @@ jobs:
         run: cargo check --locked -p aquilum-core --no-default-features
       - name: Verify 3 codec modes, independent siblings and adversarial bounds
         working-directory: aquilum-app
-        run: cargo test --locked -p aquilum-core --no-default-features --features sync-text-delta text_delta_codec::tests -- --nocapture
+        run: cargo test --manifest-path modules/text-delta-codec/Cargo.toml codec::tests -- --nocapture
       - name: Measure Rust modes on genuine successive Git revisions
-        working-directory: aquilum-app
-        run: cargo test --locked -p aquilum-core --no-default-features --features sync-text-delta real_git_markdown_pairs_numeric_ab -- --ignored --nocapture
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: .
+        run: cargo test --manifest-path modules/text-delta-codec/Cargo.toml real_git_markdown_pairs_numeric_ab -- --ignored --nocapture
       - name: Verify legacy S3 V2 parser explicitly rejects new delta envelope
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-s3,sync-text-delta new_text_delta_is_not_a_legacy_pack -- --nocapture
@@ -45,6 +46,7 @@ jobs:
       - name: Test A/B accountancy without a Rust build
         run: python3 scripts/benchmarks/sync-text-delta-rust-profile.py --self-test-only
       - name: Measure Rust Full, Splice, Raw Dictionary, and selected policy
+        if: github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
           python3 scripts/benchmarks/sync-text-delta-rust-profile.py \
@@ -71,6 +73,7 @@ jobs:
                      for r in summary)
           PY
       - name: Retain only numeric and public-Git benchmark evidence
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: akula-text-delta-04-rust-real-git-profile

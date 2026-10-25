@@ -1,9 +1,7 @@
-//! Standalone parity laboratory for Core's *existing* Text Delta representation.
+//! Standalone, pure bounded Text Delta wire representation.
 //!
-//! This is a separate Cargo compilation boundary, NOT YET a separate source
-//! owner: the exact production codec is imported by path from Core. No File
-//! Gate, network, S3, Vault mutation, baseline trust or publish permission.
-//! Physical source migration and CI routing require later independent PRs.
+//! This crate owns production codec logic, but cannot establish history trust,
+//! grant File Gate rights, transport S3 packets, or publish any baseline.
 use uuid::Uuid;
 
 /// Intentionally matches the Core RevisionId wire identity without depending
@@ -29,9 +27,7 @@ impl Default for RevisionId {
     }
 }
 
-#[allow(dead_code)]
-#[path = "../../../aquilum-app/core/src/sync/text_delta_codec.rs"]
-mod codec;
+pub mod codec;
 
 #[cfg(test)]
 mod parity_boundary_tests {
