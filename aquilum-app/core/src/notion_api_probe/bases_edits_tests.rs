@@ -717,3 +717,44 @@ fn c5b4_accept_notion_refuses_existing_foreign_archive_and_preserves_local_data(
     assert_eq!(fs::read(f.edited_path()).unwrap(),before);
     assert_eq!(fs::read(archive_path).unwrap(),b"forged");
 }
+
+#[test]
+fn c5b4_restore_one_local_cell_from_verified_archive_without_rebasing_other_data() {
+    let f=Fixture::new();
+    let row=f.row(A);let prop=f.prop(DS1,"score");
+    apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::Set{row_id:row.clone(),property_id:prop.clone(),
+            value:LocalValue::Number(777.0)}],true).unwrap();
+    let before=fs::read(f.edited_path()).unwrap();
+    let next=published_new_source(&f,|source|{
+        source.objects.iter_mut().find(|o|o.kind=="page"&&o.id==A)
+            .unwrap().json["properties"]["Score"]["number"]=json!(91);
+    });
+    let old_hash=preview_rebase(&f.vault,A,&f.digest,&next).unwrap().expected_local_hash;
+    let accepted=apply_rebase_decisions_approved(&f.core,&f.vault,A,&f.digest,
+        &next,&old_hash,&[(row.clone(),prop.clone(),RebaseDecision::AcceptNotion)],true).unwrap();
+    let archive=accepted.pre_rebase_archive.clone().unwrap();
+    assert_eq!(fs::read(f.vault.join(&archive)).unwrap(),before);
+    let active_before=fs::read(f.edited_path()).unwrap();
+    assert!(restore_archived_cell_approved(&f.core,&f.vault,A,
+        &f.digest,&next,&old_hash,&accepted.disk_hash,
+        &archive,&row,&prop,false).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),active_before);
+    assert!(restore_archived_cell_approved(&f.core,&f.vault,A,
+        &f.digest,&next,&old_hash,&accepted.disk_hash,
+        "Notion-import/other.json",&row,&prop,true).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),active_before);
+    let restored=restore_archived_cell_approved(&f.core,&f.vault,A,
+        &f.digest,&next,&old_hash,&accepted.disk_hash,
+        &archive,&row,&prop,true).unwrap();
+    assert_eq!(restored.overrides,1);
+    assert_eq!(restored.revision,accepted.revision+1);
+    let current=open(&f.vault,A,&next).unwrap().unwrap();
+    assert_eq!(current.state.local_value(&row,&prop),
+        Some(&LocalValue::Number(777.0)));
+    assert_eq!(fs::read(f.vault.join(&archive)).unwrap(),before);
+    assert!(restore_archived_cell_approved(&f.core,&f.vault,A,
+        &f.digest,&next,&old_hash,&restored.disk_hash,
+        &archive,&row,&prop,true).is_err(),
+        "cannot overwrite a locally edited cell with an archived value");
+}
