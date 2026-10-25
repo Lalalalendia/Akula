@@ -60,16 +60,20 @@ impl Fixture {
             private_folder(dir);
         }
         let key = NodeIdentity::open_or_create(&node_state).unwrap();
+        let owner_public = [9u8; 32];
+        let roster_digest = [10u8; 32];
+        let grant_digest = [11u8; 32];
+        let put_grant_digest = [12u8; 32];
         let config = serde_json::json!({
             "version": 3,
             "node_public": key.public_key(),
             "iroh_endpoint_public": NODE_ENDPOINT,
-            "owner_public": [9u8; 32],
+            "owner_public": owner_public,
             "vault_id": VaultId::new(),
             "grant_epoch": 9u64,
-            "roster_digest": [10u8; 32],
-            "grant_digest": [11u8; 32],
-            "put_grant_digest": [12u8; 32]
+            "roster_digest": roster_digest,
+            "grant_digest": grant_digest,
+            "put_grant_digest": put_grant_digest
         });
         let policy_file = node_policy.join("owner-policy.json");
         fs::write(&policy_file, serde_json::to_vec(&config).unwrap()).unwrap();
