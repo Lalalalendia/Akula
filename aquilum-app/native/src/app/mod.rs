@@ -133,6 +133,7 @@ pub struct App {
     yandex_probe: crate::yandex_probe_session::ProbeSession,
     #[cfg(feature = "notion-offline-preview")]
     notion_session: crate::notion_offline::NotionSession,
+    #[cfg(feature = "notion-offline-preview")] notion_bases: crate::notion_bases::BasesSession,
     #[cfg(feature = "notion-offline-preview")]
     notion_sync: crate::notion_sync::RefreshSession, #[cfg(feature = "notion-offline-preview")] notion_import: crate::notion_import::ImportSession,
     #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
