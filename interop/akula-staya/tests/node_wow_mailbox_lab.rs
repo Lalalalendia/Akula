@@ -27,6 +27,7 @@ use std::{
     net::{TcpListener, TcpStream},
     os::unix::fs::{PermissionsExt, symlink},
     path::{Path, PathBuf},
+    process::Command,
     thread,
 };
 
@@ -681,4 +682,103 @@ fn revoked_sqlite_mail_role_fences_live_node_even_with_valid_owner_files() {
             })
             .is_err()
     );
+}
+
+
+/// This OS test is explicitly opt-in because it stages root-owned,
+/// PUBLIC signed policy files under a disposable CI runner's /etc tree.
+/// It refuses any pre-existing Akula Node installation, never installs a
+/// daemon, binary, key, service or listens on an external network address.
+#[test]
+fn root_owned_mail_policy_is_read_only_and_current() {
+    if std::env::var("AKULA_WOW_ROOT_MAIL_OS_TEST").ok().as_deref() != Some("1") {
+        return;
+    }
+    use std::os::unix::fs::MetadataExt;
+    assert_ne!(rustix::process::geteuid().as_raw(), 0, "nonroot service required");
+    const PARENT: &str = "/etc/akula-node";
+    const ROOT: &str = "/etc/akula-node/wow-mail";
+    const POLICY: &str = "/etc/akula-node/wow-mail/owner-mail-policy.bin";
+    const FLOOR: &str = "/etc/akula-node/wow-mail/owner-mail-epoch-floor.bin";
+    assert!(
+        fs::symlink_metadata(PARENT).is_err(),
+        "refuse to touch an existing root-owned Akula Node installation"
+    );
+    fn sudo(args: &[&str]) {
+        let result = Command::new("sudo").arg("-n").args(args).status().unwrap();
+        assert!(result.success(), "CI root-owned fixture provisioning failed");
+    }
+    struct Cleanup;
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            for args in [
+                vec!["rm", "-f", "--", POLICY, FLOOR],
+                vec!["rmdir", "--", ROOT],
+                vec!["rmdir", "--", PARENT],
+            ] {
+                let _ = Command::new("sudo").arg("-n").args(args).status();
+            }
+        }
+    }
+    let fixture = Fixture::new();
+    let group = rustix::process::getegid().as_raw().to_string();
+    sudo(&["install", "-d", "-o", "root", "-g", "root", "-m", "0755", PARENT]);
+    let _cleanup = Cleanup;
+    sudo(&[
+        "install", "-d", "-o", "root", "-g", &group, "-m", "0750", ROOT,
+    ]);
+    let signed_source = fixture.mail_policy_file();
+    let floor_source = fixture.floor_file();
+    sudo(&[
+        "install", "-o", "root", "-g", &group, "-m", "0640",
+        signed_source.to_str().unwrap(), POLICY,
+    ]);
+    sudo(&[
+        "install", "-o", "root", "-g", &group, "-m", "0640",
+        floor_source.to_str().unwrap(), FLOOR,
+    ]);
+    let meta = fs::metadata(POLICY).unwrap();
+    assert_eq!(meta.uid(), 0);
+    assert_eq!(meta.gid(), rustix::process::getegid().as_raw());
+    assert_eq!(meta.permissions().mode() & 0o7777, 0o640);
+    assert!(fs::read(POLICY).is_ok(), "service must read the signed public manifest");
+    assert!(fs::write(POLICY, b"unprivileged replacement attempt").is_err());
+    assert!(fs::remove_file(POLICY).is_err());
+
+    let open = || NodeWowMailboxLab::open_existing_root_provisioned(
+        &fixture.node,
+        &fixture.mail_state,
+        NODE_ENDPOINT,
+        fixture.custodian.clone(),
+        1,
+    );
+    let mut running = open().expect("root-owned policy and SQLite witness must match");
+    let proof = fixture.list_proof();
+    let listed = exchange(&fixture.node, &mut running, move |sock| client_list(sock, &proof))
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+    let info = listed[0];
+    let proof = fixture.list_proof();
+    let retrieved = exchange(&fixture.node, &mut running, move |sock| {
+        client_fetch_listed(sock, &proof, info)
+    }).unwrap();
+    assert_eq!(retrieved, Some(fixture.packet.clone()));
+
+    // Writable group path cannot authorize a mailbox, even if signature
+    // and verified SQLite row remain unchanged.
+    sudo(&["chmod", "0770", ROOT]);
+    assert!(matches!(open(), Err(MailRoleHold::MailPolicy)));
+    sudo(&["chmod", "0750", ROOT]);
+    assert!(open().is_ok());
+
+    // Root changes the signed bytes: an existing role must stop even if
+    // the new file has a valid (but unreviewed) signature. No auto-enrolment.
+    sudo(&["rm", "-f", "--", POLICY]);
+    sudo(&["ln", "-s", "/etc/passwd", POLICY]);
+    assert!(matches!(open(), Err(MailRoleHold::MailPolicy)));
+    let listener = bind_test_loopback().unwrap();
+    assert!(matches!(
+        running.serve_one(&fixture.node, &listener, 4),
+        Err(MailRoleHold::MailPolicy)
+    ));
 }
