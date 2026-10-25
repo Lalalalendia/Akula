@@ -1,0 +1,24 @@
+name: Akula synthetic two-locks policy lab
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/tests/scope_publication_policy_lab.rs'
+      - 'docs/platforms/AK-DATA-CTRL-01C-LAB.md'
+      - '.github/workflows/scope-publication-policy-lab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: akula-two-locks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  inert-policy-lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Memory-only synthetic publication tests
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --test scope_publication_policy_lab -- --nocapture
