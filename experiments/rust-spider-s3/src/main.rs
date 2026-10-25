@@ -74,11 +74,20 @@ async fn main() -> Result<()> {
     website.with_concurrency_limit(Some(4));
     website.with_respect_robots_txt(false);
     website.with_user_agent(Some("rust-s3-compare/0.1"));
-    let mut receiver = website.subscribe(8);
+    // Benchmark-only choice: retain every synthetic page in the broadcast ring.
+    // This memory use scales with TRIAL_PAGES; it is not production backpressure.
+    let mut receiver = website.subscribe((n_pages as usize).saturating_add(16));
     let transfer = tokio::spawn(async move {
         let sem = Arc::new(Semaphore::new(4));
         let mut tasks = JoinSet::new();
-        while let Ok(page) = receiver.recv().await {
+        loop {
+            let page = match receiver.recv().await {
+                Ok(page) => page,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    bail!("Spider subscription lost {skipped} pages because S3 uploads could not keep up");
+                }
+            };
             if !page.get_url().contains("/pages/") { continue; }
             if !page.status_code.is_success() {
                 bail!("page failed HTTP status {}: {}", page.status_code, page.get_url());
