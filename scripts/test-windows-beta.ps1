@@ -78,7 +78,7 @@ if (-not $extracted.Contains('AKULANATIVEPDFNEEDLE')) {
 Write-Host 'AKULA_PDF_SIDECAR_INSTALLED=PASS;source=pinned-shiva;real_pdf=1;external_setup=0'
 # Check the installed native PDFium resource, then render a real PDF through the
 # *installed* Akula executable. This is not a source-only test.
-$installedPdfium = @((Join-Path $akulaInstall 'resources/pdfium.dll'), (Join-Path $akulaInstall 'pdfium.dll')) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+$installedPdfium = @(@((Join-Path $akulaInstall 'resources/pdfium.dll'), (Join-Path $akulaInstall 'pdfium.dll')) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
 if ($installedPdfium.Count -ne 1) { throw 'Installed Akula requires exactly one bundled PDFium DLL' }
 $compiledPdfium = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release/pdfium.dll'
 if ((Get-FileHash -LiteralPath $installedPdfium[0]).Hash -ne (Get-FileHash -LiteralPath $compiledPdfium).Hash) { throw 'Installed PDFium differs from pinned binary' }
