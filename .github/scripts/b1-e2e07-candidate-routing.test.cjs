@@ -10,7 +10,7 @@ const path = require('node:path');
 const workflow = fs.readFileSync(
   path.join(__dirname, '../workflows/akula-root-helper-candidate.yml'), 'utf8'
 );
-const scope = workflow.match(/^    paths:\n((?:      - '[^']+'\n)+)/m);
+const scope = workflow.match(/^    paths:\n((?:      (?:#.*|- '[^']+')\n)+)/m);
 assert.ok(scope, 'candidate must retain a push.paths allowlist');
 const paths = [...scope[1].matchAll(/^      - '([^']+)'$/gm)].map(m => m[1]);
 assert.equal(paths.some(p => p.startsWith('!')), false, 'no silent negative path overrides');
