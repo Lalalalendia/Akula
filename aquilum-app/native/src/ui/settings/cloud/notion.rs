@@ -3,7 +3,6 @@
 use super::*;
 use crate::notion_offline::{LoadState, PAGE_BATCH, TEXT_CHARS};
 mod bases;
-
 fn action_button(
     title: String, action: Action, bindings: &mut HashMap<WidgetId, Binding>,
 ) -> NewWidget<TextButton> {
@@ -11,7 +10,6 @@ fn action_button(
     bindings.insert(button.id(), Binding::Button(action));
     button
 }
-
 pub(super) fn body(
     ctx: &Context, bindings: &mut HashMap<WidgetId, Binding>,
 ) -> NewWidget<Flex> {
@@ -69,8 +67,6 @@ pub(super) fn body(
             ));
         }
     }
-
-
     column=bases::append(column,ctx,bindings,selected_root);
     let status = &ctx.notion_selection;
     if let Some(root) = selected_root
@@ -201,7 +197,6 @@ pub(super) fn body(
         .with(Gap::new(Length::px(size::GAP_LG)))
         .with(Padding::all(Length::px(size::GAP_XL))))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
