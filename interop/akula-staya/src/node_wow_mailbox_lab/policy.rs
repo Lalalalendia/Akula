@@ -491,7 +491,6 @@ impl VerifiedMailRoleLab {
         self.pinned_digest
     }
 
-
     pub(super) fn open(
         folder: &Path,
         node: &NodeHost,
