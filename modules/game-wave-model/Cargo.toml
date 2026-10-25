@@ -1,0 +1,10 @@
+[package]
+name = "akula-game-wave-model"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "Isolated data-driven game-wave scheduler laboratory"
+
+# Research boundary: do not join the desktop workspace before separate approval.
+[workspace]
