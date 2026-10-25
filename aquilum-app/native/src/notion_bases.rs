@@ -9,6 +9,8 @@ use std::{fs, path::{Path, PathBuf}, sync::{Arc, mpsc::{self, Sender, Receiver}}
 
 mod editor;
 mod schema_editor;
+mod grid;
+pub use grid::SelectedCell;
 pub use editor::{DraftView, EditKind};
 pub use schema_editor::{SchemaDraftView, SchemaMode};
 
@@ -67,6 +69,7 @@ pub struct BasesView {
     pub notice: Option<&'static str>,
     pub draft: Option<DraftView>,
     pub schema_draft: Option<SchemaDraftView>,
+    pub selected: Option<SelectedCell>,
 }
 enum Payload {
     Catalog(Vec<BaseChoice>),
@@ -281,7 +284,7 @@ impl BasesSession {
         let source=self.view.source.clone().ok_or(())?;
         let target=self.view.target.clone().ok_or(())?;
         self.view.digest=Some(digest.clone());self.view.base_id=Some(base_id.clone());
-        self.view.row_start=0;self.view.column_start=0;
+        self.view.row_start=0;self.view.column_start=0;self.view.selected=None;
         self.effective=None;self.disk_hash=None;
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base_id))
     }
@@ -293,6 +296,7 @@ impl BasesSession {
             || (row_start>0 && row_start>=base.rows.len())
             || (column_start>0 && column_start>=base.columns.len()){return false;}
         self.view.row_start=row_start;self.view.column_start=column_start;
+        self.view.selected=None;
         true
     }
     pub fn reload(&mut self)->Result<(),()>{
@@ -302,7 +306,7 @@ impl BasesSession {
         let target=self.view.target.clone().ok_or(())?;
         let digest=self.view.digest.clone().ok_or(())?;
         let base=self.view.base_id.clone().ok_or(())?;
-        self.effective=None; self.disk_hash=None;
+        self.effective=None; self.disk_hash=None;self.view.selected=None;
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base))
     }
     pub fn change(&mut self, core:Arc<Core>, row:&str, property:&str,
@@ -346,12 +350,14 @@ impl BasesSession {
                 {
                     self.effective=Some(base); self.disk_hash=hash;
                     self.view.stage=Stage::Ready;
-                    if saving { self.view.draft=None; self.view.schema_draft=None; }
+                    if saving { self.view.draft=None; self.view.schema_draft=None;
+                        self.view.selected=None; }
                     self.view.notice=if saving{Some("Правка сохранена локально через File Gate CAS")}
                         else{None};
                 }
                 _=>{
                     self.effective=None; self.disk_hash=None;
+                    self.view.selected=None;
                     self.view.stage=Stage::NeedsReview;
                     if saving {
                         if let Some(draft)=self.view.draft.as_mut(){draft.frozen=true;}
