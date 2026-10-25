@@ -767,3 +767,37 @@ Install/Commit opcode, no root helper publisher key, systemd service,
 or live VPS deployment. A locked password does not independently prove
 SSH/PAM policy, systemd service restrictions or helper provenance;
 these remain separate production blockers.
+
+
+### 25 October 2026 — root staging helper digest bound to independent B0v3 policy (HOLD)
+
+The first-root Python stage at root-controlled
+\`/var/lib/akula/server-bootstrap/bootstrap-v1\` publishes
+\`manifest\`, \`signature\`, \`helper.staged\`, \`release.pub\`,
+\`release.ed25519\` and \`HOLD\`. This non-shipping increment introduces
+an **independent Rust read-only root check** that opens the same fixed
+staged directory through the already authenticated root \`trust\` FD
+and rechecks exact UID0-owned 0400 file inodes, size, metadata,
+canonical signed B1a manifest, Ed25519 signature, exact public-key PEM
+and the original on-disk HOLD marker. It streams the *real* ELF inode,
+checks Linux x86-64 magic and hashes its full bytes.
+
+The stage-provided signing key alone is **not** a trust anchor. The
+verified signed helper digest must also match the independent, fixed,
+previously root-enrolled \`helper_sha256\` in B0v3 policy, otherwise
+even a newly self-signed helper cannot pass. The existing
+\`commit_first_provisioned_opt\` B1d0 path now demands this read-only
+admission before it can reach B1a Node/witness/owner CAS validation.
+Its only result is a metadata-only \`BootstrapHelperHold\`; no
+executable descriptor, process spawn or authority escapes.
+
+Disposable root-owned CI tests use synthetic signed bytes to prove
+matching staged-ELF/hash/identity/marker acceptance, and refusal on
+modified helper bytes, wrong independent B0 helper digest, changed
+signer/signature, malicious PEM, interrupted/missing stage, symlinks,
+hardlinks, unsafe permissions, truncation and expiry. No production
+signer key has been provisioned: Core still has
+\`PRODUCTION_BOOTSTRAP_PUBKEY=None\`. This verifies *staged bytes* only;
+it does not authenticate the binary currently running as root, issue
+a privileged IPC install opcode, enable systemd or constitute VPS
+acceptance. Default installed Akula and main remain unchanged.

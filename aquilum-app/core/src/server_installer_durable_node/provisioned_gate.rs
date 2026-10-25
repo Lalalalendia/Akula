@@ -85,6 +85,12 @@ pub(crate) fn commit_first_provisioned_opt(
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(DurableError::NotRoot);
     }
+    // A Windows/SSH claim must NEVER substitute for the root-held helper
+    // released through the separately signed bootstrap-v1 HOLD stage.
+    // This independent digest check is mandatory but does not authenticate
+    // the running helper process or grant permission to execute that ELF.
+    let _helper = crate::server_root_v3_trust::inspect_provisioned_bootstrap_helper_hold()
+        .map_err(DurableError::BootstrapHelper)?;
     // No timestamp or release pin is accepted from a peer. A root-owned
     // clock and the already registered B1a approval file are required.
     let now_unix = std::time::SystemTime::now()
