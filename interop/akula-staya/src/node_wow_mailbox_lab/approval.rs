@@ -71,7 +71,7 @@ pub fn sign_first_mail_approval_for_lab(
 /// a separate trusted CAS actor to compare-and-commit that revision.
 pub(super) fn verify_first_mail_approval(
     raw: &[u8],
-    policy_bytes: &[u8],
+    policy_digest: [u8; 32],
     policy: MailRoleClaims,
     operator_public: [u8; 32],
     expected_witness_revision: u64,
@@ -94,7 +94,7 @@ pub(super) fn verify_first_mail_approval(
         || claim.node_endpoint != policy.node_endpoint
         || claim.policy_epoch != policy.policy_epoch
         || claim.policy_epoch != 1
-        || claim.signed_policy_digest != *blake3::hash(policy_bytes).as_bytes()
+        || claim.signed_policy_digest != policy_digest
         || claim.approval_nonce == [0; 16]
         || claim.helper_challenge == [0; 32]
         || claim.issued_at_ms < 0
