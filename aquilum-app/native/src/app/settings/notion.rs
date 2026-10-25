@@ -58,6 +58,13 @@ impl App {
                 self.notion_bases.cancel_draft();
                 true
             }
+            Action::NotionBasesPreviewRebase(digest) => {
+                if self.notion_bases.view().target.as_deref()
+                    == self.workspace.root.as_deref() {
+                    let _=self.notion_bases.preview_new_snapshot(digest);
+                }
+                true
+            }
             Action::NotionBasesReload => {
                 let _ = self.notion_bases.reload();
                 true
