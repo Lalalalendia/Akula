@@ -1,6 +1,5 @@
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
-
 use super::{App, Effect, Outcome};
 use crate::ui::dialog::DialogAnswer;
 use crate::ui::editor::{TextAction, TextEditor};
@@ -8,18 +7,14 @@ use crate::ui::settings::{Binding, CloudPopup, SettingsDialog};
 use crate::ui::settings::controls::Committed;
 use crate::ui::settings::schema::{Action, Value};
 use crate::ui::widgets::Pressed;
-mod save;
-#[cfg(feature = "notion-offline-preview")] mod notion_draft;
+mod save; #[cfg(feature = "notion-offline-preview")] mod notion_draft;
 impl App {
     pub(super) fn on_cloud_action(
         &mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction,
         mut dialog: SettingsDialog, mut cloud: CloudPopup,
     ) -> Outcome {
         #[cfg(feature = "notion-offline-preview")]
-        if self.capture_notion_draft(root,id,action,&mut cloud) {
-            dialog.cloud_popup=Some(cloud);
-            return self.keep(dialog,None,Effect::None,root);
-        }
+        if self.capture_notion_draft(root,id,action,&mut cloud) {dialog.cloud_popup=Some(cloud);return self.keep(dialog,None,Effect::None,root);}
         if let Some(text_action) = action.downcast_ref::<TextAction>()
             && let Some(Binding::Text { setter, .. }) = cloud.bindings.get(&id)
         {
