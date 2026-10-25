@@ -209,7 +209,7 @@ mod tests {
         ));
         assert_eq!(ledger.count_for_lab(),Ok(0));
         let mut changed=grant;
-        changed[changed.len()-1]^=1;
+        changed[crate::p2p_attachment_grant_lab::GRANT_BYTES-1]^=1;
         assert!(matches!(
             snap.serve_once(&changed,&pk,7,notice.receiver().endpoint_id,
                 MID as u64,TOTAL as u64,112,&mut ledger),
