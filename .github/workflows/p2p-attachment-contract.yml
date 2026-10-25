@@ -12,6 +12,7 @@ on:
       - 'aquilum-app/core/src/p2p_attachment_grant_lab.rs'
       - 'aquilum-app/core/src/p2p_attachment_grant_spend_lab.rs'
       - 'aquilum-app/core/src/p2p_attachment_source_lab.rs'
+      - 'aquilum-app/core/src/p2p_file_sender_outbox_lab.rs'
       - 'aquilum-app/core/src/lib.rs'
       - 'aquilum-app/core/Cargo.toml'
       - 'interop/akula-staya/src/attachment_contract.rs'
