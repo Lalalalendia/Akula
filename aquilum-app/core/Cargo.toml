@@ -128,6 +128,8 @@ blake3 = "1.8.5"
 ring = "0.17.14"
 zeroize = "1.9.0"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
+akula-wow-w3-crypto = { git = "https://github.com/calex794/wow", rev = "ed59de17955a25e57a75f47f6ad6570c1d000287", optional = true }
+ed25519-dalek = { version = "2.2", optional = true }
 uuid = { version = "1.23.5", features = ["v4", "serde"] }
 tantivy = { version = "0.26.1", default-features = false, features = ["mmap", "lz4-compression", "stemmer"] }
 rust-stemmers = "1.2.0"
