@@ -32,6 +32,12 @@ server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 server-bootstrap-b0-openssh-lab = ["server-bootstrap-b0-lab"]
 # Pure offline release-signature gate; never executes or installs a package.
 server-bootstrap-b1a-release-lab = ["dep:akula-server-release-b1a"]
+# B1-E2E-02: signed package + immutable local review only; NOT an install action.
+server-install-review = ["server-bootstrap-b0-lab", "server-bootstrap-b1a-release-lab"]
+# Windows Credential Manager owner Ed25519 key: separate from P2P; no installer.
+server-owner-windows-signer = ["server-install-review", "dep:windows"]
+# Opt-in Windows signed-KEX first-root staging transport; never shipped.
+server-root-stage-ssh-lab = ["server-owner-windows-signer", "server-bootstrap-b0-openssh-lab"]
 # Linux-only inert staging laboratory; requires B1a verifier, no executable install.
 server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
 # Linux-only inert release-floor chain lab, requiring verified staged bytes.
@@ -59,6 +65,9 @@ server-bootstrap-b1c0-fixed-node-lab = ["server-bootstrap-b1b4b-os-witness-lab"]
 # Fixed /opt first-install file commit with a root-owned durable receipt and
 # conservative HOLD on startup or crash. No public installer RPC or auto-start.
 server-bootstrap-b1d0-durable-node = ["server-bootstrap-b1c0-fixed-node-lab"]
+# Inert Linux root-side B0 v3 canonical plan + pinned-owner correspondence,
+# still NO root enrollment loader, helper execution, service or install RPC.
+server-root-b0v3-gate-lab = ["server-bootstrap-b1d0-durable-node", "server-bootstrap-b0-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
@@ -164,6 +173,53 @@ aws-sdk-s3 = { version = "1.152.0", optional = true, default-features = false, f
 aws-sdk-sts = { version = "=1.119.0", optional = true, default-features = false, features = ["default-https-client", "rt-tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 url = { version = "2", optional = true }
+
+# One-shot administrator-only trust enrollment binary, never shipped in
+# ordinary Akula packages and never invoked by the desktop client.
+[[bin]]
+name = "akula-root-b0v3-enroll-lab"
+path = "src/bin/akula_root_b0v3_enroll_lab.rs"
+required-features = ["server-root-b0v3-gate-lab"]
+
+# Separate independently authorized first-root witness genesis for a clean
+# VPS. Never shipped or exposed over the Windows SSH / UI transport.
+[[bin]]
+name = "akula-root-witness-init-lab"
+path = "src/bin/akula_root_witness_init_lab.rs"
+required-features = ["server-root-b0v3-gate-lab"]
+
+# Requires an already independently enrolled B1d0 witness + B0 v3 trust.
+# No Node write, service activation, SSH or UI authority.
+[[bin]]
+name = "akula-root-opt-enroll-lab"
+path = "src/bin/akula_root_opt_enroll_lab.rs"
+required-features = ["server-root-b0v3-gate-lab"]
+
+# One-shot B1a first-release enrollment, non-shipping root admin only.
+[[bin]]
+name = "akula-root-b1a-enroll-lab"
+path = "src/bin/akula_root_b1a_enroll_lab.rs"
+required-features = ["server-root-b0v3-gate-lab"]
+
+# Non-shipping root-admin-only signed first-release staging, not an installer.
+[[bin]]
+name = "akula-root-b1a-stage-lab"
+path = "src/bin/akula_root_b1a_stage_lab.rs"
+required-features = ["server-root-b0v3-gate-lab"]
+
+# A real Linux ELF candidate for a future independently published root helper.
+# UNSIGNED/NON-SHIPPING: a single read-only signed owner preview, always HOLD.
+[[bin]]
+name = "akula-root-b1d0-helper"
+path = "src/bin/akula_root_b1d0_helper.rs"
+required-features = ["server-root-b0v3-gate-lab"]
+
+# Independently reviewed UID0 ceremony for fixed AF_UNIX local account;
+# no socket listener, install dispatch or executable activation.
+[[bin]]
+name = "akula-root-b1d0-peer-enroll-lab"
+path = "src/bin/akula_root_b1d0_peer_enroll_lab.rs"
+required-features = ["server-root-b0v3-gate-lab"]
 
 [[bin]]
 name = "akula-p2p-identity"

@@ -60,6 +60,12 @@ pub enum DurableError {
     InvalidReceipt,
     Witness(OsWitnessError),
     FileCommit(FixedNodeError),
+    #[cfg(feature = "server-root-b0v3-gate-lab")]
+    OwnerReview(crate::server_root_v3_trust::RootEnrollmentError),
+    #[cfg(feature = "server-root-b0v3-gate-lab")]
+    FirstRelease(crate::server_root_v3_trust::FirstReleaseError),
+    #[cfg(feature = "server-root-b0v3-gate-lab")]
+    BootstrapHelper(crate::server_root_v3_trust::bootstrap_helper::BootstrapHelperError),
     InjectedStop,
 }
 impl From<std::io::Error> for DurableError {
@@ -352,25 +358,12 @@ fn inspect_locked(dir: &File, actor: &OsWitnessLab)
 /// crate-private until the independent owner/release trust authority is
 /// loaded from fixed protected OS state and installed via a secure helper.
 /// NO UI or IPC route currently calls it.
-#[allow(dead_code, clippy::too_many_arguments)]
-pub(crate) fn commit_first_provisioned_opt(
-    pinned: &RootVerifiedFd,
-    owner: &SignedOwnerApproval,
-    trusted_owner: &TrustedOwnerApprover,
-    scope: ExternalApprovalScope,
-    staged: &StageReceipt,
-    proposed: ProposedFloor,
-    expected_before: WitnessCheckpoint,
-    challenge: [u8;32],
-    now_unix: u64,
-) -> Result<DurableStatus, DurableError> {
-    // Actor origin is OS-enrolled and fixed under /var/lib/akula. A caller
-    // cannot pass its own test witness actor to a production /opt commit.
-    let actor = OsWitnessLab::open_provisioned_first_install()
-        .map_err(DurableError::Witness)?;
-    commit_in(Destination::ProvisionedOpt, pinned, &actor, owner, trusted_owner,
-        scope, staged, proposed, expected_before, challenge, now_unix, CrashPoint::None)
-}
+#[cfg(feature = "server-root-b0v3-gate-lab")]
+mod provisioned_gate;
+#[cfg(feature = "server-root-b0v3-gate-lab")]
+#[allow(unused_imports)]
+pub(crate) use provisioned_gate::commit_first_provisioned_opt;
+
 /// On restart: receipt and executable bytes can be inspected only alongside
 /// the SAME independently root-provisioned production CAS ledger. Never
 /// grants automatic service activation after reboot.
