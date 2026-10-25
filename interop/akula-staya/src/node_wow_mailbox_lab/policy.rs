@@ -173,7 +173,11 @@ fn read_epoch_floor(folder: &Path) -> Result<EpochFloor, MailRoleHold> {
     if epoch == 0 || digest == [0; 32] {
         return Err(MailRoleHold::MailPolicy);
     }
-    Ok(EpochFloor { epoch, digest, inode })
+    Ok(EpochFloor {
+        epoch,
+        digest,
+        inode,
+    })
 }
 
 fn decode_and_verify(
