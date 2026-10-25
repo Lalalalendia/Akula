@@ -59,6 +59,10 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s scripts/server-bootstrap -p 'test_root_stage_v1.py' -v
+          # Offline manifest/frame parity with existing B1a and real OpenSSL.
+          # Only ephemeral test keys; NO release signer in CI.
+          python3 -m unittest discover -s scripts/server-bootstrap \
+            -p 'test_offline_helper_release.py' -v
           sudo -n /usr/bin/python3 -I -m unittest discover -s scripts/server-bootstrap -p 'test_root_stage_v1.py' -v
           cargo test --locked --manifest-path aquilum-app/Cargo.toml \
             -p aquilum-core --features server-install-review --lib \

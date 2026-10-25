@@ -904,3 +904,35 @@ release provenance; administrator-authorized fixed-path ELF install
 on an explicitly selected VPS; protected systemd socket, limited
 B1d0 write opcode with durable one-use CAS, service health and
 reboot; full installed Windows A -> authorized VPS -> Windows B.
+
+
+### 25 October 2026 — offline signing handoff for actual helper ELF (HOLD)
+
+The preceding HEAD 618e8cc6 passed both exact-head CIs:
+[#40216944898](https://github.com/Lalalalendia/Akula/actions/runs/40216944898)
+(Windows/Linux integrated gate) and
+[#40216944897](https://github.com/Lalalalendia/Akula/actions/runs/40216944897)
+(unsigned release ELF candidate).
+
+A separate **offline-only** release-preparation tool now bridges the actual
+built helper ELF with the already canonical B1a manifest and the
+\`AKULA_ROOT_STAGE_V1\` signed frame, WITHOUT creating any new signature
+format or automatically generating a key. Its \`prepare\` subcommand computes
+the exact ELF SHA-256, size, release sequence, version and approved validity
+window to produce signable manifest bytes. A real, independent offline
+operator must then sign those bytes using their own existing production
+Ed25519 authority (CI private key is prohibited). Its \`frame\` subcommand
+takes the externally provided detached 64-byte signature and a **separately
+approved** Ed25519 public key and runs the original \`root_stage_v1\`
+OpenSSL verification in a disposable scratch directory. Only then does it
+output a frame, still explicitly marked as **data-only HOLD**.
+
+This does not assert the independently pinned production public key exists;
+\`PRODUCTION_BOOTSTRAP_PUBKEY=None\` remains. It cannot publish an approved
+release, enroll root trust, execute the helper, write \`/usr/libexec\`, call
+B1d0 CAS or change a real VPS. Tests generate ephemeral disposable signing
+keys and prove valid format parity plus bad signature, wrong key,
+truncation, manifest tamper, expiry, wrong ELF, symlink and unsafe
+local input/output failures. See
+[B1-E2E-07-ROOT-HELPER-OFFLINE-RELEASE.md](B1-E2E-07-ROOT-HELPER-OFFLINE-RELEASE.md)
+for the production-key separation and human-authorized release checklist.
