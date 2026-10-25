@@ -15,7 +15,12 @@ pub mod node_live_read;
 #[cfg(all(target_os = "linux", feature = "node-v1-runtime"))]
 pub mod node_v1_runtime;
 // Non-shipping, intentionally separate from Node-V1's installed Iroh ALPN.
-#[cfg(all(target_os = "linux", feature = "node-wow-mailbox-lab"))]
+// A misconfigured release build must fail closed rather than accidentally
+// exporting a mailbox role without an independently rooted mail policy.
+#[cfg(all(feature = "node-wow-mailbox-lab", not(debug_assertions)))]
+compile_error!("Node WOW mailbox lab is forbidden in release builds");
+
+#[cfg(all(target_os = "linux", feature = "node-wow-mailbox-lab", debug_assertions))]
 pub mod node_wow_mailbox_lab;
 #[cfg(feature = "p2p-live-identity")]
 pub mod roster_observation_lab;
