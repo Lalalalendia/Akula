@@ -71,4 +71,26 @@ if ($setups[0].Name -cne "Akula_$($packagerConfig.version)_x64-setup.exe") {
     }
     Rename-Item -LiteralPath $setups[0].FullName -NewName ($setups[0].Name -replace '^akula-app_', 'Akula_')
 }
+# NSIS itself must not demand a newer OS before it can install the Akula EXE.
+$installer = Join-Path $dist "Akula_$($packagerConfig.version)_x64-setup.exe"
+if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Audited NSIS installer missing' }
+$vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+$vsroot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+if (!$vsroot) { throw 'Cannot audit Win7 installer without MSVC tools' }
+$toolsets = @(Get-ChildItem (Join-Path $vsroot 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending)
+if ($toolsets.Count -eq 0) { throw 'No MSVC x64 toolset for NSIS audit' }
+$dumpbin = Join-Path $toolsets[0].FullName 'bin/Hostx64/x64/dumpbin.exe'
+$peDir = Join-Path $dist 'win7-installer-pe-audit'
+New-Item -ItemType Directory -Force -Path $peDir | Out-Null
+$importsFile = Join-Path $peDir 'imports.txt'
+& $dumpbin /imports $installer | Set-Content -LiteralPath $importsFile -Encoding utf8
+if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the exact Akula NSIS PE imports' }
+$hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+$length = (Get-Item -LiteralPath $installer).Length
+& python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin $importsFile --out $peDir --sha256 $hash --bytes $length
+if ($LASTEXITCODE -ne 0) { throw 'NSIS static import scanner failed' }
+$pe = Get-Content -LiteralPath (Join-Path $peDir 'full-audit.json') -Raw | ConvertFrom-Json
+if (@($pe.known_post_win7_imports).Count -ne 0) {
+    throw 'Ordinary Akula NSIS installer imports Windows 8+ APIs'
+}
 Write-Host "AKULA_WIN7_NORMAL_NSIS_PACKAGED_PASS version=$($packagerConfig.version) windows7_runtime_tested=false no_release=true"
