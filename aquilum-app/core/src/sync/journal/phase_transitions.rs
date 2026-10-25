@@ -6,7 +6,9 @@ impl SqliteSyncJournal {
     /// prevents two workers from publishing incompatible baselines.
     pub fn begin(&mut self, intent: OperationIntent) -> JournalResult<JournalPhase> {
         intent.validate()?;
-        let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = read_operation(&transaction, intent.operation_id)? {
             if existing.intent != intent {
                 return Err(JournalError::IntentCollision);
@@ -14,19 +16,24 @@ impl SqliteSyncJournal {
             return Ok(existing.phase);
         }
         let baseline = load_baseline(&transaction, intent.vault_id, intent.document_id)?;
-        if baseline.as_ref().is_some_and(|b| b.profile_id != intent.profile_id) {
+        if baseline
+            .as_ref()
+            .is_some_and(|b| b.profile_id != intent.profile_id)
+        {
             return Err(JournalError::ProfileChanged);
         }
         if baseline.map(|b| b.revision_id) != intent.expected_baseline {
             return Err(JournalError::BaselineChanged);
         }
 
-        let conflicting: Option<String> = transaction.query_row(
-            "SELECT operation_id FROM sync_operations
+        let conflicting: Option<String> = transaction
+            .query_row(
+                "SELECT operation_id FROM sync_operations
              WHERE vault_id = ?1 AND document_id = ?2 AND phase < 4 LIMIT 1",
-            params![intent.vault_id.to_string(), intent.document_id.to_string()],
-            |row| row.get(0),
-        ).optional()?;
+                params![intent.vault_id.to_string(), intent.document_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
         if conflicting.is_some() {
             return Err(JournalError::BusyDocument);
         }
@@ -39,7 +46,9 @@ impl SqliteSyncJournal {
             params![
                 intent.operation_id.to_string(),
                 intent.vault_id.to_string(),
-                intent.document_id.to_string(), payload, digest,
+                intent.document_id.to_string(),
+                payload,
+                digest,
             ],
         )?;
         transaction.commit()?;
@@ -51,10 +60,14 @@ impl SqliteSyncJournal {
     /// a fake "stage complete" receipt for corrupted contents.
     /// A stage is metadata only: PR 04 must still obtain a protective copy
     /// before a destructive local File Gate operation.
-    pub fn mark_staged(&mut self, id: OperationId, staged_bytes: &[u8])
-        -> JournalResult<JournalPhase>
-    {
-        let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    pub fn mark_staged(
+        &mut self,
+        id: OperationId,
+        staged_bytes: &[u8],
+    ) -> JournalResult<JournalPhase> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let record = read_operation(&transaction, id)?.ok_or(JournalError::MissingOperation)?;
         let digest = blake3::hash(staged_bytes).to_hex().to_string();
         if digest != record.intent.expected_content_hash {
@@ -70,8 +83,9 @@ impl SqliteSyncJournal {
                 transaction.commit()?;
                 Ok(JournalPhase::Staged)
             }
-            JournalPhase::Staged if record.staged_hash.as_deref() == Some(digest.as_str()) =>
-                Ok(JournalPhase::Staged),
+            JournalPhase::Staged if record.staged_hash.as_deref() == Some(digest.as_str()) => {
+                Ok(JournalPhase::Staged)
+            }
             _ => Err(JournalError::InvalidTransition),
         }
     }
@@ -80,7 +94,9 @@ impl SqliteSyncJournal {
     /// the real provider/File Gate mutation. An uncertain response is NOT a
     /// receipt: recovery from Staged also demands inspection, never blind redo.
     pub fn mark_applied(&mut self, id: OperationId) -> JournalResult<JournalPhase> {
-        let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let record = read_operation(&transaction, id)?.ok_or(JournalError::MissingOperation)?;
         // A remote download has no native, crash-durable local apply receipt.
         // Generic provider readback/hash must never turn it into a baseline.
@@ -88,8 +104,10 @@ impl SqliteSyncJournal {
             return Err(JournalError::LocalDownloadNeedsNativeReceipt);
         }
         match record.phase {
-            JournalPhase::Staged if record.staged_hash.as_deref()
-                == Some(record.intent.expected_content_hash.as_str()) => {
+            JournalPhase::Staged
+                if record.staged_hash.as_deref()
+                    == Some(record.intent.expected_content_hash.as_str()) =>
+            {
                 transaction.execute(
                     "UPDATE sync_operations SET phase = 2
                      WHERE operation_id = ?1 AND phase = 1",
@@ -106,10 +124,15 @@ impl SqliteSyncJournal {
     /// Independently read-back bytes and the current opaque provider validator.
     /// The caller is responsible for fetching *actual destination bytes*;
     /// passing staged source bytes instead would violate the executor contract.
-    pub fn mark_verified(&mut self, id: OperationId, observed_bytes: &[u8],
-        provider_revision: &str) -> JournalResult<JournalPhase>
-    {
-        let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    pub fn mark_verified(
+        &mut self,
+        id: OperationId,
+        observed_bytes: &[u8],
+        provider_revision: &str,
+    ) -> JournalResult<JournalPhase> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let record = read_operation(&transaction, id)?.ok_or(JournalError::MissingOperation)?;
         // A remote download has no native, crash-durable local apply receipt.
         // Generic provider readback/hash must never turn it into a baseline.
@@ -130,9 +153,12 @@ impl SqliteSyncJournal {
                 transaction.commit()?;
                 Ok(JournalPhase::Verified)
             }
-            JournalPhase::Verified if record.readback_hash.as_deref() == Some(digest.as_str())
-                && record.provider_revision.as_deref() == Some(provider_revision) =>
-                Ok(JournalPhase::Verified),
+            JournalPhase::Verified
+                if record.readback_hash.as_deref() == Some(digest.as_str())
+                    && record.provider_revision.as_deref() == Some(provider_revision) =>
+            {
+                Ok(JournalPhase::Verified)
+            }
             _ => Err(JournalError::InvalidTransition),
         }
     }
@@ -141,7 +167,9 @@ impl SqliteSyncJournal {
     /// the expected previous baseline even if validation happened at begin().
     /// A failed SQLite transaction leaves the operation Verified and retryable.
     pub fn commit(&mut self, id: OperationId) -> JournalResult<JournalPhase> {
-        let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let record = read_operation(&transaction, id)?.ok_or(JournalError::MissingOperation)?;
         // A remote download has no native, crash-durable local apply receipt.
         // Generic provider readback/hash must never turn it into a baseline.
@@ -152,15 +180,20 @@ impl SqliteSyncJournal {
             return Ok(JournalPhase::Committed);
         }
         if record.phase != JournalPhase::Verified
-            || record.readback_hash.as_deref()
-                != Some(record.intent.expected_content_hash.as_str())
-            || record.provider_revision.as_deref().is_none_or(str::is_empty)
+            || record.readback_hash.as_deref() != Some(record.intent.expected_content_hash.as_str())
+            || record
+                .provider_revision
+                .as_deref()
+                .is_none_or(str::is_empty)
         {
             return Err(JournalError::InvalidTransition);
         }
         let intent = &record.intent;
         let baseline = load_baseline(&transaction, intent.vault_id, intent.document_id)?;
-        if baseline.as_ref().is_some_and(|b| b.profile_id != intent.profile_id) {
+        if baseline
+            .as_ref()
+            .is_some_and(|b| b.profile_id != intent.profile_id)
+        {
             return Err(JournalError::ProfileChanged);
         }
         if baseline.map(|b| b.revision_id) != intent.expected_baseline {
@@ -196,28 +229,30 @@ impl SqliteSyncJournal {
     pub fn recovery_queue(&self) -> JournalResult<Vec<RecoveryItem>> {
         let mut statement = self.connection.prepare(
             "SELECT operation_id FROM sync_operations WHERE phase < 4
-             ORDER BY vault_id, document_id, operation_id"
+             ORDER BY vault_id, document_id, operation_id",
         )?;
         let ids = statement.query_map([], |row| row.get::<_, String>(0))?;
         let mut result = Vec::new();
         for raw in ids {
             let id = raw?.parse().map_err(|_| JournalError::CorruptedRecord)?;
-            let record = read_operation(&self.connection, id)?
-                .ok_or(JournalError::CorruptedRecord)?;
+            let record =
+                read_operation(&self.connection, id)?.ok_or(JournalError::CorruptedRecord)?;
             let action = if record.intent.action == JournalAction::StageDownload {
                 // Local files may have changed outside Akula's in-process
                 // File Gate; no retry or commit based on a prior hash.
                 match record.phase {
                     JournalPhase::Pending => RecoveryAction::ResumeStaging,
-                    JournalPhase::Staged | JournalPhase::Applied | JournalPhase::Verified =>
-                        RecoveryAction::InspectBeforeRetry,
+                    JournalPhase::Staged | JournalPhase::Applied | JournalPhase::Verified => {
+                        RecoveryAction::InspectBeforeRetry
+                    }
                     JournalPhase::Committed => return Err(JournalError::CorruptedRecord),
                 }
             } else {
                 match record.phase {
                     JournalPhase::Pending => RecoveryAction::ResumeStaging,
-                    JournalPhase::Staged | JournalPhase::Applied =>
-                        RecoveryAction::InspectBeforeRetry,
+                    JournalPhase::Staged | JournalPhase::Applied => {
+                        RecoveryAction::InspectBeforeRetry
+                    }
                     JournalPhase::Verified => RecoveryAction::RetryCommit,
                     JournalPhase::Committed => return Err(JournalError::CorruptedRecord),
                 }
