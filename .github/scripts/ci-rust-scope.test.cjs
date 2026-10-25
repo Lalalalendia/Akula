@@ -430,6 +430,7 @@ test('every standalone Rust module has a direct PR owner and executable Cargo te
     'dropbox-auth-lab':'dropbox-t0-isolated.yml',
     'dropbox-secret-store':'dropbox-t0-isolated.yml',
     'dropbox-connect-lab':'dropbox-t0-isolated.yml',
+    'text-delta-codec':'text-delta-codec-isolated.yml',
   };
   const moduleRoot=path.join(__dirname,'../../modules');
   const found=fs.readdirSync(moduleRoot,{withFileTypes:true})
@@ -488,4 +489,26 @@ test('ignored Search performance suites are opt-in while Core correctness remain
   const app=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
   assert.match(app,/Run full Rust workspace and sync-engine tests/);
   assert.match(app,/cargo test --workspace --locked/);
+});
+
+
+test('Text Delta parity lab never duplicates Core source PR workflow runs',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const workflow='.github/workflows/text-delta-codec-isolated.yml';
+  const body=fs.readFileSync(path.join(__dirname,'../workflows/text-delta-codec-isolated.yml'),'utf8');
+  const policy=parse(body);
+  const corePaths=[
+    'aquilum-app/core/src/sync/text_delta_codec.rs',
+    'aquilum-app/core/src/sync/text_delta_codec_profile_tests.rs',
+  ];
+  for(const file of corePaths){
+    assert.equal(matches(policy,file),false,'no extra top-level parity workflow for Core edit: '+file);
+    assert.equal(classify([file]),'sync','Core source still gets mandatory sync test route');
+  }
+  assert.equal(require('./ci-shared-manifest-route.cjs').ownedRoutes([corePaths[0]]).owned_text_delta,
+    true,'security codec owner must still exercise Core code changes');
+  assert.equal(matches(policy,'modules/text-delta-codec/Cargo.toml'),true);
+  assert.equal(matches(policy,'modules/text-delta-codec/src/lib.rs'),true);
+  assert.equal(matches(policy,workflow),true);
+  assert.match(body,/^  workflow_dispatch:\s*$/m,'manual standalone parity available');
 });
