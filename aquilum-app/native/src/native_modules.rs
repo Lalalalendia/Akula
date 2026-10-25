@@ -28,6 +28,7 @@ static ALLOCATOR: memory_probe::Counting = memory_probe::Counting;
 #[cfg(feature = "notion-offline-preview")] mod notion_offline;
 #[cfg(feature = "notion-offline-preview")] mod notion_credentials;
 #[cfg(feature = "notion-offline-preview")] mod notion_sync; #[cfg(feature = "notion-offline-preview")] mod notion_import;
+#[cfg(feature = "notion-offline-preview")] mod notion_bases;
 mod navigation;
 mod note;
 mod output;
