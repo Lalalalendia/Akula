@@ -12,7 +12,7 @@ mod home;
 mod init;
 mod lifecycle;
 mod media;
-mod pdf_preview;
+mod pdf_preview; mod pdf_view;
 mod note_page;
 mod panel;
 #[cfg(feature = "memory-probe")]
@@ -101,7 +101,7 @@ const HOLD: std::time::Duration = std::time::Duration::from_millis(500);
 pub struct App {
     workspace: Workspace,
     #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview,
-    tree: FileTree,
+    tree: FileTree, pdf: pdf_view::State,
     chrome: Option<Chrome>,
     interface: Interface,
     popup: Option<Popup>,

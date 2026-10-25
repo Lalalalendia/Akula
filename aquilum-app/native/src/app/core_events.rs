@@ -26,7 +26,7 @@ impl App {
         self.on_retention_done(root);
         #[cfg(feature = "dropbox-readonly-preview")] self.poll_dropbox_settings(root);
         self.undo_failed_renames(root);
-        self.poll_find(root);
+        self.poll_find(root); self.poll_pdf(root);
         let mut links_changed = false;
         let mut history_changed = false;
         let mut changed = Vec::new();

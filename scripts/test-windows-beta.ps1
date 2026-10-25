@@ -76,6 +76,149 @@ if (-not $extracted.Contains('AKULANATIVEPDFNEEDLE')) {
   throw 'Installed Shiva PDF extraction lost native PDF text'
 }
 Write-Host 'AKULA_PDF_SIDECAR_INSTALLED=PASS;source=pinned-shiva;real_pdf=1;external_setup=0'
+
+# Akula's release EXE is linked as a WINDOWS/GUI-subsystem executable.
+# PowerShell's & operator can return before GUI-subsystem processes exit.
+# Synchronize on the real process handle and capture its own exit code.
+function Invoke-InstalledPdfWorker {
+  param(
+    [Parameter(Mandatory = $true)][string]$Source,
+    [Parameter(Mandatory = $true)][int]$Page,
+    [Parameter(Mandatory = $true)][int]$Width,
+    [Parameter(Mandatory = $true)][int]$Rotation,
+    [Parameter(Mandatory = $true)][string]$Output,
+    [Parameter(Mandatory = $true)][string]$Status
+  )
+  $start = [System.Diagnostics.ProcessStartInfo]::new()
+  $start.FileName = $exe
+  $start.UseShellExecute = $false
+  $start.CreateNoWindow = $true
+  # Windows PowerShell 5.1 runs on .NET Framework: ProcessStartInfo.ArgumentList
+  # is unavailable there. These are fixture files, not user-provided shell commands.
+  foreach ($file in @($Source, $Output, $Status)) {
+    if ($file.Contains('"')) { throw 'Unexpected quotation mark in PDF test path' }
+  }
+  $start.Arguments = '--pdf-worker "{0}" {1} {2} {3} "{4}" "{5}"' -f @(
+    $Source, $Page, $Width, $Rotation, $Output, $Status
+  )
+  $worker = [System.Diagnostics.Process]::new()
+  $worker.StartInfo = $start
+  try {
+    if (-not $worker.Start()) { throw 'Could not start installed Akula PDF worker' }
+    if (-not $worker.WaitForExit(30000)) {
+      $worker.Kill()
+      [void]$worker.WaitForExit(5000)
+      throw "Installed PDF worker timed out (page=$Page)"
+    }
+    return [int]$worker.ExitCode
+  } finally {
+    $worker.Dispose()
+  }
+}
+
+# Check the installed native PDFium resource, then render a real PDF through the
+# *installed* Akula executable. This is not a source-only test.
+$installedPdfium = @(@((Join-Path $akulaInstall 'resources/pdfium.dll'), (Join-Path $akulaInstall 'pdfium.dll')) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+if ($installedPdfium.Count -ne 1) { throw 'Installed Akula requires exactly one bundled PDFium DLL' }
+$compiledPdfium = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release/pdfium.dll'
+if ((Get-FileHash -LiteralPath $installedPdfium[0]).Hash -ne (Get-FileHash -LiteralPath $compiledPdfium).Hash) { throw 'Installed PDFium differs from pinned binary' }
+$rendered = Join-Path $probeDir 'real-page.png'
+$renderStatus = Join-Path $probeDir 'real-page.status'
+$renderExit = Invoke-InstalledPdfWorker -Source $sourcePdf -Page 0 -Width 900 -Rotation 0 -Output $rendered -Status $renderStatus
+if ($renderExit -ne 0 -or !(Test-Path -LiteralPath $rendered -PathType Leaf)) {
+  $workerStatus = if (Test-Path -LiteralPath $renderStatus -PathType Leaf) {
+    (Get-Content -LiteralPath $renderStatus -Raw).Trim()
+  } else { 'status_file_missing' }
+  if ($workerStatus.Length -gt 300) { $workerStatus = $workerStatus.Substring(0, 300) }
+  $workerStatus = $workerStatus -replace '[^A-Za-z0-9 .,;:=_()/-]', '?'
+  throw "Installed PDFium page rendering failed: exit=$renderExit;status=$workerStatus"
+}
+$reply = (Get-Content -LiteralPath $renderStatus -Raw).Trim()
+if ($reply -notmatch '^PDF_VIEW_V1 [1-9][0-9]* [1-9][0-9]* [1-9][0-9]*$') { throw "Invalid PDF page renderer reply: $reply" }
+$png = [IO.File]::ReadAllBytes($rendered)
+if ($png.Length -lt 100 -or [BitConverter]::ToString($png, 0, 8) -ne '89-50-4E-47-0D-0A-1A-0A') { throw 'PDF page renderer did not produce actual PNG pixels' }
+Write-Host "AKULA_PDFIUM_INSTALLED_RENDER=PASS;$reply"
+# Multi-page raster proof: two different page indices MUST produce distinct
+# decoded pixels, and an out-of-range request MUST fail without rewriting PDF.
+$multi = Join-Path $probeDir 'two-page.pdf'
+python scripts/pdf-preview/generate-two-page-fixture.py --out $multi
+if ($LASTEXITCODE -ne 0) { throw 'Could not generate multi-page PDF fixture' }
+$originalMultiHash = (Get-FileHash -LiteralPath $multi -Algorithm SHA256).Hash
+$distinct = @()
+for ($pageIndex = 0; $pageIndex -lt 2; $pageIndex++) {
+  $dest = Join-Path $probeDir "two-page-$pageIndex.png"
+  $meta = Join-Path $probeDir "two-page-$pageIndex.status"
+  $pageExit = Invoke-InstalledPdfWorker -Source $multi -Page $pageIndex -Width 800 -Rotation 0 -Output $dest -Status $meta
+  if ($pageExit -ne 0 -or !(Test-Path -LiteralPath $dest -PathType Leaf)) { throw "Cannot render PDF page $pageIndex; exit=$pageExit" }
+  if ((Get-Content -LiteralPath $meta -Raw).Trim() -notmatch '^PDF_VIEW_V1 2 [1-9][0-9]* [1-9][0-9]*$') { throw "Wrong PDF page count $pageIndex" }
+  $distinct += (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
+}
+if ($distinct[0] -eq $distinct[1]) { throw 'Distinct PDF pages rendered identically' }
+$invalidExit = Invoke-InstalledPdfWorker -Source $multi -Page 2 -Width 800 -Rotation 0 -Output (Join-Path $probeDir 'invalid.png') -Status (Join-Path $probeDir 'invalid.status')
+if ($invalidExit -eq 0) { throw 'Out-of-range PDF page was accepted' }
+if ((Get-FileHash -LiteralPath $multi -Algorithm SHA256).Hash -ne $originalMultiHash) { throw 'Rendering modified the PDF source' }
+Write-Host 'AKULA_PDFIUM_MULTIPAGE=PASS;pages=2;different_pixels=1;invalid_index_rejected=1;source_unchanged=1'
+
+# Built-in independent corpus: 1000-page random seeks, embedded scan image,
+# rotated pages, and invalid documents. Every operation uses the installed EXE.
+$corpus = Join-Path $probeDir 'native-corpus'
+python scripts/pdf-preview/generate-native-corpus.py --out-dir $corpus
+if ($LASTEXITCODE -ne 0) { throw 'PDF native corpus generator failed' }
+$manifest = Get-Content -LiteralPath (Join-Path $corpus 'native_manifest.json') -Raw | ConvertFrom-Json
+function Assert-PdfCorpusSource {
+  param([string]$FileName)
+  $src = Join-Path $corpus $FileName
+  $expected = $manifest.$FileName.sha256
+  if ((Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) {
+    throw "PDF fixture content drifted: $FileName"
+  }
+}
+function Invoke-PdfCorpusPage {
+  param([string]$FileName, [int]$Page, [int]$ExpectedPages)
+  Assert-PdfCorpusSource $FileName
+  $src = Join-Path $corpus $FileName
+  $key = "$($FileName.Replace('.pdf',''))-$Page"
+  $out = Join-Path $probeDir "$key.png"
+  $status = Join-Path $probeDir "$key.status"
+  $pageExit = Invoke-InstalledPdfWorker -Source $src -Page $Page -Width 720 -Rotation 0 -Output $out -Status $status
+  if ($pageExit -ne 0 -or !(Test-Path -LiteralPath $out -PathType Leaf)) {
+    throw "Installed PDFium failed to render $FileName page $Page"
+  }
+  $reply = (Get-Content -LiteralPath $status -Raw).Trim()
+  if ($reply -notmatch "^PDF_VIEW_V1 $ExpectedPages [1-9][0-9]* [1-9][0-9]*$") {
+    throw "Installed PDFium reported wrong page count: $reply"
+  }
+  $actualPng = [IO.File]::ReadAllBytes($out)
+  if ($actualPng.Length -lt 100 -or [BitConverter]::ToString($actualPng, 0, 8) -ne '89-50-4E-47-0D-0A-1A-0A') {
+    throw "Installed PDFium produced invalid PNG: $FileName page $Page"
+  }
+  Assert-PdfCorpusSource $FileName
+  return (Get-FileHash -LiteralPath $out -Algorithm SHA256).Hash
+}
+$first = Invoke-PdfCorpusPage 'native_1000_page.pdf' 0 1000
+$middle = Invoke-PdfCorpusPage 'native_1000_page.pdf' 499 1000
+$last = Invoke-PdfCorpusPage 'native_1000_page.pdf' 999 1000
+if ($first -eq $last -or $first -eq $middle -or $middle -eq $last) {
+  throw '1000-page PDF random seeking returned a stale raster'
+}
+[void](Invoke-PdfCorpusPage 'native_rotated.pdf' 0 2)
+[void](Invoke-PdfCorpusPage 'native_rotated.pdf' 1 2)
+[void](Invoke-PdfCorpusPage 'native_scan_no_text.pdf' 0 1)
+foreach ($invalidName in @('native_truncated.pdf', 'native_invalid_magic.pdf')) {
+  $src = Join-Path $corpus $invalidName
+  Assert-PdfCorpusSource $invalidName
+  $out = Join-Path $probeDir ($invalidName + '.png')
+  $status = Join-Path $probeDir ($invalidName + '.status')
+  $invalidExit = Invoke-InstalledPdfWorker -Source $src -Page 0 -Width 720 -Rotation 0 -Output $out -Status $status
+  if ($invalidExit -eq 0 -or (Test-Path -LiteralPath $out -PathType Leaf)) {
+    throw "Unsafe PDF accepted by installed PDFium: $invalidName"
+  }
+  Assert-PdfCorpusSource $invalidName
+}
+Write-Host 'AKULA_PDFIUM_CORPUS_INSTALLED=PASS;seek_1000=1;rotations=2;scan=1;invalids_rejected=2;source_unchanged=1'
+
+
+
 # Run the full native application integration path against this *installed*
 # sidecar: File Gate, idempotence, Tantivy search UI cards and result opening.
 $env:AKULA_PDF_INSTALLED_SIDECAR = $sidecar
@@ -222,8 +365,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Installed real Windows PDF pointer path; separate from native Rust harness.
+$viewerFixture = Join-Path $probeDir 'native-viewer-two-page.pdf'
+python scripts/pdf-preview/generate-two-page-fixture.py --out $viewerFixture
+if ($LASTEXITCODE -ne 0) { throw 'Failed to create native PDF viewer test fixture' }
 $pdfPointerScript = Join-Path $PSScriptRoot 'windows-pdf-os-pointer.ps1'
-& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf -ViewerFixturePdf $viewerFixture
 if ($LASTEXITCODE -ne 0) {
   throw "Installed Akula PDF OS-pointer acceptance failed: PowerShell exit $LASTEXITCODE"
 }

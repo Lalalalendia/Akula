@@ -21,7 +21,7 @@ impl App {
         let mut app = App {
             workspace,
             #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview::new(),
-            tree,
+            tree, pdf: pdf_view::State::new(),
             chrome: None,
             interface,
             popup: None,
