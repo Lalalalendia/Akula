@@ -79,7 +79,7 @@ pub(super) fn append(
             });
         if manual_possible {
             column=column.with_fixed(selectable(
-                "Для каждого конфликта значения явно подтвердите сохранение локальной правки. Значения Notion остаются в исходном снимке.",
+                "Для каждого конфликта выберите: сохранить локальное или принять новое Notion. Принятие Notion требует проверки архивной копии прежних локальных правок.",
                 |t|t.text_secondary,None,Leading::Times(1.3),
             ));
             for cell in report.cells.iter().filter(|cell|
@@ -112,7 +112,7 @@ pub(super) fn append(
             }
             if crate::notion_bases::rebase::manual_choices_complete(bases) {
                 column=column.with_fixed(action_button(
-                    "Подтвердить сохранение выбранных локальных значений (CAS)".into(),
+                    "Подтвердить решения и применить через File Gate CAS".into(),
                     Action::NotionBasesApplyReviewedRebase,bindings,
                 ));
             }

@@ -321,7 +321,7 @@ impl BasesSession {
         self.effective=None; self.disk_hash=None;
         self.view.selected=None;self.view.rebase_preview=None;
         self.view.keep_local.clear();
-                    self.view.accept_notion.clear();
+        self.view.accept_notion.clear();
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base))
     }
     pub fn change(&mut self, core:Arc<Core>, row:&str, property:&str,

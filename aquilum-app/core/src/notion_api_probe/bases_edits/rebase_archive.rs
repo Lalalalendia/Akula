@@ -7,7 +7,7 @@ use std::{fs, io::ErrorKind, path::Path};
 
 const MAX_ARCHIVE_BYTES: usize = 2 * 1024 * 1024;
 
-fn archive_relative(source:&str, old_digest:&str, new_digest:&str, disk_hash:&str)->String{
+pub(super) fn archive_relative(source:&str, old_digest:&str, new_digest:&str, disk_hash:&str)->String{
     let mut hash=blake3::Hasher::new();
     hash.update(b"akula:bases:pre-rebase:v1");
     for part in [source,old_digest,new_digest,disk_hash] {

@@ -194,7 +194,11 @@ mod tests {
         assert!(!session.toggle_keep_local("other","prop"));
         assert!(session.toggle_keep_local("row","prop"));
         assert!(manual_choices_complete(&session.view));
-        assert!(session.toggle_keep_local("row","prop"));
+        assert!(session.toggle_accept_notion("row","prop"));
+        assert!(session.view.keep_local.is_empty());
+        assert_eq!(session.view.accept_notion.len(),1);
+        assert!(manual_choices_complete(&session.view));
+        assert!(session.toggle_accept_notion("row","prop"));
         assert!(!manual_choices_complete(&session.view));
         if let Some(r)=session.view.rebase_preview.as_mut() {
             r.cells[0].disposition=RebaseDisposition::PropertyTypeChanged;

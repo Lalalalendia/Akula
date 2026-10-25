@@ -658,8 +658,13 @@ fn c5b4_accept_notion_preserves_exact_old_override_archive_and_exposes_new_sourc
     let effective=read_effective_base(&f.vault,A,&next,&base).unwrap();
     let cell=effective.rows.iter().find(|r|r.akula_id==row).unwrap()
         .cells.iter().find(|c|c.property_id==prop).unwrap();
-    assert_eq!(cell.value,EffectiveValue::Source(json!({"id":"score",
-        "type":"number","number":91})));
+    match &cell.value {
+        EffectiveValue::Source(source) => {
+            assert_eq!(source.get("type"),Some(&json!("number")));
+            assert_eq!(source.get("number"),Some(&json!(91)));
+        }
+        other => panic!("expected original Notion value, got {other:?}"),
+    }
 }
 #[test]
 fn c5b4_accept_notion_rejects_old_hash_and_duplicate_choices_before_any_backup() {
@@ -687,4 +692,28 @@ fn c5b4_accept_notion_rejects_old_hash_and_duplicate_choices_before_any_backup()
     assert!(apply_rebase_decisions_approved(&f.core,&f.vault,A,&f.digest,&next,
         &report.expected_local_hash,&[choose],true).is_err());
     assert_eq!(fs::read(f.edited_path()).unwrap(),changed);
+}
+
+#[test]
+fn c5b4_accept_notion_refuses_existing_foreign_archive_and_preserves_local_data() {
+    let f=Fixture::new();
+    let row=f.row(A);let property=f.prop(DS1,"score");
+    apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::Set{row_id:row.clone(),property_id:property.clone(),
+            value:LocalValue::Number(66.0)}],true).unwrap();
+    let next=published_new_source(&f,|src|{
+        src.objects.iter_mut().find(|o|o.kind=="page"&&o.id==A)
+            .unwrap().json["properties"]["Score"]["number"]=json!(19);
+    });
+    let report=preview_rebase(&f.vault,A,&f.digest,&next).unwrap();
+    let arch=super::rebase_archive::archive_relative(A,&f.digest,&next,
+        &report.expected_local_hash);
+    let archive_path=f.vault.join(&arch);
+    fs::write(&archive_path,b"forged").unwrap();
+    let before=fs::read(f.edited_path()).unwrap();
+    assert!(apply_rebase_decisions_approved(&f.core,&f.vault,A,
+        &f.digest,&next,&report.expected_local_hash,
+        &[(row,property,RebaseDecision::AcceptNotion)],true).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),before);
+    assert_eq!(fs::read(archive_path).unwrap(),b"forged");
 }
