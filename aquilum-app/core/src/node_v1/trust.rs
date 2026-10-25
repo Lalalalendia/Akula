@@ -144,7 +144,7 @@ impl RootTrust {
     /// has not invalidated the in-memory trusted snapshot.
     pub(super) fn policy_digest(&self) -> [u8; 32] { self.digest }
 
-    pub(super) fn require_iroh_endpoint(&self, presented: [u8; 32])
+    pub fn require_iroh_endpoint(&self, presented: [u8; 32])
         -> Result<(), NodeV1Error>
     {
         self.require_current()?;
