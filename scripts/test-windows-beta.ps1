@@ -93,15 +93,20 @@ function Invoke-InstalledPdfWorker {
   $start.FileName = $exe
   $start.UseShellExecute = $false
   $start.CreateNoWindow = $true
-  foreach ($arg in @('--pdf-worker', $Source, [string]$Page, [string]$Width, [string]$Rotation, $Output, $Status)) {
-    [void]$start.ArgumentList.Add($arg)
+  # Windows PowerShell 5.1 runs on .NET Framework: ProcessStartInfo.ArgumentList
+  # is unavailable there. These are fixture files, not user-provided shell commands.
+  foreach ($file in @($Source, $Output, $Status)) {
+    if ($file.Contains('"')) { throw 'Unexpected quotation mark in PDF test path' }
   }
+  $start.Arguments = '--pdf-worker "{0}" {1} {2} {3} "{4}" "{5}"' -f @(
+    $Source, $Page, $Width, $Rotation, $Output, $Status
+  )
   $worker = [System.Diagnostics.Process]::new()
   $worker.StartInfo = $start
   try {
     if (-not $worker.Start()) { throw 'Could not start installed Akula PDF worker' }
     if (-not $worker.WaitForExit(30000)) {
-      $worker.Kill($true)
+      $worker.Kill()
       [void]$worker.WaitForExit(5000)
       throw "Installed PDF worker timed out (page=$Page)"
     }
