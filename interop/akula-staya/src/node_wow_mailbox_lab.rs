@@ -153,6 +153,33 @@ impl NodeWowMailboxLab {
         now_ms: i64,
     ) -> Result<Self, MailRoleHold> {
         let policy = VerifiedMailRoleLab::open(mail_policy_folder, node, node_endpoint, now_ms)?;
+        Self::open_bound(node, state, custodian_signer, policy, now_ms)
+    }
+
+    /// The OS-protected candidate. It reads ONLY /etc/akula-node/wow-mail,
+    /// with root:service-group 0750/0640 and no service write authority.
+    /// The existing root Node policy and separately signed mail manifest
+    /// remain mandatory. This feature is non-shipping and cannot run in release.
+    pub fn open_existing_root_provisioned(
+        node: &NodeHost,
+        state: &Path,
+        node_endpoint: [u8; 32],
+        custodian_signer: SigningKey,
+        now_ms: i64,
+    ) -> Result<Self, MailRoleHold> {
+        let policy = VerifiedMailRoleLab::open_root_provisioned(
+            node, node_endpoint, now_ms,
+        )?;
+        Self::open_bound(node, state, custodian_signer, policy, now_ms)
+    }
+
+    fn open_bound(
+        _node: &NodeHost,
+        state: &Path,
+        custodian_signer: SigningKey,
+        policy: VerifiedMailRoleLab,
+        now_ms: i64,
+    ) -> Result<Self, MailRoleHold> {
         let claims = policy.claims;
         if claims.custodian_public != custodian_signer.verifying_key().to_bytes() {
             return Err(MailRoleHold::UnpinnedTrust);
