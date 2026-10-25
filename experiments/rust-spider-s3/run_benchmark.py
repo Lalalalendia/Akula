@@ -198,9 +198,9 @@ def main():
     webserver = subprocess.Popen([sys.executable, "-m", "http.server", str(port),
                                   "--bind", "127.0.0.1", "--directory", str(generated)],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    results = {"scope": "real MinIO S3 API, 160 synthetic HTML pages, boto3 vs Spider + aws-sdk-s3",
+    results = {"scope": "real MinIO S3 API, synthetic HTML pages, boto3 vs Spider + aws-sdk-s3",
                "pages": args.pages, "page_size_approx": args.size, "rounds": args.rounds,
-               "python": [], "rust": [], "recovery": {}, "environment": {
+               "python": [], "rust": [], "recovery": {}, "status": "RUNNING", "environment": {
                    "endpoint": os.environ.get("S3_ENDPOINT", ""),
                    "minio_image": os.environ.get("MINIO_IMAGE", ""),
                    "python": sys.version.split()[0],
@@ -242,6 +242,11 @@ def main():
         } for mode in ("python", "rust")}
         results["status"] = "PASSED"
         print(json.dumps(results["summary"], indent=2), flush=True)
+    except Exception as exc:
+        results["status"] = "FAILED"
+        results["error_type"] = type(exc).__name__
+        results["error_message"] = str(exc)
+        raise
     finally:
         if webserver.poll() is None:
             os.killpg(webserver.pid, signal.SIGTERM)
