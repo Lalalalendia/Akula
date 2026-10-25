@@ -9,6 +9,9 @@
 //!
 //! A future product role requires an independently owner-approved mail policy
 //! pinned by root before any network exposure. This feature is lab-only.
+mod policy;
+pub use policy::{MailRoleClaims, sign_mail_policy_for_lab};
+use policy::VerifiedMailRoleLab;
 use akula_wire_lab::{
     custodian_wire,
     journal_w4::Journal,
@@ -32,6 +35,7 @@ pub enum MailRoleHold {
     NodePolicy,
     InvalidIdentity,
     UnpinnedTrust,
+    MailPolicy,
     UnsafeState,
     UnsafeDatabase,
     ClockRollback,
@@ -47,9 +51,7 @@ pub struct NodeWowMailboxLab {
     state: PathBuf,
     db_inode: (u64, u64),
     custodian_signer: SigningKey,
-    custodian_id: [u8; 16],
-    custodian_epoch: u64,
-    expected_node_endpoint: [u8; 32],
+    policy: VerifiedMailRoleLab,
     trust: TrustRegistry,
     last_now_ms: i64,
 }
@@ -84,35 +86,26 @@ fn private_existing_db(state: &Path) -> Result<Metadata, MailRoleHold> {
 }
 
 impl NodeWowMailboxLab {
-    /// Open only the exact already provisioned local SQLite. The default
-    /// Akula Node role NEVER calls this; the test feature must be explicit.
-    /// TrustRegistry and signing secret are externally provisioned lab inputs.
-    /// In production these need root-pinned owner mailbox policy and an
-    /// independently enrolled key store, neither of which exists in v3.
+    /// Open an already provisioned mailbox with a separately signed policy
+    /// anchored to Node's *independently* pinned operator key (read-only).
+    /// No caller-supplied TrustRegistry or mailbox identities are trusted.
+    /// Test-only: parent file ownership here is same-UID, NOT production root.
     pub fn open_existing(
         node: &NodeHost,
         state: &Path,
+        mail_policy_folder: &Path,
         node_endpoint: [u8; 32],
-        custodian_id: [u8; 16],
-        custodian_epoch: u64,
         custodian_signer: SigningKey,
-        trust: TrustRegistry,
+        now_ms: i64,
     ) -> Result<Self, MailRoleHold> {
-        if node_endpoint == [0; 32] {
-            return Err(MailRoleHold::InvalidIdentity);
+        let policy = VerifiedMailRoleLab::open(
+            mail_policy_folder, node, node_endpoint, now_ms,
+        )?;
+        let claims = policy.claims;
+        if claims.custodian_public != custodian_signer.verifying_key().to_bytes() {
+            return Err(MailRoleHold::UnpinnedTrust);
         }
-        node.verify_iroh_endpoint(node_endpoint)
-            .map_err(|_| MailRoleHold::NodePolicy)?;
-        if custodian_id == [0; 16] || custodian_epoch == 0 || custodian_epoch > i64::MAX as u64 {
-            return Err(MailRoleHold::InvalidIdentity);
-        }
-        trust
-            .verify(
-                custodian_id,
-                custodian_epoch,
-                &custodian_signer.verifying_key(),
-            )
-            .map_err(|_| MailRoleHold::UnpinnedTrust)?;
+        let trust = policy.registry()?;
         let db_info = private_existing_db(state)?;
         let db_path = state.join(DB);
         let journal = Journal::open(&db_path).map_err(|_| MailRoleHold::Journal)?;
@@ -125,11 +118,9 @@ impl NodeWowMailboxLab {
             state: state.to_path_buf(),
             db_inode: (db_info.dev(), db_info.ino()),
             custodian_signer,
-            custodian_id,
-            custodian_epoch,
-            expected_node_endpoint: node_endpoint,
+            policy,
             trust,
-            last_now_ms: 0,
+            last_now_ms: now_ms,
         })
     }
 
@@ -141,15 +132,12 @@ impl NodeWowMailboxLab {
         if now_ms <= 0 || now_ms < self.last_now_ms {
             return Err(MailRoleHold::ClockRollback);
         }
-        node.verify_iroh_endpoint(self.expected_node_endpoint)
-            .map_err(|_| MailRoleHold::NodePolicy)?;
-        self.trust
-            .verify(
-                self.custodian_id,
-                self.custodian_epoch,
-                &self.custodian_signer.verifying_key(),
-            )
-            .map_err(|_| MailRoleHold::UnpinnedTrust)?;
+        self.policy.require_current(node, now_ms)?;
+        if self.policy.claims.custodian_public
+            != self.custodian_signer.verifying_key().to_bytes()
+        {
+            return Err(MailRoleHold::UnpinnedTrust);
+        }
         let info = private_existing_db(&self.state)?;
         if (info.dev(), info.ino()) != self.db_inode {
             return Err(MailRoleHold::UnsafeDatabase);
@@ -167,11 +155,12 @@ impl NodeWowMailboxLab {
         now_ms: i64,
     ) -> Result<(), MailRoleHold> {
         self.require_current(node, now_ms)?;
+        Self::ensure_local_only(listener)?;
         custodian_wire::serve_one_loopback(
             listener,
             &mut self.journal,
             &self.custodian_signer,
-            self.custodian_epoch,
+            self.policy.claims.custodian_epoch,
             &self.trust,
             now_ms,
         )
