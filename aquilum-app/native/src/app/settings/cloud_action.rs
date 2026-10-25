@@ -6,8 +6,7 @@ use crate::ui::editor::{TextAction, TextEditor};
 use crate::ui::settings::{Binding, CloudPopup, SettingsDialog};
 use crate::ui::settings::controls::Committed;
 use crate::ui::settings::schema::{Action, Value};
-use crate::ui::widgets::Pressed;
-mod save; #[cfg(feature = "notion-offline-preview")] mod notion_draft;
+use crate::ui::widgets::Pressed; mod save; #[cfg(feature = "notion-offline-preview")] mod notion_draft;
 impl App {
     pub(super) fn on_cloud_action(
         &mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction,
