@@ -14,6 +14,8 @@ pub mod live_identity;
 pub mod attachment_contract;
 #[cfg(feature = "p2p-wow-w3-lab")]
 pub mod wow_attachment_w3;
+#[cfg(feature = "p2p-granted-quic-lab")]
+pub mod granted_quic_lab;
 
 // The one-file source is compiled both as a standalone binary and as a
 // module inside this library. Keep its existing absolute crate path valid.
