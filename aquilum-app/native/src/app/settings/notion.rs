@@ -22,6 +22,27 @@ impl App {
                 let _ = self.notion_bases.begin_draft(row, property);
                 true
             }
+            Action::NotionBasesNewColumn(kind) => {
+                let _ = self.notion_bases.begin_new_column(*kind);
+                true
+            }
+            Action::NotionBasesRenameColumn(property) => {
+                let _ = self.notion_bases.begin_rename_column(property);
+                true
+            }
+            Action::NotionBasesSaveSchema => {
+                if self.notion_bases.view().target.as_deref()
+                    == self.workspace.root.as_deref()
+                {
+                    let _ = self.notion_bases.commit_schema(
+                        std::sync::Arc::clone(&self.workspace.core));
+                }
+                true
+            }
+            Action::NotionBasesCancelSchema => {
+                self.notion_bases.cancel_schema();
+                true
+            }
             Action::NotionBasesSaveDraft => {
                 if self.notion_bases.view().target.as_deref() == self.workspace.root.as_deref() {
                     let _ = self.notion_bases.commit_draft(
