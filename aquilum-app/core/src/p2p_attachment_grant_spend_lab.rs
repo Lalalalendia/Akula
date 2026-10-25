@@ -59,6 +59,7 @@ impl GrantSpendLedgerLab {
         start: u64, end: u64, now: u64,
     ) -> Result<(), GrantSpendError> {
         if signed_wire.len()!=GRANT_BYTES
+            || !verified.matches_signed_wire(signed_wire)
             || verified.nonce()==[0;16] || verified.owner_epoch()==0
             || verified.owner_epoch()>i64::MAX as u64
             || now>=verified.expires_unix()
@@ -140,6 +141,10 @@ mod tests {
         let (grant,wire)=fixture();
         let mut first=GrantSpendLedgerLab::open(&path).unwrap();
         assert_eq!(first.spend_for_range(&grant,&wire,0,5*1024*1024,112),Err(GrantSpendError::OutOfRange));
+        assert_eq!(first.count_for_lab(),Ok(0));
+        let mut wrong_wire = wire;
+        wrong_wire[GRANT_BYTES-1] ^= 1;
+        assert_eq!(first.spend_for_range(&grant,&wrong_wire,2*1024*1024,5*1024*1024,112),Err(GrantSpendError::Invalid));
         assert_eq!(first.count_for_lab(),Ok(0));
         assert_eq!(first.spend_for_range(&grant,&wire,2*1024*1024,5*1024*1024,112),Ok(()));
         assert_eq!(first.spend_for_range(&grant,&wire,2*1024*1024,5*1024*1024,112),Err(GrantSpendError::AlreadyUsed));

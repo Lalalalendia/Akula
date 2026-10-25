@@ -82,6 +82,7 @@ pub struct VerifiedOwnerRead {
     owner_epoch: u64,
     nonce: [u8; 16],
     expires_unix: u64,
+    signed_wire_hash: [u8; 32],
 }
 impl VerifiedOwnerRead {
     pub fn message_id(&self) -> [u8; 16] { self.message_id }
@@ -92,6 +93,9 @@ impl VerifiedOwnerRead {
     pub fn nonce(&self) -> [u8; 16] { self.nonce }
     pub fn owner_epoch(&self) -> u64 { self.owner_epoch }
     pub fn expires_unix(&self) -> u64 { self.expires_unix }
+    pub fn matches_signed_wire(&self, wire: &[u8]) -> bool {
+        wire.len() == GRANT_BYTES && *blake3::hash(wire).as_bytes() == self.signed_wire_hash
+    }
     pub fn bounds(&self) -> (u64, u64) { (self.allowed_start, self.allowed_end) }
     pub fn permits_exact_range(&self, start: u64, end: u64) -> bool {
         start >= self.allowed_start
@@ -238,6 +242,7 @@ pub fn verify_owner_read_grant(
         owner_epoch: w.owner_key_epoch,
         nonce: w.nonce,
         expires_unix: w.expires_unix,
+        signed_wire_hash: *blake3::hash(wire).as_bytes(),
     })
 }
 

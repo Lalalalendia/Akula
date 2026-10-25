@@ -11,6 +11,7 @@ on:
       - 'aquilum-app/core/src/p2p_attachment_replay_lab.rs'
       - 'aquilum-app/core/src/p2p_attachment_grant_lab.rs'
       - 'aquilum-app/core/src/p2p_attachment_grant_spend_lab.rs'
+      - 'aquilum-app/core/src/p2p_attachment_source_lab.rs'
       - 'aquilum-app/core/src/lib.rs'
       - 'aquilum-app/core/Cargo.toml'
       - 'interop/akula-staya/src/attachment_contract.rs'
@@ -57,6 +58,10 @@ jobs:
         shell: bash
         run: |
           cargo test --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features p2p-attachment-grant-spend-lab p2p_attachment_grant_spend_lab -- --nocapture
+      - name: Verify immutable selected-file bytes and signed one-shot range serving
+        shell: bash
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features p2p-attachment-source-lab p2p_attachment_source_lab -- --nocapture
       - name: Test actual Staya offset and manifest adapter
         shell: bash
         run: |

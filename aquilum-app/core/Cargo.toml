@@ -18,6 +18,7 @@ p2p-attachment-contract = ["p2p-offer-lab"]
 p2p-attachment-replay-lab = ["p2p-attachment-contract"]
 p2p-attachment-grant-lab = ["p2p-attachment-contract"]
 p2p-attachment-grant-spend-lab = ["p2p-attachment-grant-lab"]
+p2p-attachment-source-lab = ["p2p-attachment-grant-spend-lab"]
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
