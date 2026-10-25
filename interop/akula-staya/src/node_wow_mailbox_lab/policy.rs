@@ -19,7 +19,7 @@ use std::{
     fs::{self, File},
     io::Read,
     os::unix::fs::{MetadataExt, PermissionsExt},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 const DOMAIN: &[u8] = b"Akula/NodeV1/WOW/OwnerMailRole/lab-v1\0";
@@ -32,6 +32,20 @@ const MAX_OFFERS: u32 = 64;
 const PERMISSIONS: u8 = 0b0000_1111; // STORE/LIST/FETCH/RETURN
 const DIR_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
+/// Production-path candidate, never chosen by a network request or CLI
+/// argument. The /etc/akula-node ancestor is already independently
+/// protected by existing Node-V1 RootTrust.
+const ROOT_MAIL_PARENT: &str = "/etc/akula-node/wow-mail";
+const ROOT_MAIL_DIR_MODE: u32 = 0o750;
+const ROOT_MAIL_FILE_MODE: u32 = 0o640;
+
+#[derive(Clone, Copy)]
+enum PolicyFileAuthority {
+    /// Legacy same-UID lab fixtures: unsafe for installed service.
+    SameUidLab,
+    /// Root:service-group read-only files, no service write authority.
+    RootOwnedReadOnly,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MailRoleClaims {
@@ -76,6 +90,7 @@ pub(super) struct VerifiedMailRoleLab {
     inode: (u64, u64),
     pinned_digest: [u8; 32],
     floor_inode: (u64, u64),
+    authority: PolicyFileAuthority,
 }
 
 pub fn sign_mail_policy_for_lab(signer: &SigningKey, claims: MailRoleClaims) -> Vec<u8> {
@@ -143,6 +158,103 @@ fn read_exact_private_file(
     Ok((bytes, inode))
 }
 
+/// Read independently provisioned, root-owned PUBLIC policy bytes from
+/// a non-root service account. Every path component is opened relative to
+/// the previous verified directory FD with NOFOLLOW. Reject world/group
+/// writable root ancestors, nonroot owners, and directory substitution.
+/// This never reads secrets or writes /etc; only the privileged installer
+/// is permitted to create or rotate these files.
+fn read_root_owned_mail_file(
+    folder: &Path,
+    filename: &str,
+    limit: u64,
+) -> Result<(Vec<u8>, (u64, u64)), MailRoleHold> {
+    if !folder.is_absolute() || rustix::process::geteuid().as_raw() == 0 {
+        return Err(MailRoleHold::MailPolicy);
+    }
+    let mut dir = File::from(
+        open(
+            "/",
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        ).map_err(|_| MailRoleHold::MailPolicy)?,
+    );
+    let mut depth = 0;
+    for component in folder.components() {
+        match component {
+            Component::RootDir => continue,
+            Component::Normal(name) => {
+                let next = File::from(
+                    openat(
+                        &dir,
+                        Path::new(name),
+                        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW
+                            | OFlags::CLOEXEC,
+                        Mode::empty(),
+                    ).map_err(|_| MailRoleHold::MailPolicy)?,
+                );
+                let info = next.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
+                if !info.is_dir()
+                    || info.uid() != 0
+                    || info.permissions().mode() & 0o022 != 0
+                {
+                    return Err(MailRoleHold::MailPolicy);
+                }
+                depth += 1;
+                dir = next;
+            }
+            _ => return Err(MailRoleHold::MailPolicy),
+        }
+    }
+    // "/" or "/etc" are never mailbox authority directories. The final
+    // directory must be root-owned and accessible only by service group.
+    let folder_info = dir.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
+    if depth < 2
+        || folder_info.gid() != rustix::process::getegid().as_raw()
+        || folder_info.permissions().mode() & 0o7777 != ROOT_MAIL_DIR_MODE
+    {
+        return Err(MailRoleHold::MailPolicy);
+    }
+    let handle = File::from(
+        openat(
+            &dir,
+            filename,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        ).map_err(|_| MailRoleHold::MailPolicy)?,
+    );
+    let meta = handle.metadata().map_err(|_| MailRoleHold::MailPolicy)?;
+    if !meta.is_file()
+        || meta.uid() != 0
+        || meta.gid() != rustix::process::getegid().as_raw()
+        || meta.nlink() != 1
+        || meta.permissions().mode() & 0o7777 != ROOT_MAIL_FILE_MODE
+        || meta.len() == 0
+        || meta.len() > limit
+    {
+        return Err(MailRoleHold::MailPolicy);
+    }
+    let mut result = Vec::with_capacity(meta.len() as usize);
+    handle.take(limit + 1).read_to_end(&mut result)
+        .map_err(|_| MailRoleHold::MailPolicy)?;
+    if result.len() as u64 != meta.len() {
+        return Err(MailRoleHold::MailPolicy);
+    }
+    Ok((result, (meta.dev(), meta.ino())))
+}
+
+fn read_authorized_mail_file(
+    folder: &Path,
+    filename: &str,
+    limit: u64,
+    authority: PolicyFileAuthority,
+) -> Result<(Vec<u8>, (u64, u64)), MailRoleHold> {
+    match authority {
+        PolicyFileAuthority::SameUidLab => read_exact_private_file(folder, filename, limit),
+        PolicyFileAuthority::RootOwnedReadOnly => read_root_owned_mail_file(folder, filename, limit),
+    }
+}
+
 /// Lab provisioning fixture only. The floor MUST be protected by a
 /// separate root-controlled anti-rollback authority in production. A
 /// same-UID attacker could replace BOTH lab files; the test never claims
@@ -161,8 +273,8 @@ struct EpochFloor {
     inode: (u64, u64),
 }
 
-fn read_epoch_floor(folder: &Path) -> Result<EpochFloor, MailRoleHold> {
-    let (bytes, inode) = read_exact_private_file(folder, FLOOR_FILE, FLOOR_LEN as u64)?;
+fn read_epoch_floor(folder: &Path, authority: PolicyFileAuthority) -> Result<EpochFloor, MailRoleHold> {
+    let (bytes, inode) = read_authorized_mail_file(folder, FLOOR_FILE, FLOOR_LEN as u64, authority)?;
     if bytes.len() != FLOOR_LEN || &bytes[..8] != FLOOR_MAGIC {
         return Err(MailRoleHold::MailPolicy);
     }
@@ -267,9 +379,35 @@ impl VerifiedMailRoleLab {
         expected_endpoint: [u8; 32],
         now_ms: i64,
     ) -> Result<Self, MailRoleHold> {
-        let (input, inode) = read_exact_private_file(folder, FILE, MAX_FILE_BYTES)?;
+        Self::open_with_authority(
+            folder, node, expected_endpoint, now_ms, PolicyFileAuthority::SameUidLab,
+        )
+    }
+
+    /// A separate fixed service policy path, root:service-group protected,
+    /// readable to nonroot Node but never writable by it. Does NOT activate
+    /// any listener, installer or mail role without an existing SQLite gate.
+    pub(super) fn open_root_provisioned(
+        node: &NodeHost,
+        expected_endpoint: [u8; 32],
+        now_ms: i64,
+    ) -> Result<Self, MailRoleHold> {
+        Self::open_with_authority(
+            Path::new(ROOT_MAIL_PARENT), node, expected_endpoint, now_ms,
+            PolicyFileAuthority::RootOwnedReadOnly,
+        )
+    }
+
+    fn open_with_authority(
+        folder: &Path,
+        node: &NodeHost,
+        expected_endpoint: [u8; 32],
+        now_ms: i64,
+        authority: PolicyFileAuthority,
+    ) -> Result<Self, MailRoleHold> {
+        let (input, inode) = read_authorized_mail_file(folder, FILE, MAX_FILE_BYTES, authority)?;
         let claims = decode_and_verify(&input, node, expected_endpoint, now_ms)?;
-        let floor = read_epoch_floor(folder)?;
+        let floor = read_epoch_floor(folder, authority)?;
         let digest = *blake3::hash(&input).as_bytes();
         if floor.epoch != claims.policy_epoch || floor.digest != digest {
             return Err(MailRoleHold::MailPolicy);
@@ -280,6 +418,7 @@ impl VerifiedMailRoleLab {
             inode,
             pinned_digest: digest,
             floor_inode: floor.inode,
+            authority,
         })
     }
 
@@ -287,8 +426,10 @@ impl VerifiedMailRoleLab {
     /// and node policy change on EVERY request. A new policy requires an
     /// explicit reviewed restart; never hot-adopt a newer/malicious file.
     pub(super) fn require_current(&self, node: &NodeHost, now_ms: i64) -> Result<(), MailRoleHold> {
-        let (input, inode) = read_exact_private_file(&self.folder, FILE, MAX_FILE_BYTES)?;
-        let floor = read_epoch_floor(&self.folder)?;
+        let (input, inode) = read_authorized_mail_file(
+            &self.folder, FILE, MAX_FILE_BYTES, self.authority,
+        )?;
+        let floor = read_epoch_floor(&self.folder, self.authority)?;
         if inode != self.inode
             || *blake3::hash(&input).as_bytes() != self.pinned_digest
             || floor.inode != self.floor_inode
