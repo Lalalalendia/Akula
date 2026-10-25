@@ -8,7 +8,9 @@ use aquilum_core::{Core, notion_api_probe::{
 use std::{fs, path::{Path, PathBuf}, sync::{Arc, mpsc::{self, Sender, Receiver}}};
 
 mod editor;
+mod schema_editor;
 pub use editor::{DraftView, EditKind};
+pub use schema_editor::{SchemaDraftView, SchemaMode};
 
 const ROWS: usize = 10;
 const COLUMNS: usize = 6;
@@ -25,6 +27,7 @@ pub struct BaseChoice {
 }
 #[derive(Clone, Debug)]
 pub struct ColumnView {
+    pub local_only: bool,
     pub name: String,
     pub property_id: String,
     pub kind: String,
@@ -63,6 +66,7 @@ pub struct BasesView {
     pub saved_source_views: usize,
     pub notice: Option<&'static str>,
     pub draft: Option<DraftView>,
+    pub schema_draft: Option<SchemaDraftView>,
 }
 enum Payload {
     Catalog(Vec<BaseChoice>),
@@ -207,7 +211,8 @@ impl BasesSession {
             out.saved_source_views=base.saved_source_views;
             out.columns=base.columns.iter().skip(out.column_start).take(COLUMNS)
                 .map(|c|ColumnView{
-                    name:short(&c.name,40),property_id:c.property_id.clone(),
+                    name:short(&c.name,40),local_only:c.local_only,
+                    property_id:c.property_id.clone(),
                     kind:c.kind.clone(),
                 }).collect();
             for row in base.rows.iter().skip(out.row_start).take(ROWS) {
@@ -264,13 +269,14 @@ impl BasesSession {
         Ok(())
     }
     pub fn open(&mut self, target:PathBuf, source:String) -> Result<(),()> {
-        if self.view.draft.is_some() { return Err(()); }
+        if self.view.draft.is_some() || self.view.schema_draft.is_some() { return Err(()); }
         self.reset();
         self.view.source=Some(source.clone());self.view.target=Some(target.clone());
         self.start(Stage::Loading,move ||catalog(&target,&source).map(Payload::Catalog))
     }
     pub fn select(&mut self, digest:String, base_id:String)->Result<(),()>{
-        if self.view.busy || self.view.draft.is_some() || !self.view.choices.iter()
+        if self.view.busy || self.view.draft.is_some()
+            || self.view.schema_draft.is_some() || !self.view.choices.iter()
             .any(|b|b.digest==digest&&b.base_id==base_id) {return Err(());}
         let source=self.view.source.clone().ok_or(())?;
         let target=self.view.target.clone().ok_or(())?;
@@ -280,7 +286,8 @@ impl BasesSession {
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base_id))
     }
     pub fn page(&mut self, row_start:usize,column_start:usize)->bool{
-        if self.view.busy || self.view.stage!=Stage::Ready || self.view.draft.is_some() {return false;}
+        if self.view.busy || self.view.stage!=Stage::Ready || self.view.draft.is_some()
+            || self.view.schema_draft.is_some() {return false;}
         let Some(base)=&self.effective else{return false};
         if row_start%ROWS!=0 || column_start%COLUMNS!=0
             || (row_start>0 && row_start>=base.rows.len())
@@ -289,7 +296,8 @@ impl BasesSession {
         true
     }
     pub fn reload(&mut self)->Result<(),()>{
-        if self.view.busy || self.view.draft.as_ref().is_some_and(|d|!d.frozen) {return Err(());}
+        if self.view.busy || self.view.draft.as_ref().is_some_and(|d|!d.frozen)
+            || self.view.schema_draft.as_ref().is_some_and(|d|!d.frozen) {return Err(());}
         let source=self.view.source.clone().ok_or(())?;
         let target=self.view.target.clone().ok_or(())?;
         let digest=self.view.digest.clone().ok_or(())?;
@@ -300,7 +308,8 @@ impl BasesSession {
     pub fn change(&mut self, core:Arc<Core>, row:&str, property:&str,
         revert:bool)->Result<(),()>
     {
-        if self.view.busy || self.view.stage!=Stage::Ready || self.view.draft.is_some() {return Err(());}
+        if self.view.busy || self.view.stage!=Stage::Ready || self.view.draft.is_some()
+            || self.view.schema_draft.is_some() {return Err(());}
         let data=self.effective.as_ref().ok_or(())?;
         let column=data.columns.iter().find(|c|c.property_id==property).ok_or(())?;
         let row_data=data.rows.iter().find(|r|r.akula_id==row).ok_or(())?;
@@ -337,14 +346,17 @@ impl BasesSession {
                 {
                     self.effective=Some(base); self.disk_hash=hash;
                     self.view.stage=Stage::Ready;
-                    if saving { self.view.draft=None; }
+                    if saving { self.view.draft=None; self.view.schema_draft=None; }
                     self.view.notice=if saving{Some("Правка сохранена локально через File Gate CAS")}
                         else{None};
                 }
                 _=>{
                     self.effective=None; self.disk_hash=None;
                     self.view.stage=Stage::NeedsReview;
-                    if saving && let Some(draft)=self.view.draft.as_mut() {draft.frozen=true;}
+                    if saving {
+                        if let Some(draft)=self.view.draft.as_mut(){draft.frozen=true;}
+                        if let Some(draft)=self.view.schema_draft.as_mut(){draft.frozen=true;}
+                    }
                     self.view.notice=Some("Проверка данных или CAS не пройдена. Перечитайте локальную базу.");
                 }
             }
