@@ -11,6 +11,8 @@ on:
       - 'aquilum-app/core/src/sync/yandex_readonly_probe.rs'
       - 'aquilum-app/core/src/sync/profile_binding.rs'
       - 'aquilum-app/core/src/sync/host_admission.rs'
+      - 'aquilum-app/core/src/sync/host_admission/tests/mod.rs'
+      - 'aquilum-app/core/src/sync/host_admission/tests/preimage.rs'
       - 'aquilum-app/core/src/sync/s3_preimage_capture.rs'
       - 'aquilum-app/core/src/sync/host_custody_registry.rs'
       - 'aquilum-app/core/src/sync/journal.rs'
