@@ -38,7 +38,10 @@ impl App {
                     chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
                 }
             }
-            Err(error) => self.show_open_error(root, path, &error),
+            Err(error) => {
+                self.open_error = Some((path.to_path_buf(), error.clone()));
+                self.show_open_error(root, path, &error);
+            },
         }
     }
 }
