@@ -562,18 +562,18 @@ fn signed_mail_scope_must_match_durable_sqlite_grants_exactly() {
 fn epoch_floor_cannot_silently_rollback_one_signed_policy() {
     let fixture = Fixture::new();
     let original = fs::read(fixture.mail_policy_file()).unwrap();
-    assert!(fixture.role().is_ok());
+    let mut live = fixture.role().unwrap();
 
     let mut next = fixture.signed_claims();
     next.policy_epoch += 1;
     let signed_next = sign_mail_policy_for_lab(&fixture.owner, next);
     fixture.provision_mail_policy(&signed_next, 2);
-    let mut live = fixture.role().unwrap();
     let listener = bind_test_loopback().unwrap();
     assert!(matches!(
         live.serve_one(&fixture.node, &listener, 3),
         Err(MailRoleHold::MailPolicy)
-    ) == false, "the new epoch should remain authorized");
+    ));
+    assert!(fixture.role().is_ok(), "explicitly provisioned new epoch is authorized");
     // Reverting only the signed manifest does not restore old permissions.
     fs::write(fixture.mail_policy_file(), &original).unwrap();
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
