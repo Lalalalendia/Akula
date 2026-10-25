@@ -18,6 +18,21 @@ impl App {
                 self.notion_bases.page(*rows, *columns);
                 true
             }
+            Action::NotionBasesBeginEdit(row,property) => {
+                let _ = self.notion_bases.begin_draft(row, property);
+                true
+            }
+            Action::NotionBasesSaveDraft => {
+                if self.notion_bases.view().target.as_deref() == self.workspace.root.as_deref() {
+                    let _ = self.notion_bases.commit_draft(
+                        std::sync::Arc::clone(&self.workspace.core));
+                }
+                true
+            }
+            Action::NotionBasesCancelDraft => {
+                self.notion_bases.cancel_draft();
+                true
+            }
             Action::NotionBasesReload => {
                 let _ = self.notion_bases.reload();
                 true
