@@ -37,7 +37,9 @@ struct Profile {
 #[derive(Default)]
 struct Counters {
     inbound: AtomicUsize,
+    inbound_bytes: AtomicUsize,
     forwarded: AtomicUsize,
+    forwarded_bytes: AtomicUsize,
     dropped: AtomicUsize,
     reordered: AtomicUsize,
     queue_peak: AtomicUsize,
@@ -62,6 +64,7 @@ fn enqueue(
 ) {
     *count += 1;
     stats.inbound.fetch_add(1, Ordering::Relaxed);
+    stats.inbound_bytes.fetch_add(buffer.len(), Ordering::Relaxed);
     if *count % profile.loss_every == 0 || pending.len() >= 4096 {
         stats.dropped.fetch_add(1, Ordering::Relaxed);
         return;
@@ -170,6 +173,7 @@ impl ImpairedPath {
                         };
                         if socket.send_to(&item.data, item.destination).is_ok() {
                             stats_worker.forwarded.fetch_add(1, Ordering::Relaxed);
+                            stats_worker.forwarded_bytes.fetch_add(item.data.len(), Ordering::Relaxed);
                         } else {
                             stats_worker.dropped.fetch_add(1, Ordering::Relaxed);
                         }
@@ -192,11 +196,21 @@ impl ImpairedPath {
         EndpointAddr::new(id).with_ip_addr(self.listen)
     }
 
-    fn assert_injected(&self) {
-        assert!(
-            self.stats.inbound.load(Ordering::Relaxed) > 100,
-            "the real QUIC datagram stream must cross the proxy",
+    fn assert_injected(&self, minimum_forwarded_bytes: usize) {
+        let packets = self.stats.inbound.load(Ordering::Relaxed);
+        let bytes = self.stats.inbound_bytes.load(Ordering::Relaxed);
+        let forwarded = self.stats.forwarded.load(Ordering::Relaxed);
+        let delivered_bytes = self.stats.forwarded_bytes.load(Ordering::Relaxed);
+        let dropped = self.stats.dropped.load(Ordering::Relaxed);
+        let reordered = self.stats.reordered.load(Ordering::Relaxed);
+        eprintln!(
+            "UDP_IMPAIRMENT packets={packets} bytes={bytes} forwarded={forwarded}              forwarded_bytes={delivered_bytes} dropped={dropped} reorder_delayed={reordered}"
         );
+        assert!(
+            delivered_bytes >= minimum_forwarded_bytes,
+            "real QUIC payload did not traverse required UDP proxy; this is bypass, not a passed impairment test",
+        );
+        assert!(packets > 100, "UDP test sampled too few datagrams");
         assert!(
             self.stats.forwarded.load(Ordering::Relaxed) > 100,
             "the impaired proxy must forward useful packets",
@@ -242,10 +256,16 @@ async fn actual_udp_packet_loss_throttle_jitter_route_switch_and_cold_inbox() {
     let all = test_photo();
     let full_hash = *blake3::hash(&all).as_bytes();
 
+    // Force a single IPv4 loopback socket and disable implicit discovery.
+    // If iroh still learns another direct path the byte counters below
+    // detect the bypass and this test MUST fail, not claim packet-loss proof.
     let sender = Endpoint::builder(presets::Minimal)
         .secret_key(iroh::SecretKey::generate())
         .alpns(vec![ALPN.to_vec()])
         .relay_mode(RelayMode::Disabled)
+        .clear_address_lookup()
+        .clear_ip_transports()
+        .bind_addr((Ipv4Addr::LOCALHOST, 0)).unwrap()
         .bind()
         .await
         .unwrap();
@@ -282,6 +302,9 @@ async fn actual_udp_packet_loss_throttle_jitter_route_switch_and_cold_inbox() {
         .secret_key(iroh::SecretKey::generate())
         .alpns(vec![ALPN.to_vec()])
         .relay_mode(RelayMode::Disabled)
+        .clear_address_lookup()
+        .clear_ip_transports()
+        .bind_addr((Ipv4Addr::LOCALHOST, 0)).unwrap()
         .bind()
         .await
         .unwrap();
@@ -435,7 +458,10 @@ async fn actual_udp_packet_loss_throttle_jitter_route_switch_and_cold_inbox() {
 
     // The statistics prove actual UDP packet loss, not artificial sleeps in
     // the application stream. Both routes must have transmitted packets.
-    route_fast.assert_injected();
-    route_slow.assert_injected();
+    // Sender payload (not total packet overhead): fast carries 2 MiB,
+    // slow carries 3 MiB. Proxied UDP traffic must include almost all
+    // application data rather than just ICE/path-discovery probes.
+    route_fast.assert_injected(2 * 1024 * 1024);
+    route_slow.assert_injected(3 * 1024 * 1024);
     assert_eq!(confirmed, PHOTO_SIZE);
 }
