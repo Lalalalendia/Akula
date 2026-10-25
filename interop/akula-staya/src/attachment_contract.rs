@@ -3,7 +3,7 @@
 use aquilum_core::p2p_attachment_contract::AttachmentNoticeV1;
 use staya_transfer::{ByteRange, ContentId, Manifest, TransferRequest, TransferError};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AttachmentBridgeError {
     InvalidRootOrSize,
     InvalidResume,
