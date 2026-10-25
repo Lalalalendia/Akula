@@ -18,6 +18,7 @@ use akula_wire_lab::{
 use aquilum_core::node_v1::{NodeHost, NodeIdentity};
 use aquilum_core::sync::VaultId;
 use ed25519_dalek::SigningKey;
+use rusqlite::Connection;
 use std::{
     fs,
     net::{TcpListener, TcpStream},
@@ -466,4 +467,56 @@ fn unsafe_mail_role_policy_file_never_bootstraps_keys_or_mailbox() {
     fs::write(&path, original).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
     assert!(fixture.role().is_ok());
+}
+
+
+#[test]
+fn signed_mail_scope_must_match_durable_sqlite_grants_exactly() {
+    let fixture = Fixture::new();
+    let db_path = fixture.mail_state.join("wow-mailbox.sqlite");
+    assert!(fixture.role().is_ok());
+
+    let connection = Connection::open(&db_path).unwrap();
+    connection.execute(
+        "UPDATE custodian_mailbox_policy SET max_offers=3 WHERE mailbox=?1",
+        [MAILBOX.as_slice()],
+    ).unwrap();
+    assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
+    connection.execute(
+        "UPDATE custodian_mailbox_policy SET max_offers=2 WHERE mailbox=?1",
+        [MAILBOX.as_slice()],
+    ).unwrap();
+
+    let mut accepted = fixture.role().unwrap();
+    connection.execute(
+        "UPDATE custodian_mailbox_policy SET max_bytes=2048 WHERE mailbox=?1",
+        [MAILBOX.as_slice()],
+    ).unwrap();
+    let listener = bind_test_loopback().unwrap();
+    assert!(matches!(
+        accepted.serve_one(&fixture.node, &listener, 3),
+        Err(MailRoleHold::MailPolicy),
+    ));
+
+    connection.execute(
+        "UPDATE custodian_mailbox_policy SET max_bytes=1024 WHERE mailbox=?1",
+        [MAILBOX.as_slice()],
+    ).unwrap();
+    assert!(fixture.role().is_ok());
+
+    // A second locally provisioned mailbox cannot borrow this one-mailbox
+    // signed operator policy, even if the issuer key is otherwise valid.
+    connection.execute(
+        "INSERT INTO custodian_mailbox_policy
+         (mailbox,issuer,issuer_epoch,custodian,scope,recipient,max_bytes,max_offers)
+         VALUES(?1,?2,1,?3,?4,?5,1024,2)",
+        rusqlite::params![
+            [77u8;16].as_slice(),
+            OWNER.as_slice(),
+            CUSTODIAN.as_slice(),
+            SCOPE.as_slice(),
+            RECIPIENT.as_slice()
+        ],
+    ).unwrap();
+    assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
 }
