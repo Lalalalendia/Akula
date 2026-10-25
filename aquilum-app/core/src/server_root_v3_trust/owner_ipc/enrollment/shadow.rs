@@ -68,9 +68,7 @@ pub(super) fn fixed_shadow_account_locked(etc: &File) -> Result<(), PeerEnrollEr
         return Err(PeerEnrollError::AccountMismatch);
     }
     let mut bytes = Vec::new();
-    (&file)
-        .take(MAX_SHADOW_BYTES + 1)
-        .read_to_end(&mut bytes)?;
+    (&file).take(MAX_SHADOW_BYTES + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 != before.len() || !stable(&before, &file.metadata()?) {
         return Err(PeerEnrollError::AccountMismatch);
     }

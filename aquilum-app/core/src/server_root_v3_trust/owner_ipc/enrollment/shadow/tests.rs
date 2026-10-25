@@ -6,9 +6,7 @@ const PREFIX: &[u8] = b"root:!:20000:0:99999:7:::\nnobody:*:20000:0:99999:7:::\n
 
 fn records(password: &str) -> Vec<u8> {
     let mut data = PREFIX.to_vec();
-    data.extend_from_slice(
-        format!("{SERVICE_ACCOUNT}:{password}:20000:0:99999:7:::\n").as_bytes(),
-    );
+    data.extend_from_slice(format!("{SERVICE_ACCOUNT}:{password}:20000:0:99999:7:::\n").as_bytes());
     data
 }
 
@@ -28,7 +26,14 @@ fn locked_shadow_accounts_accept_standard_linux_lock_markers() {
 
 #[test]
 fn usable_password_missing_account_or_ambiguous_shadow_must_hold() {
-    for token in ["", "$y$usable-hash", "$6$usable-hash", "password", "x", " !"] {
+    for token in [
+        "",
+        "$y$usable-hash",
+        "$6$usable-hash",
+        "password",
+        "x",
+        " !",
+    ] {
         assert!(
             parse_locked_shadow(&records(token)).is_err(),
             "unsafe password token {token:?}"
@@ -71,7 +76,6 @@ fn shadow_inode_must_be_regular_root_owned_single_link_and_private() {
     fs::create_dir(&path).unwrap();
     assert!(!root_shadow_ok(&fs::metadata(&path).unwrap()));
 }
-
 
 #[test]
 fn fixed_shadow_fd_accepts_only_regular_protected_inode_without_symlink() {
