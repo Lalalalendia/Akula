@@ -13,17 +13,14 @@ impl SqliteSyncJournal {
     pub(crate) fn open_existing_read_only(path: &Path) -> JournalResult<Self> {
         let connection = Connection::open_with_flags(
             path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         connection.execute_batch(
             "PRAGMA query_only = ON;
              PRAGMA foreign_keys = ON;
              PRAGMA busy_timeout = 250;",
         )?;
-        let version: i64 = connection.query_row(
-            "PRAGMA user_version", [], |row| row.get(0),
-        )?;
+        let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         if version != SCHEMA_VERSION {
             return Err(JournalError::UnsupportedSchema(version));
         }
@@ -37,17 +34,14 @@ impl SqliteSyncJournal {
     pub(crate) fn open_existing_review_writer(path: &Path) -> JournalResult<Self> {
         let connection = Connection::open_with_flags(
             path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
-                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         connection.execute_batch(
             "PRAGMA synchronous = FULL;
              PRAGMA foreign_keys = ON;
              PRAGMA busy_timeout = 5000;",
         )?;
-        let version: i64 = connection.query_row(
-            "PRAGMA user_version", [], |row| row.get(0),
-        )?;
+        let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         if version != SCHEMA_VERSION {
             return Err(JournalError::UnsupportedSchema(version));
         }
@@ -265,7 +259,7 @@ impl SqliteSyncJournal {
                  PRAGMA user_version = 6;
                  COMMIT;",
             )?,
-            6 | 7 | SCHEMA_VERSION => {},
+            6 | 7 | SCHEMA_VERSION => {}
             other => return Err(JournalError::UnsupportedSchema(other)),
         }
         // Older migrations still reach v6. Upgrade atomically on the next
@@ -306,5 +300,4 @@ impl SqliteSyncJournal {
         }
         Ok(Self { connection })
     }
-
 }
