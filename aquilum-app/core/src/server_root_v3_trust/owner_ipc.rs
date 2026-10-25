@@ -133,7 +133,7 @@ pub(crate) fn preview_provisioned_once(
 
 mod commit_intent;
 mod enrollment;
-pub use enrollment::admin_enroll_first_peer_uid_fixed_root_once;
+pub use self::enrollment::admin_enroll_first_peer_uid_fixed_root_once;
 
 #[cfg(test)]
 mod tests;

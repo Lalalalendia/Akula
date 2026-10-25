@@ -1,4 +1,4 @@
-//! Feature-gated root-level server modules; no default install authority.
+// Feature-gated root-level server modules; no default install authority.
 #[cfg(feature = "server-bootstrap-b1a-release-lab")]
 pub mod server_release_lab;
 #[cfg(feature = "server-install-review")]
