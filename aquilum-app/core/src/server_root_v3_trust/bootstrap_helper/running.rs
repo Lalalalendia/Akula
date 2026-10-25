@@ -4,11 +4,11 @@
 //! be compared against /proc/self/exe (kernel-owned procfs reference).
 //! Never executes the staged helper, creates directories or grants IPC rights.
 use super::{BootstrapHelperHold, MAX_HELPER_BYTES};
+use ring::digest::{Context, SHA256};
 use rustix::fs::{open, openat, Mode, OFlags};
 use std::fs::{File, Metadata};
 use std::os::unix::fs::{FileExt, MetadataExt, PermissionsExt};
 use std::path::Path;
-use ring::digest::{Context, SHA256};
 
 const EXEC_LEAF: &str = "akula-root-b1d0-helper";
 const EXEC_MODE: u32 = 0o500;

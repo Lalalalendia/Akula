@@ -20,7 +20,12 @@ fn fixture() -> (TempDir, File, File, BootstrapHelperHold) {
         release_sequence: 1,
         remains_hold: true,
     };
-    (temp, File::open(&path).unwrap(), File::open(path).unwrap(), hold)
+    (
+        temp,
+        File::open(&path).unwrap(),
+        File::open(path).unwrap(),
+        hold,
+    )
 }
 
 #[test]
@@ -78,15 +83,13 @@ fn fixed_directory_and_executable_symlinks_never_become_authority() {
     // Linux O_NOFOLLOW prevents a peer-selected symlink to a different root
     // binary, including an otherwise byte-identical copy.
     symlink(EXEC_LEAF, temp.path().join("alias")).unwrap();
-    assert!(
-        openat(
-            &dir,
-            "alias",
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty(),
-        )
-        .is_err()
-    );
+    assert!(openat(
+        &dir,
+        "alias",
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .is_err());
     let meta = fixed.metadata().unwrap();
     if rustix::process::geteuid().as_raw() == 0 {
         assert_eq!(meta.uid(), 0);
