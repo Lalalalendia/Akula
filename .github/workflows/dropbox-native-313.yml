@@ -3,6 +3,11 @@
 name: Akula 3.13 installed Dropbox verification
 
 on:
+  push:
+    branches: [fix/dropbox-account-relogin-scope-20261024]
+    paths:
+      - '.github/workflows/dropbox-native-313.yml'
+      - 'scripts/windows-dropbox-browser-uia.ps1'
   pull_request:
     paths:
       # Only new Dropbox implementation files; existing source files are
@@ -13,6 +18,7 @@ on:
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
       - '.github/workflows/dropbox-native-313.yml'
+      - 'scripts/windows-dropbox-browser-uia.ps1'
   workflow_dispatch:
 
 permissions:
@@ -41,6 +47,15 @@ jobs:
         run: cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core dropbox_readonly_draft_tests --lib
       - name: Run isolated native Dropbox onboarding tests
         run: cargo test --manifest-path modules/dropbox-connect-lab/Cargo.toml --lib
+      - name: Build the installed-feature Windows GUI for Dropbox browser acceptance
+        run: cargo build --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed
+      - name: Prove Dropbox account sign-in opens a real default HTTPS browser via Windows UIA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/debug/aquilum-native.exe'
+          & "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File './scripts/windows-dropbox-browser-uia.ps1' -ExePath $exe
+          if ($LASTEXITCODE -ne 0) { throw 'Installed-feature Dropbox browser UIA failed' }
       - name: Upload generated dependency lockfile for release review
         uses: actions/upload-artifact@v7
         with:
