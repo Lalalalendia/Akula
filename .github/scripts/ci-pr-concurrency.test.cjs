@@ -5,7 +5,7 @@ const cp = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {topBlock, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, changedWorkflows, audit} = require('./ci-pr-concurrency.cjs');
+const {topBlock, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, allowedTextDeltaMigration, changedWorkflows, audit} = require('./ci-pr-concurrency.cjs');
 const group = '  group: $' + '{{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}';
 const cancel = "  cancel-in-progress: $" + "{{ github.event_name == 'pull_request' }}";
 const good = ['name: Optional lab','on:','  pull_request:','    paths:',"      - 'modules/test/**'",'  workflow_dispatch:','concurrency:',group,cancel,'jobs:','  test:','    runs-on: ubuntu-latest','    steps:','      - run: true'].join('\n')+'\n';
@@ -257,4 +257,34 @@ test('only byte-exact Linux beta migration may remove a protected PR trigger',()
     false,'missing previous source must not lose its PR test');
   assert.equal(allowedLinuxBetaMigration(old,candidate,()=>{throw Error('no evidence');}),
     false,'missing evidence always fails closed');
+});
+
+
+test('Text Delta PR owner may migrate only to a proven required Main gate',()=>{
+  const name='.github/workflows/text-delta-codec-isolated.yml';
+  const read=p=>fs.readFileSync(path.join(__dirname,'../..',p),'utf8');
+  const after=read(name);
+  const replacement="on:\n"
+    +"  # PR source owners run in the required Application checks / Main PR gate.\n"
+    +"  workflow_dispatch:\n";
+  const original="on:\n  pull_request:\n    paths:\n"
+    +"      - 'modules/text-delta-codec/**'\n"
+    +"      - '.github/workflows/text-delta-codec-isolated.yml'\n"
+    +"  workflow_dispatch:\n";
+  assert.equal(after.split(replacement).length,2,'exact migration header');
+  const before=after.replace(replacement,original);
+  assert.equal(allowedTextDeltaMigration(before,after,read),true,'fully protected route');
+  assert.equal(allowedTextDeltaMigration(before,after.replace('workflow_dispatch:','push:'),read),false);
+  assert.equal(allowedTextDeltaMigration(before.replace('modules/text-delta-codec/**','modules/other/**'),after,read),false);
+  assert.equal(allowedTextDeltaMigration(before,after,()=>{throw Error('missing route');}),false);
+  const appPath='.github/workflows/app-checks.yml';
+  const app=read(appPath);
+  for(const [label,from,to] of [
+    ['missing Main dependency','needs: [classify, required-tests, native-frames, shared-labs]','needs: [classify, native-frames, shared-labs]'],
+    ['missing Cargo step','cargo test --manifest-path modules/text-delta-codec/Cargo.toml -- --nocapture','echo bypass'],
+    ['missing conditional',"if: needs.classify.outputs.text_delta_module_required == 'true'",'if: false']
+  ]){
+    assert.ok(app.includes(from),label+' fixture');
+    assert.equal(allowedTextDeltaMigration(before,after,p=>p===appPath?app.replace(from,to):read(p)),false,label);
+  }
 });

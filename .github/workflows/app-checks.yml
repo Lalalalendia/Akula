@@ -50,6 +50,7 @@ jobs:
       owned_pinned_read: ${{ steps.scope.outputs.owned_pinned_read }}
       owned_s3_reservation: ${{ steps.scope.outputs.owned_s3_reservation }}
       owned_s3_minio: ${{ steps.scope.outputs.owned_s3_minio }}
+      text_delta_module_required: ${{ steps.scope.outputs.text_delta_module_required }}
       updater_security_required: ${{ steps.scope.outputs.updater_security_required }}
     steps:
       - uses: actions/checkout@v7
@@ -229,7 +230,20 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
 
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true'
+        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true' || needs.classify.outputs.text_delta_module_required == 'true'
+
+
+      # Text Delta is outside the Cargo workspace. Tests execute in the existing
+      # mandatory runner and therefore block Main PR gate without another workflow.
+      - name: Require standalone Text Delta wire and hostile-input tests
+        if: needs.classify.outputs.text_delta_module_required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path modules/text-delta-codec/Cargo.toml -- --nocapture
+          grep -Fx '[workspace]' modules/text-delta-codec/Cargo.toml
+          ! grep -q 'aquilum-core' modules/text-delta-codec/Cargo.toml
+          test -f aquilum-app/core/src/sync/text_delta_codec.rs
 
       - name: Security-test macOS updater TAR parser on Linux too
         if: needs.classify.outputs.updater_security_required == 'true'

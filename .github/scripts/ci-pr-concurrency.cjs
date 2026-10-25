@@ -78,6 +78,43 @@ function policyErrors(yaml, path) {
   return errors;
 }
 
+function allowedTextDeltaMigration(before, after, read) {
+  const original = "on:\n  pull_request:\n    paths:\n"
+    +"      - 'modules/text-delta-codec/**'\n"
+    +"      - '.github/workflows/text-delta-codec-isolated.yml'\n"
+    +"  workflow_dispatch:\n";
+  const replacement = "on:\n"
+    +"  # PR source owners run in the required Application checks / Main PR gate.\n"
+    +"  workflow_dispatch:\n";
+  if(before.split(original).length!==2 || after!==before.replace(original,replacement))
+    return false;
+  let app,scope,tests;
+  try {
+    app=read('.github/workflows/app-checks.yml');
+    scope=read('.github/scripts/ci-rust-scope.cjs');
+    tests=read('.github/scripts/ci-rust-scope.test.cjs');
+  }catch{return false;}
+  if(![app,scope,tests].every(x=>typeof x==='string'))return false;
+  const mustHave=[
+    "      text_delta_module_required: ${{ steps.scope.outputs.text_delta_module_required }}",
+    "node .github/scripts/ci-rust-scope.cjs --base=\"$BASE_SHA\" --head=HEAD >> \"$GITHUB_OUTPUT\"",
+    "if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true' || needs.classify.outputs.text_delta_module_required == 'true'",
+    "name: Require standalone Text Delta wire and hostile-input tests",
+    "if: needs.classify.outputs.text_delta_module_required == 'true'",
+    "cargo test --manifest-path modules/text-delta-codec/Cargo.toml -- --nocapture",
+    "    needs: [classify, required-tests, native-frames, shared-labs]",
+    "if [ \"$CLASSIFY_RESULT\" != success ] || [ \"$REQUIRED_RESULT\" != success ]; then"
+  ];
+  if(!mustHave.every(x=>app.includes(x)))return false;
+  if(!scope.includes('function textDeltaModuleRequired(changedPaths) {') ||
+     !scope.includes("p.startsWith('modules/text-delta-codec/')") ||
+     !scope.includes("p === '.github/workflows/text-delta-codec-isolated.yml'") ||
+     !scope.includes("text_delta_module_required='+textDeltaModuleRequired(paths)"))return false;
+  if(!tests.includes('Text Delta parity lab never duplicates Core source PR workflow runs') ||
+     !tests.includes('assert.equal(textDeltaModuleRequired([leaf]),true'))return false;
+  return true;
+}
+
 function allowedWindowsBetaMigration(before, after, read) {
   // Only the byte-preserving Windows beta PR -> required callable route change.
   const owned = [
@@ -246,7 +283,9 @@ function audit(base, head = 'HEAD', cwd = process.cwd()) {
           const routed = (record.path === '.github/workflows/windows-beta.yml' &&
             allowedWindowsBetaMigration(before, text, read)) ||
             (record.path === '.github/workflows/linux-beta.yml' &&
-            allowedLinuxBetaMigration(before, text, read));
+            allowedLinuxBetaMigration(before, text, read)) ||
+            (record.path === '.github/workflows/text-delta-codec-isolated.yml' &&
+            allowedTextDeltaMigration(before, text, read));
           if (!routed) errors.push(record.path + ': removed existing pull_request trigger');
         } else {
           const newer = topBlock(text, 'concurrency');
@@ -291,4 +330,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { topBlock, prEvents, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, changedWorkflows, audit, main };
+module.exports = { topBlock, prEvents, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, allowedTextDeltaMigration, changedWorkflows, audit, main };
