@@ -12,7 +12,9 @@ fn opt_shaped_parent(root: &Path) -> File {
 
 #[test]
 fn nonroot_never_creates_install_destination() {
-    if rustix::process::geteuid().as_raw() == 0 { return; }
+    if rustix::process::geteuid().as_raw() == 0 {
+        return;
+    }
     let tmp = tempdir().unwrap();
     let opt = opt_shaped_parent(tmp.path());
     assert!(matches!(
@@ -24,13 +26,19 @@ fn nonroot_never_creates_install_destination() {
 
 #[test]
 fn uid0_empty_destination_is_single_use_and_exactly_b1d0_enrolled() {
-    if rustix::process::geteuid().as_raw() != 0 { return; }
+    if rustix::process::geteuid().as_raw() != 0 {
+        return;
+    }
     let tmp = tempdir().unwrap();
     let opt = opt_shaped_parent(tmp.path());
     first_opt_destination(&opt).unwrap();
     let target = tmp.path().join("opt/akula-node");
     assert!(root_dir_ok(&fs::metadata(&target).unwrap(), 0o755));
-    assert!(root_file_ok(&fs::metadata(target.join(OPT_MARKER)).unwrap(), 0o600, 128));
+    assert!(root_file_ok(
+        &fs::metadata(target.join(OPT_MARKER)).unwrap(),
+        0o600,
+        128
+    ));
     assert_eq!(fs::read(target.join(OPT_MARKER)).unwrap(), OPT_ENROLLMENT);
     assert!(!target.join(OPT_MARKER_PENDING).exists());
     assert_eq!(fs::read_dir(&target).unwrap().count(), 1);
@@ -45,7 +53,9 @@ fn uid0_empty_destination_is_single_use_and_exactly_b1d0_enrolled() {
 
 #[test]
 fn collision_partial_directory_and_symlink_are_nonrepairable_hold() {
-    if rustix::process::geteuid().as_raw() != 0 { return; }
+    if rustix::process::geteuid().as_raw() != 0 {
+        return;
+    }
     for variant in 0..3 {
         let tmp = tempdir().unwrap();
         let opt = opt_shaped_parent(tmp.path());
@@ -76,7 +86,9 @@ fn collision_partial_directory_and_symlink_are_nonrepairable_hold() {
 
 #[test]
 fn world_writable_opt_parent_is_rejected_before_mkdir() {
-    if rustix::process::geteuid().as_raw() != 0 { return; }
+    if rustix::process::geteuid().as_raw() != 0 {
+        return;
+    }
     let tmp = tempdir().unwrap();
     let opt = opt_shaped_parent(tmp.path());
     fs::set_permissions(tmp.path().join("opt"), Permissions::from_mode(0o777)).unwrap();
