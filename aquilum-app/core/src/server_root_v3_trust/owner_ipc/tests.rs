@@ -147,11 +147,17 @@ fn unprivileged_real_kernel_peer_can_preview_signed_owner_but_never_install() {
     let bytes = request(&signed_frame(&owner));
     let preview = receive_once(&listener, &socket, &trust, &bytes).unwrap();
     assert_eq!(preview.peer_uid, TEST_PEER_UID);
-    assert_eq!(preview.owner.claim.scope_binding.pinned_host_key_sha256, [0x22; 32]);
+    assert_eq!(
+        preview.owner.claim.scope_binding.pinned_host_key_sha256,
+        [0x22; 32]
+    );
     assert!(preview.requires_independent_b0_b1a_cas);
     // No CAS or install is performed, so a repeated PREVIEW remains inert.
     let replay = receive_once(&listener, &socket, &trust, &bytes).unwrap();
-    assert_eq!(replay.owner.claim.approval_nonce, preview.owner.claim.approval_nonce);
+    assert_eq!(
+        replay.owner.claim.approval_nonce,
+        preview.owner.claim.approval_nonce
+    );
     assert_eq!(fs::read_dir(temp.path().join("trust")).unwrap().count(), 4);
 }
 
