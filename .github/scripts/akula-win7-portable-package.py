@@ -146,7 +146,7 @@ echo PDF conversion completed: pdf-smoke-output.pdf
 exit /b 0
 """
 
-FONT_PREP = """@echo off
+FONT_PREP = r"""@echo off
 rem Only copy a font supplied by this Windows installation. The lab ZIP
 rem carries no third-party fonts and does not require network access.
 if not defined SHIVA_FONT_DIR (echo ERROR: SHIVA_FONT_DIR not set & exit /b 1)
