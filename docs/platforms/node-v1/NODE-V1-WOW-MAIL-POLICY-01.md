@@ -117,6 +117,14 @@ approval with an unrelated owner and confirm that **no root file is
 created**; the usual crash-point and nonroot read scenarios continue
 with the separately signed correct approval.
 
+**Review constraint:** although the signed token carries a
+nonzero `approval_nonce` and `helper_challenge`, the CI first-publisher
+does **not yet** prove that the challenge was issued by an independent
+root/owner confirmation ceremony, nor does it atomically consume the
+nonce in an external CAS witness. Replaying this otherwise valid
+token against a deliberately reset/root-deleted sandbox is outside the
+current local `O_EXCL` fence. This remains an explicit production blocker.
+
 **Explicit non-shipping limitation:** expected witness revision 0 is
 only a CI first-install/genesis assumption, not externally witnessed
 monotonic state. `InertMailCasProposal` returns
