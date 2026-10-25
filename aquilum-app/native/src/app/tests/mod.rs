@@ -1,5 +1,6 @@
 mod damage;
 mod dialogs;
+mod docx;
 mod external;
 mod folder_colors;
 mod graph;
