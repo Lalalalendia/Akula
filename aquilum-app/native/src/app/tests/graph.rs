@@ -143,6 +143,23 @@ fn typing_suggests_notes_and_enter_links_them() {
     let note = vault.join("Черновик.md");
     std::fs::write(&note, "").unwrap();
     h.app.tree.paths_changed(&mut h.root, &[vault.join("Проектирование.md"), note.clone()]);
+    // The editor uses an asynchronously populated search index for wiki-link
+    // suggestions. A keypress before the index includes this newly created
+    // file tests indexing latency rather than suggestion keyboard behavior.
+    let workspace = vault.to_string_lossy().into_owned();
+    let mut indexed = false;
+    for _ in 0..1000 {
+        h.app.on_core_events(&mut h.root);
+        match h.app.workspace.core.search.suggest_notes(&workspace, "Прое", 12) {
+            Ok(matches) if matches.iter().any(|item| item.title == "Проектирование") => {
+                indexed = true;
+                break;
+            }
+            _ => {}
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(indexed, "поисковый индекс не увидел новую заметку перед проверкой подсказок");
     h.app.open(&mut h.root, note);
     let _ = h.root.redraw();
     let editor = h.app.editor_id().unwrap();
