@@ -3,11 +3,13 @@
 Status: **laboratory-only / HOLD**. This is not a deployable Node role.
 
 Source: [WOW #95](https://github.com/calex794/wow/pull/95); pinned Git
-revision `f7cf1357988f9ae11de140d166168a0681f7f8d7` (W12, signed
+revision `29bd044cf11c60687716560c15abef69f5581ebc` (W12, signed
 one-slot invitation, private List/Fetch, signed HPKE W4 return, all
-baseline CI green at that exact commit). No floating branch or mutable
-`main` dependency is permitted. The subsequent WOW test-only improvement
-at `97ca5a66` will need separate exact-head review before pin update.
+baseline CI green on predecessor `f7cf1357`). This new pin includes
+the actual B LIST/FETCH E2E test and `rusqlite = 0.40.1` required by the
+Akula Core SQLite ABI. W12 regression is confirmed green on the new pin;
+full Rust/QUIC results must be confirmed before promotion. No floating
+branch or mutable `main` dependency is permitted.
 
 ## What is implemented
 
@@ -36,7 +38,7 @@ private recipient discovery/fetch, state after bridge restart, refusal
 when Node policy changes, refusal of public bind and unsafe SQLite,
 and refusal of a mismatched custodian key.
 
-Test workflow: [node-wow-mailbox-lab.yml](../../.github/workflows/node-wow-mailbox-lab.yml)
+Test workflow: [node-wow-mailbox-lab.yml](../../../.github/workflows/node-wow-mailbox-lab.yml)
 (actual path from repo root is `.github/workflows/node-wow-mailbox-lab.yml`).
 Run: `cargo test --manifest-path interop/akula-staya/Cargo.toml
 --features node-wow-mailbox-lab --test node_wow_mailbox_lab`.
