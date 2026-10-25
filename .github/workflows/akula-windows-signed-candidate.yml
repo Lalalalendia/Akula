@@ -63,7 +63,9 @@ jobs:
           ref: 40b72a90b1dac39812c77c7321e57d613a81cb51
           path: _shiva-preview
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
@@ -71,42 +73,14 @@ jobs:
       - name: Install pinned NSIS packager
         run: cargo install cargo-packager --version 0.11.8 --locked
 
-      - name: Compile pinned Shiva CLI as Akula's PDF sidecar
+      - name: Build one Win7/10/11-capable Akula and Shiva pair with strict PE audit
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $actual = (git -C _shiva-preview rev-parse HEAD).Trim()
-          if ($actual -cne '40b72a90b1dac39812c77c7321e57d613a81cb51') { throw 'Shiva PDF source commit drifted' }
-          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE '.artifacts/shiva-preview'
-          cargo build --release --manifest-path _shiva-preview/Cargo.toml -p cli
-          if ($LASTEXITCODE -ne 0) { throw 'Pinned Shiva PDF companion compilation failed' }
-          $built = Join-Path $env:CARGO_TARGET_DIR 'release/shiva.exe'
-          $release = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
-          if (!(Test-Path -LiteralPath $built -PathType Leaf)) { throw 'Shiva executable absent' }
-          New-Item -ItemType Directory -Force -Path $release | Out-Null
-          Copy-Item -LiteralPath $built -Destination (Join-Path $release 'shiva-pdf-preview.exe') -Force
-          Write-Host "AKULA_PDF_SHIVA_BUNDLED pin=$actual"
-      - name: Build signed Akula with S3 pairing, Shiva PDF sidecar and NSIS
-        working-directory: aquilum-app
+        timeout-minutes: 85
+        run: ./scripts/akula-win7-signed-stage.ps1
+
+      - name: Package the exact audited pair in the normal Akula NSIS installer
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          # S3 pairing remains user-initiated in the single signed Akula.
-          cargo build --release --locked -p aquilum-native --features installed,s3-pair-beta
-          if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
-          $bin = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
-          Copy-Item -LiteralPath (Join-Path $bin 'aquilum-native.exe') -Destination (Join-Path $bin 'akula-app.exe') -Force
-          $out = Join-Path $env:GITHUB_WORKSPACE 'dist'
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          cargo packager -p aquilum-native --release --formats nsis --config native/packaging/akula-windows.json --out-dir $out
-          if ($LASTEXITCODE -ne 0) { throw 'Akula NSIS packaging failed' }
-          $list = @(Get-ChildItem -LiteralPath $out -Filter '*-setup.exe' -File)
-          if ($list.Count -ne 1 -or $list[0].Name -notmatch '^(Akula|akula-app)_[0-9]+\.[0-9]+\.[0-9]+_x64-setup\.exe$') {
-            throw 'Unexpected installer identity or package count'
-          }
-          if ($list[0].Name.StartsWith('akula-app_')) {
-            Rename-Item -LiteralPath $list[0].FullName -NewName ($list[0].Name -replace '^akula-app_', 'Akula_')
-          }
+        run: ./scripts/akula-win7-nsis-candidate.ps1
 
       - name: Execute native installed Windows editor and Aquilum coexistence smoke
         shell: pwsh
