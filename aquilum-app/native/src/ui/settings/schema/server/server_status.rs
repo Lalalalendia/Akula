@@ -22,20 +22,5 @@ pub(super) fn status_row(probe: Option<&ServerProbeView>) -> Row {
         },
     )
 }
-pub(super) fn append_facts(rows: &mut Vec<Row>, probe: Option<&ServerProbeView>) {
-    if let Some(ServerProbeView::Observed { facts }
-        | ServerProbeView::Unsupported { facts }
-        | ServerProbeView::NeedsAdminAuthorization { facts }) = probe
-    {
-        // Only normalized, bounded typed host facts; never SSH stderr,
-        // shell output, credentials or an installation-success claim.
-        rows.push(info(
-            t("settings.server.observedFacts"),
-            Some(t("settings.server.observedFactsHint")),
-            Control::Status {
-                text: facts.clone(),
-                tone: Tone::Secondary,
-            },
-        ));
-    }
-}
+mod facts;
+pub(super) use facts::append_facts;
