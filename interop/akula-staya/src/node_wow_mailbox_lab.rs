@@ -160,8 +160,12 @@ impl NodeWowMailboxLab {
         let trust = policy.registry()?;
         let db_info = private_existing_db(state)?;
         let db_path = state.join(DB);
-        let journal = Journal::open(&db_path).map_err(|_| MailRoleHold::Journal)?;
+        let mut journal = Journal::open(&db_path).map_err(|_| MailRoleHold::Journal)?;
         require_exact_mailbox(state, &policy)?;
+        // A correct signed owner policy is NOT enough if SQLite has been
+        // revoked, rolled back, or provisioned for another policy digest.
+        journal.bind_mail_role_gate(policy.sqlite_gate())
+            .map_err(|_| MailRoleHold::MailPolicy)?;
         let reopened = private_existing_db(state)?;
         if (db_info.dev(), db_info.ino()) != (reopened.dev(), reopened.ino()) {
             return Err(MailRoleHold::UnsafeDatabase);
@@ -181,7 +185,7 @@ impl NodeWowMailboxLab {
     /// identity AND to the distinct enrolled WOW custodian identity.
     /// These checks are necessary, NOT sufficient for production mailbox
     /// activation; a separate root/owner mail-policy gate is still required.
-    fn require_current(&self, node: &NodeHost, now_ms: i64) -> Result<(), MailRoleHold> {
+    fn require_current(&mut self, node: &NodeHost, now_ms: i64) -> Result<(), MailRoleHold> {
         if now_ms <= 0 || now_ms < self.last_now_ms {
             return Err(MailRoleHold::ClockRollback);
         }
@@ -193,6 +197,8 @@ impl NodeWowMailboxLab {
         }
         self.policy.require_current(node, now_ms)?;
         require_exact_mailbox(&self.state, &self.policy)?;
+        self.journal.require_mail_role_gate_current()
+            .map_err(|_| MailRoleHold::MailPolicy)?;
         if self.policy.claims.custodian_public != self.custodian_signer.verifying_key().to_bytes() {
             return Err(MailRoleHold::UnpinnedTrust);
         }
