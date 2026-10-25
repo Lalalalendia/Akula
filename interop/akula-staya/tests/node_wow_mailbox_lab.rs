@@ -4,8 +4,7 @@
 
 use akula_staya_integration::node_wow_mailbox_lab::{
     MailRoleClaims, MailRoleHold, NodeWowMailboxLab, mail_commit_receipt_for_lab,
-    mail_epoch_floor_for_lab,
-    sign_mail_policy_for_lab,
+    mail_epoch_floor_for_lab, sign_mail_policy_for_lab,
 };
 use akula_wire_lab::{
     crypto_identity_w3::SignedHeader,
@@ -767,20 +766,32 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     // privileged publishing actor durably commits the exact pair.
     assert!(matches!(
         NodeWowMailboxLab::open_existing_root_provisioned(
-            &fixture.node, &fixture.mail_state, NODE_ENDPOINT,
-            fixture.custodian.clone(), 1,
+            &fixture.node,
+            &fixture.mail_state,
+            NODE_ENDPOINT,
+            fixture.custodian.clone(),
+            1,
         ),
         Err(MailRoleHold::MailPolicy),
     ));
     let signed_bytes = fs::read(&signed_source).unwrap();
     let floor_bytes = fs::read(&floor_source).unwrap();
     let receipt_fixture = fixture._tmp.path().join("mail-commit-fixture.bin");
-    fs::write(&receipt_fixture, mail_commit_receipt_for_lab(
-        &signed_bytes, &floor_bytes, 1,
-    )).unwrap();
+    fs::write(
+        &receipt_fixture,
+        mail_commit_receipt_for_lab(&signed_bytes, &floor_bytes, 1),
+    )
+    .unwrap();
     sudo(&[
-        "install", "-o", "root", "-g", &group, "-m", "0640",
-        receipt_fixture.to_str().unwrap(), RECEIPT,
+        "install",
+        "-o",
+        "root",
+        "-g",
+        &group,
+        "-m",
+        "0640",
+        receipt_fixture.to_str().unwrap(),
+        RECEIPT,
     ]);
     let meta = fs::metadata(POLICY).unwrap();
     assert_eq!(meta.uid(), 0);
@@ -829,8 +840,15 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     sudo(&["rm", "-f", "--", RECEIPT]);
     assert!(matches!(open(), Err(MailRoleHold::MailPolicy)));
     sudo(&[
-        "install", "-o", "root", "-g", &group, "-m", "0640",
-        receipt_fixture.to_str().unwrap(), RECEIPT,
+        "install",
+        "-o",
+        "root",
+        "-g",
+        &group,
+        "-m",
+        "0640",
+        receipt_fixture.to_str().unwrap(),
+        RECEIPT,
     ]);
     // Even byte-identical receipt replacement forces existing instances
     // to re-enrol; the original receipt inode is pinned in memory.
