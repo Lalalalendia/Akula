@@ -74,7 +74,7 @@ fn parse(kind: EditKind, s: &str) -> Result<LocalValue, &'static str> {
 impl BasesSession {
     pub fn begin_draft(&mut self, row: &str, property: &str)->Result<(),()> {
         if self.view.stage!=Stage::Ready || self.view.busy
-            || self.view.draft.is_some() { return Err(()); }
+            || self.view.draft.is_some() || self.view.schema_draft.is_some() { return Err(()); }
         let base=self.effective.as_ref().ok_or(())?;
         let col=base.columns.iter().find(|c|c.property_id==property
             && c.editable_locally).ok_or(())?;
