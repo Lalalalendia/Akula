@@ -158,6 +158,64 @@ mod tests {
             LocalValue::Number(-1.25));
         assert!(parse(EditKind::Text,&"a".repeat(MAX_TEXT_BYTES+1)).is_err());
     }
+    fn editable_session() -> BasesSession {
+        use super::super::{
+            bases_edits::{EffectiveBase,EffectiveCell,EffectiveColumn,EffectiveRow},
+        };
+        let mut session=BasesSession::new(Arc::new(||{}));
+        session.view.stage=Stage::Ready;
+        session.effective=Some(EffectiveBase {
+            base_id:"base".into(), notion_source_id:"source-base".into(),
+            source_root:"root".into(),source_digest:"a".repeat(64),
+            local_revision:0, saved_source_views:0,native_views_supported:false,
+            columns:vec![EffectiveColumn {
+                property_id:"name".into(),name:"Название".into(),
+                kind:"rich_text".into(),local_only:false,editable_locally:true,
+            }],
+            rows:vec![EffectiveRow {
+                akula_id:"row".into(),notion_page_id:"notion-row".into(),
+                cells:vec![EffectiveCell{property_id:"name".into(),
+                    value:EffectiveValue::Source(json!({"type":"rich_text",
+                        "rich_text":[{"plain_text":"Источник"}]}))}],
+            }],
+        });
+        session
+    }
+    #[test]
+    fn staging_requires_explicit_save_and_blocks_navigation() {
+        let mut session=editable_session();
+        assert!(session.begin_draft("row","name").is_ok());
+        assert_eq!(session.view().draft.as_ref().unwrap().value,"Источник");
+        assert!(!session.page(0,0));
+        assert!(session.begin_draft("row","name").is_err());
+        assert!(session.update_draft("Изменено локально").is_ok());
+        assert_eq!(session.view().draft.as_ref().unwrap().value,"Изменено локально");
+        assert!(session.reload().is_err()); // don't discard an unsaved draft
+        assert!(session.cancel_draft());
+        assert!(session.view().draft.is_none());
+    }
+    #[test]
+    fn failed_cas_freezes_draft_and_disallows_implicit_retry() {
+        let mut session=editable_session();
+        session.begin_draft("row","name").unwrap();
+        session.update_draft("Мой текст").unwrap();
+        session.view.source=Some("root".into());
+        session.view.target=Some(std::path::PathBuf::from("vault"));
+        session.view.busy=true;
+        session.view.stage=Stage::Saving;
+        session.generation=7;
+        session.tx.send(super::super::Completion{
+            generation:7,source:"root".into(),
+            target:std::path::PathBuf::from("vault"),result:Err(()),
+        }).unwrap();
+        assert!(session.poll());
+        assert_eq!(session.view().stage,Stage::NeedsReview);
+        let preserved=session.view().draft.unwrap();
+        assert_eq!(preserved.value,"Мой текст");
+        assert!(preserved.frozen);
+        assert!(session.update_draft("другая версия").is_err());
+        assert!(session.cancel_draft());
+    }
     #[test]
     fn formulas_and_malformed_source_cannot_be_interpreted_as_plain_text() {
         assert!(editable_kind("formula").is_none());
