@@ -94,6 +94,38 @@ attestation or remote owner approval. Production root-helper CAS,
 durable ordered rotation, service restart rules, root revocation vs
 SQLite COMMIT synchronization, and installer provenance remain HOLD.
 
+### Detached first-mail publication consent (inert CAS proposal)
+
+The owner-signed mailbox **manifest** is NOT an instruction to install
+anything. The separately domain-separated Ed25519 action approval in
+`approval.rs` authorizes a **specific proposed operation** for a
+specific node and mail manifest, but is still insufficient by itself
+to touch root-owned files.
+
+The canonical signed approval binds `NodePublic`, Iroh EndpointId,
+`BLAKE3(signed-manifest)`, first-only mail policy epoch 1, expected
+independent CAS witness revision, nonzero approval nonce, nonzero
+privileged-helper challenge, and a bounded issued/expiry window
+(maximum 15 minutes). Bad or missing signatures, wrong endpoint or
+policy digest, expired tokens, zero nonce, or stale expected witness
+revision fail closed. Signed policy tokens are not interchangeable with
+signed installation approvals; the domains differ.
+
+The opt-in `first_mail_publish_ci` now insists on this second signature
+before it stages *any* pending root file. The CI lab tests forge the
+approval with an unrelated owner and confirm that **no root file is
+created**; the usual crash-point and nonroot read scenarios continue
+with the separately signed correct approval.
+
+**Explicit non-shipping limitation:** expected witness revision 0 is
+only a CI first-install/genesis assumption, not externally witnessed
+monotonic state. `InertMailCasProposal` returns
+`requires_independent_cas_commit=true`, but this disposable CI
+first-install writer still has **no production B1d0 CAS witness
+consumption** or verified operator UI confirmation. It must not be
+repackaged into the installed root helper until that additional
+authority is checked at the same commit boundary.
+
 ### Root-owned two-file publish fence (receipt-last, recovery HOLD)
 
 As a prerequisite to a trusted root-helper transaction, the nonroot reader
