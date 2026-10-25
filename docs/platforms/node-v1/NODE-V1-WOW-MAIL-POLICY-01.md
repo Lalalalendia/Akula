@@ -56,6 +56,44 @@ quota must additionally match the durable SQLite mailbox-policy row
 (`custodian_mailbox_policy`). A second mailbox or broader SQLite quota
 is refused.
 
+### Root-owned, nonroot-readable OS policy — isolated acceptance candidate
+
+The new lab-only `open_existing_root_provisioned` code path reads
+**only** a fixed `/etc/akula-node/wow-mail` directory. It cannot
+accept a path from an untrusted caller, network frame, GUI control or CLI.
+The existing Node's `/etc/akula-node` parent must remain root-owned
+and not writable by the service.
+
+- `/etc/akula-node/wow-mail`: `root:akula-node`, mode `0750`.
+- `owner-mail-policy.bin`: `root:akula-node`, mode `0640`.
+- `owner-mail-epoch-floor.bin`: `root:akula-node`, mode `0640`.
+- Both files contain **public owner-signed policy data** and a minimum
+  epoch/digest witness, **not any private signing/encryption key**.
+- Every ancestor is opened with file-descriptor-relative
+  `O_DIRECTORY|O_NOFOLLOW`, must be root-owned and not group/world
+  writable. Both files use `openat(O_NOFOLLOW)`, require uid 0, the
+  running service's exact effective GID, single hardlink, fixed mode,
+  bounded size, signature, exact digest/epoch, Node root policy and
+  independent SQLite transaction guard. The nonroot service does not
+  have write permission to these files or their directory.
+- The new path is still behind `node-wow-mailbox-lab` **and** the
+  release-profile `compile_error!`. The legacy same-UID test-only
+  `open_existing` is unchanged.
+
+A disposable GitHub-hosted Linux CI test provisions these **public**
+files under `/etc` using `sudo install`, verifies nonroot read and
+write denial, performs signed local LIST/FETCH, rejects a group-writable
+directory and a symlink attack, then deletes only files and directories
+it created. The test refuses a pre-existing Akula Node installation.
+It does **not** deploy a service or touch a user-owned VPS.
+
+**Still not production anti-rollback:** uid 0 can roll back both
+manifest and floor; the same-epoch digest can be reset by a privileged
+root actor. This validates an unprivileged-service boundary, not TPM
+attestation or remote owner approval. Production root-helper CAS,
+durable ordered rotation, service restart rules, root revocation vs
+SQLite COMMIT synchronization, and installer provenance remain HOLD.
+
 ### Transaction-bound SQLite mail-role fence
 
 The default-off Node bridge additionally binds `MailRoleGate` from the
