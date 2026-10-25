@@ -197,4 +197,3 @@ pub fn preview_node_v3<T: PreviewTransport>(
     plan.plan_blake3 = plan.computed_digest();
     Ok(plan)
 }
-
