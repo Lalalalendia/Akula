@@ -53,7 +53,8 @@ test('ordinary Core PRs schedule no independent perf workflows; opt-in routes re
   const perf=fs.readFileSync(path.join(__dirname,'../workflows/core-perf.yml'),'utf8');
   const compare=fs.readFileSync(path.join(__dirname,'../workflows/core-perf-compare.yml'),'utf8');
   assert.match(perf,/^on:\n  workflow_call:/m);
-  assert.match(perf,/types: \[labeled, edited\]/);
+  assert.match(perf,/types: \[labeled\]/,'label-based opt-in remains');
+  assert.doesNotMatch(perf,/types: \[[^\]]*edited/,'PR description edits must not spawn optional perf workflow');
   assert.doesNotMatch(perf,/types: \[opened, synchronize/);
   assert.match(perf,/^  workflow_dispatch:/m,'manual baseline remains');
   assert.match(perf,/^  paired:\n/m,'paired comparison is called from one baseline workflow');
@@ -262,7 +263,7 @@ test('Linux beta source-only, mixed lock and workflow edits remain mandatory wit
 });
 
 
-test('Pinned Read keeps 46 exact sources on both OS, main required and non-main direct only',()=>{
+test('Pinned Read keeps 49 exact sources on both OS, main required and non-main direct only',()=>{
   const route=require('./ci-shared-manifest-route.cjs');
   const {parse,matches}=require('./ci-file-ratchet.cjs');
   const body=fs.readFileSync(path.join(__dirname,'../workflows/sync-pinned-read.yml'),'utf8');
@@ -293,6 +294,9 @@ test('Pinned Read keeps 46 exact sources on both OS, main required and non-main 
   "aquilum-app/core/src/sync/sealed_archive.rs",
   "aquilum-app/core/src/sync/local_create_tests.rs",
   "aquilum-app/core/src/sync/journal.rs",
+  "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+  "aquilum-app/core/src/sync/journal/publication_recovery.rs",
+  "aquilum-app/core/src/sync/journal/phase_transitions.rs",
   "aquilum-app/core/src/sync/core_scan.rs",
   "aquilum-app/core/src/sync/path.rs",
   "aquilum-app/core/src/search/paths.rs",
@@ -325,10 +329,10 @@ test('Pinned Read keeps 46 exact sources on both OS, main required and non-main 
   "aquilum-app/core/src/sync/mod.rs",
   ".github/workflows/sync-pinned-read.yml"
 ];
-  assert.equal(originalPaths.length,46);
+  assert.equal(originalPaths.length,49);
   assert.deepEqual(configured,originalPaths,'all former paths still trigger non-main PR acceptance');
   assert.deepEqual(route.OWNED_SUITES.owned_pinned_read,originalPaths,
-    'all 46 paths also trigger mandatory main-branch OS checks');
+    'all 49 paths also trigger mandatory main-branch OS checks');
   assert.equal(parse(body).t,'paths');
   for(const source of originalPaths){
     assert.equal(matches(parse(body),source),true,source+' direct for non-main PR');
@@ -428,7 +432,7 @@ test('Reserved S3 OS acceptance preserves all 14 glob owners for main and non-ma
 });
 
 
-test('S3 MinIO preserves 23 direct non-main source paths and required main glob routing',()=>{
+test('S3 MinIO preserves 26 direct non-main source paths and required main glob routing',()=>{
   const owned=require('./ci-shared-manifest-route.cjs');
   const {parse,matches}=require('./ci-file-ratchet.cjs');
   const body=fs.readFileSync(path.join(__dirname,'../workflows/sync-s3-minio.yml'),'utf8');
@@ -441,6 +445,9 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   "aquilum-app/core/src/sync/s3_preimage_capture.rs",
   "aquilum-app/core/src/sync/host_custody_registry.rs",
   "aquilum-app/core/src/sync/journal.rs",
+  "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+  "aquilum-app/core/src/sync/journal/publication_recovery.rs",
+  "aquilum-app/core/src/sync/journal/phase_transitions.rs",
   "aquilum-app/core/src/sync/local_create_tests.rs",
   "aquilum-app/core/src/sync/local_create.rs",
   "aquilum-app/core/src/sync/s3_transport/**",
@@ -457,7 +464,7 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   "aquilum-app/core/src/sync/mod.rs",
   ".github/workflows/sync-s3-minio.yml"
 ];
-  assert.equal(oldPaths.length,23,'full original source path coverage');
+  assert.equal(oldPaths.length,26,'full original source path coverage');
   assert.deepEqual(oldPaths.filter(p=>p.includes('*')),
     ['aquilum-app/core/src/sync/s3_transport/**'],'preserve exact nested transport glob');
   assert.match(body,/^on:\n  workflow_call:\n  pull_request:\n/m);
@@ -471,7 +478,7 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   assert.deepEqual(parse(body),{t:'paths',p:oldPaths},
     'non-main pull_request.paths must retain all original patterns');
   assert.deepEqual(owned.OWNED_SUITES.owned_s3_minio,oldPaths,
-    'required Main route owns exact same 23 path patterns');
+    'required Main route owns exact same 26 path patterns');
   for(const entry of oldPaths){
     assert.equal(matches(parse(body),entry),true,entry+' direct non-main match');
     assert.equal(owned.assess({paths:[entry]}).owned_s3_minio,true,entry+' required main source-only');
@@ -548,4 +555,57 @@ test('B0c Windows owned sources run only through required main route; non-main a
   assert.match(shared,/\["route-b0c-ssh-native",\["native","owned_b0c_ssh"\]\]/);
   assert.match(shared,/needs: \[[^\n]*route-b0c-ssh-native[^\n]*\]/);
   assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+});
+
+test('extracted journal publication/recovery retains fail-closed OS and S3 owners',()=>{
+  const route=require('./ci-shared-manifest-route.cjs');
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const p='aquilum-app/core/src/sync/journal/publication_recovery.rs';
+  const child=fs.readFileSync(path.join(__dirname,'../../'+p),'utf8');
+  const root=fs.readFileSync(path.join(__dirname,'../../aquilum-app/core/src/sync/journal.rs'),'utf8');
+  assert.ok(root.includes('mod publication_recovery;'));
+  assert.ok(child.startsWith('use super::*;'));
+  assert.ok(child.includes('impl SqliteSyncJournal {'));
+  const methods=["record_local_publication_attempt_once","record_native_local_publication_observation_once","read_native_local_publication_observation","local_publication_count","local_publication_review_queue","check_local_recovery_case","record_local_recovery_case_once","read_local_recovery_case","require_appdata_outside_vault","validated_forensic_digest","record_local_recovery_copy_once","read_local_recovery_copy","recovery_review_snapshot","read_recovery_review_rows","recovery_review_history","append_recovery_review"];
+  for(const name of methods){
+    assert.ok(child.includes('fn '+name+'('),name+' survives');
+    assert.ok(!root.includes('fn '+name+'('),name+' not duplicated');
+  }
+  const routes=[['owned_pinned_read','sync-pinned-read.yml'],
+    ['owned_s3_minio','sync-s3-minio.yml'],
+    ['owned_s3_reservation','sync-reserved-s3-transaction.yml']];
+  for(const [owner,file] of routes){
+    const workflow=fs.readFileSync(path.join(__dirname,'../workflows',file),'utf8');
+    assert.equal(matches(parse(workflow),p),true,file+' non-main source route');
+    assert.equal(route.assess({paths:[p]})[owner],true,owner+' main required');
+    assert.equal(route.assess({paths:[p,route.LOCK]})[owner],true,owner+' mixed lock required');
+  }
+  assert.ok(core.includes('needs: [classify, required-tests, native-frames, shared-labs]'));
+  assert.equal(route.assess({paths:['README.md']}).owned_s3_minio,false);
+});
+
+test('extracted journal phase transitions retain public APIs and all protected source routes',()=>{
+  const route=require('./ci-shared-manifest-route.cjs');
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const p='aquilum-app/core/src/sync/journal/phase_transitions.rs';
+  const source=fs.readFileSync(path.join(__dirname,'../../'+p),'utf8');
+  const root=fs.readFileSync(path.join(__dirname,'../../aquilum-app/core/src/sync/journal.rs'),'utf8');
+  assert.ok(source.startsWith('use super::*;'));
+  assert.ok(source.includes('impl SqliteSyncJournal {'));
+  assert.ok(root.includes('mod phase_transitions;'));
+  for(const name of ['begin','mark_staged','mark_applied','mark_verified','commit','recovery_queue']){
+    assert.ok(source.includes('pub fn '+name+'('),'public method preserved: '+name);
+    assert.ok(!root.includes('pub fn '+name+'('),'no duplicate method: '+name);
+  }
+  for(const [suite,file] of [
+    ['owned_pinned_read','sync-pinned-read.yml'],
+    ['owned_s3_minio','sync-s3-minio.yml'],
+    ['owned_s3_reservation','sync-reserved-s3-transaction.yml']]){
+    const yaml=fs.readFileSync(path.join(__dirname,'../workflows',file),'utf8');
+    assert.ok(yaml.includes('branches-ignore: [main]'),'non-main direct route: '+file);
+    assert.equal(matches(parse(yaml),p),true,'direct source: '+file);
+    assert.equal(route.assess({paths:[p]})[suite],true,'main required route: '+suite);
+    assert.equal(route.assess({paths:[p,route.LOCK]})[suite],true,'mixed Cargo and source: '+suite);
+  }
+  assert.ok(core.includes('needs: [classify, required-tests, native-frames, shared-labs]'));
 });
