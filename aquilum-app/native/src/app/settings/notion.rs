@@ -4,6 +4,33 @@ use super::*;
 impl App {
     pub(super) fn handle_notion_action(&mut self, action: &Action) -> bool {
         match action {
+            Action::NotionBasesOpen(source) => {
+                if let Some(target) = self.workspace.root.clone() {
+                    let _ = self.notion_bases.open(target, source.clone());
+                }
+                true
+            }
+            Action::NotionBasesSelect(digest, base_id) => {
+                let _ = self.notion_bases.select(digest.clone(), base_id.clone());
+                true
+            }
+            Action::NotionBasesPage(rows, columns) => {
+                self.notion_bases.page(*rows, *columns);
+                true
+            }
+            Action::NotionBasesReload => {
+                let _ = self.notion_bases.reload();
+                true
+            }
+            Action::NotionBasesChange(row, property, revert) => {
+                if self.notion_bases.view().target.as_deref() == self.workspace.root.as_deref() {
+                    let _ = self.notion_bases.change(
+                        std::sync::Arc::clone(&self.workspace.core),
+                        row, property, *revert,
+                    );
+                }
+                true
+            }
             Action::NotionConnect => {
                 if self.notion_sync.busy() { return true; }
                 match crate::notion_credentials::prompt_and_store() {
