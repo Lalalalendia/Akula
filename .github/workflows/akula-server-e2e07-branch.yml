@@ -20,6 +20,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Audit root-helper candidate change routing before expensive builds
+        run: node --test .github/scripts/b1-e2e07-candidate-routing.test.cjs
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt

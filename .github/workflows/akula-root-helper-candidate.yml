@@ -4,13 +4,29 @@ on:
   push:
     branches: [feature/akula-b1-e2e07-owner-install]
     paths:
+      # Only security-critical inputs to the unsigned Linux root helper.
+      # Include both mod.rs-style paths and adjacent foo.rs modules:
+      # "bootstrap_helper/**" alone misses "bootstrap_helper.rs".
       - 'aquilum-app/core/src/bin/akula_root_b1d0_helper.rs'
-      - 'aquilum-app/core/src/server_root_v3_trust/root_helper_entry.rs'
       - 'aquilum-app/core/src/server_root_v3_trust.rs'
-      - 'aquilum-app/core/src/server_root_v3_trust/bootstrap_helper/**'
-      - 'aquilum-app/core/src/server_root_v3_trust/owner_ipc/**'
+      - 'aquilum-app/core/src/server_root_v3_trust/**'
+      - 'aquilum-app/core/src/server_root_v3_guard.rs'
+      - 'aquilum-app/core/src/server_root_v3_guard/**'
+      - 'aquilum-app/core/src/server_first_root_stage.rs'
+      - 'aquilum-app/core/src/server_release_lab.rs'
+      - 'aquilum-app/core/src/server_release_lab/**'
+      - 'aquilum-app/core/src/server_owner_approval_lab.rs'
+      - 'aquilum-app/core/src/server_owner_approval_wire.rs'
+      - 'aquilum-app/core/src/server_owner_approval_wire/**'
+      - 'aquilum-app/core/src/server_installer_pinned_release_lab.rs'
+      - 'aquilum-app/core/src/server_installer_ipc_lab.rs'
+      - 'aquilum-app/core/src/server_installer_durable_node.rs'
+      - 'aquilum-app/core/src/server_installer_durable_node/**'
+      - 'aquilum-app/core/src/lib.rs'
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
+      - 'modules/bootstrap-b0/src/lib.rs'
+      - '.github/scripts/b1-e2e07-candidate-routing.test.cjs'
       - '.github/workflows/akula-root-helper-candidate.yml'
   workflow_dispatch:
 
@@ -29,6 +45,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Prove candidate rebuild scope covers every privileged verifier module
+        run: node --test .github/scripts/b1-e2e07-candidate-routing.test.cjs
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
