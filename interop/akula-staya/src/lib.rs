@@ -12,6 +12,8 @@ use aquilum_core::p2p_offer_lab::{
 pub mod live_identity;
 #[cfg(feature = "p2p-attachment-contract")]
 pub mod attachment_contract;
+#[cfg(feature = "p2p-wow-w3-lab")]
+pub mod wow_attachment_w3;
 
 // The one-file source is compiled both as a standalone binary and as a
 // module inside this library. Keep its existing absolute crate path valid.
