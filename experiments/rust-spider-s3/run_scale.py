@@ -60,7 +60,7 @@ def main():
     ap.add_argument("--rounds",type=int,default=1)
     ap.add_argument("--profile",choices=("smoke","full"),default="full")
     opts=ap.parse_args()
-    binary=opts.bounded_binary.resolve()
+    binary=opts.bounded_binary.expanduser().resolve()
     if not binary.is_file():ap.error(f"binary missing {binary}")
     if not 1<=opts.rounds<=5:ap.error("rounds 1..5")
     wait_for_minio()
