@@ -347,7 +347,7 @@ fn current_node_policy_and_independent_mailbox_survive_restart() {
 fn changed_node_owner_policy_fences_mailbox_before_accept() {
     let fixture = Fixture::new();
     let mut role = fixture.role().unwrap();
-    assert!(matches!(fixture.role(), Ok(_)));
+    assert!(fixture.role().is_ok());
     // Same JSON object with a different byte commitment invalidates Node V1.
     let mut bytes = fs::read(&fixture.node_policy).unwrap();
     bytes.push(b'\n');
