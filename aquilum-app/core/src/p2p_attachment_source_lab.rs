@@ -75,6 +75,7 @@ impl SelectedSourceSnapshotLab {
 
     pub fn message_id(&self) -> [u8; 16] { self.notice.message_id() }
     pub fn size(&self) -> u64 { self.bytes.len() as u64 }
+    pub fn receiver_endpoint(&self) -> [u8;32] { self.notice.receiver().endpoint_id }
 
     /// After a fresh authenticated QUIC handshake, supply its actual remote
     /// EndpointId. The key/epoch must come from local trusted enrollment,
