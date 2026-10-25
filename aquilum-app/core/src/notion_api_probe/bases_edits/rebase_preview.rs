@@ -71,7 +71,7 @@ fn source_cell<'a>(
 /// All three inputs must belong to the SAME Notion root and a verified,
 /// independent Vault. The two source digests must be different; the old
 /// local overlay must still be pinned to the old digest.
-/// 
+///
 /// This operation is read-only and does not authorize any file modification.
 pub fn preview_rebase(
     workspace: &Path, source: &str, old_digest: &str, new_digest: &str,
