@@ -100,6 +100,9 @@ impl BasesSession {
         self.view.notice=None;
         Ok(())
     }
+    pub fn reject_draft_input(&mut self) {
+        self.view.notice=Some("Не удалось прочитать поле: сохранение отменено");
+    }
     pub fn cancel_draft(&mut self)->bool{
         if self.view.busy || self.view.draft.is_none(){return false;}
         self.view.draft=None;
