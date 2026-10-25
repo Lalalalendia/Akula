@@ -823,14 +823,14 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     fs::write(
         &approval_source,
         sign_first_mail_approval_for_lab(&fixture.owner, action_claims),
-    ).unwrap();
+    )
+    .unwrap();
     let forged_approval = fixture._tmp.path().join("forged-owner-action.bin");
     fs::write(
         &forged_approval,
-        sign_first_mail_approval_for_lab(
-            &SigningKey::from_bytes(&[99; 32]), action_claims,
-        ),
-    ).unwrap();
+        sign_first_mail_approval_for_lab(&SigningKey::from_bytes(&[99; 32]), action_claims),
+    )
+    .unwrap();
     let root_child = |stop: &str| {
         eprintln!("ROOT_MAIL_CI: root subprocess start {stop}");
         let exe = std::env::current_exe().unwrap();
@@ -848,7 +848,12 @@ fn root_owned_mail_policy_is_read_only_and_current() {
             ))
             .arg(format!(
                 "AKULA_WOW_ROOT_CAS_APPROVAL={}",
-                if stop == "forged" { &forged_approval } else { &approval_source }.display()
+                if stop == "forged" {
+                    &forged_approval
+                } else {
+                    &approval_source
+                }
+                .display()
             ))
             .arg(format!("AKULA_WOW_ROOT_CAS_STOP={stop}"))
             .arg(exe)
@@ -862,8 +867,18 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     };
     // Wrong detached owner approval must FAIL BEFORE ANY root files exist.
     root_child("forged");
-    for path in [POLICY, FLOOR, RECEIPT, PENDING, PENDING_FLOOR, PENDING_RECEIPT] {
-        assert!(fs::symlink_metadata(path).is_err(), "forged approval created a root mail file");
+    for path in [
+        POLICY,
+        FLOOR,
+        RECEIPT,
+        PENDING,
+        PENDING_FLOOR,
+        PENDING_RECEIPT,
+    ] {
+        assert!(
+            fs::symlink_metadata(path).is_err(),
+            "forged approval created a root mail file"
+        );
     }
 
     // All three early crash points must refuse admission. A privileged
