@@ -1,0 +1,71 @@
+name: Akula Library iroh direct transfer lab
+on:
+  pull_request:
+    paths:
+      - 'experiments/akula-library-iroh/**'
+      - '.github/workflows/akula-library-iroh.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  iroh-standalone-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.91.1'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: experiments/akula-library-iroh
+      - name: Resolve dependencies and validate fork chain
+        working-directory: experiments/akula-library-iroh
+        run: |
+          cargo metadata --locked --format-version 1 > metadata.json
+          python3 check_dependency_chain.py metadata.json Cargo.lock
+          cargo tree --locked -i noq
+          cargo tree --locked -i noq-proto
+          cargo tree --locked -i noq-udp
+      - name: Compile and test real QUIC loopback endpoints
+        working-directory: experiments/akula-library-iroh
+        run: cargo test --locked --all-targets
+      - name: Record 10-client QUIC load metrics
+        working-directory: experiments/akula-library-iroh
+        run: cargo test --locked ten_simultaneous_quic_readers_load_and_measure -- --nocapture
+      - name: Record 25-client QUIC load metrics
+        working-directory: experiments/akula-library-iroh
+        run: cargo test --locked twenty_five_quic_readers_two_chunks_load_and_measure -- --nocapture
+      - name: Record 50-client backpressure metrics
+        working-directory: experiments/akula-library-iroh
+        run: cargo test --locked fifty_quic_clients_backpressure_and_measure -- --nocapture
+      - name: Unknown-key QUIC admission stress and CPU RSS metrics
+        working-directory: experiments/akula-library-iroh
+        run: cargo test --locked unknown_48_quic_peers_cannot_read_book_and_known_peer_recovers -- --nocapture
+      - name: Build two-process laboratory binary
+        working-directory: experiments/akula-library-iroh
+        run: cargo build --locked --bin akula-library-iroh-lab
+      - name: Separate-process durable download smoke test
+        working-directory: experiments/akula-library-iroh
+        run: python3 tests/two_process_smoke.py --binary target/debug/akula-library-iroh-lab
+      - name: Persistent quota across sender restarts
+        working-directory: experiments/akula-library-iroh
+        run: python3 tests/quota_restart_smoke.py --binary target/debug/akula-library-iroh-lab
+      - name: Bounded-rate QUIC loopback transfer
+        working-directory: experiments/akula-library-iroh
+        run: python3 tests/rate_smoke.py --binary target/debug/akula-library-iroh-lab
+      - name: Distinct local IP ingress and unknown-key isolation
+        working-directory: experiments/akula-library-iroh
+        run: python3 tests/multi_source_loopback.py --binary target/debug/akula-library-iroh-lab
+      - name: Profile sender PID under unauthorized clients
+        working-directory: experiments/akula-library-iroh
+        run: python3 tests/server_isolated_metrics.py --binary target/debug/akula-library-iroh-lab
+      - name: Archive resolved dependencies
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-library-iroh-dependency-evidence
+          path: |
+            experiments/akula-library-iroh/Cargo.lock
+            experiments/akula-library-iroh/metadata.json
+          if-no-files-found: ignore
