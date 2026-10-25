@@ -151,15 +151,19 @@ pub fn mail_epoch_floor_for_lab(signed_policy: &[u8], epoch: u64) -> Vec<u8> {
     result
 }
 
-fn read_epoch_floor(
-    folder: &Path,
-) -> Result<((u64, [u8; 32]), (u64, u64)), MailRoleHold> {
+fn read_epoch_floor(folder: &Path) -> Result<((u64, [u8; 32]), (u64, u64)), MailRoleHold> {
     let (bytes, inode) = read_exact_private_file(folder, FLOOR_FILE, FLOOR_LEN as u64)?;
     if bytes.len() != FLOOR_LEN || &bytes[..8] != FLOOR_MAGIC {
         return Err(MailRoleHold::MailPolicy);
     }
-    let epoch = u64::from_be_bytes(bytes[8..16].try_into().map_err(|_| MailRoleHold::MailPolicy)?);
-    let digest: [u8; 32] = bytes[16..].try_into().map_err(|_| MailRoleHold::MailPolicy)?;
+    let epoch = u64::from_be_bytes(
+        bytes[8..16]
+            .try_into()
+            .map_err(|_| MailRoleHold::MailPolicy)?,
+    );
+    let digest: [u8; 32] = bytes[16..]
+        .try_into()
+        .map_err(|_| MailRoleHold::MailPolicy)?;
     if epoch == 0 || digest == [0; 32] {
         return Err(MailRoleHold::MailPolicy);
     }
