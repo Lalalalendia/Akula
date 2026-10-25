@@ -75,7 +75,11 @@ impl Host {
         let presented = !drawn.is_empty();
         #[cfg(all(any(target_os = "macos", target_os = "linux"), feature = "installed"))]
         let startup_frame_presented = !drawn.is_empty();
-        if !drawn.is_empty() {
+        // WM_PAINT on Windows also fires when another window uncovers this one.
+        // The scene can be unchanged while the OS needs the retained pixels again.
+        // The DXGI backend ignores empty damage; the software backend restores
+        // its complete backing buffer, including newly exposed regions.
+        if !drawn.is_empty() || cfg!(target_os = "windows") {
             output.present(&drawn);
         }
         self.layers = Some(layers);
