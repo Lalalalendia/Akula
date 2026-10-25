@@ -7,6 +7,13 @@ use crate::ui::scroll::ScrollArea;
 use crate::ui::widgets::{Font, Label, Leading};
 
 impl App {
+    pub(super) fn show_docx_tab(&mut self, root: &mut RenderRoot, path: std::path::PathBuf) {
+        self.leave_note();
+        self.drop_note_page(root);
+        self.show_docx_readonly(root, &path);
+        self.tree.set_active(root, Some(path));
+        self.show_page(root, 0);
+    }
     pub(super) fn show_docx_readonly(&mut self, root: &mut RenderRoot, path: &Path) {
         self.note = None;
         self.note_ids = None;
