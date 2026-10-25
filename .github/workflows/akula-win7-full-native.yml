@@ -1,16 +1,5 @@
 name: LAB Win7 Akula and Shiva PDF build
 on:
-  push:
-    branches: ['lab/win7-release-pe-imports-20261023']
-    paths:
-      - '.github/workflows/akula-win7-full-native.yml'
-      - '.github/scripts/akula-win7-portable-package.py'
-      - '.github/scripts/akula-win7-dumpbin-audit.py'
-      - 'aquilum-app/native/src/output/**'
-      - 'aquilum-app/native/src/host/**'
-      - 'aquilum-app/native/src/touchpad/**'
-      - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/native/src/main.rs'
   pull_request:
     branches: [main]
     paths:
@@ -128,6 +117,14 @@ jobs:
           $audit = Get-Content "$out/full-audit.json" -Raw | ConvertFrom-Json
           if (@($audit.known_post_win7_imports).Count -ne 0) { throw 'Shiva still has post-Windows-7 static imports' }
           if (@($audit.potentially_risky_imported_dlls) -contains 'combase.dll') { throw 'Shiva has unapproved combase.dll direct dependency' }
+          # Shiva requires a pre-authorized font directory. Use a font
+          # from this Windows installation, not a downloaded/bundled font.
+          $fontDir = Join-Path $env:RUNNER_TEMP 'shiva-smoke-fonts'
+          New-Item -ItemType Directory -Force -Path $fontDir | Out-Null
+          $systemFont = Join-Path $env:WINDIR 'Fonts\arial.ttf'
+          if (!(Test-Path -LiteralPath $systemFont -PathType Leaf)) { throw 'System Arial font missing from Windows runner' }
+          Copy-Item -LiteralPath $systemFont -Destination (Join-Path $fontDir 'arial.ttf') -Force
+          $env:SHIVA_FONT_DIR = $fontDir
           # Native execution here is on Windows Server 2022, NOT Windows 7.
           $src = Join-Path $env:GITHUB_WORKSPACE 'win7-full-results/pdf-smoke-input.txt'
           $pdf = Join-Path $env:GITHUB_WORKSPACE 'win7-full-results/pdf-smoke-output.pdf'
@@ -156,6 +153,23 @@ jobs:
           python .github/scripts/akula-win7-portable-package.py --exe $source --audit win7-full-results/full-audit.json --sidecar .artifacts/shiva-win7/x86_64-win7-windows-msvc/release/shiva.exe --sidecar-audit win7-full-results/shiva-audit/full-audit.json --out win7-lab-output --revision $env:GITHUB_SHA
           if ($LASTEXITCODE -ne 0) { throw 'Win7 portable package verification failed' }
           if (!(Test-Path 'win7-lab-output/Akula-Win7-LAB-portable.zip')) { throw 'Test ZIP was not created' }
+
+      - name: Exercise the exact packaged Windows 7 PDF smoke command on runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $batch = Join-Path $env:GITHUB_WORKSPACE 'win7-lab-output/SMOKE-PDF-WIN7.cmd'
+          if (!(Test-Path -LiteralPath $batch -PathType Leaf)) { throw 'Portable PDF smoke command missing' }
+          & cmd.exe /d /c $batch
+          $code = $LASTEXITCODE
+          if ($code -ne 0) { throw "Packaged PDF smoke failed: $code" }
+          $pdf = Join-Path $env:GITHUB_WORKSPACE 'win7-lab-output/pdf-smoke-output.pdf'
+          if (!(Test-Path -LiteralPath $pdf -PathType Leaf)) { throw 'Portable PDF smoke produced no PDF' }
+          $bytes = [IO.File]::ReadAllBytes($pdf)
+          if ($bytes.Length -lt 64 -or [Text.Encoding]::ASCII.GetString($bytes, 0, 5) -cne '%PDF-') {
+            throw 'Portable PDF smoke output is not a PDF'
+          }
+          Write-Host 'WIN7_PACKAGED_PDF_SMOKE_PASSED runner=windows2022 test_os_win7=false'
 
       - name: Verify patched portable EXE imports before distribution
         shell: pwsh
