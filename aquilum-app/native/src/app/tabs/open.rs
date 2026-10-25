@@ -130,6 +130,14 @@ impl App {
             self.show_page(root, 0);
             return;
         }
+        if crate::docx::is_docx_path(&path) {
+            self.leave_note();
+            self.drop_note_page(root);
+            self.show_docx_readonly(root, &path);
+            self.tree.set_active(root, Some(path));
+            self.show_page(root, 0);
+            return;
+        }
         if is_structured_file(&path) {
             self.leave_note();
             self.show_structured_readonly(root, &path);
@@ -318,12 +326,17 @@ impl App {
 
     pub(crate) fn open_in_with_offset(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool, offset: Option<usize>) -> bool {
         let image = crate::images::kind(&path.to_string_lossy()) == Some(crate::images::MediaKind::Image);
-        if !image && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) {
+        if !image && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) && !crate::docx::is_docx_path(&path) {
             return false;
         }
         // Validate the image before changing tabs or navigation: no paths
         // outside this vault, symlinks, oversized or corrupt sources.
         if image && self.tree.root().and_then(|vault| super::super::media::local_image_preview(vault, &path)).is_none() {
+            return false;
+        }
+        if crate::docx::is_docx_path(&path)
+            && self.tree.root().and_then(|vault| crate::docx::admit(vault, &path).ok()).is_none()
+        {
             return false;
         }
         if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {
