@@ -69,7 +69,7 @@ jobs:
           test "$(id -u)" -ne 0
           command -v sudo
           test ! -e /etc/akula-node
-          cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-wow-mailbox-lab --test node_wow_mailbox_lab root_owned_mail_policy_is_read_only_and_current -- --exact --nocapture
+          timeout 180s cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-wow-mailbox-lab --test node_wow_mailbox_lab root_owned_mail_policy_is_read_only_and_current -- --exact --nocapture
           test ! -e /etc/akula-node
       - name: Re-test existing live-Iroh roster and grant identity behavior
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-wow-mailbox-lab --test node_live_identity -- --nocapture
