@@ -6,9 +6,9 @@ use akula_staya_integration::node_wow_mailbox_lab::{MailRoleHold, NodeWowMailbox
 use akula_wire_lab::{
     crypto_identity_w3::SignedHeader,
     crypto_w3,
-    custodian_discovery::{sign_list_for_lab, ListClaims},
-    custodian_mailbox::{sign_store_for_lab, MailboxPolicy, StoreClaims, StoreLocator},
-    custodian_wire::{bind_test_loopback, client_fetch_listed, client_list, WireError},
+    custodian_discovery::{ListClaims, sign_list_for_lab},
+    custodian_mailbox::{MailboxPolicy, StoreClaims, StoreLocator, sign_store_for_lab},
+    custodian_wire::{WireError, bind_test_loopback, client_fetch_listed, client_list},
     journal_w4::Journal,
     private_route_w3,
     trust_w3::TrustRegistry,
@@ -19,7 +19,7 @@ use ed25519_dalek::SigningKey;
 use std::{
     fs,
     net::{TcpListener, TcpStream},
-    os::unix::fs::{symlink, PermissionsExt},
+    os::unix::fs::{PermissionsExt, symlink},
     path::{Path, PathBuf},
     thread,
 };
@@ -82,7 +82,11 @@ impl Fixture {
         let custodian = SigningKey::from_bytes(&[8; 32]);
         let sender = SigningKey::from_bytes(&[7; 32]);
         let mut trust = TrustRegistry::new();
-        for (id, key) in [(OWNER, &owner), (RECIPIENT, &recipient), (CUSTODIAN, &custodian)] {
+        for (id, key) in [
+            (OWNER, &owner),
+            (RECIPIENT, &recipient),
+            (CUSTODIAN, &custodian),
+        ] {
             trust.enroll(id, 1, key.verifying_key()).unwrap();
         }
         let (_, hpke_public) = crypto_w3::new_recipient();
@@ -98,7 +102,8 @@ impl Fixture {
                 epoch: 1,
             },
             b"independent NodeV1 and WOW mail state",
-        ).unwrap();
+        )
+        .unwrap();
         let claims = StoreClaims {
             issuer: OWNER,
             issuer_epoch: 1,
@@ -116,25 +121,50 @@ impl Fixture {
         };
         let db_file = mail_state.join("wow-mailbox.sqlite");
         let mut journal = Journal::open(&db_file).unwrap();
-        journal.operator_provision_mailbox(
-            MailboxPolicy {
-                mailbox: MAILBOX, issuer: OWNER, issuer_epoch: 1,
-                custodian: CUSTODIAN, scope: SCOPE, recipient: RECIPIENT,
-                max_message_bytes: 1024, max_offers: 2,
-            },
-            &trust,
-        ).unwrap();
-        journal.request_custodian_store(
-            &sign_store_for_lab(&owner, claims), &trust, 1,
-        ).unwrap();
-        journal.commit_custodian_store(
-            StoreLocator { mailbox: MAILBOX, offer: claims.offer },
-            &packet, &custodian, 1, &trust, 2,
-        ).unwrap();
+        journal
+            .operator_provision_mailbox(
+                MailboxPolicy {
+                    mailbox: MAILBOX,
+                    issuer: OWNER,
+                    issuer_epoch: 1,
+                    custodian: CUSTODIAN,
+                    scope: SCOPE,
+                    recipient: RECIPIENT,
+                    max_message_bytes: 1024,
+                    max_offers: 2,
+                },
+                &trust,
+            )
+            .unwrap();
+        journal
+            .request_custodian_store(&sign_store_for_lab(&owner, claims), &trust, 1)
+            .unwrap();
+        journal
+            .commit_custodian_store(
+                StoreLocator {
+                    mailbox: MAILBOX,
+                    offer: claims.offer,
+                },
+                &packet,
+                &custodian,
+                1,
+                &trust,
+                2,
+            )
+            .unwrap();
         drop(journal);
         fs::set_permissions(&db_file, fs::Permissions::from_mode(0o600)).unwrap();
-        Self { _tmp: tmp, node, node_policy: policy_file, mail_state,
-            owner, recipient, custodian, trust, packet }
+        Self {
+            _tmp: tmp,
+            node,
+            node_policy: policy_file,
+            mail_state,
+            owner,
+            recipient,
+            custodian,
+            trust,
+            packet,
+        }
     }
 
     fn role(&self) -> Result<NodeWowMailboxLab, MailRoleHold> {
@@ -158,19 +188,22 @@ impl Fixture {
     }
 
     fn list_proof(&self) -> Vec<u8> {
-        sign_list_for_lab(&self.recipient, ListClaims {
-            issuer: OWNER,
-            issuer_epoch: 1,
-            custodian: CUSTODIAN,
-            mailbox: MAILBOX,
-            scope: SCOPE,
-            recipient: RECIPIENT,
-            recipient_epoch: 1,
-            since_seq: 0,
-            grant_until_ms: 100_000,
-            nonce: [80; 16],
-            max_items: 1,
-        })
+        sign_list_for_lab(
+            &self.recipient,
+            ListClaims {
+                issuer: OWNER,
+                issuer_epoch: 1,
+                custodian: CUSTODIAN,
+                mailbox: MAILBOX,
+                scope: SCOPE,
+                recipient: RECIPIENT,
+                recipient_epoch: 1,
+                since_seq: 0,
+                grant_until_ms: 100_000,
+                nonce: [80; 16],
+                max_items: 1,
+            },
+        )
     }
 }
 
@@ -179,7 +212,8 @@ fn exchange<T>(
     role: &mut NodeWowMailboxLab,
     f: impl FnOnce(&mut TcpStream) -> Result<T, WireError> + Send + 'static,
 ) -> Result<T, WireError>
-where T: Send + 'static
+where
+    T: Send + 'static,
 {
     let listener = bind_test_loopback().unwrap();
     NodeWowMailboxLab::ensure_local_only(&listener).unwrap();
@@ -197,8 +231,10 @@ fn current_node_policy_and_independent_mailbox_survive_restart() {
     let fixture = Fixture::new();
     let mut role = fixture.role().unwrap();
     let proof = fixture.list_proof();
-    let found = exchange(&fixture.node, &mut role, move |sock| client_list(sock, &proof))
-        .unwrap();
+    let found = exchange(&fixture.node, &mut role, move |sock| {
+        client_list(sock, &proof)
+    })
+    .unwrap();
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].message, MESSAGE);
     assert_eq!(*blake3::hash(&fixture.packet).as_bytes(), found[0].digest);
@@ -206,15 +242,18 @@ fn current_node_policy_and_independent_mailbox_survive_restart() {
     let entry = found[0];
     let fetched = exchange(&fixture.node, &mut role, move |sock| {
         client_fetch_listed(sock, &proof, entry)
-    }).unwrap();
+    })
+    .unwrap();
     assert_eq!(fetched, Some(fixture.packet.clone()));
     drop(role);
 
     // Service restart must not generate a new mailbox, signing key or Node ID.
     let mut restarted = fixture.role().unwrap();
     let proof = fixture.list_proof();
-    let later = exchange(&fixture.node, &mut restarted, move |sock| client_list(sock, &proof))
-        .unwrap();
+    let later = exchange(&fixture.node, &mut restarted, move |sock| {
+        client_list(sock, &proof)
+    })
+    .unwrap();
     assert_eq!(later, found);
 }
 
@@ -272,7 +311,7 @@ fn missing_world_readable_or_wrong_signing_key_fails_closed() {
             NODE_ENDPOINT,
             CUSTODIAN,
             1,
-            SigningKey::from_bytes(&[96;32]),
+            SigningKey::from_bytes(&[96; 32]),
             fixture.trust,
         ),
         Err(MailRoleHold::UnpinnedTrust)
