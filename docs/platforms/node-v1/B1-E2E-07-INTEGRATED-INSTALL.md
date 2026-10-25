@@ -410,3 +410,43 @@ writes. There is still no independently reviewed production publisher
 key or packaged verified administrator binary, no signed owner
 enrollment proposal on Windows and no real VPS install. The B1-E2E-07
 release gate remains HOLD.
+
+### Fixed root-administrator B1d0 witness genesis on a genuinely empty VPS
+
+The B0 v3 enrollment CLI previously required an already enrolled
+`OsWitnessLab`, which made the clean-VPS initial state unreachable without
+an unimplemented external step. A separate opt-in
+`akula-root-witness-init-lab` binary now supplies that *first*
+**administratively authorized** step. It accepts no arguments, paths,
+SSH, IPC, public keys, candidate artifacts or environment-selected
+locations and must be invoked by an operator who already holds UID0
+privileges and independently verified the exact signed binary.
+
+The sole production destination is the OS-owned `/var/lib` tree.
+The command opens `/`, `/var` and `/var/lib` by fixed
+`O_NOFOLLOW` directory-FD traversal, validates UID0 and mode 0755,
+takes an exclusive root-owned parent lock, then exclusively creates
+`/var/lib/akula/server-bootstrap/trust` and `journal` with mode 0700.
+It uses the Linux OS CSPRNG to generate a fresh Ed25519 signing seed
+locally and publishes `witness.seed` (0600), matching `witness.pub`
+(0600), and finally the distinct B1d0 production `enrollment` marker
+(0600). All file writes use an O_EXCL pending name, fsync, NOREPLACE
+rename and parent directory fsync. Public witness identity is derived
+from the same newly generated private key. A missing/corrupt partial
+state cannot be interpreted as enrollment because the marker is last.
+
+A pre-existing `/var/lib/akula` directory, unsafe parent, symlink,
+interrupted attempt or retry is an irreversible **HOLD pending human
+root review**; never silently repair, overwrite or restart a key
+generation. Root-owned test directories verify proper 32-byte private
+seed custody, matching Ed25519 public key, pristine genesis ledger,
+single-use semantics and simulated crashes after every major step.
+Production `/var/lib` is never mutated by CI tests; the CLI is
+compiled only, not executed. The separate existing B0 v3 admin
+enrollment may run only afterward on the same fixed protected paths.
+
+**Unresolved production prerequisites:** out-of-band authentication
+of the root-admin executable, signature/publisher key and safe
+distribution, independent admin consent, real VPS E2E, actual root
+commit/activation authority, systemd and post-reboot two-client proof.
+This remains a non-shipping experiment and **B1-E2E-07 stays HOLD**.

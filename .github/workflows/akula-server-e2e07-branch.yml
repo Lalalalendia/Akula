@@ -97,6 +97,10 @@ jobs:
           # One-time admin enrollment uses root-owned disposable directories.
           "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
+          # First host-root witness seed and empty ledger; NEVER run the
+          # production fixed-path binary on a CI runner or user's server.
+          "$test_bin" server_root_v3_trust::witness_init::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::witness_init::tests --nocapture
       - name: Compile fixed administrator-only B0 v3 enrollment binary (do not run)
         shell: bash
         run: |
@@ -104,6 +108,9 @@ jobs:
           cargo check --locked --manifest-path aquilum-app/Cargo.toml \
             -p aquilum-core --features server-root-b0v3-gate-lab \
             --bin akula-root-b0v3-enroll-lab
+          cargo check --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab \
+            --bin akula-root-witness-init-lab
       - name: Confirm default Core compiles without installer authority
         shell: bash
         run: |
@@ -125,6 +132,9 @@ jobs:
             aquilum-app/core/src/server_installer_durable_node/provisioned_gate.rs
             aquilum-app/core/src/server_root_v3_trust/enrollment.rs
             aquilum-app/core/src/server_root_v3_trust/enrollment/tests.rs
+            aquilum-app/core/src/server_root_v3_trust/witness_init.rs
+            aquilum-app/core/src/server_root_v3_trust/witness_init/tests.rs
+            aquilum-app/core/src/bin/akula_root_witness_init_lab.rs
             aquilum-app/core/src/bin/akula_root_b0v3_enroll_lab.rs
             aquilum-app/core/src/server_first_root_stage.rs
             aquilum-app/core/src/server_first_root_stage/tests.rs
