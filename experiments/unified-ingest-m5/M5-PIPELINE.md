@@ -163,3 +163,45 @@ The output only confirms the **selected manifest**, not whole-site coverage.
 5. Add opt-in real MinIO test of the **whole M5 chain**, encrypted secrets,
    retention and reviewable deployment controls. Earlier PR #726 proves
    the separate bounded transport with MinIO, **not** M5 end-to-end.
+
+## M6: actual Erida import handoff (read-only unless the member acts)
+
+M5's published `verified-source-handoff-v1` and the 64-digit SHA-256 are
+validated **against all immutable RAW/parsed receipts**, the content-addressed
+publisher manifest and individual chapter objects. Any mismatch, omission or
+ambiguity fails closed. M6 then creates deterministic, bounded HTML batches
+that Erida's existing `POST /v1/imports/preview` / `POST /v1/imports/stages`
+accept. No new Erida parser or book import service is invented.
+
+```sh
+python -m discovery_lab.unified_cli demo --state /tmp/demo-m6 \
+  --erida-out /tmp/demo-m6-import
+# The first command returns the batch receipt with the exact file names.
+# M6 never stages, confirms, translates or publishes by itself.
+```
+
+To validate each batch against an authenticated **trusted** Erida instance
+(with explicit consent to send that text to that instance):
+
+```sh
+ERIDA_API_KEY=... python -m discovery_lab.unified_cli preview-erida \
+  --state /tmp/demo-m6 \
+  --erida-manifest /tmp/demo-m6-import/demo-story-<revision-prefix>-import.json \
+  --erida-origin https://YOUR-ERIDA-SERVER
+```
+
+The `preview-erida` command sends ONLY `POST /v1/imports/preview`. It never
+follows redirects (avoids credential leakage), refuses non-HTTPS origins
+except loopback, validates the number and order of detected chapter numbers,
+and returns only counts and status, not confidential chapter text or keys.
+Actual staging uses Erida's existing authenticated actor-owned `/stages` and
+`/confirm` endpoints **only by separate explicit human action**.
+
+Limits: each HTML batch < 12 MiB (10 MiB target), individual source chapter
+<= 2 MiB for the current M5 small-object sink. Any larger chapter requires a
+future streaming M6 reader; splitting one source chapter silently is forbidden.
+M6 checks only the explicitly selected plan, never asserts complete site coverage.
+
+Pinned real Erida import parser (`Lalalalendia/ararra@0b793ed1`) is read and
+run in isolated GitHub CI to guard against drifting chapter heading formats.
+

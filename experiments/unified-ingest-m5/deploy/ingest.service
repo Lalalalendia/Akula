@@ -1,0 +1,26 @@
+[Unit]
+Description=Approved offline ingest API and local workers
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ingest
+Group=ingest
+WorkingDirectory=/opt/unified-ingest
+EnvironmentFile=/etc/unified-ingest/ingest.env
+ExecStart=/opt/unified-ingest/venv/bin/python -m discovery_lab.service_cli serve --state /var/lib/unified-ingest/state --approved-root /var/lib/unified-ingest/approved --max-workers 2 --port 8765 --s3-bucket ${INGEST_S3_BUCKET} --s3-endpoint ${INGEST_S3_ENDPOINT} --s3-prefix ingest/
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/unified-ingest
+CapabilityBoundingSet=
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

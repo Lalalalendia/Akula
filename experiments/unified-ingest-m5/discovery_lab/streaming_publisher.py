@@ -26,6 +26,7 @@ from typing import Iterable
 from urllib.parse import parse_qs, urlsplit
 
 from .model import canonical_fixture_url, require_entity_id
+from .literotica_snapshot import story_url, series_url, SnapshotRejected
 from .multipart import MultipartFileUploader, StreamingObjectUploader, MiB, READBACK_BYTES, MAX_LAB_FILE_BYTES
 from .objects import FileObjectSink, S3ObjectSink, ObjectConflict, ObjectWriteUncertain
 from .publisher import (_TAG_RE, _json_bytes, _sha, _safe_heading, _clean_line,
@@ -63,6 +64,7 @@ class StreamWork:
     source_categories: tuple[str, ...]
     expected_chapters: int
     chapters: Iterable[StreamChapter]
+    parser_profile: str = "fixture-chapter-html-v1"
 
 
 @dataclass(frozen=True)
@@ -161,10 +163,26 @@ def _normalized_chunks(chunks: Iterable[str]):
     # Do not emit pending trailing LF; M2 uses strip("\n").
 
 
+def _safe_source_url(url: str, profile: str, *, is_page: bool = False) -> str:
+    if profile == "fixture-chapter-html-v1":
+        return canonical_fixture_url(url)
+    if profile != "literotica-saved-story-v1":
+        raise ValueError("unknown source parser profile")
+    # Provenance validation ONLY. Never fetch this URL.
+    if is_page:
+        story_url(url)
+    else:
+        try:
+            story_url(url)
+        except SnapshotRejected:
+            series_url(url)
+    return url
+
+
 def _validate_head(work: StreamWork) -> tuple[str, str, str, str, str, tuple[str, ...], tuple[str, ...]]:
     try:
         ident = require_entity_id(work.source_id)
-        source_url = canonical_fixture_url(work.source_url)
+        source_url = _safe_source_url(work.source_url, work.parser_profile)
     except (ValueError, TypeError) as exc:
         raise IncompleteWork("unsafe ID or non-fixture URL") from exc
     title = _clean_line(work.title, "title")
@@ -242,9 +260,12 @@ def spool_work(work: StreamWork, target: str | Path) -> StagedBundle:
                     if page.number != page_count:
                         raise IncompleteWork("missing/repeated/out-of-order page")
                     try:
-                        url = canonical_fixture_url(page.source_url)
-                        page_query = parse_qs(urlsplit(url).query).get("page", ["1"])
-                        url_page = int(page_query[0])
+                        url = _safe_source_url(page.source_url, work.parser_profile, is_page=True)
+                        if work.parser_profile == "literotica-saved-story-v1":
+                            url_page = story_url(url).page
+                        else:
+                            page_query = parse_qs(urlsplit(url).query).get("page", ["1"])
+                            url_page = int(page_query[0])
                     except (ValueError, TypeError, IndexError) as exc:
                         raise IncompleteWork("unsafe page URL") from exc
                     if url_page != page_count or url in sources:
@@ -298,13 +319,14 @@ def spool_work(work: StreamWork, target: str | Path) -> StagedBundle:
     finally:
         story.close()
 
+    integrity, coverage = ("verified_fixture", "all_fixture_pages") if work.parser_profile == "fixture-chapter-html-v1" else ("verified_selected_snapshot", "selected_manifest_only")
     metadata = {"schema_version": 1, "source": "literotica", "source_work_id": ident,
                 "source_url": source_url, "kind": "story", "title": title,
                 "authors": [{"display_name": author}], "language": lang,
                 "tags": list(work.tags), "source_tags": list(source_tags),
                 "source_categories": list(cats), "chapters": recorded_chapters,
-                "integrity": "verified_fixture", "coverage_scope": "all_fixture_pages",
-                "parser_version": "synthetic-m2-v1"}
+                "integrity": integrity, "coverage_scope": coverage,
+                "parser_version": "synthetic-m2-v1" if work.parser_profile == "fixture-chapter-html-v1" else work.parser_profile}
     meta_blob = _json_bytes(metadata)
     if len(meta_blob) > MAX_OBJECT_BYTES:
         raise IncompleteWork("metadata exceeds configured small-object limit")
@@ -317,7 +339,7 @@ def spool_work(work: StreamWork, target: str | Path) -> StagedBundle:
     files = [{"key": x.key, "size": x.size, "sha256": x.sha256} for x in finished]
     manifest = _json_bytes({"schema_version": 1, "source": "literotica", "work_id": ident,
                             "file_count": len(files), "files": files,
-                            "integrity": "verified_fixture", "coverage_scope": "all_fixture_pages",
+                            "integrity": integrity, "coverage_scope": coverage,
                             "algorithm": "sha256"})
     if len(manifest) > MAX_OBJECT_BYTES:
         raise IncompleteWork("manifest exceeds configured small-object limit")

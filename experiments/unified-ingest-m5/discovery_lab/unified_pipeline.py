@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import Iterator, Protocol
 
 from .model import canonical_fixture_url, require_entity_id
-from .objects import FileObjectSink, S3ObjectSink, ObjectConflict
+from .literotica_snapshot import story_url, series_url, parse_saved_story_page, SnapshotRejected
+from .objects import FileObjectSink, S3ObjectSink, ObjectConflict, ObjectWriteUncertain
 from .publisher import IncompleteWork, PublicationUncertain
 from .streaming_publisher import (StreamWork, StreamChapter, StreamPage,
                                   StreamingWorkPublisher)
@@ -69,6 +70,7 @@ class WorkPlan:
     source_categories: tuple[str, ...]
     chapters: tuple[ChapterSpec, ...]
     manifest_sha256: str
+    parser_profile: str = PARSER_VERSION
 
     @property
     def expected_pages(self) -> int:
@@ -108,7 +110,21 @@ def parse_plan(document: bytes) -> WorkPlan:
     if not isinstance(o, dict) or o.get("schema") != "selected-work-v1":
         raise NeedsReview("unknown plan schema")
     source_id = _safe_ident(o.get("source_id"), "source ID")
-    source_url = canonical_fixture_url(o.get("source_url", ""))
+    parser_profile = o.get("parser_profile", PARSER_VERSION)
+    if parser_profile not in (PARSER_VERSION, "literotica-saved-story-v1"):
+        raise NeedsReview("unknown source parser profile")
+    if parser_profile == PARSER_VERSION:
+        source_url = canonical_fixture_url(o.get("source_url", ""))
+    else:
+        source_url = o.get("source_url", "")
+        # The selected source can be a standalone story or a series.
+        try:
+            story_url(source_url)
+        except SnapshotRejected:
+            try:
+                series_url(source_url)
+            except SnapshotRejected as exc:
+                raise NeedsReview("invalid Literotica source URL") from exc
     title, author = _nonempty(o.get("title"), "title"), _nonempty(o.get("author"), "author")
     language = _nonempty(o.get("language"), "language", 30)
     if not re.fullmatch(r"[a-z]{2,3}(?:-[a-z]{2})?", language):
@@ -135,10 +151,24 @@ def parse_plan(document: bytes) -> WorkPlan:
         if not isinstance(raw_pages, list) or not raw_pages or len(raw_pages) > 3000:
             raise NeedsReview("invalid chapter page inventory")
         pages = []
+        story_identity = None
         for n, page in enumerate(raw_pages, 1):
             if not isinstance(page, dict) or page.get("number") != n:
                 raise NeedsReview("pages must be consecutive")
-            src = canonical_fixture_url(page.get("source_url", ""))
+            if parser_profile == PARSER_VERSION:
+                src = canonical_fixture_url(page.get("source_url", ""))
+            else:
+                src = page.get("source_url", "")
+                try:
+                    ident = story_url(src)
+                except SnapshotRejected as exc:
+                    raise NeedsReview("invalid Literotica chapter page URL") from exc
+                if ident.page != n:
+                    raise NeedsReview("story page number does not match selected page index")
+                if story_identity is None:
+                    story_identity = (ident.host, ident.slug)
+                elif (ident.host, ident.slug) != story_identity:
+                    raise NeedsReview("chapter pages span different story identities")
             filename, key, digest = page.get("fixture_file"), page.get("raw_key"), page.get("raw_sha256")
             if bool(filename) == bool(key):
                 raise NeedsReview("exactly one of fixture_file or raw_key required")
@@ -159,7 +189,7 @@ def parse_plan(document: bytes) -> WorkPlan:
         raise NeedsReview("too many pages")
     # Hash the raw manifest bytes: restart must use the exact same approved plan.
     return WorkPlan(source_id, title, author, source_url, language, tuple(tags),
-                    tuple(source_tags), tuple(categories), tuple(chapters), _sha(document))
+                    tuple(source_tags), tuple(categories), tuple(chapters), _sha(document), parser_profile)
 
 
 class _ChapterReader(HTMLParser):
@@ -323,6 +353,18 @@ class PageLedger:
             db.execute("INSERT OR IGNORE INTO stage_events(work_id,chapter,page,phase,object_key,sha256) VALUES(?,?,?,?,?,?)",
                        (claimed["work_id"], claimed["chapter"], claimed["page"], phase, key, sha))
 
+    def release_uncertain(self, claimed: dict) -> None:
+        with self.tx() as db:
+            state = "READY" if claimed["state"] == "READY" else "RAW"
+            expected = "FETCHING" if state == "READY" else "PARSING"
+            changed = db.execute("""UPDATE source_pages SET state=?,lease_token=NULL,
+                lease_until=0,error=NULL WHERE work_id=? AND chapter=? AND page=?
+                AND state=? AND lease_token=?""",
+                (state, claimed["work_id"], claimed["chapter"], claimed["page"],
+                 expected, claimed["lease_token"])).rowcount
+            if changed != 1:
+                raise NeedsReview("stale lease cannot release uncertain S3 operation")
+
     def fail(self, claimed: dict, exc: Exception) -> None:
         with self.tx() as db:
             db.execute("""UPDATE source_pages SET state='NEEDS_REVIEW',lease_token=NULL,lease_until=0,error=?
@@ -392,6 +434,9 @@ class UnifiedPipeline:
                 count += 1
             except InjectCrash:
                 raise
+            except ObjectWriteUncertain:
+                self.ledger.release_uncertain(claimed)
+                raise
             except Exception as exc:
                 self.ledger.fail(claimed, exc)
                 raise
@@ -404,9 +449,20 @@ class UnifiedPipeline:
                 data = self.sink.get(claimed["raw_key"])
                 if len(data) != claimed["raw_size"] or _sha(data) != claimed["raw_sha"]:
                     raise ObjectConflict("immutable RAW changed")
-                text = parse_snapshot(data, source_id=plan.source_id,
-                                      chapter=claimed["chapter"], page=claimed["page"])
-                parsed = {"schema": "parsed-page-v1", "parser": PARSER_VERSION,
+                spec = self._find_page(plan, claimed["chapter"], claimed["page"])
+                if plan.parser_profile == PARSER_VERSION:
+                    text = parse_snapshot(data, source_id=plan.source_id,
+                                          chapter=claimed["chapter"], page=claimed["page"])
+                else:
+                    # Parse immutable RAW only; no network or hidden pagination fetches.
+                    page_count = len(plan.chapters[claimed["chapter"] - 1].pages)
+                    try:
+                        text = parse_saved_story_page(
+                            data, url=spec.source_url, page=claimed["page"],
+                            expected_pages=page_count).text
+                    except SnapshotRejected as exc:
+                        raise NeedsReview("saved Literotica page needs parser review") from exc
+                parsed = {"schema": "parsed-page-v1", "parser": plan.parser_profile,
                           "work_id": plan.source_id, "chapter": claimed["chapter"],
                           "page": claimed["page"], "source_url": self._find_page(plan, claimed["chapter"], claimed["page"]).source_url,
                           "raw_sha256": claimed["raw_sha"], "text": text}
@@ -417,6 +473,9 @@ class UnifiedPipeline:
                     raise ObjectConflict("PARSED put digest mismatch")
                 self.ledger.commit(claimed, phase="PARSED", key=key, sha=sha)
                 count += 1
+            except ObjectWriteUncertain:
+                self.ledger.release_uncertain(claimed)
+                raise
             except Exception as exc:
                 self.ledger.fail(claimed, exc)
                 raise
@@ -440,7 +499,7 @@ class UnifiedPipeline:
                 if _sha(blob) != r["parsed_sha"]:
                     raise ObjectConflict("PARSED receipt changed")
                 d = json.loads(blob)
-                if (d.get("schema") != "parsed-page-v1" or d.get("parser") != PARSER_VERSION or
+                if (d.get("schema") != "parsed-page-v1" or d.get("parser") != plan.parser_profile or
                     d.get("work_id") != plan.source_id or d.get("chapter") != chapter.ordinal or
                     d.get("page") != p.page or d.get("source_url") != p.source_url or
                     d.get("raw_sha256") != r["raw_sha"]):
@@ -456,7 +515,7 @@ class UnifiedPipeline:
                     for c in plan.chapters)
         return StreamWork(plan.source_id, plan.title, plan.author, plan.source_url,
                           plan.language, plan.tags, plan.source_tags, plan.source_categories,
-                          len(plan.chapters), chapters)
+                          len(plan.chapters), chapters, plan.parser_profile)
 
     def publish(self, plan: WorkPlan, *, expected_revision: str | None = None) -> dict:
         stream = self._work(plan)
@@ -473,6 +532,7 @@ class UnifiedPipeline:
                    "tags": list(plan.tags), "source_tags": list(plan.source_tags),
                    "source_categories": list(plan.source_categories),
                    "manifest_sha256": plan.manifest_sha256,
+                   "parser_profile": plan.parser_profile,
                    "revision_id": result["revision_id"], "artifact_manifest_key": verified["manifest_key"],
                    "chapter_count": len(plan.chapters), "pages": len(rows),
                    "chapters": [{"ordinal": c.ordinal, "title": c.title,

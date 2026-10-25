@@ -7,11 +7,14 @@ from .objects import FileObjectSink, S3ObjectSink
 from .engine import DiscoveryEngine, DiscoveryStore, MemoryFixtureSource, FixtureResponse
 from .model import fixture_json
 from .unified_pipeline import PageLedger, UnifiedPipeline, parse_plan
+from .erida_export import prepare_erida_batches
+from .erida_preview import preview_erida_batches
+from .erida_stage import stage_erida_batches
 
 
 def main():
     ap = argparse.ArgumentParser(description="Approved snapshots -> RAW -> parse -> publish -> handoff")
-    ap.add_argument("command", choices=("run", "status", "demo"))
+    ap.add_argument("command", choices=("run", "status", "demo", "export-erida", "preview-erida", "stage-erida"))
     ap.add_argument("--plan", type=Path)
     ap.add_argument("--state", type=Path, required=True, help="private SQLite, spool, local object store")
     ap.add_argument("--fixtures", type=Path, help="approved local fixture directory; no network")
@@ -19,12 +22,43 @@ def main():
     ap.add_argument("--s3-bucket", help="opt-in S3 bucket, uses ambient AWS credentials")
     ap.add_argument("--s3-endpoint", help="opt-in S3 endpoint")
     ap.add_argument("--s3-prefix", default="unified-lab/")
+    ap.add_argument("--erida-out", type=Path, help="write read-only verified Erida HTML import batches")
+    ap.add_argument("--handoff-key", help="immutable handoff object key for export-erida")
+    ap.add_argument("--handoff-sha256", help="expected immutable handoff SHA-256 for export-erida")
+    ap.add_argument("--erida-manifest", type=Path, help="prepared local Erida import manifest for preview-erida")
+    ap.add_argument("--erida-origin", help="explicit trusted Erida HTTPS origin for read-only preview")
+    ap.add_argument("--allow-stage", action="store_true", help="explicitly create short-lived Erida stages; NEVER confirm imports")
     a = ap.parse_args()
-    if a.command != "demo" and a.plan is None:
+    if a.command in ("run", "status") and a.plan is None:
         ap.error("--plan is required for run/status")
+    if a.command == "export-erida" and (not a.erida_out or not a.handoff_key or not a.handoff_sha256):
+        ap.error("export-erida requires --erida-out, --handoff-key and --handoff-sha256")
+    if a.command == "preview-erida":
+        if not a.erida_manifest or not a.erida_origin:
+            ap.error("preview-erida requires --erida-manifest and --erida-origin")
+        import os
+        key = os.environ.get("ERIDA_API_KEY", "")
+        if not key:
+            ap.error("explicit authenticated preview requires ERIDA_API_KEY environment variable")
+        print(json.dumps(preview_erida_batches(a.erida_manifest, erida_origin=a.erida_origin, api_key=key),
+                         ensure_ascii=False, indent=2))
+        return
+    if a.command == "stage-erida":
+        if not a.erida_manifest or not a.erida_origin or not a.allow_stage:
+            ap.error("stage-erida requires --erida-manifest --erida-origin --allow-stage")
+        import os
+        key = os.environ.get("ERIDA_API_KEY", "")
+        if not key:
+            ap.error("stage-erida requires ERIDA_API_KEY in environment")
+        result = stage_erida_batches(a.erida_manifest, erida_origin=a.erida_origin,
+                                    api_key=key, allow_stage=True)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result["status"] != "STAGED_AWAITING_ACTOR_CONFIRMATION":
+            raise SystemExit(2)
+        return
     sample = Path(__file__).resolve().parent.parent / "examples" / "approved-work"
     planfile = sample / "approved-plan.json" if a.command == "demo" else a.plan
-    plan = parse_plan(planfile.read_bytes())
+    plan = None if a.command == "export-erida" else parse_plan(planfile.read_bytes())
     a.state.mkdir(parents=True, exist_ok=True)
     ledger = PageLedger(a.state / "ingest.sqlite3")
     if a.command == "status":
@@ -39,6 +73,10 @@ def main():
         journal = a.state / "multipart.sqlite3"
     else:
         sink, journal = FileObjectSink(a.state / "objects"), None
+    if a.command == "export-erida":
+        print(json.dumps(prepare_erida_batches(sink, a.handoff_key, a.handoff_sha256, a.erida_out),
+                         ensure_ascii=False, indent=2))
+        return
     pipeline = UnifiedPipeline(ledger, sink, a.fixtures or planfile.parent,
                                a.state / "stage", multipart_journal=journal)
     if a.command == "demo":
@@ -61,6 +99,12 @@ def main():
         result = {"discovery": proof, "pipeline": pipeline.run(plan)}
     else:
         result = pipeline.run(plan, stop_after=a.stop_after)
+    if a.erida_out:
+        receipt = result["pipeline"] if a.command == "demo" else result
+        if not receipt.get("handoff_key") or not receipt.get("handoff_sha256"):
+            ap.error("Erida export requires a completed published handoff")
+        result["erida_export"] = prepare_erida_batches(sink, receipt["handoff_key"],
+                                                       receipt["handoff_sha256"], a.erida_out)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
