@@ -26,8 +26,15 @@ pub(super) fn preserve_before_accept(
 )->Result<String,String>{
     let input=fs::symlink_metadata(old_path)
         .map_err(|_|"cannot inspect pre-rebase local overlay")?;
+    #[cfg(windows)]
+    let input_reparse={
+        use std::os::windows::fs::MetadataExt;
+        input.file_attributes() & 0x0000_0400 != 0
+    };
+    #[cfg(not(windows))]
+    let input_reparse=false;
     if !input.is_file() || input.file_type().is_symlink()
-        || input.len()>MAX_ARCHIVE_BYTES as u64 {
+        || input_reparse || input.len()>MAX_ARCHIVE_BYTES as u64 {
         return Err("unsafe or oversized source overlay; backup denied".into());
     }
     let bytes=fs::read(old_path)

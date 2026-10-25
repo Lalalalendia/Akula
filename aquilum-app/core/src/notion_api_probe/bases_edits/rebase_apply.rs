@@ -115,10 +115,6 @@ pub fn apply_rebase_decisions_approved(
     let accept=decisions.iter().filter(|(_,_,decision)|
         *decision==RebaseDecision::AcceptNotion)
         .map(|(r,p,_)|(r.clone(),p.clone())).collect::<BTreeSet<_>>();
-    let backup=if accept.is_empty(){None}else{
-        Some(preserve_before_accept(core,&root,source,old_digest,new_digest,
-            &path,expected_local_hash)?)
-    };
     if !accept.is_empty() {
         let before=revised.overrides.len();
         revised.overrides.retain(|cell|
@@ -136,6 +132,12 @@ pub fn apply_rebase_decisions_approved(
     if json.len()>MAX_FILE {
         return Err("rebased edits exceed size limit".into());
     }
+    // Only after every validation succeeded create a separate full backup.
+    // Backup failure aborts before the one authoritative overlay CAS.
+    let backup=if accept.is_empty(){None}else{
+        Some(preserve_before_accept(core,&root,source,old_digest,new_digest,
+            &path,expected_local_hash)?)
+    };
     let saved=gate::write(core,&path,&json,Some(expected_local_hash),
         Source::Me,Some("Akula Bases approved source rebase"))
         .map_err(|_|"File Gate rejected rebase CAS; inspect before retry")?;

@@ -624,3 +624,67 @@ fn c5b4_keep_local_denies_metadata_only_changes_without_visible_value_diff() {
         &preview.expected_local_hash,&[(row,prop)],true).is_err());
     assert_eq!(fs::read(f.edited_path()).unwrap(),before);
 }
+
+#[test]
+fn c5b4_accept_notion_preserves_exact_old_override_archive_and_exposes_new_source() {
+    let f=Fixture::new();
+    let row=f.row(A);let prop=f.prop(DS1,"score");
+    apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::Set {row_id:row.clone(),property_id:prop.clone(),
+            value:LocalValue::Number(700.0)}],true).unwrap();
+    let old_overlay=fs::read(f.edited_path()).unwrap();
+    let old_source=fs::read(f.vault.join(&f.bundle)).unwrap();
+    let next=published_new_source(&f,|src|{
+        src.objects.iter_mut().find(|o|o.kind=="page"&&o.id==A)
+            .unwrap().json["properties"]["Score"]["number"]=json!(91);
+    });
+    let report=preview_rebase(&f.vault,A,&f.digest,&next).unwrap();
+    let choices=vec![(row.clone(),prop.clone(),RebaseDecision::AcceptNotion)];
+    assert!(apply_rebase_decisions_approved(&f.core,&f.vault,A,&f.digest,
+        &next,&report.expected_local_hash,&choices,false).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),old_overlay);
+    let receipt=apply_rebase_decisions_approved(&f.core,&f.vault,A,&f.digest,
+        &next,&report.expected_local_hash,&choices,true).unwrap();
+    assert_eq!(receipt.accepted_notion_values,1);
+    assert_eq!(receipt.approved_local_wins,0);
+    assert_eq!(receipt.overrides_preserved,0);
+    let archive=receipt.pre_rebase_archive.expect("Accept Notion needs backup");
+    assert!(archive.starts_with("Notion-import/"));
+    assert_eq!(fs::read(f.vault.join(&archive)).unwrap(),old_overlay);
+    assert_eq!(fs::read(f.vault.join(&f.bundle)).unwrap(),old_source);
+    let current=open(&f.vault,A,&next).unwrap().unwrap();
+    assert!(current.state.local_value(&row,&prop).is_none());
+    let base=f.model().bases.iter().find(|b|b.notion_id==DS1).unwrap().akula_id.clone();
+    let effective=read_effective_base(&f.vault,A,&next,&base).unwrap();
+    let cell=effective.rows.iter().find(|r|r.akula_id==row).unwrap()
+        .cells.iter().find(|c|c.property_id==prop).unwrap();
+    assert_eq!(cell.value,EffectiveValue::Source(json!({"id":"score",
+        "type":"number","number":91})));
+}
+#[test]
+fn c5b4_accept_notion_rejects_old_hash_and_duplicate_choices_before_any_backup() {
+    let f=Fixture::new();
+    let row=f.row(A);let prop=f.prop(DS1,"score");
+    let first=apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::Set {row_id:row.clone(),property_id:prop.clone(),
+            value:LocalValue::Number(700.0)}],true).unwrap();
+    let next=published_new_source(&f,|src|{
+        src.objects.iter_mut().find(|o|o.kind=="page"&&o.id==A)
+            .unwrap().json["properties"]["Score"]["number"]=json!(91);
+    });
+    let report=preview_rebase(&f.vault,A,&f.digest,&next).unwrap();
+    let choose=(row.clone(),prop.clone(),RebaseDecision::AcceptNotion);
+    let before=fs::read(f.edited_path()).unwrap();
+    assert!(apply_rebase_decisions_approved(&f.core,&f.vault,A,&f.digest,&next,
+        &report.expected_local_hash,&[choose.clone(),choose.clone()],true).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),before);
+    let later=apply_approved(&f.core,&f.vault,A,&f.digest,
+        Some(&first.disk_hash),&[Change::Set{
+            row_id:row,property_id:prop,value:LocalValue::Number(701.0),
+        }],true).unwrap();
+    assert_ne!(later.disk_hash,report.expected_local_hash);
+    let changed=fs::read(f.edited_path()).unwrap();
+    assert!(apply_rebase_decisions_approved(&f.core,&f.vault,A,&f.digest,&next,
+        &report.expected_local_hash,&[choose],true).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),changed);
+}
