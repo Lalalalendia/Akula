@@ -127,6 +127,11 @@ fn exact_canonical_v3_plan_and_owner_signature_are_inertly_correlated() {
     assert_eq!(scope.plan_digest, claim.plan_digest);
     assert_eq!(scope.node_sha256, NODE_SHA);
     assert_eq!(scope.bootstrap_helper_sha256, HELPER_SHA);
+    let parsed: DryRunPlan = serde_json::from_slice(&raw).unwrap();
+    assert_eq!(
+        parsed.bootstrap_helper_install_path.as_deref(),
+        Some(crate::server_bootstrap_lab::ROOT_HELPER_EXECUTABLE_PATH)
+    );
     assert_eq!(scope.approval_nonce, [0x88; 16]);
 }
 
@@ -159,7 +164,7 @@ fn changed_or_duplicate_json_is_not_an_install_plan() {
 #[test]
 fn rehashed_downgrade_changed_action_or_helper_still_refuses() {
     let (raw, claim, signature, pins) = fixture();
-    for variant in 0..3 {
+    for variant in 0..5 {
         let mut plan: DryRunPlan = serde_json::from_slice(&raw).unwrap();
         match variant {
             0 => plan.schema_version = 2,
@@ -169,6 +174,8 @@ fn rehashed_downgrade_changed_action_or_helper_still_refuses() {
             2 => {
                 plan.bootstrap_helper_sha256 = Some([0x99; 32]);
             }
+            3 => plan.bootstrap_helper_install_path = Some("/tmp/attacker-helper".into()),
+            4 => plan.bootstrap_helper_install_path = None,
             _ => unreachable!(),
         }
         plan.plan_blake3 = plan.computed_digest();

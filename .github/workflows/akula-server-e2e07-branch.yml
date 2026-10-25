@@ -32,6 +32,11 @@ jobs:
           set -euo pipefail
           cargo test --manifest-path modules/bootstrap-b0/Cargo.toml --lib \
             node_plan_v2_tests -- --nocapture
+          # B0 v3 now binds the exact future root-helper installation path
+          # and explicit privileged action into the owner-review digest.
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab --lib \
+            server_root_v3_guard::tests -- --nocapture
       - name: Verify B1a package, B0 review and portable owner wire
         shell: bash
         run: |

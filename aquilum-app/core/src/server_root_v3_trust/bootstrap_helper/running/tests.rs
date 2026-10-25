@@ -29,6 +29,14 @@ fn fixture() -> (TempDir, File, File, BootstrapHelperHold) {
 }
 
 #[test]
+fn root_process_path_matches_canonical_b0_v3_install_review() {
+    assert_eq!(
+        crate::server_bootstrap_lab::ROOT_HELPER_EXECUTABLE_PATH,
+        "/usr/libexec/akula/akula-root-b1d0-helper"
+    );
+}
+
+#[test]
 fn running_process_inode_must_be_the_same_root_owned_signed_executable() {
     let (temp, fixed, running, hold) = fixture();
     if rustix::process::geteuid().as_raw() != 0 {

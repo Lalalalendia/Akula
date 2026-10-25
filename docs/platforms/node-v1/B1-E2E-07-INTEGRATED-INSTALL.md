@@ -839,3 +839,34 @@ inode, wrong permission/digest/size/links and symlink path; production
 path also requires the trusted fixed /proc/self/exe and cannot accept
 an injected test FD. This is a **process provenance gate**, not
 a root-helper release, deployment, B1d0 activation or production acceptance.
+
+
+### 25 October 2026 — B0 v3 owner approval explicitly binds root-helper install destination
+
+The installed-executable provenance gate previously hard-coded
+\`/usr/libexec/akula/akula-root-b1d0-helper\`, but the reviewed B0 v3
+plan did **not** contain that path. That was a real authorization gap:
+a user could sign the plan without seeing the separately required
+root-owned helper binary destination.
+
+The opt-in, unreleased B0 v3 contract now carries the exact fixed
+\`bootstrap_helper_install_path\`, requires
+\`InstallRootOwnedBootstrapHelperAtFixedPath\` as a separate
+privileged proposed action and includes BOTH in the existing
+domain-separated canonical BLAKE3 owner-review digest. A wrong
+path, traversal variant, omitted path, missing action or replay
+of a former B0 v3 plan with the old digest fails closed, even
+if the attacker recomputes an internally consistent digest.
+The Linux B0v3 verifier checks the same fixed constant against
+the root process image implementation, not against a request-supplied
+path. B0 v1/v2 omit the new field and retain identical canonical
+hashes and action lists. Any previously signed **experimental**
+B0 v3 plan requires a fresh review and owner signature; there is
+no silent migration. The new field describes an intended privileged
+operation, **not** permission to execute it.
+
+The service installed binaries remain untouched and no helper
+installation is implemented. Exact OS-root test of staged and
+running helper, independently pinned publisher key, IPC authorization
+and user approval remain necessary before any root write. Production
+helper signer is not enrolled; no VPS was accessed.

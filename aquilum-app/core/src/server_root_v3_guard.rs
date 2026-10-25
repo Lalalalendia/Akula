@@ -4,7 +4,9 @@
 //! read SSH claims as authority, or advance the B1d0 witness. The independent
 //! pins below MUST eventually be loaded from verified, root-owned enrollment
 //! and an already B1a-verified Node release, never caller/SSH JSON.
-use crate::server_bootstrap_lab::{DryRunPlan, MachineArch, SupportedOs};
+use crate::server_bootstrap_lab::{
+    DryRunPlan, MachineArch, SupportedOs, ROOT_HELPER_EXECUTABLE_PATH,
+};
 use crate::server_owner_approval_wire::{OwnerApprovalWireV1, WireError};
 
 const MAX_CANONICAL_PLAN_BYTES: usize = 16 * 1024;
@@ -100,6 +102,10 @@ pub fn verify_root_b0_v3_scope(
         || pins.ssh_host_sha256 == [0; 32]
         || pins.bootstrap_helper_sha256 == [0; 32]
         || plan.bootstrap_helper_sha256 != Some(pins.bootstrap_helper_sha256)
+        // The reviewed fixed UID0 destination must also agree with the
+        // actual root process image pin, not an SSH-supplied install path.
+        || plan.bootstrap_helper_install_path.as_deref()
+            != Some(ROOT_HELPER_EXECUTABLE_PATH)
         || pins.node_sha256 == [0; 32]
         || pins.node_size == 0
         || plan.package.package_sha256 != pins.node_sha256

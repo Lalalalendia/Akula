@@ -14,6 +14,11 @@ use uuid::Uuid;
 const MIN_RAM_MIB: u64 = 512;
 const MIN_FREE_DISK_MIB: u64 = 1024;
 
+/// Fixed root-owned helper path shown to the user in B0 v3 and independently
+/// enforced on Linux. This is a PLAN DISCLOSURE, not install permission.
+pub const ROOT_HELPER_EXECUTABLE_PATH: &str =
+    "/usr/libexec/akula/akula-root-b1d0-helper";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum B0Error {
     InvalidTarget,
@@ -147,6 +152,7 @@ pub enum ProposedChange {
     // B1-E2E-07 V2: explicitly disclose actual service privileges and endpoint.
     RequireIndependentlyPinnedRootBootstrap,
     VerifySignedBootstrapHelperBeforeRootExecution,
+    InstallRootOwnedBootstrapHelperAtFixedPath,
     VerifySeparateOwnerSignatureAndDurableCas,
     CommitSignedNodeIntoRootOwnedOpt,
     EnrollPersistentNodeAndReceiptIdentities,
@@ -180,10 +186,11 @@ const NODE_V2_ACTIONS: [ProposedChange; 12] = [
 ];
 // B0 v3 adds the exact separately signed bootstrap-helper digest to the
 // reviewed owner scope. The v1/v2 JSON and hash domains stay byte compatible.
-const NODE_V3_ACTIONS: [ProposedChange; 13] = [
+const NODE_V3_ACTIONS: [ProposedChange; 14] = [
     ProposedChange::VerifySignedPinnedPackage,
     ProposedChange::RequireIndependentlyPinnedRootBootstrap,
     ProposedChange::VerifySignedBootstrapHelperBeforeRootExecution,
+    ProposedChange::InstallRootOwnedBootstrapHelperAtFixedPath,
     ProposedChange::VerifySeparateOwnerSignatureAndDurableCas,
     ProposedChange::CommitSignedNodeIntoRootOwnedOpt,
     ProposedChange::CreateDedicatedServiceAccount,
@@ -207,6 +214,10 @@ pub struct DryRunPlan {
     /// from the Node daemon. V1/V2 MUST leave this absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bootstrap_helper_sha256: Option<[u8; 32]>,
+    /// The EXACT future UID0 0500 helper install destination. V1/V2 omit.
+    /// V3 has no variable root path and no root execution permission.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_helper_install_path: Option<String>,
     pub inspected_host: ReadOnlyHostFacts,
     pub proposed_changes: Vec<ProposedChange>,
     /// Hash of this exact typed plan; NOT a signature and NOT permission to execute.
@@ -223,6 +234,8 @@ impl DryRunPlan {
             package: &'a PackagePin,
             #[serde(skip_serializing_if = "Option::is_none")]
             bootstrap_helper_sha256: Option<[u8; 32]>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            bootstrap_helper_install_path: Option<&'a str>,
             inspected_host: &'a ReadOnlyHostFacts,
             proposed_changes: &'a [ProposedChange],
         }
@@ -232,6 +245,7 @@ impl DryRunPlan {
             target: &self.target,
             package: &self.package,
             bootstrap_helper_sha256: self.bootstrap_helper_sha256,
+            bootstrap_helper_install_path: self.bootstrap_helper_install_path.as_deref(),
             inspected_host: &self.inspected_host,
             proposed_changes: &self.proposed_changes,
         }).expect("typed canonical preview must serialize")
@@ -251,10 +265,14 @@ impl DryRunPlan {
     pub fn verify_unchanged(&self) -> bool {
         let fixed = match self.schema_version {
             1 => self.proposed_changes == FIXED_ACTIONS
-                && self.bootstrap_helper_sha256.is_none(),
+                && self.bootstrap_helper_sha256.is_none()
+                && self.bootstrap_helper_install_path.is_none(),
             2 => self.proposed_changes == NODE_V2_ACTIONS
-                && self.bootstrap_helper_sha256.is_none(),
+                && self.bootstrap_helper_sha256.is_none()
+                && self.bootstrap_helper_install_path.is_none(),
             3 => self.proposed_changes == NODE_V3_ACTIONS
+                && self.bootstrap_helper_install_path.as_deref()
+                    == Some(ROOT_HELPER_EXECUTABLE_PATH)
                 && self.bootstrap_helper_sha256.is_some_and(|helper| {
                     helper != [0; 32] && helper != self.package.package_sha256
                 }),
@@ -331,6 +349,7 @@ fn preview_with_scope<T: PreviewTransport>(
         target: input.target.clone(),
         package: input.package.clone(),
         bootstrap_helper_sha256: None,
+        bootstrap_helper_install_path: None,
         inspected_host: facts,
         proposed_changes: if node_v2 {
             NODE_V2_ACTIONS.to_vec()
@@ -387,6 +406,7 @@ pub fn preview_node_v3<T: PreviewTransport>(
     let mut plan = preview_with_scope(input, transport, cancelled, true)?;
     plan.schema_version = 3;
     plan.bootstrap_helper_sha256 = Some(helper_package_sha256);
+    plan.bootstrap_helper_install_path = Some(ROOT_HELPER_EXECUTABLE_PATH.to_owned());
     plan.proposed_changes = NODE_V3_ACTIONS.to_vec();
     plan.plan_blake3 = plan.computed_digest();
     Ok(plan)
@@ -520,7 +540,19 @@ mod node_plan_v2_tests {
         }, || false).unwrap();
         assert!(v2.verify_unchanged() && v3.verify_unchanged());
         assert_eq!(v2.bootstrap_helper_sha256, None);
+        assert_eq!(v2.bootstrap_helper_install_path, None);
         assert_eq!(v3.bootstrap_helper_sha256, Some([0x55; 32]));
+        assert_eq!(
+            v3.bootstrap_helper_install_path.as_deref(),
+            Some(ROOT_HELPER_EXECUTABLE_PATH)
+        );
+        assert!(v3.proposed_changes.contains(
+            &ProposedChange::InstallRootOwnedBootstrapHelperAtFixedPath
+        ));
+        // Old v1/v2 serialized plans and hash domains are untouched; only
+        // the opt-in unreleased v3 gains this approval-bound fixed path.
+        assert!(!serde_json::to_string(&v2).unwrap().contains("bootstrap_helper_install_path"));
+        assert!(serde_json::to_string(&v3).unwrap().contains(ROOT_HELPER_EXECUTABLE_PATH));
         assert_ne!(v2.plan_blake3, v3.plan_blake3);
         assert!(v3.proposed_changes.contains(
             &ProposedChange::VerifySignedBootstrapHelperBeforeRootExecution
@@ -529,6 +561,27 @@ mod node_plan_v2_tests {
         omitted.bootstrap_helper_sha256 = None;
         omitted.plan_blake3 = omitted.computed_digest();
         assert!(!omitted.verify_unchanged());
+        let mut missing_path = v3.clone();
+        missing_path.bootstrap_helper_install_path = None;
+        missing_path.plan_blake3 = missing_path.computed_digest();
+        assert!(!missing_path.verify_unchanged());
+        let mut missing_action = v3.clone();
+        missing_action.proposed_changes.remove(3);
+        missing_action.plan_blake3 = missing_action.computed_digest();
+        assert!(!missing_action.verify_unchanged());
+        for path in ["/tmp/helper", "/usr/libexec/akula/../akula-root-b1d0-helper",
+                     "/usr/libexec/akula/akula-root-b1d0-helper/", "/usr/libexec/akula/other"] {
+            let mut altered = v3.clone();
+            altered.bootstrap_helper_install_path = Some(path.to_owned());
+            altered.plan_blake3 = altered.computed_digest();
+            assert!(!altered.verify_unchanged(), "changed root destination {path}");
+        }
+        // A canonical but old laboratory v3 plan without the newly required
+        // destination must never be granted root install authority.
+        let mut legacy_v3 = serde_json::to_value(&v3).unwrap();
+        legacy_v3.as_object_mut().unwrap().remove("bootstrap_helper_install_path");
+        let legacy: DryRunPlan = serde_json::from_value(legacy_v3).unwrap();
+        assert!(!legacy.verify_unchanged());
         let mut downgrade = v3.clone();
         downgrade.schema_version = 2;
         downgrade.plan_blake3 = downgrade.computed_digest();

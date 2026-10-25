@@ -118,6 +118,13 @@ pub(super) fn verify_installed_self_image(
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(RunningImageError::NotRoot);
     }
+    // The read-only B0 v3 reviewed destination and this fixed root-opener
+    // must remain exactly the same, including every directory component.
+    if crate::server_bootstrap_lab::ROOT_HELPER_EXECUTABLE_PATH
+        != "/usr/libexec/akula/akula-root-b1d0-helper"
+    {
+        return Err(RunningImageError::UntrustedImage);
+    }
     let mut dir = File::from(
         open(
             Path::new("/"),
