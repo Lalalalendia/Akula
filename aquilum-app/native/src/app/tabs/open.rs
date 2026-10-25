@@ -1,4 +1,5 @@
 mod readonly;
+mod docx;
 
 use std::path::{Path, PathBuf};
 
@@ -131,12 +132,7 @@ impl App {
             return;
         }
         if crate::docx::is_docx_path(&path) {
-            self.leave_note();
-            self.drop_note_page(root);
-            self.show_docx_readonly(root, &path);
-            self.tree.set_active(root, Some(path));
-            self.show_page(root, 0);
-            return;
+            return self.show_docx_tab(root, path);
         }
         if is_structured_file(&path) {
             self.leave_note();
@@ -332,11 +328,6 @@ impl App {
         // Validate the image before changing tabs or navigation: no paths
         // outside this vault, symlinks, oversized or corrupt sources.
         if image && self.tree.root().and_then(|vault| super::super::media::local_image_preview(vault, &path)).is_none() {
-            return false;
-        }
-        if crate::docx::is_docx_path(&path)
-            && self.tree.root().and_then(|vault| crate::docx::admit(vault, &path).ok()).is_none()
-        {
             return false;
         }
         if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {
