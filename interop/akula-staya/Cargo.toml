@@ -22,6 +22,9 @@ node-live-read-lab = ["node-replica-transport-lab", "aquilum-core/device-roster-
 node-v1-e2e-tests = ["node-v1-runtime", "aquilum-core/node-v1-transport-tests"]
 # Current protected Node witness and SQLite replay fence, not a public listener.
 node-v1-runtime = ["node-live-read-lab", "aquilum-core/node-v1", "dep:tokio", "dep:ring", "dep:serde", "dep:serde_json", "dep:rustix"]
+# Non-shipping bridge: reuse independently pinned Akula Node V1 transport
+# policy and the exact audited WOW W3/W4 mailbox. Not installed or exposed.
+node-wow-mailbox-lab = ["node-v1-e2e-tests", "dep:akula-wire-lab", "dep:ed25519-dalek"]
 
 # Non-shipping one-shot Akula consent to Staya local test-operator handoff.
 sender-arm-lab = []
@@ -39,6 +42,9 @@ path = "src/bin/akula_node_v1_service.rs"
 required-features = ["node-v1-runtime"]
 
 [dependencies]
+# Exact green WOW baseline; avoid git HEAD, transitive updates or duplicates.
+akula-wire-lab = { git = "https://github.com/calex794/wow", rev = "f7cf1357988f9ae11de140d166168a0681f7f8d7", optional = true }
+ed25519-dalek = { version = "2.2", optional = true }
 aquilum-core = { path = "../../aquilum-app/core", features = ["p2p-inbox-lab"] }
 staya-transfer = { git = "https://github.com/Lalalalendia/staya-transfer", rev = "ccfe82dc6125e2810e95043a6a4ac55954b710e0", default-features = false }
 blake3 = "=1.8.5"
