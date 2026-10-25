@@ -234,9 +234,9 @@ impl Fixture {
             custodian: CUSTODIAN,
             custodian_epoch: 1,
             custodian_public: self.custodian.verifying_key().to_bytes(),
-            sender: [7;16],
+            sender: [7; 16],
             sender_epoch: 1,
-            sender_public: SigningKey::from_bytes(&[7;32]).verifying_key().to_bytes(),
+            sender_public: SigningKey::from_bytes(&[7; 32]).verifying_key().to_bytes(),
             recipient: RECIPIENT,
             recipient_epoch: 1,
             recipient_public: self.recipient.verifying_key().to_bytes(),
@@ -380,7 +380,6 @@ fn missing_world_readable_or_wrong_signing_key_fails_closed() {
     ));
 }
 
-
 #[test]
 fn independently_pinned_operator_signature_rejects_untrusted_mail_roles() {
     let fixture = Fixture::new();
@@ -391,14 +390,22 @@ fn independently_pinned_operator_signature_rejects_untrusted_mail_roles() {
     // The same valid-looking policy signed by an unrelated key cannot
     // become an active WOW trust registry.
     let attacker = SigningKey::from_bytes(&[99; 32]);
-    fs::write(&file, sign_mail_policy_for_lab(&attacker, fixture.signed_claims())).unwrap();
+    fs::write(
+        &file,
+        sign_mail_policy_for_lab(&attacker, fixture.signed_claims()),
+    )
+    .unwrap();
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
     fs::write(&file, &baseline).unwrap();
 
     // Binding mail to a different Akula Node endpoint is a hard refusal.
     let mut wrong_endpoint = fixture.signed_claims();
     wrong_endpoint.node_endpoint = [88; 32];
-    fs::write(&file, sign_mail_policy_for_lab(&fixture.owner, wrong_endpoint)).unwrap();
+    fs::write(
+        &file,
+        sign_mail_policy_for_lab(&fixture.owner, wrong_endpoint),
+    )
+    .unwrap();
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
     fs::write(&file, &baseline).unwrap();
 
@@ -406,7 +413,11 @@ fn independently_pinned_operator_signature_rejects_untrusted_mail_roles() {
     // silently upgrade the schema/role, even when signed.
     let mut unknown_right = fixture.signed_claims();
     unknown_right.permissions |= 0b1000_0000;
-    fs::write(&file, sign_mail_policy_for_lab(&fixture.owner, unknown_right)).unwrap();
+    fs::write(
+        &file,
+        sign_mail_policy_for_lab(&fixture.owner, unknown_right),
+    )
+    .unwrap();
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
     fs::write(&file, &baseline).unwrap();
 
@@ -469,7 +480,6 @@ fn unsafe_mail_role_policy_file_never_bootstraps_keys_or_mailbox() {
     assert!(fixture.role().is_ok());
 }
 
-
 #[test]
 fn signed_mail_scope_must_match_durable_sqlite_grants_exactly() {
     let fixture = Fixture::new();
@@ -477,46 +487,56 @@ fn signed_mail_scope_must_match_durable_sqlite_grants_exactly() {
     assert!(fixture.role().is_ok());
 
     let connection = Connection::open(&db_path).unwrap();
-    connection.execute(
-        "UPDATE custodian_mailbox_policy SET max_offers=3 WHERE mailbox=?1",
-        [MAILBOX.as_slice()],
-    ).unwrap();
+    connection
+        .execute(
+            "UPDATE custodian_mailbox_policy SET max_offers=3 WHERE mailbox=?1",
+            [MAILBOX.as_slice()],
+        )
+        .unwrap();
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
-    connection.execute(
-        "UPDATE custodian_mailbox_policy SET max_offers=2 WHERE mailbox=?1",
-        [MAILBOX.as_slice()],
-    ).unwrap();
+    connection
+        .execute(
+            "UPDATE custodian_mailbox_policy SET max_offers=2 WHERE mailbox=?1",
+            [MAILBOX.as_slice()],
+        )
+        .unwrap();
 
     let mut accepted = fixture.role().unwrap();
-    connection.execute(
-        "UPDATE custodian_mailbox_policy SET max_bytes=2048 WHERE mailbox=?1",
-        [MAILBOX.as_slice()],
-    ).unwrap();
+    connection
+        .execute(
+            "UPDATE custodian_mailbox_policy SET max_bytes=2048 WHERE mailbox=?1",
+            [MAILBOX.as_slice()],
+        )
+        .unwrap();
     let listener = bind_test_loopback().unwrap();
     assert!(matches!(
         accepted.serve_one(&fixture.node, &listener, 3),
         Err(MailRoleHold::MailPolicy),
     ));
 
-    connection.execute(
-        "UPDATE custodian_mailbox_policy SET max_bytes=1024 WHERE mailbox=?1",
-        [MAILBOX.as_slice()],
-    ).unwrap();
+    connection
+        .execute(
+            "UPDATE custodian_mailbox_policy SET max_bytes=1024 WHERE mailbox=?1",
+            [MAILBOX.as_slice()],
+        )
+        .unwrap();
     assert!(fixture.role().is_ok());
 
     // A second locally provisioned mailbox cannot borrow this one-mailbox
     // signed operator policy, even if the issuer key is otherwise valid.
-    connection.execute(
-        "INSERT INTO custodian_mailbox_policy
+    connection
+        .execute(
+            "INSERT INTO custodian_mailbox_policy
          (mailbox,issuer,issuer_epoch,custodian,scope,recipient,max_bytes,max_offers)
          VALUES(?1,?2,1,?3,?4,?5,1024,2)",
-        rusqlite::params![
-            [77u8;16].as_slice(),
-            OWNER.as_slice(),
-            CUSTODIAN.as_slice(),
-            SCOPE.as_slice(),
-            RECIPIENT.as_slice()
-        ],
-    ).unwrap();
+            rusqlite::params![
+                [77u8; 16].as_slice(),
+                OWNER.as_slice(),
+                CUSTODIAN.as_slice(),
+                SCOPE.as_slice(),
+                RECIPIENT.as_slice()
+            ],
+        )
+        .unwrap();
     assert!(matches!(fixture.role(), Err(MailRoleHold::MailPolicy)));
 }
