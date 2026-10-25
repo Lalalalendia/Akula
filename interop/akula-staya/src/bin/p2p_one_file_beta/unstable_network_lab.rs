@@ -4,7 +4,7 @@
 //! short final window is discarded before the next connection. No W4 signed ACK.
 use super::*;
 use super::resume_checkpoint_lab::{Checkpoint, Identity};
-use std::{fs::{self, File, OpenOptions},io::{Read, Write},net::{IpAddr,Ipv4Addr}};
+use std::{fs::{self, OpenOptions},io::Write,net::{IpAddr,Ipv4Addr}};
 
 const BLOCK: usize = 64 * 1024;
 const TOTAL: usize = 5 * 1024 * 1024;
@@ -101,11 +101,25 @@ async fn unstable_five_mib_multiple_drops_throttling_and_route_profile_switch() 
             let response = ack.read_to_end(64).await.unwrap();
             assert_eq!(response, if attempt == 4 { COMPLETE } else { VERIFY });
             offset += windows[attempt] * BLOCK;
-            // Stream ACK is not connection ACK; wait for peer to consume it.
+            // A completed send stream alone does not mean the receiver has
+            // consumed the last bytes. Under real netem packet loss, closing
+            // after a fixed 150ms destroyed ACK_READ before delivery.
+            // Require a complete, bounded application-level receipt chain
+            // before this *intentional* connection replacement.
             let mut consumed = connection.open_uni().await.unwrap();
             consumed.write_all(b"ACK_READ").await.unwrap();
             consumed.finish().unwrap();
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            let mut observed = tokio::time::timeout(
+                Duration::from_secs(20), connection.accept_uni()
+            ).await.expect("receiver receipt timed out").unwrap();
+            assert_eq!(
+                observed.read_to_end(64).await.unwrap(),
+                b"ACK_READ_RECEIVED",
+            );
+            let mut release = connection.open_uni().await.unwrap();
+            release.write_all(b"RELEASE_ROUTE").await.unwrap();
+            release.finish().unwrap();
+            tokio::time::sleep(Duration::from_millis(800)).await;
             connection.close(0u8.into(), b"stress lab reconnect");
         }
         assert_eq!(offset, TOTAL);
@@ -170,8 +184,20 @@ async fn unstable_five_mib_multiple_drops_throttling_and_route_profile_switch() 
         ack.write_all(if attempt == windows.len()-1 { COMPLETE } else { VERIFY })
             .await.unwrap();
         ack.finish().unwrap();
-        let mut consumed = connection.accept_uni().await.unwrap();
+        let mut consumed = tokio::time::timeout(
+            Duration::from_secs(20), connection.accept_uni()
+        ).await.expect("sender receipt timed out").unwrap();
         assert_eq!(consumed.read_to_end(64).await.unwrap(), b"ACK_READ");
+        let mut observed = connection.open_uni().await.unwrap();
+        observed.write_all(b"ACK_READ_RECEIVED").await.unwrap();
+        observed.finish().unwrap();
+        let mut release = tokio::time::timeout(
+            Duration::from_secs(20), connection.accept_uni()
+        ).await.expect("route release timed out").unwrap();
+        assert_eq!(release.read_to_end(64).await.unwrap(), b"RELEASE_ROUTE");
+        // QUIC stream bytes are complete; the peer may now deliberately
+        // replace this route without making any false file-delivery claim.
+        tokio::time::sleep(Duration::from_millis(800)).await;
         connection.close(1u8.into(), b"test route changed");
     }
     receiver.close().await;
