@@ -213,7 +213,7 @@ test('B1b1 signed ledger and approval tests are covered on shared Cargo/Core cha
     assert.ok(gate.includes('--test '+suite),suite+' retained in mandatory contract');
 });
 
-test('File Gate timing-only workflow runs on own sources, not every Core manifest change',()=>{
+test('File Gate timing-only workflow is manual or self-triggered, never source fan-out',()=>{
   const {parse,matches}=require('./ci-file-ratchet.cjs');
   const w=fs.readFileSync(path.join(__dirname,
     '../workflows/filegate-history-stage-profile.yml'),'utf8');
@@ -223,10 +223,11 @@ test('File Gate timing-only workflow runs on own sources, not every Core manifes
     'aquilum-app/core/src/files/document.rs',
     'aquilum-app/core/src/files/gate/write.rs',
     'aquilum-app/core/src/history/service.rs',
-    'aquilum-app/core/src/history/store.rs',
-    '.github/workflows/filegate-history-stage-profile.yml'
-  ]) assert.equal(matches(policy,file),true,file);
-  assert.match(w,/workflow_dispatch:/,'manual profiling stays available');
+    'aquilum-app/core/src/history/store.rs'
+  ]) assert.equal(matches(policy,file),false,'optional stage profiler must not run on '+file);
+  assert.equal(matches(policy,'.github/workflows/filegate-history-stage-profile.yml'),true,
+    'profiler workflow edits still exercise the profiler');
+  assert.match(w,/^  workflow_dispatch:/m,'manual profiling stays available');
   assert.match(w,/Six fresh Core processes per note size/);
 });
 
