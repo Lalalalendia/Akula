@@ -43,7 +43,7 @@ required-features = ["node-v1-runtime"]
 
 [dependencies]
 # Exact green WOW baseline; avoid git HEAD, transitive updates or duplicates.
-akula-wire-lab = { git = "https://github.com/calex794/wow", rev = "f7cf1357988f9ae11de140d166168a0681f7f8d7", optional = true }
+akula-wire-lab = { git = "https://github.com/calex794/wow", rev = "29bd044cf11c60687716560c15abef69f5581ebc", optional = true }
 ed25519-dalek = { version = "2.2", optional = true }
 aquilum-core = { path = "../../aquilum-app/core", features = ["p2p-inbox-lab"] }
 staya-transfer = { git = "https://github.com/Lalalalendia/staya-transfer", rev = "ccfe82dc6125e2810e95043a6a4ac55954b710e0", default-features = false }
