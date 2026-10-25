@@ -468,3 +468,7 @@ mod tests {
         assert!(!tmp.path().join("Notion-import").exists());
     }
 }
+
+#[cfg(test)]
+#[path = "notion_bases/e2e_tests.rs"]
+mod e2e_tests;
