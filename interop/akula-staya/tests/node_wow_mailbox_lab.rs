@@ -684,7 +684,6 @@ fn revoked_sqlite_mail_role_fences_live_node_even_with_valid_owner_files() {
     );
 }
 
-
 /// This OS test is explicitly opt-in because it stages root-owned,
 /// PUBLIC signed policy files under a disposable CI runner's /etc tree.
 /// It refuses any pre-existing Akula Node installation, never installs a
@@ -695,7 +694,11 @@ fn root_owned_mail_policy_is_read_only_and_current() {
         return;
     }
     use std::os::unix::fs::MetadataExt;
-    assert_ne!(rustix::process::geteuid().as_raw(), 0, "nonroot service required");
+    assert_ne!(
+        rustix::process::geteuid().as_raw(),
+        0,
+        "nonroot service required"
+    );
     const PARENT: &str = "/etc/akula-node";
     const ROOT: &str = "/etc/akula-node/wow-mail";
     const POLICY: &str = "/etc/akula-node/wow-mail/owner-mail-policy.bin";
@@ -706,7 +709,10 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     );
     fn sudo(args: &[&str]) {
         let result = Command::new("sudo").arg("-n").args(args).status().unwrap();
-        assert!(result.success(), "CI root-owned fixture provisioning failed");
+        assert!(
+            result.success(),
+            "CI root-owned fixture provisioning failed"
+        );
     }
     struct Cleanup;
     impl Drop for Cleanup {
@@ -722,7 +728,9 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     }
     let fixture = Fixture::new();
     let group = rustix::process::getegid().as_raw().to_string();
-    sudo(&["install", "-d", "-o", "root", "-g", "root", "-m", "0755", PARENT]);
+    sudo(&[
+        "install", "-d", "-o", "root", "-g", "root", "-m", "0755", PARENT,
+    ]);
     let _cleanup = Cleanup;
     sudo(&[
         "install", "-d", "-o", "root", "-g", &group, "-m", "0750", ROOT,
@@ -730,38 +738,60 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     let signed_source = fixture.mail_policy_file();
     let floor_source = fixture.floor_file();
     sudo(&[
-        "install", "-o", "root", "-g", &group, "-m", "0640",
-        signed_source.to_str().unwrap(), POLICY,
+        "install",
+        "-o",
+        "root",
+        "-g",
+        &group,
+        "-m",
+        "0640",
+        signed_source.to_str().unwrap(),
+        POLICY,
     ]);
     sudo(&[
-        "install", "-o", "root", "-g", &group, "-m", "0640",
-        floor_source.to_str().unwrap(), FLOOR,
+        "install",
+        "-o",
+        "root",
+        "-g",
+        &group,
+        "-m",
+        "0640",
+        floor_source.to_str().unwrap(),
+        FLOOR,
     ]);
     let meta = fs::metadata(POLICY).unwrap();
     assert_eq!(meta.uid(), 0);
     assert_eq!(meta.gid(), rustix::process::getegid().as_raw());
     assert_eq!(meta.permissions().mode() & 0o7777, 0o640);
-    assert!(fs::read(POLICY).is_ok(), "service must read the signed public manifest");
+    assert!(
+        fs::read(POLICY).is_ok(),
+        "service must read the signed public manifest"
+    );
     assert!(fs::write(POLICY, b"unprivileged replacement attempt").is_err());
     assert!(fs::remove_file(POLICY).is_err());
 
-    let open = || NodeWowMailboxLab::open_existing_root_provisioned(
-        &fixture.node,
-        &fixture.mail_state,
-        NODE_ENDPOINT,
-        fixture.custodian.clone(),
-        1,
-    );
+    let open = || {
+        NodeWowMailboxLab::open_existing_root_provisioned(
+            &fixture.node,
+            &fixture.mail_state,
+            NODE_ENDPOINT,
+            fixture.custodian.clone(),
+            1,
+        )
+    };
     let mut running = open().expect("root-owned policy and SQLite witness must match");
     let proof = fixture.list_proof();
-    let listed = exchange(&fixture.node, &mut running, move |sock| client_list(sock, &proof))
-        .unwrap();
+    let listed = exchange(&fixture.node, &mut running, move |sock| {
+        client_list(sock, &proof)
+    })
+    .unwrap();
     assert_eq!(listed.len(), 1);
     let info = listed[0];
     let proof = fixture.list_proof();
     let retrieved = exchange(&fixture.node, &mut running, move |sock| {
         client_fetch_listed(sock, &proof, info)
-    }).unwrap();
+    })
+    .unwrap();
     assert_eq!(retrieved, Some(fixture.packet.clone()));
 
     // Writable group path cannot authorize a mailbox, even if signature
