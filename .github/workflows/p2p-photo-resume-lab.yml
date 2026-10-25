@@ -8,6 +8,7 @@ on:
       - 'interop/akula-staya/src/bin/p2p_one_file_beta/resume_lab.rs'
       - 'interop/akula-staya/src/bin/p2p_one_file_beta/resume_checkpoint_lab.rs'
       - 'interop/akula-staya/src/bin/p2p_one_file_beta/unstable_network_lab.rs'
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta/resume_process_lab.rs'
       - 'interop/akula-staya/Cargo.toml'
       - '.github/workflows/p2p-photo-resume-lab.yml'
 
@@ -50,6 +51,10 @@ jobs:
         shell: bash
         run: |
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta unstable_network_lab -- --nocapture
+      - name: Force-kill the checkpoint process and cold-recover verified bytes
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta resume_process_lab::force_kill_after_checkpoint -- --nocapture
       - name: Verify ordinary one-file tests are still unchanged
         shell: bash
         run: |
