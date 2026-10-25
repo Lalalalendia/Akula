@@ -240,6 +240,8 @@ jobs:
             win7-lab-output/pe-audit/full-audit.md
             win7-lab-output/pe-audit/full-audit.json
             dist/Akula_*-setup.exe
+            dist/win7-installer-pe-audit/full-audit.json
+            dist/win7-installer-pe-audit/full-audit.md
             win7-full-results/shiva-audit/full-audit.md
             win7-full-results/shiva-audit/full-audit.json
           if-no-files-found: error
