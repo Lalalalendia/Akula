@@ -2,6 +2,7 @@
 use super::*;
 mod editor;
 mod schema;
+mod grid;
 
 pub(super) fn append(
     mut column: Flex, ctx: &Context,
@@ -63,37 +64,7 @@ pub(super) fn append(
                             bases.total_rows,bases.total_columns,bases.local_revision,bases.saved_source_views),
                         |t|t.text_primary,None,Leading::Times(1.3),
                     ));
-                    for (i,row) in bases.rows.iter().enumerate() {
-                        column=column.with_fixed(selectable(
-                            &format!("{}. {}",bases.row_start+i+1,row.label),
-                            |t|t.text_secondary,None,Leading::Times(1.3),
-                        ));
-                        for (col,cell) in bases.columns.iter().zip(&row.cells) {
-                            column=column.with_fixed(selectable(
-                                &format!("{}: {}",col.name,cell.text),
-                                |t|t.text_muted,None,Leading::Times(1.3),
-                            ));
-                            if cell.toggle_to.is_some() {
-                                column=column.with_fixed(action_button(
-                                    "Изменить флажок локально".into(),
-                                    Action::NotionBasesChange(cell.row_id.clone(),cell.property_id.clone(),false),bindings,
-                                ));
-                            }
-                            if cell.edit_text {
-                                column=column.with_fixed(action_button(
-                                    "Редактировать значение".into(),
-                                    Action::NotionBasesBeginEdit(cell.row_id.clone(),cell.property_id.clone()),
-                                    bindings,
-                                ));
-                            }
-                            if cell.revert {
-                                column=column.with_fixed(action_button(
-                                    "Вернуть исходное значение".into(),
-                                    Action::NotionBasesChange(cell.row_id.clone(),cell.property_id.clone(),true),bindings,
-                                ));
-                            }
-                        }
-                    }
+                    column=grid::append(column,bases,bindings);
                     if bases.row_start>0 {
                         column=column.with_fixed(action_button(
                             "← Предыдущие строки".into(),
