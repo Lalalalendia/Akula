@@ -154,6 +154,7 @@ fn catalog(workspace: &Path, source: &str) -> Result<Vec<BaseChoice>, ()> {
     let metadata = fs::symlink_metadata(&folder).map_err(|_| ())?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() { return Err(()); }
     let mut found = Vec::new();
+    let mut bundles = 0usize;
     for entry in fs::read_dir(&folder).map_err(|_| ())? {
         let entry = entry.map_err(|_| ())?;
         let filename = entry.file_name();
@@ -162,7 +163,8 @@ fn catalog(workspace: &Path, source: &str) -> Result<Vec<BaseChoice>, ()> {
             .and_then(|s|s.strip_suffix(".notion.json")) else { continue; };
         if digest.len()!=64 || !digest.bytes().all(|b|b.is_ascii_hexdigit()
             && !b.is_ascii_uppercase()) { return Err(()); }
-        if found.len()>=MAX_BUNDLES { return Err(()); }
+        if bundles>=MAX_BUNDLES { return Err(()); }
+        bundles+=1;
         if entry.file_type().map_err(|_| ())?.is_symlink() { return Err(()); }
         let model = bases_model::from_independent_bundle(&entry.path()).map_err(|_| ())?;
         if model.source_root != source || model.source_digest != digest || model.needs_review() {
