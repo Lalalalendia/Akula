@@ -1,12 +1,10 @@
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
 
-use super::bindings::same_setter;
 use super::{App, Effect, Outcome, Popup};
 use crate::ui::dialog::DialogAnswer;
-use crate::ui::menu::MenuChoice;
 use crate::ui::settings::Binding;
-use crate::ui::settings::controls::{Changed, DropdownButton, Picked};
+use crate::ui::settings::controls::Picked;
 use crate::ui::settings::schema::{Action, Value};
 use crate::ui::widgets::Pressed;
 
@@ -30,6 +28,10 @@ impl App {
             return self.keep(dialog, None, effect, root);
         }
 
+        // A provider modal owns input until it is explicitly closed.
+        if let Some(cloud) = dialog.cloud_popup.take() {
+            return self.on_cloud_action(root, id, action, dialog, cloud);
+        }
 
         if let Some(picked) = action.downcast_ref::<Picked>() {
             let Some(menu) = menu else {
@@ -52,55 +54,13 @@ impl App {
         }
 
         if let Some(menu) = menu {
-            if id == menu.button && matches!(action.downcast_ref::<Changed>(), Some(Changed::OpenColor(_))) {
-                root.remove_layer(menu.layer);
-                root.focus_on(Some(dialog.layer));
-                if let Some(&Binding::Color(setter)) = dialog.bindings.get(&menu.button) {
-                    let typed = dialog.bindings.values().find_map(|b| match b {
-                        Binding::Text { setter: s, value, .. } if same_setter(*s, setter) => Some(value.clone()),
-                        _ => None,
-                    });
-                    if let Some(hex) = typed {
-                        effect = self.apply(setter, Value::Text(hex));
-                    }
-                }
-                return self.keep(dialog, None, effect, root);
-            }
-            if id == menu.button && matches!(action.downcast_ref::<Changed>(), Some(Changed::OpenMenu(_))) {
-                root.remove_layer(menu.layer);
-                root.edit_widget(menu.button, |mut w| DropdownButton::set_open(&mut w.downcast(), false));
-                root.focus_on(Some(dialog.layer));
-                self.popup = Some(Popup::Settings { dialog, menu: None });
-                return Outcome::default();
-            }
-            if action.downcast_ref::<MenuChoice>().is_some() {
-                root.edit_widget(menu.button, |mut w| DropdownButton::set_open(&mut w.downcast(), false));
-            }
-            match action.downcast_ref::<MenuChoice>() {
-                Some(MenuChoice::Item(index)) => {
-                    root.remove_layer(menu.layer);
-                    if let Some(Binding::Dropdown { setter, options, selected }) = dialog.bindings.get_mut(&menu.button) {
-                        *selected = *index;
-                        let label = options.get(*index).cloned().unwrap_or_default();
-                        let setter = *setter;
-                        root.edit_widget(menu.button, |mut w| DropdownButton::set_label(&mut w.downcast(), &label));
-                        effect = self.apply(setter, Value::Index(*index));
-                    }
-                    root.focus_on(Some(dialog.layer));
-                    self.popup = Some(Popup::Settings { dialog, menu: None });
-                }
-                Some(MenuChoice::Dismissed) => {
-                    root.focus_on(Some(dialog.layer));
-                    self.popup = Some(Popup::Settings { dialog, menu: None });
-                }
-                None | Some(MenuChoice::Hover(_) | MenuChoice::Sub(_)) => self.popup = Some(Popup::Settings { dialog, menu: Some(menu) }),
-            }
-            return self.finish(root, effect);
+            return self.on_menu_action(root, id, action, dialog, menu);
         }
 
         let closing = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
             || (id == dialog.close && action.downcast_ref::<Pressed>().is_some());
         if closing {
+            self.yandex_probe.settings_closed();
             crate::ui::dialog::close(root, dialog.layer);
             return Outcome::default();
         }
@@ -124,6 +84,15 @@ impl App {
                 Action::RequestRecoveryReview(decision) if dialog.section == super::Section::Sync =>
                     self.request_sync_review(root, &mut dialog, decision),
                 Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
+                Action::OpenCloudProvider(provider) if dialog.section == super::Section::Sync => {
+                    let config = self.workspace.core.settings.get_config();
+                    let ctx = self.settings_context(dialog.section, dialog.copied, dialog.trash_page);
+                    let (layer, popup) = crate::ui::settings::provider_modal(&config, &ctx, provider);
+                    root.add_layer(layer, masonry::kurbo::Point::ORIGIN);
+                    root.focus_on(Some(popup.layer));
+                    dialog.cloud_popup = Some(popup);
+                    Effect::None
+                }
                 other => self.press(&mut dialog, other),
             };
         }

@@ -1,8 +1,6 @@
 //! Transfer dialog construction, leaving transfer.rs as a compact API.
 use super::*;
 
-/// The only actionable controls modify local drafts or open the local picker.
-/// No button can reach QUIC, File Gate, YDB or any source of peer authority.
 pub fn dialog(
     rows: &[QueueRow],
     devices: &[DeviceRow],
@@ -10,24 +8,15 @@ pub fn dialog(
     choosing: bool,
     error: Option<&str>,
     identity: Option<&IdentityView>,
+    #[cfg(feature = "messaging-w4-pilot")] w4: Option<&PilotView>,
 ) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
-    let choose = NewWidget::new(
-        TextButton::new(
-            if choosing {
-                t("transfer.picking")
-            } else {
-                t("transfer.addFile")
-            },
-            Variant::Primary,
-        )
-        .with_icon(icons::UPLOAD),
-    );
+    let label = t(["transfer.addFile", "transfer.picking"][usize::from(choosing)]);
+    let choose = NewWidget::new(TextButton::new(label, Variant::Primary).with_icon(icons::UPLOAD));
     let choose_id = choose.id();
     let (queue, actions) = queue_view::render(rows);
     let queue = NewWidget::new(ScrollArea::new(queue));
-
     let (info, device_actions) = devices::render(devices, error);
     let mut identity_actions = Vec::new();
     let footer = NewWidget::new(
@@ -50,6 +39,14 @@ pub fn dialog(
     if let Some(identity) = identity {
         let (panel, actions) = identity::render(identity);
         identity_actions = actions;
+        card = card.with_fixed(rule()).with_fixed(panel);
+    }
+    #[cfg(feature = "messaging-w4-pilot")]
+    let mut w4_actions = Vec::new();
+    #[cfg(feature = "messaging-w4-pilot")]
+    if let Some(view) = w4 {
+        let (panel, actions) = w4_pilot::render(view);
+        w4_actions = actions;
         card = card.with_fixed(rule()).with_fixed(panel);
     }
     let card = NewWidget::new(
@@ -75,6 +72,8 @@ pub fn dialog(
             actions,
             device_actions,
             identity_actions,
+            #[cfg(feature = "messaging-w4-pilot")]
+            w4_actions,
         },
     )
 }

@@ -49,13 +49,13 @@ e2e_args=()
 container_image=ubuntu:22.04
 e2e_lock_digest=""
 if [[ -d "$PWD/dist/e2e-v2" ]]; then
-  v2="$PWD/dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage"
+  v2="$PWD/dist/e2e-v2/akula-app_0.3.14_x86_64.AppImage"
   helper="$PWD/dist/e2e-v2/transaction-helper"
   [[ -s "$v2" && -x "$helper" ]] || {
-    echo 'CI-only 0.3.10 AppImage or real transaction harness missing' >&2
+    echo 'CI-only 0.3.14 AppImage or real transaction harness missing' >&2
     exit 1
   }
-  e2e_args=("/dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage" "/dist/e2e-v2/transaction-helper")
+  e2e_args=("/dist/e2e-v2/akula-app_0.3.14_x86_64.AppImage" "/dist/e2e-v2/transaction-helper")
   # Jammy 22.04 has no minisign CLI package. Run this additional
   # signed, two-version GUI experiment on Noble 24.04; regular AppImage
   # smoke still uses Jammy 22.04 unchanged.

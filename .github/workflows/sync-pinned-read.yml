@@ -3,6 +3,8 @@ name: Sync pinned-read OS checks
 on:
   workflow_call:
   pull_request:
+    # Main uses the required Application checks owner route; other PR bases stay direct.
+    branches-ignore: [main]
     paths:
       - "aquilum-app/core/src/plugins/vault_reader.rs"
       - "aquilum-app/core/src/plugins/read_tests.rs"
@@ -19,6 +21,9 @@ on:
       - "aquilum-app/core/src/sync/sealed_archive.rs"
       - "aquilum-app/core/src/sync/local_create_tests.rs"
       - "aquilum-app/core/src/sync/journal.rs"
+      - "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs"
+      - "aquilum-app/core/src/sync/journal/publication_recovery.rs"
+      - "aquilum-app/core/src/sync/journal/phase_transitions.rs"
       - "aquilum-app/core/src/sync/core_scan.rs"
       - "aquilum-app/core/src/sync/path.rs"
       - "aquilum-app/core/src/search/paths.rs"

@@ -1,5 +1,6 @@
 'use strict';
 const {execFileSync}=require('node:child_process');
+const {matches: matchesWorkflowPaths}=require('./ci-file-ratchet.cjs');
 const CORE='aquilum-app/core/Cargo.toml';
 const LOCK='aquilum-app/Cargo.lock';
 const LIB='aquilum-app/core/src/lib.rs';
@@ -51,6 +52,22 @@ const INSTALLED_OWNER_PATHS=new Set(["aquilum-app/core/src/sync/host_install_uni
 // Preserve the exact former pull_request.path owners. These source-owned labs
 // run through the required Main PR gate, including mixed source/manifest diffs.
 const OWNED_SUITES=Object.freeze({
+  "owned_b0c_ssh": [
+    "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs",
+    "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs",
+    "aquilum-app/core/src/server_bootstrap_modules.rs",
+    "aquilum-app/core/tests/server_bootstrap_b0c_windows.rs",
+    "scripts/ci/akula-b0c-windows-loopback-sshd.py",
+    ".github/workflows/core-server-bootstrap-b0c-windows-ssh.yml",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0C.md",
+    "aquilum-app/native/src/app/settings/server.rs",
+    "aquilum-app/native/src/app/settings/server_state.rs",
+    "aquilum-app/native/src/ui/settings/schema/server/server_status.rs",
+    "aquilum-app/native/src/ui/settings/schema/server/identity.rs",
+    "aquilum-app/native/assets/locales/ru.json",
+    "aquilum-app/native/assets/locales/en.json",
+    "aquilum-app/native/src/ui/settings/schema/tests.rs"
+  ],
   "owned_host_custody": [
     "aquilum-app/core/src/app_core.rs",
     "aquilum-app/core/src/app_core_installed_host_tests.rs",
@@ -90,12 +107,127 @@ const OWNED_SUITES=Object.freeze({
     "aquilum-app/native/packaging/akula-linux.json",
     "aquilum-app/native/packaging/Akula.desktop",
     "aquilum-app/native/Cargo.toml"
+  ],
+  "owned_windows_beta": [
+    ".github/workflows/windows-beta.yml",
+    ".github/scripts/windows-beta-identity.test.cjs",
+    "scripts/test-windows-beta.ps1",
+    "scripts/build-windows-update-fixture.ps1",
+    "scripts/test-windows-beta-upgrade.ps1",
+    "scripts/windows-beta-gui-input.ps1",
+    "scripts/windows-beta-candidate-manifest.ps1",
+    "scripts/windows-accesskit-uia.ps1",
+    "aquilum-app/native/packaging/akula-windows.json",
+    "aquilum-app/native/Cargo.toml"
+  ],
+  "owned_linux_beta": [
+    ".github/workflows/linux-beta.yml",
+    ".github/scripts/linux-beta-identity.test.cjs",
+    "scripts/linux-beta-smoke.sh",
+    "aquilum-app/native/packaging/akula-linux-nfpm.yaml",
+    "aquilum-app/native/packaging/Akula.desktop",
+    "aquilum-app/native/Cargo.toml"
+  ],
+  "owned_pinned_read": [
+    "aquilum-app/core/src/plugins/vault_reader.rs",
+    "aquilum-app/core/src/plugins/read_tests.rs",
+    "aquilum-app/core/src/plugins/permission_broker.rs",
+    "aquilum-app/core/src/sync/pinned_read.rs",
+    "aquilum-app/core/src/sync/local_create.rs",
+    "aquilum-app/core/src/sync/native_existing_replace_probe.rs",
+    "aquilum-app/core/src/sync/native_windows_replace_probe.rs",
+    "aquilum-app/core/src/sync/local_recovery.rs",
+    "aquilum-app/core/src/sync/recovery_dashboard.rs",
+    "aquilum-app/core/src/sync/recovery_existing_replace_tests.rs",
+    "aquilum-app/core/src/sync/journal/existing_replace_attempt.rs",
+    "aquilum-app/core/src/sync/recovery_review.rs",
+    "aquilum-app/core/src/sync/sealed_archive.rs",
+    "aquilum-app/core/src/sync/local_create_tests.rs",
+    "aquilum-app/core/src/sync/journal.rs",
+    "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+    "aquilum-app/core/src/sync/journal/publication_recovery.rs",
+    "aquilum-app/core/src/sync/journal/phase_transitions.rs",
+    "aquilum-app/core/src/sync/core_scan.rs",
+    "aquilum-app/core/src/sync/path.rs",
+    "aquilum-app/core/src/search/paths.rs",
+    "aquilum-app/core/src/sync/host_admission.rs",
+    "aquilum-app/core/src/sync/guarded_note_write.rs",
+    "aquilum-app/core/src/app_core.rs",
+    "aquilum-app/core/src/files/gate/write.rs",
+    "aquilum-app/core/src/files/gate/moves.rs",
+    "aquilum-app/core/src/files/gate/trash.rs",
+    "aquilum-app/core/src/files/gate/mod.rs",
+    "aquilum-app/core/src/files/trash.rs",
+    "aquilum-app/core/src/history/store.rs",
+    "aquilum-app/core/src/history/service.rs",
+    "aquilum-app/core/src/history/recovery.rs",
+    "aquilum-app/core/src/history/mod.rs",
+    "aquilum-app/native/src/app/settings/apply.rs",
+    "aquilum-app/native/src/app/settings/mod.rs",
+    "aquilum-app/native/src/app/templates/starters.rs",
+    "aquilum-app/core/src/files/gate/tests.rs",
+    "aquilum-app/core/src/files/gate/interprocess_probe.rs",
+    "aquilum-app/core/src/sync/filegate_lock_probe.rs",
+    "aquilum-app/core/src/documents/hub.rs",
+    "aquilum-app/core/src/documents/hub_tests.rs",
+    "aquilum-app/core/src/documents/session.rs",
+    "aquilum-app/core/src/documents/session_tests.rs",
+    "aquilum-app/core/src/documents/store.rs",
+    "aquilum-app/core/src/documents/store_tests.rs",
+    "aquilum-app/core/src/documents/io.rs",
+    "aquilum-app/core/src/sync/pinned_windows.rs",
+    "aquilum-app/core/src/sync/mod.rs",
+    ".github/workflows/sync-pinned-read.yml"
+  ],
+  "owned_s3_reservation": [
+    "aquilum-app/core/src/sync/s3_reserved_replace*.rs",
+    "aquilum-app/core/src/sync/guarded_note_write.rs",
+    "aquilum-app/core/src/sync/guarded_note_write/tests/**",
+    "aquilum-app/core/src/sync/profile_binding.rs",
+    "aquilum-app/core/src/sync/s3_preimage_capture.rs",
+    "aquilum-app/core/src/sync/pinned_read.rs",
+    "aquilum-app/core/src/sync/journal/**",
+    "aquilum-app/core/src/sync/mod.rs",
+    "aquilum-app/core/src/documents/hub.rs",
+    "aquilum-app/core/src/files/gate/write.rs",
+    "aquilum-app/core/src/files/gate/mod.rs",
+    ".github/workflows/sync-reserved-s3-transaction.yml",
+    "docs/sync/p0g2-held-s3-editor-reservation.md",
+    "docs/sync/p0g3a-single-filegate-prewrite.md"
+  ],
+  "owned_s3_minio": [
+    "aquilum-app/core/src/sync/s3_transport.rs",
+    "aquilum-app/core/tests/aws_credentials_regression.rs",
+    "aquilum-app/core/src/sync/yandex_readonly_probe.rs",
+    "aquilum-app/core/src/sync/profile_binding.rs",
+    "aquilum-app/core/src/sync/host_admission.rs",
+    "aquilum-app/core/src/sync/s3_preimage_capture.rs",
+    "aquilum-app/core/src/sync/host_custody_registry.rs",
+    "aquilum-app/core/src/sync/journal.rs",
+    "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+    "aquilum-app/core/src/sync/journal/publication_recovery.rs",
+    "aquilum-app/core/src/sync/journal/phase_transitions.rs",
+    "aquilum-app/core/src/sync/local_create_tests.rs",
+    "aquilum-app/core/src/sync/local_create.rs",
+    "aquilum-app/core/src/sync/s3_transport/**",
+    "aquilum-app/core/src/sync/s3.rs",
+    "aquilum-app/core/src/sync/s3_manifest.rs",
+    "aquilum-app/core/src/sync/s3_manifest_delta.rs",
+    "aquilum-app/core/src/sync/s3_coord_v2.rs",
+    "aquilum-app/core/src/sync/s3_head_probe.rs",
+    "aquilum-app/core/src/sync/s3_delta_walker.rs",
+    "aquilum-app/core/src/sync/s3_remote_anchor.rs",
+    "aquilum-app/core/src/sync/s3_transport/selective_snapshot.rs",
+    "aquilum-app/core/src/sync/s3_transport/offline_retention.rs",
+    "aquilum-app/core/src/sync/s3_anchored_delta.rs",
+    "aquilum-app/core/src/sync/mod.rs",
+    ".github/workflows/sync-s3-minio.yml"
   ]
 });
 function ownedRoutes(paths){
   const changed=new Set(paths);
   return Object.fromEntries(Object.entries(OWNED_SUITES).map(([key,owned])=>
-    [key,owned.some(file=>changed.has(file))]));
+    [key,[...changed].some(file=>matchesWorkflowPaths({t:'paths',p:owned},file))]));
 }
 function changes(diff){
   return String(diff||'').split(/\r?\n/)
