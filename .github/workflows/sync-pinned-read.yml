@@ -30,6 +30,8 @@ on:
       - "aquilum-app/core/src/sync/path.rs"
       - "aquilum-app/core/src/search/paths.rs"
       - "aquilum-app/core/src/sync/host_admission.rs"
+      - "aquilum-app/core/src/sync/host_admission/tests/mod.rs"
+      - "aquilum-app/core/src/sync/host_admission/tests/preimage.rs"
       - "aquilum-app/core/src/sync/guarded_note_write.rs"
       - "aquilum-app/core/src/app_core.rs"
       - "aquilum-app/core/src/files/gate/write.rs"
