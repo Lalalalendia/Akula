@@ -58,7 +58,9 @@ impl App {
     /// A dismissed Notion popup must not silently discard a cell or schema
     /// draft. A File Gate save in flight cannot be cancelled by closing it.
     pub(super) fn confirm_close_notion_bases(&mut self) -> bool {
-        if self.notion_bases.view().stage == crate::notion_bases::Stage::Saving {
+        let view = self.notion_bases.view();
+        if view.stage == crate::notion_bases::Stage::Saving
+            || (view.busy && self.notion_bases.has_pending_draft()) {
             return false;
         }
         if !self.notion_bases.has_pending_draft() { return true; }
