@@ -3,7 +3,8 @@
 #![cfg(all(target_os = "linux", feature = "node-wow-mailbox-lab"))]
 
 use akula_staya_integration::node_wow_mailbox_lab::{
-    MailRoleClaims, MailRoleHold, NodeWowMailboxLab, mail_epoch_floor_for_lab,
+    MailRoleClaims, MailRoleHold, NodeWowMailboxLab, mail_commit_receipt_for_lab,
+    mail_epoch_floor_for_lab,
     sign_mail_policy_for_lab,
 };
 use akula_wire_lab::{
@@ -703,6 +704,8 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     const ROOT: &str = "/etc/akula-node/wow-mail";
     const POLICY: &str = "/etc/akula-node/wow-mail/owner-mail-policy.bin";
     const FLOOR: &str = "/etc/akula-node/wow-mail/owner-mail-epoch-floor.bin";
+    const RECEIPT: &str = "/etc/akula-node/wow-mail/owner-mail-commit.bin";
+    const PENDING: &str = "/etc/akula-node/wow-mail/owner-mail-policy.pending";
     assert!(
         fs::symlink_metadata(PARENT).is_err(),
         "refuse to touch an existing root-owned Akula Node installation"
@@ -718,7 +721,7 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     impl Drop for Cleanup {
         fn drop(&mut self) {
             for args in [
-                vec!["rm", "-f", "--", POLICY, FLOOR],
+                vec!["rm", "-f", "--", POLICY, FLOOR, RECEIPT, PENDING],
                 vec!["rmdir", "--", ROOT],
                 vec!["rmdir", "--", PARENT],
             ] {
@@ -759,6 +762,26 @@ fn root_owned_mail_policy_is_read_only_and_current() {
         floor_source.to_str().unwrap(),
         FLOOR,
     ]);
+    // No receipt means the root installer may have crashed between
+    // publishing the manifest and the floor. Refuse to serve until the
+    // privileged publishing actor durably commits the exact pair.
+    assert!(matches!(
+        NodeWowMailboxLab::open_existing_root_provisioned(
+            &fixture.node, &fixture.mail_state, NODE_ENDPOINT,
+            fixture.custodian.clone(), 1,
+        ),
+        Err(MailRoleHold::MailPolicy),
+    ));
+    let signed_bytes = fs::read(&signed_source).unwrap();
+    let floor_bytes = fs::read(&floor_source).unwrap();
+    let receipt_fixture = fixture._tmp.path().join("mail-commit-fixture.bin");
+    fs::write(&receipt_fixture, mail_commit_receipt_for_lab(
+        &signed_bytes, &floor_bytes, 1,
+    )).unwrap();
+    sudo(&[
+        "install", "-o", "root", "-g", &group, "-m", "0640",
+        receipt_fixture.to_str().unwrap(), RECEIPT,
+    ]);
     let meta = fs::metadata(POLICY).unwrap();
     assert_eq!(meta.uid(), 0);
     assert_eq!(meta.gid(), rustix::process::getegid().as_raw());
@@ -793,6 +816,31 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     })
     .unwrap();
     assert_eq!(retrieved, Some(fixture.packet.clone()));
+
+    // A new pending file is an unresolved root transaction and must not
+    // be treated as a valid previous receipt.
+    sudo(&["touch", PENDING]);
+    assert!(matches!(open(), Err(MailRoleHold::MailPolicy)));
+    sudo(&["rm", "-f", "--", PENDING]);
+    assert!(open().is_ok());
+
+    // The receipt checksum binds both exact files. A missing or foreign
+    // receipt cannot turn a partially published manifest into an active role.
+    sudo(&["rm", "-f", "--", RECEIPT]);
+    assert!(matches!(open(), Err(MailRoleHold::MailPolicy)));
+    sudo(&[
+        "install", "-o", "root", "-g", &group, "-m", "0640",
+        receipt_fixture.to_str().unwrap(), RECEIPT,
+    ]);
+    // Even byte-identical receipt replacement forces existing instances
+    // to re-enrol; the original receipt inode is pinned in memory.
+    assert!(open().is_ok());
+    let listener = bind_test_loopback().unwrap();
+    assert!(matches!(
+        running.serve_one(&fixture.node, &listener, 4),
+        Err(MailRoleHold::MailPolicy)
+    ));
+    let mut running = open().unwrap();
 
     // Writable group path cannot authorize a mailbox, even if signature
     // and verified SQLite row remain unchanged.
