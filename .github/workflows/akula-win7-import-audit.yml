@@ -1,4 +1,4 @@
-name: LAB Win7 published Akula PE imports (diagnostic only)
+name: LAB Win7 public v0.3.14 import audit (diagnostic only)
 on:
   push:
     branches: ['lab/win7-release-pe-imports-20261023']
@@ -20,17 +20,17 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends p7zip-full binutils-mingw-w64-x86-64
       - name: Fetch and verify release
         env:
-          AKULA_RELEASE_TAG: v0.3.11
-          AKULA_RELEASE_SHA256: 37414336ae05dc8ce2df46e42ae871787dce5a8cb37a1da0fddedc4989bd4793
+          AKULA_RELEASE_TAG: v0.3.14
+          AKULA_RELEASE_SHA256: e91f97eff69717b442fa6288036a1a9ea8b129ebfdd056b5290fbb2eb9b85c11
         run: |
           mkdir -p "$RUNNER_TEMP/akula-win7/extracted" "$RUNNER_TEMP/akula-win7/report"
-          curl --proto '=https' --tlsv1.2 -fL --retry 2 --max-time 90 'https://github.com/Lalalalendia/Akula/releases/download/v0.3.11/Akula_0.3.11_x64-setup.exe' -o "$RUNNER_TEMP/akula-win7/installer.exe"
+          curl --proto '=https' --tlsv1.2 -fL --retry 2 --max-time 90 'https://github.com/Lalalalendia/Akula/releases/download/v0.3.14/Akula_0.3.14_x64-setup.exe' -o "$RUNNER_TEMP/akula-win7/installer.exe"
           printf '%s  %s\n' "$AKULA_RELEASE_SHA256" "$RUNNER_TEMP/akula-win7/installer.exe" | sha256sum -c -
           7z x -y -o"$RUNNER_TEMP/akula-win7/extracted" "$RUNNER_TEMP/akula-win7/installer.exe" > /dev/null
       - name: Analyze static PE imports
         env:
-          AKULA_RELEASE_TAG: v0.3.11
-          AKULA_RELEASE_SHA256: 37414336ae05dc8ce2df46e42ae871787dce5a8cb37a1da0fddedc4989bd4793
+          AKULA_RELEASE_TAG: v0.3.14
+          AKULA_RELEASE_SHA256: e91f97eff69717b442fa6288036a1a9ea8b129ebfdd056b5290fbb2eb9b85c11
         run: |
           python3 .github/scripts/akula-win7-import-audit.py "$RUNNER_TEMP/akula-win7/extracted" "$RUNNER_TEMP/akula-win7/report" | tee "$GITHUB_STEP_SUMMARY"
       - name: Upload diagnostic report

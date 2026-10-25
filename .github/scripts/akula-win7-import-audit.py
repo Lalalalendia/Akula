@@ -35,6 +35,7 @@ POST_WIN7_APIS = {
     "EnableNonClientDpiScaling": "Windows 10",
     "RoOriginateErrorW": "Windows 8",
     "ProcessPrng": "Windows 8",
+    "CreateDXGIFactory2": "Windows 8.1",
 }
 
 _DLL = re.compile(r"^\s*DLL Name:\s*(\S+)", re.IGNORECASE)
@@ -95,11 +96,10 @@ def run(root: Path, output: Path) -> None:
         dump = proc.stdout
         (raw / f"{i:03d}-{path.name}.objdump.txt").write_text(dump, encoding="utf-8")
         symbols = parse_imports(dump)
-        # Also match raw symbol names in case a binutils output format differs.
+        # Only real import table entries, not arbitrary references in dump output.
         hits = [
-            {"symbol": api, "minimum_windows": minver}
-            for api, minver in POST_WIN7_APIS.items()
-            if re.search(r"\b" + re.escape(api) + r"\b", dump, re.IGNORECASE)
+            {"symbol": imp["symbol"], "dll": imp["dll"], "minimum_windows": POST_WIN7_APIS[imp["symbol"]]}
+            for imp in symbols if imp["symbol"] in POST_WIN7_APIS
         ]
         entries.append({
             "file": path.relative_to(root).as_posix(),
@@ -124,6 +124,9 @@ def run(root: Path, output: Path) -> None:
         "main_executable": target["file"],
         "main_sha256": target["sha256"],
         "note": "Static imports only. Does not cover dynamic LoadLibrary/GetProcAddress calls or actual OS execution.",
+        "main_import_count": target["parsed_import_count"],
+        "main_post_win7_imports": target["known_post_win7_imports"],
+        "main_combase_imports": [x for x in target["imports"] if x["dll"].lower() == "combase.dll"],
         "files": entries,
     }
     (output / "report.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -133,6 +136,7 @@ def run(root: Path, output: Path) -> None:
         f"- Pinned NSIS installer SHA-256: {result['installer_expected_sha256']}",
         f"- Main executable: {target['file']}",
         f"- Main executable SHA-256: {target['sha256']}",
+        f"- Main executable parsed imports: {target['parsed_import_count']}",
         "- Method: checked GitHub Release SHA-256, extracted NSIS without running it, inspected PE import tables.",
         "- Limitation: no Win7 VM, only a finite list of modern APIs; other OS or dependency failures may remain.",
         "",
@@ -141,10 +145,19 @@ def run(root: Path, output: Path) -> None:
     total = 0
     for item in entries:
         for match in item["known_post_win7_imports"]:
-            lines.append(f"- `{item['file']}`: `{match['symbol']}` ({match['minimum_windows']}+)")
+            lines.append(f"- `{item['file']}`: `{match['dll']}!{match['symbol']}` ({match['minimum_windows']}+)")
             total += 1
     if not total:
         lines.append("- None from the screening list. **This does not prove Windows 7 compatibility.**")
+    if target["known_post_win7_imports"]:
+        lines += ["", "**RESULT: NOT Windows 7 load-compatible (direct newer-OS API imports in main EXE).**"]
+    lines += ["", "## COM import caveat"]
+    combase = [x for x in target["imports"] if x["dll"].lower() == "combase.dll"]
+    if combase:
+        lines += ["- Direct combase.dll imports need independent verification on clean Windows 7: " +
+                  ", ".join(x["symbol"] for x in combase)]
+    else:
+        lines += ["- No direct combase.dll imports in main EXE."]
     lines += ["", "## Imported DLL names"]
     for item in entries:
         lines += [f"- `{item['file']}`: {', '.join(item['dlls']) or '(not parsed)'}"]
