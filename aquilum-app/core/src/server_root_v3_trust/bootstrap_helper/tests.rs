@@ -106,6 +106,52 @@ fn independently_pinned_root_policy_accepts_only_signed_stage_hold() {
         ));
         return;
     }
+    // Verify each independent fixture boundary before the composite check,
+    // so a regression points to a precise signed/OS-owned contract.
+    let policy = RootEnrolledV3::from_trust_fd(&trust).unwrap();
+    assert_eq!(policy.helper_sha256, sha, "root-enrolled helper digest");
+    let parent = File::from(
+        openat(
+            &trust,
+            "..",
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .unwrap(),
+    );
+    assert!(root_dir_ok(&parent.metadata().unwrap(), 0o700), "parent root");
+    let stage = File::from(
+        openat(
+            &parent,
+            STAGE_LEAF,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .unwrap(),
+    );
+    assert!(root_dir_ok(&stage.metadata().unwrap(), 0o700), "stage root");
+    let manifest = decode_b1a_wire(&protected(&stage, "manifest", 256).unwrap()).unwrap();
+    assert_eq!(manifest.signer_id, HELPER_SIGNER, "signed helper identity");
+    assert_eq!(manifest.package_sha256, sha, "manifest SHA");
+    let key: [u8; 32] = protected(&stage, "release.ed25519", 32)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(
+        protected(&stage, "release.pub", 1024).unwrap(),
+        expected_pub_pem(&key),
+        "PEM matches exact signer"
+    );
+    assert_eq!(
+        protected(&stage, "HOLD", 256).unwrap(),
+        marker(&sha),
+        "durable HOLD marker"
+    );
+    let bytes = protected(&stage, HELPER_LEAF, MAX_HELPER_BYTES).unwrap();
+    assert_eq!(bytes.len(), manifest.package_size as usize, "package size");
+    assert_eq!(&bytes[..7], b"\x7fELF\x02\x01\x01", "ELF magic");
+    assert_eq!(&bytes[18..20], b"\x3e\x00", "x86-64");
+    assert_eq!(digest(&SHA256, &bytes).as_ref(), sha, "ELF digest");
     let result = inspect_from_trust_fd(&trust, NOW).unwrap();
     assert_eq!(
         result,
