@@ -1,0 +1,71 @@
+name: EXP Unified Ingest M9 real MinIO and workers
+on:
+  pull_request:
+    paths:
+      - 'experiments/unified-ingest-m5/**'
+      - '.github/workflows/exp-unified-ingest-m9.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  minio-workers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      S3_ENDPOINT: http://127.0.0.1:9000
+      AWS_ACCESS_KEY_ID: trial-access
+      AWS_SECRET_ACCESS_KEY: trial-secret-2026
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: 'true'
+      M9_ALLOW_LOCAL_MINIO: 'yes'
+      MINIO_IMAGE: dappros/minio:RELEASE.2025-09-07T16-13-09Z
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install isolated M9 test dependencies
+        run: python -m pip install -e './experiments/unified-ingest-m5[test]'
+      - name: Test all offline pipeline and multi-worker cases
+        working-directory: experiments/unified-ingest-m5
+        run: python -m unittest discover -s tests -p 'test_m[56789]*.py' -q
+      - name: Start isolated S3-compatible MinIO
+        run: |
+          docker run -d --name ingest-m9-minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
+            -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
+            "$MINIO_IMAGE" server /data
+          python - <<'PY'
+          import boto3, time
+          from botocore.client import Config
+          c=boto3.client('s3',endpoint_url='http://127.0.0.1:9000',config=Config(s3={'addressing_style':'path'}))
+          for _ in range(70):
+              try:
+                  c.list_buckets()
+                  print('MinIO ready')
+                  break
+              except Exception:
+                  time.sleep(.4)
+          else:
+              raise SystemExit('MinIO health did not converge')
+          PY
+      - name: Verify API to multi-worker to durable S3 to Erida handoff
+        working-directory: experiments/unified-ingest-m5
+        run: python tests/live_m9_minio.py
+      - name: Upload M9 acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m9-minio-api-worker-receipt
+          path: experiments/unified-ingest-m5/m9-minio-results.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Show MinIO server errors
+        if: failure()
+        run: docker logs ingest-m9-minio --tail 100 || true
+      - name: Stop isolated MinIO
+        if: always()
+        run: docker rm -f ingest-m9-minio || true
