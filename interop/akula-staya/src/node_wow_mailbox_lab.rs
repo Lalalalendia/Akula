@@ -12,8 +12,10 @@
 mod approval;
 mod policy;
 mod root_publish;
-pub use approval::{InertMailCasProposal, MailFirstApprovalClaims, sign_first_mail_approval_for_lab};
 use akula_wire_lab::{custodian_wire, journal_w4::Journal, trust_w3::TrustRegistry};
+pub use approval::{
+    InertMailCasProposal, MailFirstApprovalClaims, sign_first_mail_approval_for_lab,
+};
 use aquilum_core::node_v1::NodeHost;
 use ed25519_dalek::SigningKey;
 use policy::VerifiedMailRoleLab;
@@ -99,13 +101,16 @@ pub fn first_mail_approval_proposal_for_lab(
     expected_witness_revision: u64,
     now_ms: i64,
 ) -> Result<InertMailCasProposal, MailRoleHold> {
-    let policy = VerifiedMailRoleLab::open(
-        signed_mail_folder, node, expected_endpoint, now_ms,
-    )?;
+    let policy = VerifiedMailRoleLab::open(signed_mail_folder, node, expected_endpoint, now_ms)?;
     approval::verify_first_mail_approval(
-        approval_bytes, policy.signed_digest(), policy.claims,
-        policy.claims.operator_public, expected_witness_revision, now_ms,
-    ).map_err(|_| MailRoleHold::MailPolicy)
+        approval_bytes,
+        policy.signed_digest(),
+        policy.claims,
+        policy.claims.operator_public,
+        expected_witness_revision,
+        now_ms,
+    )
+    .map_err(|_| MailRoleHold::MailPolicy)
 }
 
 /// Fail closed if the durable WOW schema grants a different mailbox,
