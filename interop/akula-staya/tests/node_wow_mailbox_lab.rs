@@ -3,7 +3,8 @@
 #![cfg(all(target_os = "linux", feature = "node-wow-mailbox-lab"))]
 
 use akula_staya_integration::node_wow_mailbox_lab::{
-    MailRoleClaims, MailRoleHold, NodeWowMailboxLab, mail_commit_receipt_for_lab,
+    MailRoleClaims, MailRoleHold, NodeWowMailboxLab, PublishHold, PublishStop,
+    first_mail_publish_ci, mail_commit_receipt_for_lab,
     mail_epoch_floor_for_lab, sign_mail_policy_for_lab,
 };
 use akula_wire_lab::{
@@ -688,6 +689,29 @@ fn revoked_sqlite_mail_role_fences_live_node_even_with_valid_owner_files() {
 /// PUBLIC signed policy files under a disposable CI runner's /etc tree.
 /// It refuses any pre-existing Akula Node installation, never installs a
 /// daemon, binary, key, service or listens on an external network address.
+/// Run ONLY through a sudo child of the disposable CI OS test. The test
+/// executable and public source are synthetic; no installed Node is touched.
+#[test]
+fn root_mail_cas_publisher_ci_child() {
+    if std::env::var("AKULA_WOW_ROOT_CAS_CHILD").ok().as_deref()!=Some("1") {
+        return;
+    }
+    assert_eq!(rustix::process::geteuid().as_raw(),0);
+    let source=std::env::var("AKULA_WOW_ROOT_CAS_SOURCE").unwrap();
+    let bytes=fs::read(source).unwrap();
+    let which=std::env::var("AKULA_WOW_ROOT_CAS_STOP").unwrap();
+    let (point,expected)=match which.as_str() {
+        "pending"=>(PublishStop::AfterPendingSync,Err(PublishHold::InjectedStop)),
+        "policy"=>(PublishStop::AfterPolicyRename,Err(PublishHold::InjectedStop)),
+        "floor"=>(PublishStop::AfterFloorRename,Err(PublishHold::InjectedStop)),
+        "receipt"=>(PublishStop::AfterReceiptRename,Err(PublishHold::InjectedStop)),
+        "existing"=>(PublishStop::None,Err(PublishHold::ExistingOrInterrupted)),
+        "none"=>(PublishStop::None,Ok(())),
+        _=>panic!("invalid CI-only crash point"),
+    };
+    assert_eq!(first_mail_publish_ci(&bytes,1,point),expected);
+}
+
 #[test]
 fn root_owned_mail_policy_is_read_only_and_current() {
     if std::env::var("AKULA_WOW_ROOT_MAIL_OS_TEST").ok().as_deref() != Some("1") {
@@ -705,6 +729,9 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     const FLOOR: &str = "/etc/akula-node/wow-mail/owner-mail-epoch-floor.bin";
     const RECEIPT: &str = "/etc/akula-node/wow-mail/owner-mail-commit.bin";
     const PENDING: &str = "/etc/akula-node/wow-mail/owner-mail-policy.pending";
+    const PENDING_FLOOR: &str = "/etc/akula-node/wow-mail/owner-mail-epoch-floor.pending";
+    const PENDING_RECEIPT: &str = "/etc/akula-node/wow-mail/owner-mail-commit.pending";
+    const ROOT_POLICY: &str = "/etc/akula-node/owner-policy.json";
     assert!(
         fs::symlink_metadata(PARENT).is_err(),
         "refuse to touch an existing root-owned Akula Node installation"
@@ -720,8 +747,9 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     impl Drop for Cleanup {
         fn drop(&mut self) {
             for args in [
-                vec!["rm", "-f", "--", POLICY, FLOOR, RECEIPT, PENDING],
+                vec!["rm", "-f", "--", POLICY, FLOOR, RECEIPT, PENDING, PENDING_FLOOR, PENDING_RECEIPT],
                 vec!["rmdir", "--", ROOT],
+                vec!["rm", "-f", "--", ROOT_POLICY],
                 vec!["rmdir", "--", PARENT],
             ] {
                 let _ = Command::new("sudo").arg("-n").args(args).status();
@@ -739,60 +767,54 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     ]);
     let signed_source = fixture.mail_policy_file();
     let floor_source = fixture.floor_file();
+    // RootTrust is independently pinned: the root actor reads this
+    // root-owned Node policy, not a key from the caller's mail manifest.
     sudo(&[
-        "install",
-        "-o",
-        "root",
-        "-g",
-        &group,
-        "-m",
-        "0640",
-        signed_source.to_str().unwrap(),
-        POLICY,
+        "install", "-o", "root", "-g", "root", "-m", "0600",
+        fixture.node_policy.to_str().unwrap(), ROOT_POLICY,
     ]);
-    sudo(&[
-        "install",
-        "-o",
-        "root",
-        "-g",
-        &group,
-        "-m",
-        "0640",
-        floor_source.to_str().unwrap(),
-        FLOOR,
-    ]);
-    // No receipt means the root installer may have crashed between
-    // publishing the manifest and the floor. Refuse to serve until the
-    // privileged publishing actor durably commits the exact pair.
-    assert!(matches!(
-        NodeWowMailboxLab::open_existing_root_provisioned(
-            &fixture.node,
-            &fixture.mail_state,
-            NODE_ENDPOINT,
-            fixture.custodian.clone(),
-            1,
-        ),
-        Err(MailRoleHold::MailPolicy),
-    ));
+    let root_child = |stop: &str| {
+        let exe = std::env::current_exe().unwrap();
+        let status = Command::new("sudo")
+            .arg("-n")
+            .arg("env")
+            .arg("GITHUB_ACTIONS=true")
+            .arg("AKULA_WOW_ROOT_CAS_CI=1")
+            .arg("AKULA_WOW_ROOT_CAS_CHILD=1")
+            .arg(format!("AKULA_WOW_ROOT_CAS_SOURCE={}", signed_source.display()))
+            .arg(format!("AKULA_WOW_ROOT_CAS_STOP={stop}"))
+            .arg(exe)
+            .arg("--exact")
+            .arg("root_mail_cas_publisher_ci_child")
+            .arg("--nocapture")
+            .status().unwrap();
+        assert!(status.success(), "root-only publisher subprocess: {stop}");
+    };
+    // All three early crash points must refuse admission. A privileged
+    // human repair is simulated only by clearing the disposable CI tree.
+    for crash in ["pending", "policy", "floor"] {
+        root_child(crash);
+        assert!(matches!(
+            NodeWowMailboxLab::open_existing_root_provisioned(
+                &fixture.node, &fixture.mail_state, NODE_ENDPOINT,
+                fixture.custodian.clone(),1,
+            ),
+            Err(MailRoleHold::MailPolicy)
+        ));
+        sudo(&["rm", "-f", "--", POLICY, FLOOR, RECEIPT,
+            PENDING, PENDING_FLOOR, PENDING_RECEIPT]);
+    }
+    // The last rename was already fsynced: a lost response must not
+    // permit re-provisioning, even though read-only admission is complete.
+    root_child("receipt");
+    root_child("existing");
     let signed_bytes = fs::read(&signed_source).unwrap();
     let floor_bytes = fs::read(&floor_source).unwrap();
     let receipt_fixture = fixture._tmp.path().join("mail-commit-fixture.bin");
     fs::write(
         &receipt_fixture,
         mail_commit_receipt_for_lab(&signed_bytes, &floor_bytes, 1),
-    )
-    .unwrap();
-    sudo(&[
-        "install",
-        "-o",
-        "root",
-        "-g",
-        &group,
-        "-m",
-        "0640",
-        receipt_fixture.to_str().unwrap(),
-        RECEIPT,
-    ]);
+    ).unwrap();
     let meta = fs::metadata(POLICY).unwrap();
     assert_eq!(meta.uid(), 0);
     assert_eq!(meta.gid(), rustix::process::getegid().as_raw());
