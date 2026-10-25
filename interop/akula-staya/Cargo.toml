@@ -43,7 +43,7 @@ required-features = ["node-v1-runtime"]
 
 [dependencies]
 # Exact green WOW baseline; avoid git HEAD, transitive updates or duplicates.
-akula-wire-lab = { git = "https://github.com/calex794/wow", rev = "29bd044cf11c60687716560c15abef69f5581ebc", optional = true }
+akula-wire-lab = { git = "https://github.com/calex794/wow", rev = "be5eff2a78f91442f39268ca2b83134763b3a097", optional = true }
 ed25519-dalek = { version = "2.2", optional = true }
 # Same native SQLite link ABI as Akula Core and WOW; never downgrade either.
 rusqlite = { version = "=0.40.1", features = ["bundled"], optional = true }
