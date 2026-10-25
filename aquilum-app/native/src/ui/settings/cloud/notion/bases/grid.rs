@@ -131,11 +131,12 @@ mod tests {
             name: format!("Column {i}"), property_id: format!("column-{i}"),
             kind: "rich_text".into(), local_only: false,
         }).collect();
+        let columns = view.columns.clone();
         view.rows = (0..10).map(|i| {
             let row_id = format!("row-{i}");
             RowView {
                 row_id: row_id.clone(), label: format!("Row {i}"),
-                cells: view.columns.iter().map(|col| CellView {
+                cells: columns.iter().map(|col| CellView {
                     row_id: row_id.clone(), property_id: col.property_id.clone(),
                     text: format!("{row_id}:{}", col.property_id),
                     toggle_to: None, revert: false, edit_text: true,
