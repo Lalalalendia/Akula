@@ -98,6 +98,11 @@ jobs:
           # and exact Linux B1b1b claim conversion. Pure read-only HOLD.
           "$test_bin" server_root_v3_trust::owner_frame::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::owner_frame::tests --nocapture
+          # One inert AF_UNIX owner-frame PREVIEW. A real setuid-nobody
+          # child is checked using kernel SO_PEERCRED against an
+          # independently root-owned allowed UID file; no /opt changes.
+          "$test_bin" server_root_v3_trust::owner_ipc::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::owner_ipc::tests --nocapture
           # One-time admin enrollment uses root-owned disposable directories.
           "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
@@ -164,6 +169,8 @@ jobs:
             aquilum-app/core/src/server_root_v3_trust/tests.rs
             aquilum-app/core/src/server_root_v3_trust/owner_frame.rs
             aquilum-app/core/src/server_root_v3_trust/owner_frame/tests.rs
+            aquilum-app/core/src/server_root_v3_trust/owner_ipc.rs
+            aquilum-app/core/src/server_root_v3_trust/owner_ipc/tests.rs
             aquilum-app/core/src/server_installer_durable_node/provisioned_gate.rs
             aquilum-app/core/src/server_root_v3_trust/enrollment.rs
             aquilum-app/core/src/server_root_v3_trust/enrollment/tests.rs

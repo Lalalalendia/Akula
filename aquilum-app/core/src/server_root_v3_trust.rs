@@ -320,6 +320,7 @@ fn open_fixed_trust_fd() -> Result<File, RootEnrollmentError> {
 
 mod owner_frame;
 pub(crate) use owner_frame::load_verified_owner_frame;
+mod owner_ipc;
 mod enrollment;
 pub use enrollment::admin_enroll_fixed_root_once;
 mod witness_init;

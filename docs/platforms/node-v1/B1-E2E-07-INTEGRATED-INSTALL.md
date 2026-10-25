@@ -663,3 +663,37 @@ symlink, tampered or truncated frames, expiry and nonroot refusal.
 Additional pure B1d0 correspondence tests reject modified package,
 plan, proposed floor and witness revision. The default Windows Akula
 and actual VPS remain unchanged. Full installed end-to-end = HOLD.
+
+
+### 25 October 2026 — protected one-shot AF_UNIX owner preview (no root installer)
+
+The existing B1b3a lab already provides Linux kernel SO_PEERCRED
+authentication but its general Preview accepts a policy passed by the
+caller; that is NOT independent root install authority. Instead, a
+new opt-in, **non-shipping** \`server_root_v3_trust::owner_ipc\` adapter
+opens only the previously enrolled root-owned B0 v3 policy and a
+separately provisioned root-owned 0600 \`b1d0.peer-uid\` record. The
+record has a fixed domain and a nonzero, non-root Linux UID; callers
+cannot provide or change it. There is deliberately no production writer
+for this record and no installed listener.
+
+A real accepted AF_UNIX stream is gated on Linux SO_PEERCRED matching
+that independently pinned UID before reading an exact, capped, domain
+separated B1b1b preview frame. The peer must end its write half after
+one complete frame; partial, oversized, appended, wrong-domain or
+hanging requests HOLD. Only the independently pinned root owner ID/key
+can authenticate the nested detached Ed25519 owner signature. A
+freshly signed request for a *different* SSH host is also refused by
+the root policy's separate host pin. Expired, tampered or malformed
+requests never yield an inert preview.
+
+The Linux UID0 CI uses actual AF_UNIX sockets and a separately
+unprivileged (UID 65534) Python sender in disposable directories
+to prove kernel peer identity, correct signature, root-owned policy,
+replay being *preview-only*, bad pins/permissions/symlinks, different
+host, trailing/truncated frames and nonroot service refusal.
+No sudo command, interpreter, listener, socket file or user creation
+is installed onto a real VPS. In particular this admission DOES NOT
+call B1d0 CAS, modify /opt, activate systemd, give SSH/root privileges
+or enable Install Node. Root-helper signer \`PRODUCTION_BOOTSTRAP_PUBKEY\`
+remains unprovisioned and the authorized privileged transport is HOLD.
