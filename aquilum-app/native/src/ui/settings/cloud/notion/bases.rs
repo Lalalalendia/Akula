@@ -1,6 +1,7 @@
 //! Experimental local Akula Bases panel. Never reads the Notion API.
 use super::*;
 mod editor;
+mod schema;
 
 pub(super) fn append(
     mut column: Flex, ctx: &Context,
@@ -10,7 +11,7 @@ pub(super) fn append(
     // Independent offline Akula Bases, separate from the Notion API cache.
     if let (Some(source), Some(target)) = (selected_root,ctx.workspace.as_deref()) {
         let bases=&ctx.notion_bases;
-        if !bases.busy && bases.draft.is_none() {
+        if !bases.busy && bases.draft.is_none() && bases.schema_draft.is_none() {
             column=column.with_fixed(action_button(
                 "Открыть локальные Akula Bases".into(),
                 Action::NotionBasesOpen(source.clone()),bindings,
@@ -36,6 +37,8 @@ pub(super) fn append(
             if bases.stage==crate::notion_bases::Stage::Ready {
                 if let Some(draft)=&bases.draft {
                     column=editor::append(column,draft,bases.stage,bindings);
+                } else if let Some(draft)=&bases.schema_draft {
+                    column=schema::append(column,draft,bases.stage,bindings);
                 } else {
                 for choice in &bases.choices {
                     column=column.with_fixed(action_button(
@@ -45,6 +48,16 @@ pub(super) fn append(
                     ));
                 }
                 if bases.base_id.is_some() {
+                    column=schema::new_column_buttons(column,bindings);
+                    for local in &bases.columns {
+                        if local.local_only {
+                            column=column.with_fixed(action_button(
+                                format!("Переименовать локальную: {}",local.name),
+                                Action::NotionBasesRenameColumn(local.property_id.clone()),
+                                bindings,
+                            ));
+                        }
+                    }
                     column=column.with_fixed(selectable(
                         &format!("Строк: {} · колонок: {} · локальная ревизия: {} · исходных views: {} (только снимки)",
                             bases.total_rows,bases.total_columns,bases.local_revision,bases.saved_source_views),
@@ -114,6 +127,9 @@ pub(super) fn append(
             } else if bases.stage==crate::notion_bases::Stage::NeedsReview {
                 if let Some(draft)=&bases.draft {
                     column=editor::append(column,draft,bases.stage,bindings);
+                }
+                if let Some(draft)=&bases.schema_draft {
+                    column=schema::append(column,draft,bases.stage,bindings);
                 }
                 column=column.with_fixed(action_button(
                     "Проверить локальную базу повторно".into(),Action::NotionBasesReload,bindings,
