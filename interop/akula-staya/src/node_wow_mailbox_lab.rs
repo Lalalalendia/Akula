@@ -10,15 +10,11 @@
 //! A future product role requires an independently owner-approved mail policy
 //! pinned by root before any network exposure. This feature is lab-only.
 mod policy;
-pub use policy::{MailRoleClaims, sign_mail_policy_for_lab};
-use policy::VerifiedMailRoleLab;
-use akula_wire_lab::{
-    custodian_wire,
-    journal_w4::Journal,
-    trust_w3::TrustRegistry,
-};
+use akula_wire_lab::{custodian_wire, journal_w4::Journal, trust_w3::TrustRegistry};
 use aquilum_core::node_v1::NodeHost;
 use ed25519_dalek::SigningKey;
+use policy::VerifiedMailRoleLab;
+pub use policy::{MailRoleClaims, sign_mail_policy_for_lab};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::{
     fs::{self, Metadata},
@@ -90,40 +86,54 @@ fn private_existing_db(state: &Path) -> Result<Metadata, MailRoleHold> {
 /// broader quota, different owner epoch, or other identities than the
 /// separately signed owner policy. This is a lab preflight: real product
 /// admission must check the policy INSIDE the same SQLite write transaction.
-fn require_exact_mailbox(state: &Path, policy: &VerifiedMailRoleLab)
-    -> Result<(), MailRoleHold>
-{
+fn require_exact_mailbox(state: &Path, policy: &VerifiedMailRoleLab) -> Result<(), MailRoleHold> {
     let p = policy.claims;
     let db = Connection::open_with_flags(
         state.join(DB),
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ).map_err(|_| MailRoleHold::MailPolicy)?;
-    let total: i64 = db.query_row(
-        "SELECT count(*) FROM custodian_mailbox_policy", [], |r| r.get(0),
-    ).map_err(|_| MailRoleHold::MailPolicy)?;
+    )
+    .map_err(|_| MailRoleHold::MailPolicy)?;
+    let total: i64 = db
+        .query_row("SELECT count(*) FROM custodian_mailbox_policy", [], |r| {
+            r.get(0)
+        })
+        .map_err(|_| MailRoleHold::MailPolicy)?;
     if total != 1 {
         return Err(MailRoleHold::MailPolicy);
     }
     type PolicyRow = (Vec<u8>, i64, Vec<u8>, Vec<u8>, Vec<u8>, i64, i64);
-    let stored: Option<PolicyRow> = db.query_row(
-        "SELECT issuer, issuer_epoch, custodian, scope, recipient,
+    let stored: Option<PolicyRow> = db
+        .query_row(
+            "SELECT issuer, issuer_epoch, custodian, scope, recipient,
                 max_bytes, max_offers FROM custodian_mailbox_policy
          WHERE mailbox=?1",
-        params![p.mailbox.as_slice()],
-        |r| Ok((
-            r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?,
-            r.get(4)?, r.get(5)?, r.get(6)?,
-        )),
-    ).optional().map_err(|_| MailRoleHold::MailPolicy)?;
+            params![p.mailbox.as_slice()],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| MailRoleHold::MailPolicy)?;
     let Some((owner, owner_epoch, custodian, scope, recipient, max_bytes, max_offers)) = stored
-        else { return Err(MailRoleHold::MailPolicy) };
-    if owner.as_slice()!=p.issuer.as_slice()
-        || owner_epoch!=p.issuer_epoch as i64
-        || custodian.as_slice()!=p.custodian.as_slice()
-        || scope.as_slice()!=p.scope.as_slice()
-        || recipient.as_slice()!=p.recipient.as_slice()
-        || max_bytes!=i64::from(p.max_message_bytes)
-        || max_offers!=i64::from(p.max_offers) {
+    else {
+        return Err(MailRoleHold::MailPolicy);
+    };
+    if owner.as_slice() != p.issuer.as_slice()
+        || owner_epoch != p.issuer_epoch as i64
+        || custodian.as_slice() != p.custodian.as_slice()
+        || scope.as_slice() != p.scope.as_slice()
+        || recipient.as_slice() != p.recipient.as_slice()
+        || max_bytes != i64::from(p.max_message_bytes)
+        || max_offers != i64::from(p.max_offers)
+    {
         return Err(MailRoleHold::MailPolicy);
     }
     Ok(())
@@ -142,9 +152,7 @@ impl NodeWowMailboxLab {
         custodian_signer: SigningKey,
         now_ms: i64,
     ) -> Result<Self, MailRoleHold> {
-        let policy = VerifiedMailRoleLab::open(
-            mail_policy_folder, node, node_endpoint, now_ms,
-        )?;
+        let policy = VerifiedMailRoleLab::open(mail_policy_folder, node, node_endpoint, now_ms)?;
         let claims = policy.claims;
         if claims.custodian_public != custodian_signer.verifying_key().to_bytes() {
             return Err(MailRoleHold::UnpinnedTrust);
@@ -179,9 +187,7 @@ impl NodeWowMailboxLab {
         }
         self.policy.require_current(node, now_ms)?;
         require_exact_mailbox(&self.state, &self.policy)?;
-        if self.policy.claims.custodian_public
-            != self.custodian_signer.verifying_key().to_bytes()
-        {
+        if self.policy.claims.custodian_public != self.custodian_signer.verifying_key().to_bytes() {
             return Err(MailRoleHold::UnpinnedTrust);
         }
         let info = private_existing_db(&self.state)?;
