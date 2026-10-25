@@ -9,11 +9,12 @@ from .model import fixture_json
 from .unified_pipeline import PageLedger, UnifiedPipeline, parse_plan
 from .erida_export import prepare_erida_batches
 from .erida_preview import preview_erida_batches
+from .erida_stage import stage_erida_batches
 
 
 def main():
     ap = argparse.ArgumentParser(description="Approved snapshots -> RAW -> parse -> publish -> handoff")
-    ap.add_argument("command", choices=("run", "status", "demo", "export-erida", "preview-erida"))
+    ap.add_argument("command", choices=("run", "status", "demo", "export-erida", "preview-erida", "stage-erida"))
     ap.add_argument("--plan", type=Path)
     ap.add_argument("--state", type=Path, required=True, help="private SQLite, spool, local object store")
     ap.add_argument("--fixtures", type=Path, help="approved local fixture directory; no network")
@@ -26,6 +27,7 @@ def main():
     ap.add_argument("--handoff-sha256", help="expected immutable handoff SHA-256 for export-erida")
     ap.add_argument("--erida-manifest", type=Path, help="prepared local Erida import manifest for preview-erida")
     ap.add_argument("--erida-origin", help="explicit trusted Erida HTTPS origin for read-only preview")
+    ap.add_argument("--allow-stage", action="store_true", help="explicitly create short-lived Erida stages; NEVER confirm imports")
     a = ap.parse_args()
     if a.command in ("run", "status") and a.plan is None:
         ap.error("--plan is required for run/status")
@@ -40,6 +42,19 @@ def main():
             ap.error("explicit authenticated preview requires ERIDA_API_KEY environment variable")
         print(json.dumps(preview_erida_batches(a.erida_manifest, erida_origin=a.erida_origin, api_key=key),
                          ensure_ascii=False, indent=2))
+        return
+    if a.command == "stage-erida":
+        if not a.erida_manifest or not a.erida_origin or not a.allow_stage:
+            ap.error("stage-erida requires --erida-manifest --erida-origin --allow-stage")
+        import os
+        key = os.environ.get("ERIDA_API_KEY", "")
+        if not key:
+            ap.error("stage-erida requires ERIDA_API_KEY in environment")
+        result = stage_erida_batches(a.erida_manifest, erida_origin=a.erida_origin,
+                                    api_key=key, allow_stage=True)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result["status"] != "STAGED_AWAITING_ACTOR_CONFIRMATION":
+            raise SystemExit(2)
         return
     sample = Path(__file__).resolve().parent.parent / "examples" / "approved-work"
     planfile = sample / "approved-plan.json" if a.command == "demo" else a.plan
@@ -95,4 +110,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
