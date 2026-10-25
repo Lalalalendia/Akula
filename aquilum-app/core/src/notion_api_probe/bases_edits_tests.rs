@@ -521,3 +521,60 @@ fn c5b4_approved_rebase_denies_changed_source_and_stale_hash() {
         &preview.expected_local_hash,true).is_err());
     assert_eq!(fs::read(f.edited_path()).unwrap(),stale_before);
 }
+
+#[test]
+fn c5b4_keep_local_requires_exact_manual_selection_of_changed_source_values() {
+    let f=Fixture::new();
+    let row=f.row(A);
+    let prop=f.prop(DS1,"score");
+    apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::Set{row_id:row.clone(),property_id:prop.clone(),
+            value:LocalValue::Number(777.0)}],true).unwrap();
+    let next=published_new_source(&f, |src| {
+        src.objects.iter_mut().find(|o|o.kind=="page"&&o.id==A)
+            .unwrap().json["properties"]["Score"]["number"]=json!(91);
+    });
+    let preview=preview_rebase(&f.vault,A,&f.digest,&next).unwrap();
+    assert_eq!(preview.cells[0].disposition,RebaseDisposition::SourceValueChanged);
+    let preserved=fs::read(f.edited_path()).unwrap();
+    let selection=vec![(row.clone(),prop.clone())];
+    for decisions in [
+        vec![],
+        vec![("unrelated".into(),prop.clone())],
+        vec![selection[0].clone(),selection[0].clone()],
+    ] {
+        assert!(apply_rebase_resolved_approved(&f.core,&f.vault,A,
+            &f.digest,&next,&preview.expected_local_hash,&decisions,true).is_err());
+        assert_eq!(fs::read(f.edited_path()).unwrap(),preserved);
+    }
+    assert!(apply_rebase_resolved_approved(&f.core,&f.vault,A,&f.digest,
+        &next,&preview.expected_local_hash,&selection,false).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),preserved);
+    let receipt=apply_rebase_resolved_approved(&f.core,&f.vault,A,
+        &f.digest,&next,&preview.expected_local_hash,&selection,true).unwrap();
+    assert_eq!(receipt.approved_local_wins,1);
+    let base=f.model().bases.iter().find(|b|b.notion_id==DS1).unwrap().akula_id.clone();
+    let effective=read_effective_base(&f.vault,A,&next,&base).unwrap();
+    assert_eq!(effective.rows.iter().find(|r|r.akula_id==row).unwrap()
+        .cells.iter().find(|c|c.property_id==prop).unwrap().value,
+        EffectiveValue::Local(LocalValue::Number(777.0)));
+}
+#[test]
+fn c5b4_keep_local_rejects_property_definition_conflicts_even_when_selected() {
+    let f=Fixture::new();
+    let row=f.row(A);
+    let property=f.prop(DS1,"score");
+    apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::Set{row_id:row.clone(),property_id:property.clone(),
+            value:LocalValue::Number(27.0)}],true).unwrap();
+    let next=published_new_source(&f, |src| {
+        src.objects.iter_mut().find(|o|o.kind=="data_source"&&o.id==DS1)
+            .unwrap().json["properties"]["Score"]["format"]="percent".into();
+    });
+    let old=fs::read(f.edited_path()).unwrap();
+    let report=preview_rebase(&f.vault,A,&f.digest,&next).unwrap();
+    assert_eq!(report.cells[0].disposition,RebaseDisposition::PropertyDefinitionChanged);
+    assert!(apply_rebase_resolved_approved(&f.core,&f.vault,A,&f.digest,
+        &next,&report.expected_local_hash,&[(row,property)],true).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),old);
+}

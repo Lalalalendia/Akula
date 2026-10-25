@@ -4,7 +4,8 @@
 use super::{
     read, relative, registered, source_model, validate, MAX_FILE,
 };
-use super::rebase_preview::preview_rebase;
+use super::rebase_preview::{preview_rebase, RebaseDisposition};
+use std::collections::BTreeSet;
 use crate::{app_core::Core, files::gate, history::Source};
 use serde::Serialize;
 use std::path::Path;
@@ -18,6 +19,8 @@ pub struct RebaseReceipt {
     pub overrides_preserved: usize,
     pub local_columns_preserved: usize,
     pub source_unchanged: bool,
+    /// Number of source-value conflicts resolved by explicit Keep Local choice.
+    pub approved_local_wins: usize,
 }
 
 /// No partial migration or silent conflict resolution. The expected hash
@@ -28,13 +31,46 @@ pub fn apply_rebase_approved(
     old_digest: &str, new_digest: &str,
     expected_local_hash: &str, approved: bool,
 ) -> Result<RebaseReceipt, String> {
+    apply_rebase_resolved_approved(core,workspace,source,old_digest,new_digest,
+        expected_local_hash,&[],approved)
+}
+
+/// A narrowly scoped manual conflict decision: preserve the explicitly
+/// selected local overrides when only their Notion source VALUE changed.
+/// Structural conflicts, source property definition edits and missing rows
+/// always block publication. No decision can remove a local override.
+pub fn apply_rebase_resolved_approved(
+    core: &Core, workspace: &Path, source: &str,
+    old_digest: &str, new_digest: &str,
+    expected_local_hash: &str,
+    keep_local: &[(String,String)], approved: bool,
+) -> Result<RebaseReceipt, String> {
     if !approved {
         return Err("Akula Bases rebase needs explicit user confirmation".into());
     }
     let root=registered(core,workspace)?;
     let preview=preview_rebase(&root,source,old_digest,new_digest)?;
-    if !preview.can_offer_approval() {
-        return Err("source or local schema conflicts: manual review required".into());
+    // Exact equality is intentional. The caller must explicitly select EVERY
+    // changed source-value cell, never only a convenient subset, and must not
+    // authorize extra or duplicate keys. All other conflict kinds are hard holds.
+    let requested=keep_local.iter().cloned().collect::<BTreeSet<_>>();
+    let affected=preview.cells.iter()
+        .filter(|cell|cell.disposition==RebaseDisposition::SourceValueChanged)
+        .map(|cell|(cell.row_id.clone(),cell.property_id.clone()))
+        .collect::<BTreeSet<_>>();
+    if keep_local.len()>256 || requested.len()!=keep_local.len() || requested!=affected {
+        return Err("explicit Keep Local decisions must exactly match all changed source cells".into());
+    }
+    if preview.conflicted_columns>0 || preview.cells.iter().any(|cell|
+        !matches!(cell.disposition,
+            RebaseDisposition::Eligible|RebaseDisposition::SourceValueChanged)) {
+        return Err("structural or schema rebase conflicts require separate manual review".into());
+    }
+    if !affected.is_empty() && preview.conflicted_cells!=affected.len() {
+        return Err("unresolved source conflicts: rebase denied".into());
+    }
+    if affected.is_empty() && !preview.can_offer_approval() {
+        return Err("no eligible local changes or incompatible schema".into());
     }
     if preview.expected_local_hash != expected_local_hash {
         return Err("local edits changed since preview: reload before rebase".into());
@@ -73,6 +109,6 @@ pub fn apply_rebase_approved(
         revision:revised.revision,disk_hash:saved.hash,
         overrides_preserved:revised.overrides.len(),
         local_columns_preserved:revised.local_columns.len(),
-        source_unchanged:true,
+        source_unchanged:true,approved_local_wins:affected.len(),
     })
 }
