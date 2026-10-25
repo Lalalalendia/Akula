@@ -171,6 +171,27 @@ jobs:
           cargo check --locked --manifest-path aquilum-app/Cargo.toml \
             -p aquilum-core --features server-root-b0v3-gate-lab \
             --bin akula-root-b1d0-peer-enroll-lab
+          # Compile and refuse any attempted install in the new real ELF.
+          cargo build --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab \
+            --bin akula-root-b1d0-helper
+          helper=aquilum-app/target/debug/akula-root-b1d0-helper
+          test -x "$helper"
+          set +e
+          out="$("$helper" --install 2>&1)"
+          exit_code=$?
+          set -e
+          test "$exit_code" -eq 2
+          test "$out" = "AKULA_B1D0_ROOT_HELPER_HOLD"
+          set +e
+          out="$("$helper" </dev/null 2>&1)"
+          exit_code=$?
+          set -e
+          test "$exit_code" -eq 2
+          test "$out" = "AKULA_B1D0_ROOT_HELPER_HOLD"
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab --lib \
+            server_root_v3_trust::root_helper_entry::tests -- --nocapture
       - name: Confirm default Core compiles without installer authority
         shell: bash
         run: |
@@ -203,6 +224,8 @@ jobs:
             aquilum-app/core/src/server_root_v3_trust/bootstrap_helper/tests.rs
             aquilum-app/core/src/server_root_v3_trust/bootstrap_helper/running.rs
             aquilum-app/core/src/server_root_v3_trust/bootstrap_helper/running/tests.rs
+            aquilum-app/core/src/server_root_v3_trust/root_helper_entry.rs
+            aquilum-app/core/src/bin/akula_root_b1d0_helper.rs
             aquilum-app/core/src/bin/akula_root_b1d0_peer_enroll_lab.rs
             aquilum-app/core/src/server_installer_durable_node/provisioned_gate.rs
             aquilum-app/core/src/server_root_v3_trust/enrollment.rs

@@ -1,0 +1,80 @@
+name: Akula B1d0 root helper unsigned candidate
+
+on:
+  push:
+    branches: [feature/akula-b1-e2e07-owner-install]
+    paths:
+      - 'aquilum-app/core/src/bin/akula_root_b1d0_helper.rs'
+      - 'aquilum-app/core/src/server_root_v3_trust/root_helper_entry.rs'
+      - 'aquilum-app/core/src/server_root_v3_trust.rs'
+      - 'aquilum-app/core/src/server_root_v3_trust/bootstrap_helper/**'
+      - 'aquilum-app/core/src/server_root_v3_trust/owner_ipc/**'
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
+      - '.github/workflows/akula-root-helper-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: b1d0-unsigned-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unsigned-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app
+      - name: Compile actual Linux root-helper ELF (no signing or install)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab \
+            --bin akula-root-b1d0-helper
+          binary=aquilum-app/target/release/akula-root-b1d0-helper
+          test -f "$binary" && test -x "$binary"
+          readelf -h "$binary" | grep -q 'Class:.*ELF64'
+          readelf -h "$binary" | grep -q 'Machine:.*Advanced Micro Devices X86-64'
+          size="$(stat -c %s "$binary")"
+          test "$size" -ge 64 && test "$size" -le 67108864
+          set +e
+          output="$("$binary" --install 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          test "$output" = "AKULA_B1D0_ROOT_HELPER_HOLD"
+          set +e
+          output="$("$binary" </dev/null 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          test "$output" = "AKULA_B1D0_ROOT_HELPER_HOLD"
+          mkdir -p candidate
+          cp "$binary" candidate/akula-root-b1d0-helper
+          (cd candidate && sha256sum akula-root-b1d0-helper > SHA256SUMS)
+          {
+            printf '%s\n' 'AKULA B1D0 ROOT HELPER - UNSIGNED, NOT FOR INSTALLATION'
+            printf 'commit=%s\n' "$GITHUB_SHA"
+            printf 'size_bytes=%s\n' "$size"
+            printf '%s\n' 'release_signature=ABSENT'
+            printf '%s\n' 'production_publisher_key=UNPROVISIONED'
+            printf '%s\n' 'privileged_install_dispatch=DISABLED'
+            printf '%s\n' 'root_service_activation=DISABLED'
+            printf '%s\n' 'This build must not be copied to a VPS or treated as an authorized release.'
+          } > candidate/UNSIGNED-CANDIDATE.txt
+      - name: Archive short-lived non-production candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: UNSIGNED-NOT-FOR-INSTALL-root-helper-${{ github.sha }}
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 3

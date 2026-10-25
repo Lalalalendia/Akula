@@ -870,3 +870,37 @@ installation is implemented. Exact OS-root test of staged and
 running helper, independently pinned publisher key, IPC authorization
 and user approval remain necessary before any root write. Production
 helper signer is not enrolled; no VPS was accessed.
+
+
+### 25 October 2026 — executable root-helper candidate (unsigned, HOLD)
+
+The opt-in \`akula-root-b1d0-helper\` now compiles as a REAL Linux ELF,
+not a mocked helper. It is deliberately non-shipping and UNSIGNED.
+It accepts zero CLI arguments, no user-provided paths, commands,
+keys, SSH text or configuration. A future root-owned socket-activated
+service may supply only one already connected AF_UNIX fd 0; no
+listener, socket, service or account is installed by this change.
+The helper first verifies that its own running executable inode
+matches the independently B0v3-pinned signed staged ELF and fixed
+root-owned /usr/libexec path. Only then does it reuse the existing
+SO_PEERCRED + independently enrolled peer UID + locked local account
++ strict B1b1b owner signed-frame preview. Even a valid preview ALWAYS
+exits 2 and explicitly reports installation HOLD. There is no B1d0
+CAS, /opt writer, sudo call, systemd activation or new privileged
+protocol opcode. Nonroot, arguments and absent independent root
+authority are denied.
+
+The branch gate compiles this actual binary and checks rejection with
+\`--install\` and stdin; a separate GitHub Actions candidate workflow
+builds a locked release ELF, checks architecture and 64 MiB limit,
+computes SHA256SUMS and uploads a short-lived artifact explicitly named
+\`UNSIGNED-NOT-FOR-INSTALL\`. CI has no publisher private key and
+performs NO signing. The artifact is not a production release and
+must not be installed to any VPS. The Windows release still pins
+\`PRODUCTION_BOOTSTRAP_PUBKEY=None\`.
+
+Remaining production blockers: independent publisher key and signed
+release provenance; administrator-authorized fixed-path ELF install
+on an explicitly selected VPS; protected systemd socket, limited
+B1d0 write opcode with durable one-use CAS, service health and
+reboot; full installed Windows A -> authorized VPS -> Windows B.
