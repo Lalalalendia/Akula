@@ -1,0 +1,31 @@
+{
+  "tested_at": "2026-10-25",
+  "module": "M5 unified offline pipeline",
+  "tests_discovered": 189,
+  "tests_passed": 188,
+  "tests_skipped": 1,
+  "verified_scenarios": [
+    "discovery M4 two stable passes",
+    "RAW persistence/readback",
+    "HTML fixture parse",
+    "chapter completeness",
+    "streaming work publication",
+    "S3-compatible fixture",
+    "SQLite crash lease recovery",
+    "read-only Erida/Literotica handoff",
+    "strict repeat idempotence"
+  ],
+  "demo": {
+    "discovery_status": "STABLE_OBSERVED",
+    "pipeline_status": "PUBLISHED",
+    "pages": 3,
+    "revision_id": "02066f758728df5a07991c1089ec0459eb8bb292ce31614b49a176bdb45ece1b",
+    "handoff_key": "handoffs/demo-story/02066f758728df5a07991c1089ec0459eb8bb292ce31614b49a176bdb45ece1b.json"
+  },
+  "not_verified": [
+    "genuine MinIO for full M5 chain",
+    "real Literotica site parser/fetch",
+    "actual Erida importer integration",
+    "production deployment"
+  ]
+}
