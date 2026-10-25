@@ -31,6 +31,36 @@ mod tests {
     use std::{path::PathBuf, sync::Arc};
 
     #[test]
+    fn invalid_preview_preserves_the_current_verified_local_grid() {
+        use super::super::Completion;
+        use aquilum_core::notion_api_probe::bases_edits::EffectiveBase;
+        let mut s=BasesSession::new(Arc::new(|| {}));
+        s.generation=3;
+        let root="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let target=PathBuf::from("test-vault");
+        s.view.stage=Stage::Reviewing;
+        s.view.busy=true;
+        s.view.source=Some(root.into());
+        s.view.target=Some(target.clone());
+        s.view.digest=Some("a".repeat(64));
+        s.disk_hash=Some("c".repeat(64));
+        s.effective=Some(EffectiveBase {
+            base_id:"base".into(),notion_source_id:"notion".into(),
+            source_root:root.into(),source_digest:"a".repeat(64),
+            local_revision:2,columns:Vec::new(),rows:Vec::new(),
+            saved_source_views:0,native_views_supported:false,
+        });
+        s.tx.send(Completion {
+            generation:3,source:root.into(),target,
+            result:Err(()),
+        }).unwrap();
+        assert!(s.poll());
+        assert_eq!(s.view.stage,Stage::Ready);
+        assert!(s.effective.is_some(),"a failed read-only comparison cannot discard valid old data");
+        assert!(s.view.rebase_preview.is_none());
+        assert!(!s.view.busy);
+    }
+    #[test]
     fn preview_never_starts_without_a_pinned_local_overlay_and_known_target() {
         let mut session = BasesSession::new(Arc::new(|| {}));
         session.view = BasesView {
