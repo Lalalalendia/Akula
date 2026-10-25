@@ -4,8 +4,8 @@
 
 use akula_staya_integration::node_wow_mailbox_lab::{
     MailRoleClaims, MailRoleHold, NodeWowMailboxLab, PublishHold, PublishStop,
-    first_mail_publish_ci, mail_commit_receipt_for_lab,
-    mail_epoch_floor_for_lab, sign_mail_policy_for_lab,
+    first_mail_publish_ci, mail_commit_receipt_for_lab, mail_epoch_floor_for_lab,
+    sign_mail_policy_for_lab,
 };
 use akula_wire_lab::{
     crypto_identity_w3::SignedHeader,
@@ -693,23 +693,35 @@ fn revoked_sqlite_mail_role_fences_live_node_even_with_valid_owner_files() {
 /// executable and public source are synthetic; no installed Node is touched.
 #[test]
 fn root_mail_cas_publisher_ci_child() {
-    if std::env::var("AKULA_WOW_ROOT_CAS_CHILD").ok().as_deref()!=Some("1") {
+    if std::env::var("AKULA_WOW_ROOT_CAS_CHILD").ok().as_deref() != Some("1") {
         return;
     }
-    assert_eq!(rustix::process::geteuid().as_raw(),0);
-    let source=std::env::var("AKULA_WOW_ROOT_CAS_SOURCE").unwrap();
-    let bytes=fs::read(source).unwrap();
-    let which=std::env::var("AKULA_WOW_ROOT_CAS_STOP").unwrap();
-    let (point,expected)=match which.as_str() {
-        "pending"=>(PublishStop::AfterPendingSync,Err(PublishHold::InjectedStop)),
-        "policy"=>(PublishStop::AfterPolicyRename,Err(PublishHold::InjectedStop)),
-        "floor"=>(PublishStop::AfterFloorRename,Err(PublishHold::InjectedStop)),
-        "receipt"=>(PublishStop::AfterReceiptRename,Err(PublishHold::InjectedStop)),
-        "existing"=>(PublishStop::None,Err(PublishHold::ExistingOrInterrupted)),
-        "none"=>(PublishStop::None,Ok(())),
-        _=>panic!("invalid CI-only crash point"),
+    assert_eq!(rustix::process::geteuid().as_raw(), 0);
+    let source = std::env::var("AKULA_WOW_ROOT_CAS_SOURCE").unwrap();
+    let bytes = fs::read(source).unwrap();
+    let which = std::env::var("AKULA_WOW_ROOT_CAS_STOP").unwrap();
+    let (point, expected) = match which.as_str() {
+        "pending" => (
+            PublishStop::AfterPendingSync,
+            Err(PublishHold::InjectedStop),
+        ),
+        "policy" => (
+            PublishStop::AfterPolicyRename,
+            Err(PublishHold::InjectedStop),
+        ),
+        "floor" => (
+            PublishStop::AfterFloorRename,
+            Err(PublishHold::InjectedStop),
+        ),
+        "receipt" => (
+            PublishStop::AfterReceiptRename,
+            Err(PublishHold::InjectedStop),
+        ),
+        "existing" => (PublishStop::None, Err(PublishHold::ExistingOrInterrupted)),
+        "none" => (PublishStop::None, Ok(())),
+        _ => panic!("invalid CI-only crash point"),
     };
-    assert_eq!(first_mail_publish_ci(&bytes,1,point),expected);
+    assert_eq!(first_mail_publish_ci(&bytes, 1, point), expected);
 }
 
 #[test]
@@ -747,7 +759,17 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     impl Drop for Cleanup {
         fn drop(&mut self) {
             for args in [
-                vec!["rm", "-f", "--", POLICY, FLOOR, RECEIPT, PENDING, PENDING_FLOOR, PENDING_RECEIPT],
+                vec![
+                    "rm",
+                    "-f",
+                    "--",
+                    POLICY,
+                    FLOOR,
+                    RECEIPT,
+                    PENDING,
+                    PENDING_FLOOR,
+                    PENDING_RECEIPT,
+                ],
                 vec!["rmdir", "--", ROOT],
                 vec!["rm", "-f", "--", ROOT_POLICY],
                 vec!["rmdir", "--", PARENT],
@@ -770,8 +792,15 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     // RootTrust is independently pinned: the root actor reads this
     // root-owned Node policy, not a key from the caller's mail manifest.
     sudo(&[
-        "install", "-o", "root", "-g", "root", "-m", "0600",
-        fixture.node_policy.to_str().unwrap(), ROOT_POLICY,
+        "install",
+        "-o",
+        "root",
+        "-g",
+        "root",
+        "-m",
+        "0600",
+        fixture.node_policy.to_str().unwrap(),
+        ROOT_POLICY,
     ]);
     let root_child = |stop: &str| {
         let exe = std::env::current_exe().unwrap();
@@ -781,13 +810,17 @@ fn root_owned_mail_policy_is_read_only_and_current() {
             .arg("GITHUB_ACTIONS=true")
             .arg("AKULA_WOW_ROOT_CAS_CI=1")
             .arg("AKULA_WOW_ROOT_CAS_CHILD=1")
-            .arg(format!("AKULA_WOW_ROOT_CAS_SOURCE={}", signed_source.display()))
+            .arg(format!(
+                "AKULA_WOW_ROOT_CAS_SOURCE={}",
+                signed_source.display()
+            ))
             .arg(format!("AKULA_WOW_ROOT_CAS_STOP={stop}"))
             .arg(exe)
             .arg("--exact")
             .arg("root_mail_cas_publisher_ci_child")
             .arg("--nocapture")
-            .status().unwrap();
+            .status()
+            .unwrap();
         assert!(status.success(), "root-only publisher subprocess: {stop}");
     };
     // All three early crash points must refuse admission. A privileged
@@ -796,13 +829,25 @@ fn root_owned_mail_policy_is_read_only_and_current() {
         root_child(crash);
         assert!(matches!(
             NodeWowMailboxLab::open_existing_root_provisioned(
-                &fixture.node, &fixture.mail_state, NODE_ENDPOINT,
-                fixture.custodian.clone(),1,
+                &fixture.node,
+                &fixture.mail_state,
+                NODE_ENDPOINT,
+                fixture.custodian.clone(),
+                1,
             ),
             Err(MailRoleHold::MailPolicy)
         ));
-        sudo(&["rm", "-f", "--", POLICY, FLOOR, RECEIPT,
-            PENDING, PENDING_FLOOR, PENDING_RECEIPT]);
+        sudo(&[
+            "rm",
+            "-f",
+            "--",
+            POLICY,
+            FLOOR,
+            RECEIPT,
+            PENDING,
+            PENDING_FLOOR,
+            PENDING_RECEIPT,
+        ]);
     }
     // The last rename was already fsynced: a lost response must not
     // permit re-provisioning, even though read-only admission is complete.
@@ -814,7 +859,8 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     fs::write(
         &receipt_fixture,
         mail_commit_receipt_for_lab(&signed_bytes, &floor_bytes, 1),
-    ).unwrap();
+    )
+    .unwrap();
     let meta = fs::metadata(POLICY).unwrap();
     assert_eq!(meta.uid(), 0);
     assert_eq!(meta.gid(), rustix::process::getegid().as_raw());
