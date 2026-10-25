@@ -1,8 +1,39 @@
 //! C5b4 QA dry-run: compare a selected imported source snapshot with another.
 //! No approve/write action is exported from this module.
-use super::{bases_edits, BasesSession, Payload, Stage};
+use super::{bases_edits, load, BasesSession, Payload, Stage};
+use aquilum_core::Core;
+use std::sync::Arc;
 
 impl BasesSession {
+    /// The host must show an explicit confirmation dialog before calling this.
+    /// The core rechecks every source field and the pinned File Gate hash.
+    pub fn apply_compatible_snapshot(&mut self, core: Arc<Core>) -> Result<(),()> {
+        if self.view.stage!=Stage::Ready || self.view.busy
+            || self.has_pending_draft() {return Err(());}
+        let preview=self.view.rebase_preview.as_ref().ok_or(())?;
+        let source=self.view.source.clone().ok_or(())?;
+        let old=self.view.digest.clone().ok_or(())?;
+        let base=self.view.base_id.clone().ok_or(())?;
+        let target=self.view.target.clone().ok_or(())?;
+        let expected=self.disk_hash.as_deref().ok_or(())?;
+        if !preview.can_offer_approval() || preview.old_digest!=old
+            || preview.source_root!=source || preview.expected_local_hash!=expected
+            || !self.view.choices.iter().any(|c|
+                c.base_id==base && c.digest==preview.new_digest) {
+            return Err(());
+        }
+        let next=preview.new_digest.clone();
+        let hash=expected.to_owned();
+        self.start(Stage::Saving, move || {
+            bases_edits::apply_rebase_approved(&core,&target,&source,&old,
+                &next,&hash,true).map_err(|_| ())?;
+            match load(&target,&source,&next,&base)? {
+                Payload::Loaded(effective,disk_hash)=>
+                    Ok(Payload::Rebased(effective,disk_hash)),
+                _=>Err(()),
+            }
+        })
+    }
     pub fn preview_new_snapshot(&mut self, new_digest: &str) -> Result<(), ()> {
         if self.view.stage != Stage::Ready || self.view.busy
             || self.has_pending_draft() || self.effective.is_none()

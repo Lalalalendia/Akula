@@ -452,3 +452,72 @@ fn c5b4_rebase_preview_blocks_same_type_schema_definition_changes() {
     assert_eq!(preview.cells[0].disposition,RebaseDisposition::PropertyDefinitionChanged);
     assert!(!preview.can_offer_approval());
 }
+
+
+#[test]
+fn c5b4_approved_rebase_preserves_local_values_only_after_exact_cas() {
+    let f=Fixture::new();
+    let base=f.model().bases.iter().find(|b|b.notion_id==DS1).unwrap().akula_id.clone();
+    let row=f.row(A);
+    let property=f.prop(DS1,"score");
+    apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::Set{row_id:row.clone(),property_id:property.clone(),
+            value:LocalValue::Number(700.0)}],true).unwrap();
+    let original=fs::read(f.vault.join(&f.bundle)).unwrap();
+    let next=published_new_source(&f, |source| {
+        source.objects.iter_mut().find(|o|o.kind=="page"&&o.id==C)
+            .unwrap().json["properties"]["Score"]["number"]=json!(103);
+    });
+    let report=preview_rebase(&f.vault,A,&f.digest,&next).unwrap();
+    assert!(report.can_offer_approval());
+    let before=fs::read(f.edited_path()).unwrap();
+    assert!(apply_rebase_approved(&f.core,&f.vault,A,&f.digest,&next,
+        &report.expected_local_hash,false).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),before);
+    let receipt=apply_rebase_approved(&f.core,&f.vault,A,&f.digest,&next,
+        &report.expected_local_hash,true).unwrap();
+    assert_eq!(receipt.revision,2);
+    assert_eq!(receipt.overrides_preserved,1);
+    assert!(receipt.source_unchanged);
+    assert_ne!(fs::read(f.edited_path()).unwrap(),before);
+    assert_eq!(fs::read(f.vault.join(&f.bundle)).unwrap(),original);
+    assert!(open(&f.vault,A,&f.digest).is_err(),
+        "old baseline must not work after explicitly approved rebase");
+    let active=open(&f.vault,A,&next).unwrap().unwrap();
+    assert_eq!(active.state.baseline_digest,next);
+    assert_eq!(active.expected_disk_hash,receipt.disk_hash);
+    let effective=read_effective_base(&f.vault,A,&next,&base).unwrap();
+    let selected=effective.rows.iter().find(|r|r.akula_id==row).unwrap();
+    assert_eq!(selected.cells.iter().find(|c|c.property_id==property).unwrap().value,
+        EffectiveValue::Local(LocalValue::Number(700.0)));
+}
+#[test]
+fn c5b4_approved_rebase_denies_changed_source_and_stale_hash() {
+    let f=Fixture::new();
+    let row=f.row(A);let property=f.prop(DS1,"score");
+    let initial=apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::Set{row_id:row.clone(),property_id:property.clone(),
+            value:LocalValue::Number(3.0)}],true).unwrap();
+    let next=published_new_source(&f, |source| {
+        source.objects.iter_mut().find(|o|o.kind=="page"&&o.id==A)
+            .unwrap().json["properties"]["Score"]["number"]=json!(11);
+    });
+    let before=fs::read(f.edited_path()).unwrap();
+    assert!(apply_rebase_approved(&f.core,&f.vault,A,&f.digest,&next,
+        &initial.disk_hash,true).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),before);
+    let compatible=published_new_source(&f, |source| {
+        source.objects.iter_mut().find(|o|o.kind=="page"&&o.id==C)
+            .unwrap().json["properties"]["Score"]["number"]=json!(107);
+    });
+    let preview=preview_rebase(&f.vault,A,&f.digest,&compatible).unwrap();
+    let newer=apply_approved(&f.core,&f.vault,A,&f.digest,
+        Some(&initial.disk_hash),&[Change::Set{
+            row_id:row,property_id:property,value:LocalValue::Number(4.0),
+        }],true).unwrap();
+    assert_ne!(preview.expected_local_hash,newer.disk_hash);
+    let stale_before=fs::read(f.edited_path()).unwrap();
+    assert!(apply_rebase_approved(&f.core,&f.vault,A,&f.digest,&compatible,
+        &preview.expected_local_hash,true).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),stale_before);
+}

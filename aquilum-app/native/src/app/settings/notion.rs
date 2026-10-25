@@ -65,6 +65,30 @@ impl App {
                 }
                 true
             }
+            Action::NotionBasesApplyRebase => {
+                let view=self.notion_bases.view();
+                if view.target.as_deref()==self.workspace.root.as_deref()
+                    && !view.busy
+                    && let Some(report)=view.rebase_preview.as_ref()
+                    && report.can_offer_approval()
+                {
+                    let confirmed=rfd::MessageDialog::new()
+                        .set_title("Akula Bases — подтверждение локального переноса")
+                        .set_description(format!(
+                            "Источник: {}\nСтарый снимок: {}\nНовый снимок: {}\nСохранить: {} локальных значений, {} собственных колонок.\n\nПеренос разрешён только при нуле конфликтов. Перед записью проверяются снимки и точный CAS-хеш локального файла. Исходные JSON Notion не меняются.\n\nПрименить локальный перенос?",
+                            report.source_root, report.old_digest,report.new_digest,
+                            report.ready_cells,report.columns.len(),
+                        ))
+                        .set_level(rfd::MessageLevel::Warning)
+                        .set_buttons(rfd::MessageButtons::YesNo)
+                        .show()==rfd::MessageDialogResult::Yes;
+                    if confirmed {
+                        let _=self.notion_bases.apply_compatible_snapshot(
+                            std::sync::Arc::clone(&self.workspace.core));
+                    }
+                }
+                true
+            }
             Action::NotionBasesReload => {
                 let _ = self.notion_bases.reload();
                 true

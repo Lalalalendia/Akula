@@ -1,4 +1,4 @@
-//! Read-only C5b4 comparison panel, intentionally without an Apply button.
+//! C5b4 comparison panel; only a conflict-free, explicit CAS action can apply.
 use super::*;
 use aquilum_core::notion_api_probe::bases_edits::RebaseDisposition;
 use crate::notion_bases::BasesView;
@@ -70,13 +70,21 @@ pub(super) fn append(
                 |t|t.text_secondary,None,Leading::Times(1.3),
             ));
         }
-        column=column.with_fixed(selectable(
-            if report.can_offer_approval() {
-                "Конфликты не обнаружены. Перенос пока недоступен: необходим отдельный проверенный шаг File Gate CAS."
-            } else {
-                "Есть конфликты. Автоматический перенос запрещён; старые локальные правки не изменены."
-            },|t|t.text_muted,None,Leading::Times(1.3),
-        ));
+        if report.can_offer_approval() {
+            column=column.with_fixed(action_button(
+                "Применить совместимый снимок через File Gate (с подтверждением)".into(),
+                Action::NotionBasesApplyRebase,bindings,
+            ));
+            column=column.with_fixed(selectable(
+                "Перед записью источник и хеш будут проверены повторно. Это локальный перенос; данные Notion не меняются.",
+                |t|t.text_muted,None,Leading::Times(1.3),
+            ));
+        } else {
+            column=column.with_fixed(selectable(
+                "Есть конфликты. Перенос заблокирован, старые локальные правки не изменены.",
+                |t|t.text_muted,None,Leading::Times(1.3),
+            ));
+        }
     }
     column
 }

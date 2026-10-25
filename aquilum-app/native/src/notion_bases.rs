@@ -77,6 +77,7 @@ enum Payload {
     Catalog(Vec<BaseChoice>),
     Loaded(EffectiveBase, Option<String>),
     Rebase(bases_edits::RebasePreview),
+    Rebased(EffectiveBase, Option<String>),
 }
 struct Completion {
     generation: u64,
@@ -364,6 +365,17 @@ impl BasesSession {
                         self.view.selected=None; }
                     self.view.notice=if saving{Some("Правка сохранена локально через File Gate CAS")}
                         else{None};
+                }
+                Ok(Payload::Rebased(base, hash)) if saving
+                    && self.view.base_id.as_deref()==Some(base.base_id.as_str()) =>
+                {
+                    self.view.digest=Some(base.source_digest.clone());
+                    self.view.rebase_preview=None;
+                    self.view.selected=None;
+                    self.view.row_start=0;self.view.column_start=0;
+                    self.effective=Some(base);self.disk_hash=hash;
+                    self.view.stage=Stage::Ready;
+                    self.view.notice=Some("Совместимый снимок принят через File Gate CAS. Конфликтов нет.");
                 }
                 Ok(Payload::Rebase(report)) if reviewing
                     && self.view.digest.as_deref()==Some(report.old_digest.as_str())
