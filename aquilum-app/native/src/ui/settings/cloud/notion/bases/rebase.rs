@@ -70,6 +70,35 @@ pub(super) fn append(
                 |t|t.text_secondary,None,Leading::Times(1.3),
             ));
         }
+        let manual_possible=report.conflicted_columns==0
+            && report.conflicted_cells>0 && report.conflicted_cells<=10
+            && report.cells.iter().all(|cell|matches!(cell.disposition,
+                RebaseDisposition::Eligible|RebaseDisposition::SourceValueChanged));
+        if manual_possible {
+            column=column.with_fixed(selectable(
+                "Для каждого конфликта значения явно подтвердите сохранение локальной правки. Значения Notion остаются в исходном снимке.",
+                |t|t.text_secondary,None,Leading::Times(1.3),
+            ));
+            for cell in report.cells.iter().filter(|cell|
+                cell.disposition==RebaseDisposition::SourceValueChanged) {
+                let marked=bases.keep_local.iter().any(|(row,prop)|
+                    row==&cell.row_id && prop==&cell.property_id);
+                column=column.with_fixed(action_button(
+                    format!("{}: сохранить локальное · {} / {}",
+                        if marked {"Выбрано"} else {"Выбрать"},
+                        cell.row_id.chars().take(10).collect::<String>(),
+                        cell.property_id.chars().take(10).collect::<String>()),
+                    Action::NotionBasesToggleKeepLocal(
+                        cell.row_id.clone(),cell.property_id.clone()),bindings,
+                ));
+            }
+            if crate::notion_bases::rebase::manual_choices_complete(bases) {
+                column=column.with_fixed(action_button(
+                    "Подтвердить сохранение выбранных локальных значений (CAS)".into(),
+                    Action::NotionBasesApplyReviewedRebase,bindings,
+                ));
+            }
+        }
         if report.can_offer_approval() {
             column=column.with_fixed(action_button(
                 "Применить совместимый снимок через File Gate (с подтверждением)".into(),

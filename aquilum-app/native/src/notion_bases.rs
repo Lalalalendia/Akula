@@ -72,6 +72,7 @@ pub struct BasesView {
     pub schema_draft: Option<SchemaDraftView>,
     pub selected: Option<SelectedCell>,
     pub rebase_preview: Option<bases_edits::RebasePreview>,
+    pub keep_local: Vec<(String,String)>,
 }
 enum Payload {
     Catalog(Vec<BaseChoice>),
@@ -293,6 +294,7 @@ impl BasesSession {
         self.view.digest=Some(digest.clone());self.view.base_id=Some(base_id.clone());
         self.view.row_start=0;self.view.column_start=0;
         self.view.selected=None;self.view.rebase_preview=None;
+        self.view.keep_local.clear();
         self.effective=None;self.disk_hash=None;
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base_id))
     }
@@ -316,6 +318,7 @@ impl BasesSession {
         let base=self.view.base_id.clone().ok_or(())?;
         self.effective=None; self.disk_hash=None;
         self.view.selected=None;self.view.rebase_preview=None;
+        self.view.keep_local.clear();
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base))
     }
     pub fn change(&mut self, core:Arc<Core>, row:&str, property:&str,
@@ -360,6 +363,7 @@ impl BasesSession {
                 {
                     self.effective=Some(base); self.disk_hash=hash;
                     self.view.rebase_preview=None;
+                    self.view.keep_local.clear();
                     self.view.stage=Stage::Ready;
                     if saving { self.view.draft=None; self.view.schema_draft=None;
                         self.view.selected=None; }
@@ -371,6 +375,7 @@ impl BasesSession {
                 {
                     self.view.digest=Some(base.source_digest.clone());
                     self.view.rebase_preview=None;
+                    self.view.keep_local.clear();
                     self.view.selected=None;
                     self.view.row_start=0;self.view.column_start=0;
                     self.effective=Some(base);self.disk_hash=hash;
@@ -382,6 +387,7 @@ impl BasesSession {
                     && self.disk_hash.as_deref()==Some(report.expected_local_hash.as_str()) =>
                 {
                     self.view.rebase_preview=Some(report);
+                    self.view.keep_local.clear();
                     self.view.stage=Stage::Ready;
                     self.view.notice=Some("Сравнение снимков завершено: это только анализ, без переноса правок");
                 }

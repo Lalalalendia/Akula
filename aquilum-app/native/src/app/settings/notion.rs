@@ -65,6 +65,34 @@ impl App {
                 }
                 true
             }
+            Action::NotionBasesToggleKeepLocal(row,property) => {
+                let _=self.notion_bases.toggle_keep_local(row,property);
+                true
+            }
+            Action::NotionBasesApplyReviewedRebase => {
+                let view=self.notion_bases.view();
+                if view.target.as_deref()==self.workspace.root.as_deref()
+                    && !view.busy
+                    && crate::notion_bases::rebase::manual_choices_complete(&view)
+                    && let Some(report)=view.rebase_preview.as_ref()
+                {
+                    let confirmed=rfd::MessageDialog::new()
+                        .set_title("Akula Bases — ручное разрешение конфликтов")
+                        .set_description(format!(
+                            "Источник Notion: {}\nСтарый снимок: {}\nНовый снимок: {}\n\nДля {} конфликтующих ячеек вы явно выбрали сохранение локального значения вместо изменённого значения Notion.\n\nНи исходные JSON, ни удалённые поля не перезаписываются. Структурные конфликты остаются запрещены. Перед локальной записью проверяется CAS-хеш.\n\nПрименить выбор?",
+                            report.source_root,report.old_digest,report.new_digest,
+                            view.keep_local.len(),
+                        ))
+                        .set_level(rfd::MessageLevel::Warning)
+                        .set_buttons(rfd::MessageButtons::YesNo)
+                        .show()==rfd::MessageDialogResult::Yes;
+                    if confirmed {
+                        let _=self.notion_bases.apply_reviewed_snapshot(
+                            std::sync::Arc::clone(&self.workspace.core));
+                    }
+                }
+                true
+            }
             Action::NotionBasesApplyRebase => {
                 let view=self.notion_bases.view();
                 if view.target.as_deref()==self.workspace.root.as_deref()

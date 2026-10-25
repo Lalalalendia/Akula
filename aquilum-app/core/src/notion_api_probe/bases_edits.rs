@@ -13,7 +13,7 @@ mod effective;
 mod rebase_preview;
 mod rebase_apply;
 pub use rebase_apply::{apply_rebase_approved, apply_rebase_resolved_approved, RebaseReceipt};
-pub use rebase_preview::{preview_rebase, RebasePreview, RebaseDisposition};
+pub use rebase_preview::{preview_rebase, RebasePreview, RebaseDisposition, RebaseCell};
 pub use effective::{read_effective_base, EffectiveBase, EffectiveCell,
     EffectiveColumn, EffectiveRow, EffectiveValue};
 
