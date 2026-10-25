@@ -10,6 +10,7 @@ on:
       - 'interop/akula-staya/src/bin/p2p_one_file_beta/unstable_network_lab.rs'
       - 'interop/akula-staya/src/bin/p2p_one_file_beta/resume_process_lab.rs'
       - 'interop/akula-staya/src/bin/p2p_one_file_beta/udp_impairment_lab.rs'
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta/lost_ack_reconcile_lab.rs'
       - 'interop/akula-staya/Cargo.toml'
       - '.github/workflows/p2p-photo-resume-lab.yml'
 
@@ -60,6 +61,10 @@ jobs:
         shell: bash
         run: |
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta udp_impairment_lab -- --nocapture
+      - name: Lost partial ACK and lost final ACK are recovered by cold status query
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta lost_ack_reconcile_lab -- --nocapture
       - name: Verify ordinary one-file tests are still unchanged
         shell: bash
         run: |
