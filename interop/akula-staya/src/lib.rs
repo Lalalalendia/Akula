@@ -10,6 +10,8 @@ use aquilum_core::p2p_offer_lab::{
 };
 #[cfg(feature = "p2p-live-identity")]
 pub mod live_identity;
+#[cfg(feature = "p2p-attachment-contract")]
+pub mod attachment_contract;
 
 // The one-file source is compiled both as a standalone binary and as a
 // module inside this library. Keep its existing absolute crate path valid.
