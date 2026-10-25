@@ -17,6 +17,9 @@ pub fn manual_choices_complete(view:&BasesView)->bool{
         .collect::<BTreeSet<_>>();
     let selected=view.keep_local.iter().cloned().collect::<BTreeSet<_>>();
     report.conflicted_cells==conflicts.len()
+        && report.cells.iter().all(|cell|
+            cell.disposition!=bases_edits::RebaseDisposition::SourceValueChanged
+                || cell.manual_review_supported)
         && view.keep_local.len()==selected.len()
         && selected==conflicts
 }
@@ -32,7 +35,8 @@ impl BasesSession {
         if report.conflicted_columns>0
             || !report.cells.iter().any(|cell|
                 cell.row_id==row && cell.property_id==property
-                && cell.disposition==bases_edits::RebaseDisposition::SourceValueChanged) {
+                && cell.disposition==bases_edits::RebaseDisposition::SourceValueChanged
+                && cell.manual_review_supported) {
             return false;
         }
         let key=(row.to_owned(),property.to_owned());
@@ -156,7 +160,9 @@ mod tests {
             local_revision:2,ready_cells:0,conflicted_cells:1,
             conflicted_columns:0,
             cells:vec![RebaseCell{row_id:"row".into(),property_id:"prop".into(),
-                disposition:RebaseDisposition::SourceValueChanged}],
+                disposition:RebaseDisposition::SourceValueChanged,
+                previous_source:Some("1".into()),updated_source:Some("2".into()),
+                local_override:Some("3".into()),manual_review_supported:true}],
             columns:Vec::new(),writes_performed:false,
         });
         assert!(!manual_choices_complete(&session.view));

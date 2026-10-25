@@ -72,8 +72,11 @@ pub(super) fn append(
         }
         let manual_possible=report.conflicted_columns==0
             && report.conflicted_cells>0 && report.conflicted_cells<=10
-            && report.cells.iter().all(|cell|matches!(cell.disposition,
-                RebaseDisposition::Eligible|RebaseDisposition::SourceValueChanged));
+            && report.cells.iter().all(|cell|match cell.disposition {
+                RebaseDisposition::Eligible=>true,
+                RebaseDisposition::SourceValueChanged=>cell.manual_review_supported,
+                _=>false,
+            });
         if manual_possible {
             column=column.with_fixed(selectable(
                 "Для каждого конфликта значения явно подтвердите сохранение локальной правки. Значения Notion остаются в исходном снимке.",
@@ -83,6 +86,13 @@ pub(super) fn append(
                 cell.disposition==RebaseDisposition::SourceValueChanged) {
                 let marked=bases.keep_local.iter().any(|(row,prop)|
                     row==&cell.row_id && prop==&cell.property_id);
+                column=column.with_fixed(selectable(
+                    &format!("Было в Notion: {} · Стало в Notion: {} · Локально: {}",
+                        cell.previous_source.as_deref().unwrap_or("недоступно"),
+                        cell.updated_source.as_deref().unwrap_or("недоступно"),
+                        cell.local_override.as_deref().unwrap_or("недоступно")),
+                    |t|t.text_secondary,None,Leading::Times(1.3),
+                ));
                 column=column.with_fixed(action_button(
                     format!("{}: сохранить локальное · {} / {}",
                         if marked {"Выбрано"} else {"Выбрать"},

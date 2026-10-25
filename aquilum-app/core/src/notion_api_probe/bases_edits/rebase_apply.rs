@@ -66,8 +66,11 @@ pub fn apply_rebase_resolved_approved(
             RebaseDisposition::Eligible|RebaseDisposition::SourceValueChanged)) {
         return Err("structural or schema rebase conflicts require separate manual review".into());
     }
-    if !affected.is_empty() && preview.conflicted_cells!=affected.len() {
-        return Err("unresolved source conflicts: rebase denied".into());
+    if !affected.is_empty() && (preview.conflicted_cells!=affected.len()
+        || preview.cells.iter().any(|cell|
+            cell.disposition==RebaseDisposition::SourceValueChanged
+            && !cell.manual_review_supported)) {
+        return Err("source values cannot be fully displayed for manual approval".into());
     }
     if affected.is_empty() && !preview.can_offer_approval() {
         return Err("no eligible local changes or incompatible schema".into());

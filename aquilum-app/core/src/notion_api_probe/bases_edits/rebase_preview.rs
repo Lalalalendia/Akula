@@ -1,7 +1,7 @@
 //! C5b4: evidence-only, read-only three-way Akula Bases rebase preview.
 //! No File Gate operation is reachable here. Nothing is silently replayed.
 //! Old source, new source and the pinned local overlay are all verified first.
-use super::{read, relative, source_model, validate_cell, validate_columns_only, Edits};
+use super::{read, relative, source_model, validate_cell, validate_columns_only, Edits, LocalValue};
 use crate::notion_api_probe::bases_model::{BaseRow, BasesModel};
 use serde::Serialize;
 use std::{collections::BTreeMap, path::Path};
@@ -24,6 +24,11 @@ pub struct RebaseCell {
     pub row_id: String,
     pub property_id: String,
     pub disposition: RebaseDisposition,
+    /// Complete, scalar/plain-text value previews; none when unsupported or too long.
+    pub previous_source: Option<String>,
+    pub updated_source: Option<String>,
+    pub local_override: Option<String>,
+    pub manual_review_supported: bool,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct RebaseColumn {
@@ -68,6 +73,40 @@ fn source_cell<'a>(
         c.akula_property_id.as_deref() == Some(property))?;
     Some((&col.source_type, &col.source_definition, &cell.source_value))
 }
+
+const MAX_MANUAL_VALUE_CHARS: usize = 240;
+fn bounded_readable(text:String)->Option<String>{
+    if text.chars().count()>MAX_MANUAL_VALUE_CHARS
+        || text.chars().any(|c|c.is_control() && c!='\n' && c!='\t') {
+        return None;
+    }
+    Some(text)
+}
+fn readable_source(value:&serde_json::Value)->Option<String>{
+    let kind=value.get("type")?.as_str()?;
+    let text=match kind {
+        "number" => value.get("number")?.as_number()
+            .map(ToString::to_string)
+            .or_else(||value.get("number")?.is_null().then(||"(пусто)".into()))?,
+        "checkbox" => value.get("checkbox")?.as_bool()?.to_string(),
+        "title"|"rich_text" => value.get(kind)?.as_array()?.iter()
+            .map(|part|part.get("plain_text")?.as_str())
+            .collect::<Option<Vec<_>>>()?.join(""),
+        "url"|"email"|"phone_number" => value.get(kind)?.as_str()?.to_owned(),
+        _=>return None,
+    };
+    bounded_readable(text)
+}
+fn readable_local(value:&LocalValue)->Option<String>{
+    let text=match value {
+        LocalValue::Text(s)=>s.clone(),
+        LocalValue::Number(n) if n.is_finite()=>n.to_string(),
+        LocalValue::Checkbox(b)=>b.to_string(),
+        _=>return None,
+    };
+    bounded_readable(text)
+}
+
 /// All three inputs must belong to the SAME Notion root and a verified,
 /// independent Vault. The two source digests must be different; the old
 /// local overlay must still be pinned to the old digest.
@@ -154,9 +193,21 @@ pub fn preview_rebase(
         };
         if disposition == RebaseDisposition::Eligible {ready_cells+=1;}
         else {conflicted_cells+=1;}
+        let (previous_source,updated_source,local_override,manual_review_supported)=
+            if disposition==RebaseDisposition::SourceValueChanged {
+                let prior=source_cell(&old,old_row,&override_cell.property_id)
+                    .and_then(|(_,_,value)|readable_source(value));
+                let incoming=target.and_then(|row|
+                    source_cell(&new,row,&override_cell.property_id)
+                        .and_then(|(_,_,value)|readable_source(value)));
+                let local=readable_local(&override_cell.value);
+                let supported=prior.is_some() && incoming.is_some() && local.is_some();
+                (prior,incoming,local,supported)
+            } else {(None,None,None,false)};
         cells.push(RebaseCell {
             row_id:override_cell.row_id.clone(),
             property_id:override_cell.property_id.clone(),disposition,
+            previous_source,updated_source,local_override,manual_review_supported,
         });
     }
     let conflicted_columns=columns.iter().filter(|c|!c.compatible).count();
