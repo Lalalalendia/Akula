@@ -1,8 +1,7 @@
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
 use super::{App, Effect, Outcome};
-use crate::ui::dialog::DialogAnswer;
-use crate::ui::editor::{TextAction, TextEditor};
+use crate::ui::dialog::DialogAnswer; use crate::ui::editor::{TextAction, TextEditor};
 use crate::ui::settings::{Binding, CloudPopup, SettingsDialog};
 use crate::ui::settings::controls::Committed;
 use crate::ui::settings::schema::{Action, Value};
@@ -49,6 +48,7 @@ impl App {
         let closing = (id == cloud.layer && action.downcast_ref::<DialogAnswer>() == Some(&DialogAnswer::Cancel))
             || (pressed && (id == cloud.close || id == cloud.cancel));
         if closing {
+            #[cfg(feature = "notion-offline-preview")] if cloud.provider == crate::ui::settings::schema::CloudProvider::Notion && !self.confirm_close_notion_bases() {dialog.cloud_popup=Some(cloud);return self.keep(dialog,None,Effect::None,root);}
             crate::ui::dialog::close(root, cloud.layer);
             root.focus_on(Some(dialog.layer));
             return self.keep(dialog, None, Effect::Content, root);
