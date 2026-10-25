@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "literotica-discovery-lab"
+version = "0.5.0"
+description = "Offline synthetic discovery, bounded streaming long-work publication and atomic S3 index lab"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+s3 = ["boto3>=1.30"]
+test = ["boto3>=1.30", "PyYAML>=6.0"]
+
+[tool.setuptools]
+packages = ["discovery_lab"]
