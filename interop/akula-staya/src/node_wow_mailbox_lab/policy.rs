@@ -225,7 +225,7 @@ fn read_root_owned_mail_file_with_handle(
     {
         return Err(MailRoleHold::MailPolicy);
     }
-    let handle = File::from(
+    let mut handle = File::from(
         openat(
             &dir,
             filename,
@@ -246,7 +246,7 @@ fn read_root_owned_mail_file_with_handle(
         return Err(MailRoleHold::MailPolicy);
     }
     let mut result = Vec::with_capacity(meta.len() as usize);
-    handle
+    (&mut handle)
         .take(limit + 1)
         .read_to_end(&mut result)
         .map_err(|_| MailRoleHold::MailPolicy)?;
