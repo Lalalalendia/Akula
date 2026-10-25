@@ -68,7 +68,8 @@ class TrialSpider(scrapy.Spider):
         "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
     }
 
-    def start_requests(self):
+    async def start(self):
+        # Scrapy 2.19 removed start_requests(); use the async start hook.
         yield scrapy.Request(ROOT, callback=self.parse, dont_filter=True)
 
     def parse(self, response):
