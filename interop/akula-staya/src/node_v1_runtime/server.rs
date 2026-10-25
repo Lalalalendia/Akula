@@ -38,21 +38,16 @@ pub async fn serve_one_authenticated_connection(
     }
     let roster: OwnerSignedRoster = request.roster.try_into()?;
     let grant = request.grant;
-    let challenge;
     // Grant type is selected before authorizing the operation. Cross-type
     // domain substitution is rejected by the pinned root-owned digest.
-    match request.operation {
-        Operation::Put => {
-            challenge = node
-                .issue_put_challenge(&roster, &grant.clone().put()?, peer)
-                .map_err(|_| NodeWireDenied)?;
-        }
-        Operation::Get => {
-            challenge = node
-                .issue_read_challenge(&roster, &grant.clone().read()?, peer)
-                .map_err(|_| NodeWireDenied)?;
-        }
-    }
+    let challenge = match request.operation {
+        Operation::Put => node
+            .issue_put_challenge(&roster, &grant.clone().put()?, peer)
+            .map_err(|_| NodeWireDenied)?,
+        Operation::Get => node
+            .issue_read_challenge(&roster, &grant.clone().read()?, peer)
+            .map_err(|_| NodeWireDenied)?,
+    };
     let signature = node
         .sign_local_health(request.client_nonce)
         .map_err(|_| NodeWireDenied)?;
