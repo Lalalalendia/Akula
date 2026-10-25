@@ -186,15 +186,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "akula-text-delta-codec"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "uuid",
- "zstd",
-]
-
-[[package]]
 name = "akula-node-catalog"
 version = "0.1.0"
 dependencies = [
@@ -222,6 +213,15 @@ dependencies = [
  "blake3",
  "ring",
  "serde",
+]
+
+[[package]]
+name = "akula-text-delta-codec"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "uuid",
+ "zstd",
 ]
 
 [[package]]
