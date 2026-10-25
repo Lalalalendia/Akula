@@ -77,8 +77,7 @@ fn protected(dir: &File, name: &str, maximum: u64) -> Result<Vec<u8>, BootstrapH
 /// Exact public key PEM stored by root_stage_v1.py. The PEM must not carry
 /// a second key or a different verifier identity from release.ed25519.
 fn expected_pub_pem(key: &[u8; 32]) -> Vec<u8> {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut der = Vec::with_capacity(SPKI_PREFIX.len() + key.len());
     der.extend_from_slice(SPKI_PREFIX);
     der.extend_from_slice(key);
@@ -139,8 +138,8 @@ pub(super) fn inspect_from_trust_fd(
     }
 
     let raw_manifest = protected(&stage, "manifest", 256)?;
-    let manifest = decode_b1a_wire(&raw_manifest)
-        .map_err(|_| BootstrapHelperError::InvalidStage)?;
+    let manifest =
+        decode_b1a_wire(&raw_manifest).map_err(|_| BootstrapHelperError::InvalidStage)?;
     if manifest.signer_id != HELPER_SIGNER
         || manifest.package_sha256 != policy.helper_sha256
         || manifest.package_size < 64
@@ -194,9 +193,7 @@ pub(super) fn inspect_from_trust_fd(
         .map_err(syscall)?,
     );
     let before = file.metadata()?;
-    if !root_file_ok(&before, 0o400, MAX_HELPER_BYTES)
-        || before.len() != manifest.package_size
-    {
+    if !root_file_ok(&before, 0o400, MAX_HELPER_BYTES) || before.len() != manifest.package_size {
         return Err(BootstrapHelperError::InvalidStage);
     }
     let mut hash = Context::new(&SHA256);
@@ -213,8 +210,7 @@ pub(super) fn inspect_from_trust_fd(
         let head_count = ((head.len() as u64).saturating_sub(offset)) as usize;
         let copy = head_count.min(read);
         if copy != 0 {
-            head[offset as usize..offset as usize + copy]
-                .copy_from_slice(&buffer[..copy]);
+            head[offset as usize..offset as usize + copy].copy_from_slice(&buffer[..copy]);
         }
         hash.update(&buffer[..read]);
         offset += read as u64;

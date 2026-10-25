@@ -221,11 +221,8 @@ fn signed_but_wrong_helper_identity_tampered_stage_or_unsafe_inode_holds() {
                 symlink("saved-stage", &stage).unwrap();
             }
             8 => {
-                fs::set_permissions(
-                    stage.join(HELPER_LEAF),
-                    Permissions::from_mode(0o444),
-                )
-                .unwrap();
+                fs::set_permissions(stage.join(HELPER_LEAF), Permissions::from_mode(0o444))
+                    .unwrap();
             }
             9 => {
                 fs::write(stage.join("release.pub"), b"different PEM").unwrap();
