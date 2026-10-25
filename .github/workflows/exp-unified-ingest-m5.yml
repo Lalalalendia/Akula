@@ -1,0 +1,50 @@
+name: EXP Unified Ingest M5 offline chain
+on:
+  pull_request:
+    paths:
+      - 'experiments/unified-ingest-m5/**'
+      - '.github/workflows/exp-unified-ingest-m5.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  offline-ingest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install isolated M5 dependencies
+        run: python -m pip install -e './experiments/unified-ingest-m5[test]'
+      - name: Test full M5 offline S3-compatible path
+        working-directory: experiments/unified-ingest-m5
+        run: python -m unittest discover -s tests -p test_m5_pipeline.py -v
+      - name: Run all-stages discovery / parse / publish / handoff
+        working-directory: experiments/unified-ingest-m5
+        run: |
+          python -m discovery_lab.unified_cli demo --state ./m5-state > ./first.json
+          python -m discovery_lab.unified_cli demo --state ./m5-state > ./second.json
+          python - <<'PY'
+          import json
+          a=json.load(open("first.json"));b=json.load(open("second.json"))
+          assert a["discovery"]["status"]=="STABLE_OBSERVED"
+          assert a["pipeline"]["status"]=="PUBLISHED"
+          assert a["pipeline"]["pages_verified"]==3
+          assert b["pipeline"]["status"]=="UNCHANGED"
+          assert a["pipeline"]["revision_id"]==b["pipeline"]["revision_id"]
+          PY
+      - name: Upload smoke receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unified-ingest-m5-evidence
+          path: |
+            experiments/unified-ingest-m5/first.json
+            experiments/unified-ingest-m5/second.json
+          if-no-files-found: ignore
+          retention-days: 14
