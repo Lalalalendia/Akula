@@ -3,9 +3,9 @@
 #![cfg(all(target_os = "linux", feature = "node-wow-mailbox-lab"))]
 
 use akula_staya_integration::node_wow_mailbox_lab::{
-    MailFirstApprovalClaims, MailRoleClaims, MailRoleHold, NodeWowMailboxLab, PublishHold, PublishStop,
-    first_mail_approval_proposal_for_lab, sign_first_mail_approval_for_lab,
-    first_mail_publish_ci, mail_commit_receipt_for_lab, mail_epoch_floor_for_lab,
+    MailFirstApprovalClaims, MailRoleClaims, MailRoleHold, NodeWowMailboxLab, PublishHold,
+    PublishStop, first_mail_approval_proposal_for_lab, first_mail_publish_ci,
+    mail_commit_receipt_for_lab, mail_epoch_floor_for_lab, sign_first_mail_approval_for_lab,
     sign_mail_policy_for_lab,
 };
 use akula_wire_lab::{
@@ -965,7 +965,6 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     ));
 }
 
-
 #[test]
 fn detached_owner_first_publish_approval_is_not_a_reusable_mail_grant() {
     let fixture = Fixture::new();
@@ -986,8 +985,12 @@ fn detached_owner_first_publish_approval_is_not_a_reusable_mail_grant() {
     };
     let verify = |bytes: &[u8], revision: u64, now: i64| {
         first_mail_approval_proposal_for_lab(
-            &fixture.node, &fixture.mail_policy_dir, NODE_ENDPOINT,
-            bytes, revision, now,
+            &fixture.node,
+            &fixture.mail_policy_dir,
+            NODE_ENDPOINT,
+            bytes,
+            revision,
+            now,
         )
     };
     let approved = sign_first_mail_approval_for_lab(&fixture.owner, claim);
@@ -999,36 +1002,65 @@ fn detached_owner_first_publish_approval_is_not_a_reusable_mail_grant() {
 
     // An owner-signed mailbox policy is NOT consent for the separate action.
     assert!(matches!(
-        verify(&signed_policy, 0, 3), Err(MailRoleHold::MailPolicy)
+        verify(&signed_policy, 0, 3),
+        Err(MailRoleHold::MailPolicy)
     ));
-    let forged = sign_first_mail_approval_for_lab(
-        &SigningKey::from_bytes(&[99; 32]), claim,
-    );
-    assert!(matches!(verify(&forged, 0, 3), Err(MailRoleHold::MailPolicy)));
-    assert!(matches!(verify(&approved, 1, 3), Err(MailRoleHold::MailPolicy)));
-    assert!(matches!(verify(&approved, 0, 200_000), Err(MailRoleHold::MailPolicy)));
+    let forged = sign_first_mail_approval_for_lab(&SigningKey::from_bytes(&[99; 32]), claim);
+    assert!(matches!(
+        verify(&forged, 0, 3),
+        Err(MailRoleHold::MailPolicy)
+    ));
+    assert!(matches!(
+        verify(&approved, 1, 3),
+        Err(MailRoleHold::MailPolicy)
+    ));
+    assert!(matches!(
+        verify(&approved, 0, 200_000),
+        Err(MailRoleHold::MailPolicy)
+    ));
 
     let mut bad_digest = claim;
     bad_digest.signed_policy_digest = [55; 32];
-    assert!(verify(
-        &sign_first_mail_approval_for_lab(&fixture.owner, bad_digest), 0, 3,
-    ).is_err());
+    assert!(
+        verify(
+            &sign_first_mail_approval_for_lab(&fixture.owner, bad_digest),
+            0,
+            3,
+        )
+        .is_err()
+    );
     let mut bad_endpoint = claim;
     bad_endpoint.node_endpoint = [77; 32];
-    assert!(verify(
-        &sign_first_mail_approval_for_lab(&fixture.owner, bad_endpoint), 0, 3,
-    ).is_err());
+    assert!(
+        verify(
+            &sign_first_mail_approval_for_lab(&fixture.owner, bad_endpoint),
+            0,
+            3,
+        )
+        .is_err()
+    );
     let mut zero_nonce = claim;
     zero_nonce.approval_nonce = [0; 16];
-    assert!(verify(
-        &sign_first_mail_approval_for_lab(&fixture.owner, zero_nonce), 0, 3,
-    ).is_err());
+    assert!(
+        verify(
+            &sign_first_mail_approval_for_lab(&fixture.owner, zero_nonce),
+            0,
+            3,
+        )
+        .is_err()
+    );
     let mut oversize_window = claim;
     oversize_window.valid_until_ms = 1_000_000;
-    assert!(verify(
-        &sign_first_mail_approval_for_lab(&fixture.owner, oversize_window), 0, 3,
-    ).is_err());
+    assert!(
+        verify(
+            &sign_first_mail_approval_for_lab(&fixture.owner, oversize_window),
+            0,
+            3,
+        )
+        .is_err()
+    );
     assert!(matches!(
-        verify(&approved, 0, 0), Err(MailRoleHold::MailPolicy)
+        verify(&approved, 0, 0),
+        Err(MailRoleHold::MailPolicy)
     ));
 }
