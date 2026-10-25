@@ -86,6 +86,8 @@ pub(super) fn append(
                 cell.disposition==RebaseDisposition::SourceValueChanged) {
                 let marked=bases.keep_local.iter().any(|(row,prop)|
                     row==&cell.row_id && prop==&cell.property_id);
+                let accepted=bases.accept_notion.iter().any(|(row,prop)|
+                    row==&cell.row_id && prop==&cell.property_id);
                 column=column.with_fixed(selectable(
                     &format!("Было в Notion: {} · Стало в Notion: {} · Локально: {}",
                         cell.previous_source.as_deref().unwrap_or("недоступно"),
@@ -99,6 +101,12 @@ pub(super) fn append(
                         cell.row_id.chars().take(10).collect::<String>(),
                         cell.property_id.chars().take(10).collect::<String>()),
                     Action::NotionBasesToggleKeepLocal(
+                        cell.row_id.clone(),cell.property_id.clone()),bindings,
+                ));
+                column=column.with_fixed(action_button(
+                    format!("{}: принять новое значение Notion (с архивом)",
+                        if accepted {"Выбрано"} else {"Выбрать"}),
+                    Action::NotionBasesToggleAcceptNotion(
                         cell.row_id.clone(),cell.property_id.clone()),bindings,
                 ));
             }
@@ -124,6 +132,12 @@ pub(super) fn append(
                 |t|t.text_muted,None,Leading::Times(1.3),
             ));
         }
+    }
+    if let Some(path)=&bases.last_archive {
+        column=column.with_fixed(selectable(
+            &format!("Архив прежних локальных правок: {} (в Vault; не удалять)",path),
+            |t|t.text_secondary,None,Leading::Times(1.3),
+        ));
     }
     column
 }

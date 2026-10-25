@@ -65,6 +65,10 @@ impl App {
                 }
                 true
             }
+            Action::NotionBasesToggleAcceptNotion(row,property) => {
+                let _=self.notion_bases.toggle_accept_notion(row,property);
+                true
+            }
             Action::NotionBasesToggleKeepLocal(row,property) => {
                 let _=self.notion_bases.toggle_keep_local(row,property);
                 true
@@ -79,9 +83,9 @@ impl App {
                     let confirmed=rfd::MessageDialog::new()
                         .set_title("Akula Bases — ручное разрешение конфликтов")
                         .set_description(format!(
-                            "Источник Notion: {}\nСтарый снимок: {}\nНовый снимок: {}\n\nДля {} конфликтующих ячеек вы явно выбрали сохранение локального значения вместо изменённого значения Notion.\n\nНи исходные JSON, ни удалённые поля не перезаписываются. Структурные конфликты остаются запрещены. Перед локальной записью проверяется CAS-хеш.\n\nПрименить выбор?",
+                            "Источник Notion: {}\nСтарый снимок: {}\nНовый снимок: {}\n\nРешено конфликтов: {}. Для {} ячеек принято новое Notion, для остальных — сохранено локальное.\n\nПеред заменой активных локальных правок Akula запишет полную проверяемую копию прежнего JSON overlay в Vault. Если архивация не удастся, перенос будет запрещён. Структурные конфликты остаются заблокированы.\n\nПрименить выбор?",
                             report.source_root,report.old_digest,report.new_digest,
-                            view.keep_local.len(),
+                            view.keep_local.len()+view.accept_notion.len(),view.accept_notion.len(),
                         ))
                         .set_level(rfd::MessageLevel::Warning)
                         .set_buttons(rfd::MessageButtons::YesNo)

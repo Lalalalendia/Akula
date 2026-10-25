@@ -73,12 +73,14 @@ pub struct BasesView {
     pub selected: Option<SelectedCell>,
     pub rebase_preview: Option<bases_edits::RebasePreview>,
     pub keep_local: Vec<(String,String)>,
+    pub accept_notion: Vec<(String,String)>,
+    pub last_archive: Option<String>,
 }
 enum Payload {
     Catalog(Vec<BaseChoice>),
     Loaded(EffectiveBase, Option<String>),
     Rebase(bases_edits::RebasePreview),
-    Rebased(EffectiveBase, Option<String>),
+    Rebased(EffectiveBase, Option<String>, Option<String>),
 }
 struct Completion {
     generation: u64,
@@ -294,7 +296,7 @@ impl BasesSession {
         self.view.digest=Some(digest.clone());self.view.base_id=Some(base_id.clone());
         self.view.row_start=0;self.view.column_start=0;
         self.view.selected=None;self.view.rebase_preview=None;
-        self.view.keep_local.clear();
+        self.view.keep_local.clear();self.view.accept_notion.clear();
         self.effective=None;self.disk_hash=None;
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base_id))
     }
@@ -319,6 +321,7 @@ impl BasesSession {
         self.effective=None; self.disk_hash=None;
         self.view.selected=None;self.view.rebase_preview=None;
         self.view.keep_local.clear();
+                    self.view.accept_notion.clear();
         self.start(Stage::Loading,move ||load(&target,&source,&digest,&base))
     }
     pub fn change(&mut self, core:Arc<Core>, row:&str, property:&str,
@@ -364,23 +367,26 @@ impl BasesSession {
                     self.effective=Some(base); self.disk_hash=hash;
                     self.view.rebase_preview=None;
                     self.view.keep_local.clear();
+                    self.view.accept_notion.clear();
                     self.view.stage=Stage::Ready;
                     if saving { self.view.draft=None; self.view.schema_draft=None;
                         self.view.selected=None; }
                     self.view.notice=if saving{Some("Правка сохранена локально через File Gate CAS")}
                         else{None};
                 }
-                Ok(Payload::Rebased(base, hash)) if saving
+                Ok(Payload::Rebased(base, hash, archive)) if saving
                     && self.view.base_id.as_deref()==Some(base.base_id.as_str()) =>
                 {
                     self.view.digest=Some(base.source_digest.clone());
+                    self.view.last_archive=archive;
                     self.view.rebase_preview=None;
                     self.view.keep_local.clear();
+                    self.view.accept_notion.clear();
                     self.view.selected=None;
                     self.view.row_start=0;self.view.column_start=0;
                     self.effective=Some(base);self.disk_hash=hash;
                     self.view.stage=Stage::Ready;
-                    self.view.notice=Some("Совместимый снимок принят через File Gate CAS. Конфликтов нет.");
+                    self.view.notice=Some("Новый снимок принят локально через File Gate CAS. Исходный Notion не изменён.");
                 }
                 Ok(Payload::Rebase(report)) if reviewing
                     && self.view.digest.as_deref()==Some(report.old_digest.as_str())
@@ -388,6 +394,7 @@ impl BasesSession {
                 {
                     self.view.rebase_preview=Some(report);
                     self.view.keep_local.clear();
+                    self.view.accept_notion.clear();
                     self.view.stage=Stage::Ready;
                     self.view.notice=Some("Сравнение снимков завершено: это только анализ, без переноса правок");
                 }

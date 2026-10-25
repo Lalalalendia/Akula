@@ -15,12 +15,16 @@ pub fn manual_choices_complete(view:&BasesView)->bool{
         .filter(|cell|cell.disposition==bases_edits::RebaseDisposition::SourceValueChanged)
         .map(|cell|(cell.row_id.clone(),cell.property_id.clone()))
         .collect::<BTreeSet<_>>();
-    let selected=view.keep_local.iter().cloned().collect::<BTreeSet<_>>();
+    let selected=view.keep_local.iter().chain(view.accept_notion.iter())
+        .cloned().collect::<BTreeSet<_>>();
+    let local=view.keep_local.iter().cloned().collect::<BTreeSet<_>>();
+    let remote=view.accept_notion.iter().cloned().collect::<BTreeSet<_>>();
     report.conflicted_cells==conflicts.len()
         && report.cells.iter().all(|cell|
             cell.disposition!=bases_edits::RebaseDisposition::SourceValueChanged
                 || cell.manual_review_supported)
-        && view.keep_local.len()==selected.len()
+        && view.keep_local.len()+view.accept_notion.len()==selected.len()
+        && local.is_disjoint(&remote)
         && selected==conflicts
 }
 
@@ -29,6 +33,12 @@ impl BasesSession {
     /// conflict is a source value edit with unchanged schema and identity.
     /// A conflicted cell is never implicitly selected.
     pub fn toggle_keep_local(&mut self,row:&str,property:&str)->bool{
+        self.toggle_decision(row,property,false)
+    }
+    pub fn toggle_accept_notion(&mut self,row:&str,property:&str)->bool{
+        self.toggle_decision(row,property,true)
+    }
+    fn toggle_decision(&mut self,row:&str,property:&str,accept:bool)->bool{
         if self.view.stage!=Stage::Ready || self.view.busy
             || self.has_pending_draft() {return false;}
         let Some(report)=self.view.rebase_preview.as_ref() else{return false};
@@ -40,10 +50,14 @@ impl BasesSession {
             return false;
         }
         let key=(row.to_owned(),property.to_owned());
-        if self.view.keep_local.contains(&key) {
-            self.view.keep_local.retain(|choice|choice!=&key);
-        } else {
-            self.view.keep_local.push(key);
+        let was_selected=if accept {
+            self.view.accept_notion.contains(&key)
+        }else{self.view.keep_local.contains(&key)};
+        self.view.keep_local.retain(|choice|choice!=&key);
+        self.view.accept_notion.retain(|choice|choice!=&key);
+        if !was_selected {
+            if accept {self.view.accept_notion.push(key);}
+            else {self.view.keep_local.push(key);}
         }
         true
     }
@@ -60,7 +74,8 @@ impl BasesSession {
         let preview=self.view.rebase_preview.as_ref().ok_or(())?;
         if reviewed {
             if !manual_choices_complete(&self.view) {return Err(());}
-        }else if !preview.can_offer_approval() || !self.view.keep_local.is_empty() {
+        }else if !preview.can_offer_approval() || !self.view.keep_local.is_empty()
+            || !self.view.accept_notion.is_empty() {
             return Err(());
         }
         let source=self.view.source.clone().ok_or(())?;
@@ -73,19 +88,28 @@ impl BasesSession {
             || !self.view.choices.iter().any(|c|
                 c.base_id==base && c.digest==preview.new_digest) {return Err(());}
         let next=preview.new_digest.clone();
-        let decisions=self.view.keep_local.clone();
+        let decisions=self.view.keep_local.iter().map(|(r,p)|
+            (r.clone(),p.clone(),bases_edits::RebaseDecision::KeepLocal))
+            .chain(self.view.accept_notion.iter().map(|(r,p)|
+                (r.clone(),p.clone(),bases_edits::RebaseDecision::AcceptNotion)))
+            .collect::<Vec<_>>();
         let hash=expected.to_owned();
         self.start(Stage::Saving,move ||{
             if reviewed {
-                bases_edits::apply_rebase_resolved_approved(&core,&target,
+                let receipt=bases_edits::apply_rebase_decisions_approved(&core,&target,
                     &source,&old,&next,&hash,&decisions,true).map_err(|_| ())?;
+                return match load(&target,&source,&next,&base)? {
+                    Payload::Loaded(effective,disk_hash)=>
+                        Ok(Payload::Rebased(effective,disk_hash,receipt.pre_rebase_archive)),
+                    _=>Err(()),
+                };
             } else {
                 bases_edits::apply_rebase_approved(&core,&target,
                     &source,&old,&next,&hash,true).map_err(|_| ())?;
             }
             match load(&target,&source,&next,&base)? {
                 Payload::Loaded(effective,disk_hash)=>
-                    Ok(Payload::Rebased(effective,disk_hash)),
+                    Ok(Payload::Rebased(effective,disk_hash,None)),
                 _=>Err(()),
             }
         })
@@ -105,6 +129,7 @@ impl BasesSession {
         let vault = self.view.target.clone().ok_or(())?;
         self.view.rebase_preview = None;
         self.view.keep_local.clear();
+        self.view.accept_notion.clear();
         self.start(Stage::Reviewing, move || {
             bases_edits::preview_rebase(&vault, &root, &old, &next)
                 .map(Payload::Rebase).map_err(|_| ())
@@ -138,7 +163,7 @@ mod tests {
         };
         s.tx.send(Completion{
             generation:9,source:root.into(),target,
-            result:Ok(Payload::Rebased(rebased,Some("d".repeat(64)))),
+            result:Ok(Payload::Rebased(rebased,Some("d".repeat(64)),None)),
         }).unwrap();
         assert!(s.poll());
         assert_eq!(s.view.stage,Stage::Ready);
