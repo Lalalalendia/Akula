@@ -201,7 +201,11 @@ pub fn preview_rebase(
                     source_cell(&new,row,&override_cell.property_id)
                         .and_then(|(_,_,value)|readable_source(value)));
                 let local=readable_local(&override_cell.value);
-                let supported=prior.is_some() && incoming.is_some() && local.is_some();
+                // A raw Notion edit that leaves the complete visible value
+                // unchanged (e.g. rich-text styling only) needs a richer
+                // review UI; never pretend that this scalar preview explains it.
+                let supported=prior.is_some() && incoming.is_some() && local.is_some()
+                    && prior!=incoming;
                 (prior,incoming,local,supported)
             } else {(None,None,None,false)};
         cells.push(RebaseCell {

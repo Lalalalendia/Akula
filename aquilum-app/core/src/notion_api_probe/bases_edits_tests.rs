@@ -536,6 +536,10 @@ fn c5b4_keep_local_requires_exact_manual_selection_of_changed_source_values() {
     });
     let preview=preview_rebase(&f.vault,A,&f.digest,&next).unwrap();
     assert_eq!(preview.cells[0].disposition,RebaseDisposition::SourceValueChanged);
+    assert!(preview.cells[0].manual_review_supported);
+    assert_eq!(preview.cells[0].previous_source.as_deref(),Some("5"));
+    assert_eq!(preview.cells[0].updated_source.as_deref(),Some("91"));
+    assert_eq!(preview.cells[0].local_override.as_deref(),Some("777"));
     let preserved=fs::read(f.edited_path()).unwrap();
     let selection=vec![(row.clone(),prop.clone())];
     for decisions in [
@@ -577,4 +581,46 @@ fn c5b4_keep_local_rejects_property_definition_conflicts_even_when_selected() {
     assert!(apply_rebase_resolved_approved(&f.core,&f.vault,A,&f.digest,
         &next,&report.expected_local_hash,&[(row,property)],true).is_err());
     assert_eq!(fs::read(f.edited_path()).unwrap(),old);
+}
+
+#[test]
+fn c5b4_keep_local_denies_large_unreviewable_text_and_preserves_overlay() {
+    let f=Fixture::new();
+    let row=f.row(A);let prop=f.prop(DS1,"title");
+    apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::Set{row_id:row.clone(),property_id:prop.clone(),
+            value:LocalValue::Text("My full local text".into())}],true).unwrap();
+    let next=published_new_source(&f, |source| {
+        source.objects.iter_mut().find(|o|o.kind=="page"&&o.id==A)
+            .unwrap().json["properties"]["Name"]["title"][0]["plain_text"]=
+                json!("z".repeat(260));
+    });
+    let preview=preview_rebase(&f.vault,A,&f.digest,&next).unwrap();
+    assert_eq!(preview.cells[0].disposition,RebaseDisposition::SourceValueChanged);
+    assert!(!preview.cells[0].manual_review_supported);
+    assert!(preview.cells[0].updated_source.is_none());
+    let before=fs::read(f.edited_path()).unwrap();
+    assert!(apply_rebase_resolved_approved(&f.core,&f.vault,A,&f.digest,&next,
+        &preview.expected_local_hash,&[(row,prop)],true).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),before);
+}
+#[test]
+fn c5b4_keep_local_denies_metadata_only_changes_without_visible_value_diff() {
+    let f=Fixture::new();
+    let row=f.row(A);let prop=f.prop(DS1,"score");
+    apply_approved(&f.core,&f.vault,A,&f.digest,None,
+        &[Change::Set{row_id:row.clone(),property_id:prop.clone(),
+            value:LocalValue::Number(40.0)}],true).unwrap();
+    let next=published_new_source(&f, |source| {
+        source.objects.iter_mut().find(|o|o.kind=="page"&&o.id==A)
+            .unwrap().json["properties"]["Score"]["metadata"]="changed".into();
+    });
+    let preview=preview_rebase(&f.vault,A,&f.digest,&next).unwrap();
+    assert_eq!(preview.cells[0].disposition,RebaseDisposition::SourceValueChanged);
+    assert!(!preview.cells[0].manual_review_supported);
+    assert_eq!(preview.cells[0].previous_source,preview.cells[0].updated_source);
+    let before=fs::read(f.edited_path()).unwrap();
+    assert!(apply_rebase_resolved_approved(&f.core,&f.vault,A,&f.digest,&next,
+        &preview.expected_local_hash,&[(row,prop)],true).is_err());
+    assert_eq!(fs::read(f.edited_path()).unwrap(),before);
 }
