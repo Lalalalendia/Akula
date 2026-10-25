@@ -3,7 +3,8 @@
 #![cfg(all(target_os = "linux", feature = "node-wow-mailbox-lab"))]
 
 use akula_staya_integration::node_wow_mailbox_lab::{
-    MailRoleClaims, MailRoleHold, NodeWowMailboxLab, PublishHold, PublishStop,
+    MailFirstApprovalClaims, MailRoleClaims, MailRoleHold, NodeWowMailboxLab, PublishHold, PublishStop,
+    first_mail_approval_proposal_for_lab, sign_first_mail_approval_for_lab,
     first_mail_publish_ci, mail_commit_receipt_for_lab, mail_epoch_floor_for_lab,
     sign_mail_policy_for_lab,
 };
@@ -961,5 +962,73 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     assert!(matches!(
         running.serve_one(&fixture.node, &listener, 4),
         Err(MailRoleHold::MailPolicy)
+    ));
+}
+
+
+#[test]
+fn detached_owner_first_publish_approval_is_not_a_reusable_mail_grant() {
+    let fixture = Fixture::new();
+    let signed_policy = fs::read(fixture.mail_policy_file()).unwrap();
+    let digest = *blake3::hash(&signed_policy).as_bytes();
+    let claim = MailFirstApprovalClaims {
+        version: 1,
+        operation: 1,
+        node_public: fixture.node.public_key(),
+        node_endpoint: NODE_ENDPOINT,
+        signed_policy_digest: digest,
+        policy_epoch: 1,
+        expected_witness_revision: 0,
+        approval_nonce: [91; 16],
+        helper_challenge: [92; 32],
+        issued_at_ms: 1,
+        valid_until_ms: 200_000,
+    };
+    let verify = |bytes: &[u8], revision: u64, now: i64| {
+        first_mail_approval_proposal_for_lab(
+            &fixture.node, &fixture.mail_policy_dir, NODE_ENDPOINT,
+            bytes, revision, now,
+        )
+    };
+    let approved = sign_first_mail_approval_for_lab(&fixture.owner, claim);
+    let proposal = verify(&approved, 0, 3).unwrap();
+    assert!(proposal.requires_independent_cas_commit);
+    assert_eq!(proposal.required_next_revision, 1);
+    assert_eq!(proposal.approved_digest, digest);
+    assert_eq!(proposal.approval_nonce, claim.approval_nonce);
+
+    // An owner-signed mailbox policy is NOT consent for the separate action.
+    assert!(matches!(
+        verify(&signed_policy, 0, 3), Err(MailRoleHold::MailPolicy)
+    ));
+    let forged = sign_first_mail_approval_for_lab(
+        &SigningKey::from_bytes(&[99; 32]), claim,
+    );
+    assert!(matches!(verify(&forged, 0, 3), Err(MailRoleHold::MailPolicy)));
+    assert!(matches!(verify(&approved, 1, 3), Err(MailRoleHold::MailPolicy)));
+    assert!(matches!(verify(&approved, 0, 200_000), Err(MailRoleHold::MailPolicy)));
+
+    let mut bad_digest = claim;
+    bad_digest.signed_policy_digest = [55; 32];
+    assert!(verify(
+        &sign_first_mail_approval_for_lab(&fixture.owner, bad_digest), 0, 3,
+    ).is_err());
+    let mut bad_endpoint = claim;
+    bad_endpoint.node_endpoint = [77; 32];
+    assert!(verify(
+        &sign_first_mail_approval_for_lab(&fixture.owner, bad_endpoint), 0, 3,
+    ).is_err());
+    let mut zero_nonce = claim;
+    zero_nonce.approval_nonce = [0; 16];
+    assert!(verify(
+        &sign_first_mail_approval_for_lab(&fixture.owner, zero_nonce), 0, 3,
+    ).is_err());
+    let mut oversize_window = claim;
+    oversize_window.valid_until_ms = 1_000_000;
+    assert!(verify(
+        &sign_first_mail_approval_for_lab(&fixture.owner, oversize_window), 0, 3,
+    ).is_err());
+    assert!(matches!(
+        verify(&approved, 0, 0), Err(MailRoleHold::MailPolicy)
     ));
 }
