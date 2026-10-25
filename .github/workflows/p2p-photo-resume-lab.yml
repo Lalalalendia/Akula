@@ -6,6 +6,7 @@ on:
     paths:
       - 'interop/akula-staya/src/bin/p2p_one_file_beta.rs'
       - 'interop/akula-staya/src/bin/p2p_one_file_beta/resume_lab.rs'
+      - 'interop/akula-staya/src/bin/p2p_one_file_beta/resume_checkpoint_lab.rs'
       - 'interop/akula-staya/Cargo.toml'
       - '.github/workflows/p2p-photo-resume-lab.yml'
 
@@ -40,6 +41,10 @@ jobs:
         shell: bash
         run: |
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta resume_lab -- --nocapture
+      - name: Verify fsynced cold recovery and malicious checkpoint rejection
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta resume_checkpoint_lab -- --nocapture
       - name: Verify ordinary one-file tests are still unchanged
         shell: bash
         run: |
