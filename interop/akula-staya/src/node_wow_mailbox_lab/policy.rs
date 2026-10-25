@@ -76,8 +76,7 @@ pub fn sign_mail_policy_for_lab(signer: &SigningKey, claims: MailRoleClaims) -> 
     signed.extend_from_slice(DOMAIN);
     signed.extend_from_slice(&body);
     let signature = signer.sign(&signed).to_bytes().to_vec();
-    postcard::to_stdvec(&SignedPolicy { claims, signature })
-        .expect("fixed-size policy + signature")
+    postcard::to_stdvec(&SignedPolicy { claims, signature }).expect("fixed-size policy + signature")
 }
 
 fn read_exact_private_file(folder: &Path) -> Result<(Vec<u8>, (u64, u64)), MailRoleHold> {
@@ -138,34 +137,45 @@ fn decode_and_verify(
     expected_endpoint: [u8; 32],
     now_ms: i64,
 ) -> Result<MailRoleClaims, MailRoleHold> {
-    let signed: SignedPolicy = postcard::from_bytes(input)
-        .map_err(|_| MailRoleHold::MailPolicy)?;
+    let signed: SignedPolicy = postcard::from_bytes(input).map_err(|_| MailRoleHold::MailPolicy)?;
     // Reject alternate encodings and trailing/unknown data.
     if postcard::to_stdvec(&signed).map_err(|_| MailRoleHold::MailPolicy)? != input {
         return Err(MailRoleHold::MailPolicy);
     }
     let p = signed.claims;
-    if p.version != 1 || p.policy_epoch == 0
+    if p.version != 1
+        || p.policy_epoch == 0
         || p.node_public != node.public_key()
         || p.node_endpoint != expected_endpoint
         || expected_endpoint == [0; 32]
         || p.operator_public == [0; 32]
-        || p.operator_public != node.mail_operator_key_for_lab()
-            .map_err(|_| MailRoleHold::NodePolicy)?
-        || p.issuer == [0; 16] || p.issuer_epoch == 0
-        || p.custodian == [0; 16] || p.custodian_epoch == 0
-        || p.sender == [0; 16] || p.sender_epoch == 0
-        || p.recipient == [0; 16] || p.recipient_epoch == 0
-        || p.issuer_public == [0; 32] || p.custodian_public == [0; 32]
-        || p.sender_public == [0; 32] || p.recipient_public == [0; 32]
-        || p.mailbox == [0; 16] || p.scope == [0; 16]
+        || p.operator_public
+            != node
+                .mail_operator_key_for_lab()
+                .map_err(|_| MailRoleHold::NodePolicy)?
+        || p.issuer == [0; 16]
+        || p.issuer_epoch == 0
+        || p.custodian == [0; 16]
+        || p.custodian_epoch == 0
+        || p.sender == [0; 16]
+        || p.sender_epoch == 0
+        || p.recipient == [0; 16]
+        || p.recipient_epoch == 0
+        || p.issuer_public == [0; 32]
+        || p.custodian_public == [0; 32]
+        || p.sender_public == [0; 32]
+        || p.recipient_public == [0; 32]
+        || p.mailbox == [0; 16]
+        || p.scope == [0; 16]
         || p.permissions != PERMISSIONS
         || p.max_message_bytes == 0
         || p.max_message_bytes as usize > MAX_MESSAGE_BYTES
-        || p.max_offers == 0 || p.max_offers > MAX_OFFERS
+        || p.max_offers == 0
+        || p.max_offers > MAX_OFFERS
         || p.valid_from_ms < 0
         || p.valid_until_ms <= p.valid_from_ms
-        || now_ms < p.valid_from_ms || now_ms >= p.valid_until_ms
+        || now_ms < p.valid_from_ms
+        || now_ms >= p.valid_until_ms
         || p.issuer_epoch > i64::MAX as u64
         || p.custodian_epoch > i64::MAX as u64
         || p.sender_epoch > i64::MAX as u64
@@ -183,15 +193,16 @@ fn decode_and_verify(
     }
     node.verify_iroh_endpoint(expected_endpoint)
         .map_err(|_| MailRoleHold::NodePolicy)?;
-    let verifying = VerifyingKey::from_bytes(&p.operator_public)
-        .map_err(|_| MailRoleHold::MailPolicy)?;
+    let verifying =
+        VerifyingKey::from_bytes(&p.operator_public).map_err(|_| MailRoleHold::MailPolicy)?;
     let body = postcard::to_stdvec(&p).map_err(|_| MailRoleHold::MailPolicy)?;
     let mut message = Vec::with_capacity(DOMAIN.len() + body.len());
     message.extend_from_slice(DOMAIN);
     message.extend_from_slice(&body);
-    let signature = Signature::from_slice(&signed.signature)
-        .map_err(|_| MailRoleHold::MailPolicy)?;
-    verifying.verify(&message, &signature)
+    let signature =
+        Signature::from_slice(&signed.signature).map_err(|_| MailRoleHold::MailPolicy)?;
+    verifying
+        .verify(&message, &signature)
         .map_err(|_| MailRoleHold::MailPolicy)?;
     Ok(p)
 }
@@ -216,11 +227,7 @@ impl VerifiedMailRoleLab {
     /// Reject in-place replacement, byte alteration, revocation, expiry
     /// and node policy change on EVERY request. A new policy requires an
     /// explicit reviewed restart; never hot-adopt a newer/malicious file.
-    pub(super) fn require_current(
-        &self,
-        node: &NodeHost,
-        now_ms: i64,
-    ) -> Result<(), MailRoleHold> {
+    pub(super) fn require_current(&self, node: &NodeHost, now_ms: i64) -> Result<(), MailRoleHold> {
         let (input, inode) = read_exact_private_file(&self.folder)?;
         if inode != self.inode || *blake3::hash(&input).as_bytes() != self.pinned_digest {
             return Err(MailRoleHold::MailPolicy);
@@ -240,8 +247,12 @@ impl VerifiedMailRoleLab {
             (p.sender, p.sender_epoch, p.sender_public),
             (p.recipient, p.recipient_epoch, p.recipient_public),
         ] {
-            registry.enroll(identity, epoch, VerifyingKey::from_bytes(&key)
-                .map_err(|_| MailRoleHold::MailPolicy)?)
+            registry
+                .enroll(
+                    identity,
+                    epoch,
+                    VerifyingKey::from_bytes(&key).map_err(|_| MailRoleHold::MailPolicy)?,
+                )
                 .map_err(|_| MailRoleHold::MailPolicy)?;
         }
         Ok(registry)
