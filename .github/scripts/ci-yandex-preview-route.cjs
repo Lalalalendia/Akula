@@ -30,7 +30,7 @@ const ALSO_PROTECTED=new Set([
 // Only PDF-owned leaf code and fixtures may accompany the two exact shared seams.
 const PDF_LEAF=/^aquilum-app\/native\/src\/(?:pdf(?:_worker)?\.rs|ui\/pdf\.rs|app\/pdf_view\.rs)$/;
 const PDF_HELPER=/^scripts\/(?:pdf-preview\/[a-z0-9-]+\.(?:py|ps1)|install-pdfium-pinned\.ps1|windows-pdf-os-pointer\.ps1)$/;
-const MAGIC=/\b(?:yandex|s3|credential|cloud|storage|probe)\b/i;
+const MAGIC=/(?:yandex|s3|cred|cloud|storage|probe)/i;
 const safeDelta={
   [BOOT]:['-            tree,','+            tree, pdf: pdf_view::State::new(),'],
   [MOD]:['-mod pdf;','+mod pdf; mod pdf_worker;']
