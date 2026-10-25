@@ -82,6 +82,10 @@ jobs:
         shell: bash
         run: |
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-granted-inbox-lab granted_inbox_lab -- --nocapture
+      - name: Signed content W4 only after cold verified Inbox
+        shell: bash
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-file-w4-lab file_commit_w4_lab -- --nocapture
       - name: Test real WOW W3 HPKE Ed25519 trust and expiry
         shell: bash
         run: |
