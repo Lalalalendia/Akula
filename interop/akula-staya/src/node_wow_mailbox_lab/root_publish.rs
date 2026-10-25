@@ -2,7 +2,7 @@
 //! ROOT-ONLY CI LAB: not a release installer, root IPC opcode or mail daemon.
 //! An independently signed owner manifest is checked against the fixed
 //! RootTrust before any mutation. There is NO auto-enrolment, update or retry.
-use super::policy;
+use super::{approval, policy};
 use rustix::fs::{FlockOperation, Mode, OFlags, RenameFlags, flock, openat, renameat_with};
 use std::{
     fs::{File, Metadata, Permissions},
@@ -37,6 +37,7 @@ pub enum PublishHold {
     RootAuthority,
     ExistingOrInterrupted,
     InvalidOwnerSignature,
+    InvalidOwnerApproval,
     Io,
     InjectedStop,
 }
@@ -158,6 +159,7 @@ fn verify_published(dir: &File, expected: &[(&str, &[u8]); 3]) -> Result<(), Pub
 /// This function is callable only from explicit root CI test code.
 pub fn first_mail_publish_ci(
     signed: &[u8],
+    separate_approval: &[u8],
     now_ms: i64,
     stop: PublishStop,
 ) -> Result<(), PublishHold> {
@@ -175,6 +177,22 @@ pub fn first_mail_publish_ci(
     // First provision only; no update/rollback, no unaudited auto-enrolment.
     if claims.policy_epoch != 1 {
         return Err(PublishHold::InvalidOwnerSignature);
+    }
+    // This detached, domain-separated owner action must be independently
+    // signed; simply signing the mailbox policy does NOT approve installation.
+    // The empty-directory NOREPLACE gate is only a CI first-install CAS.
+    // B1d0's external trusted monotonic witness must be composed before ship.
+    let proposal = approval::verify_first_mail_approval(
+        separate_approval,
+        *blake3::hash(signed).as_bytes(),
+        claims,
+        claims.operator_public, // verified against fixed root-owned RootTrust
+        0,                      // disposable CI genesis; NOT a production witness observation
+        now_ms,
+    )
+    .map_err(|_| PublishHold::InvalidOwnerApproval)?;
+    if proposal.required_next_revision != 1 || !proposal.requires_independent_cas_commit {
+        return Err(PublishHold::InvalidOwnerApproval);
     }
     let floor = policy::mail_epoch_floor_for_lab(signed, 1);
     let receipt = policy::mail_commit_receipt_for_lab(signed, &floor, 1);
