@@ -905,15 +905,23 @@ fn root_owned_mail_policy_is_read_only_and_current() {
 
     // A new pending file is an unresolved root transaction and must not
     // be treated as a valid previous receipt.
+    eprintln!("ROOT_MAIL_CI: pending touch start");
     sudo(&["touch", PENDING]);
+    eprintln!("ROOT_MAIL_CI: pending touch done, deny check");
     assert!(matches!(open(), Err(MailRoleHold::MailPolicy)));
+    eprintln!("ROOT_MAIL_CI: pending denial PASS, remove pending");
     sudo(&["rm", "-f", "--", PENDING]);
+    eprintln!("ROOT_MAIL_CI: pending removed, clean reopen");
     assert!(open().is_ok());
+    eprintln!("ROOT_MAIL_CI: pending gate PASS");
 
     // The receipt checksum binds both exact files. A missing or foreign
     // receipt cannot turn a partially published manifest into an active role.
+    eprintln!("ROOT_MAIL_CI: receipt removal start");
     sudo(&["rm", "-f", "--", RECEIPT]);
+    eprintln!("ROOT_MAIL_CI: receipt removed, deny check");
     assert!(matches!(open(), Err(MailRoleHold::MailPolicy)));
+    eprintln!("ROOT_MAIL_CI: missing receipt denied");
     sudo(&[
         "install",
         "-o",
@@ -927,7 +935,9 @@ fn root_owned_mail_policy_is_read_only_and_current() {
     ]);
     // Even byte-identical receipt replacement forces existing instances
     // to re-enrol; the original receipt inode is pinned in memory.
+    eprintln!("ROOT_MAIL_CI: replacement receipt re-open");
     assert!(open().is_ok());
+    eprintln!("ROOT_MAIL_CI: prior instance receipt replay denial");
     let listener = bind_test_loopback().unwrap();
     assert!(matches!(
         running.serve_one(&fixture.node, &listener, 4),
