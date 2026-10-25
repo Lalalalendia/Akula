@@ -9,7 +9,8 @@ impl App {
         }
         let selection_changed = self.notion_session.poll();
         let import_changed = self.notion_import.poll();
-        if (sync_changed || selection_changed || import_changed)
+        let bases_changed = self.notion_bases.poll();
+        if (sync_changed || selection_changed || import_changed || bases_changed)
             && matches!(&self.popup, Some(Popup::Settings { dialog, .. })
                 if dialog.section == crate::ui::settings::schema::Section::Sync)
         {
