@@ -71,5 +71,7 @@ pub mod p2p_attachment_grant_lab;
 pub mod p2p_attachment_grant_spend_lab;
 #[cfg(feature = "p2p-attachment-source-lab")]
 pub mod p2p_attachment_source_lab;
+#[cfg(feature = "p2p-file-sender-outbox-lab")]
+pub mod p2p_file_sender_outbox_lab;
 #[cfg(feature = "p2p-device-identity")]
 pub mod p2p_device_identity;
