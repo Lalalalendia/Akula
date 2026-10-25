@@ -77,7 +77,7 @@ def find_import_dll_offsets(data: bytearray) -> list[tuple[int, bytes]]:
 
 README = """AKULA WIN7 LAB - PORTABLE TEST, NOT A RELEASE
 
-For Windows 7 SP1 64-bit only. EXE is unsigned and untested on real Win7.
+For Windows 7 SP1 64-bit only. Both EXEs are unsigned and untested on real Win7.
 This is the experimental Akula PR #667 binary, not the public Akula release.
 
 1. Extract all files to a NEW folder on a test PC/VM.
@@ -92,13 +92,20 @@ This is the experimental Akula PR #667 binary, not the public Akula release.
 7. Close Akula, reopen it, and verify that the test note was saved.
 8. If the interface is erased, capture before/after screenshots and
    provide Windows version/SP1, DPI scale, display driver and step.
-9. Test the same executable on Windows 10/11 when available.
+9. Run SMOKE-PDF-WIN7.cmd. It must create pdf-smoke-output.pdf with
+   no errors. Open the output in a PDF reader and check that text exists.
+10. Test both executables on Windows 10/11 when available.
 
 The launcher uses a test vault and separate data directory beside this file.
 Do not use private files, network sync, or normal automatic updating.
 Do not overwrite your production Akula installation.
 
-The experimental EXE was compiled with the Win7 target, and the import
+The two experimental EXEs were built from independent pinned sources using
+the same Windows 7 target. The Shiva PDF converter belongs next to Akula.
+Both were PE-audited; Shiva passed a text-to-PDF test on Windows Server 2022,
+which is NOT proof of a native Windows 7 runtime test.
+
+The experimental Akula EXE was compiled with the Win7 target, and the import
 descriptor for 2 COM functions was remapped from combase.dll to ole32.dll.
 The resulting import table is audited after patching, not just before.
 
@@ -116,11 +123,29 @@ if not exist "%ROOT%state" mkdir "%ROOT%state"
 "%ROOT%akula-app.exe" --vault "%ROOT%vault" --data-dir "%ROOT%state"
 """
 
+PDF_SMOKE = """@echo off
+setlocal
+set "ROOT=%~dp0"
+if not exist "%ROOT%shiva-pdf-preview.exe" (echo ERROR: Shiva EXE missing & exit /b 1)
+if exist "%ROOT%pdf-smoke-output.pdf" del /q "%ROOT%pdf-smoke-output.pdf"
+"%ROOT%shiva-pdf-preview.exe" "%ROOT%pdf-smoke-input.txt" "%ROOT%pdf-smoke-output.pdf"
+if errorlevel 1 (echo ERROR: PDF conversion failed & exit /b 1)
+if not exist "%ROOT%pdf-smoke-output.pdf" (echo ERROR: PDF output missing & exit /b 1)
+for %%F in ("%ROOT%pdf-smoke-output.pdf") do if %%~zF LSS 64 (echo ERROR: output too small & exit /b 1)
+echo PDF conversion completed: pdf-smoke-output.pdf
+exit /b 0
+"""
+
+PDF_SMOKE_INPUT = "Akula Windows 7 PDF companion sample.\\r\\nA test of Shiva text-to-PDF.\\r\\n"
+
+
 
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--exe", type=Path, required=True)
     p.add_argument("--audit", type=Path, required=True)
+    p.add_argument("--sidecar", type=Path, required=True)
+    p.add_argument("--sidecar-audit", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--revision", required=True)
     args = p.parse_args()
@@ -130,6 +155,22 @@ def main() -> None:
         fail("unexpected combase.dll exports: cannot safely remap")
     if report.get("known_post_win7_imports"):
         fail("known Windows 8+ static imports remain")
+
+    sidecar_report = json.loads(args.sidecar_audit.read_text(encoding="utf-8"))
+    sidecar = args.sidecar.read_bytes()
+    sidecar_digest = hashlib.sha256(sidecar).hexdigest()
+    if sidecar[:2] != b"MZ" or len(sidecar) < 512 or u16(sidecar, u32(sidecar, 0x3C) + 4) != 0x8664:
+        fail("Shiva PDF sidecar is not an x64 PE")
+    if sidecar_report.get("known_post_win7_imports"):
+        fail("Shiva PDF sidecar has newer Windows API imports")
+    if "combase.dll" in sidecar_report.get("potentially_risky_imported_dlls", []):
+        fail("Shiva PDF sidecar has combase.dll dependency")
+    if sidecar_report.get("binary_sha256", "").lower() != sidecar_digest:
+        fail("Shiva PDF sidecar SHA does not match its PE audit")
+    if sidecar_report.get("binary_bytes") != len(sidecar):
+        fail("Shiva PDF sidecar size does not match its PE audit")
+    if sidecar_report.get("imported_function_count", 0) < 1:
+        fail("Shiva PDF sidecar PE import list is empty")
 
     data = bytearray(args.exe.read_bytes())
     descriptors = find_import_dll_offsets(data)
@@ -149,13 +190,21 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     exe = args.out / "akula-app.exe"
     exe.write_bytes(data)
+    (args.out / "shiva-pdf-preview.exe").write_bytes(sidecar)
     digest = hashlib.sha256(data).hexdigest()
     (args.out / "README-WIN7-LAB.txt").write_text(README, encoding="utf-8")
     (args.out / "START-WIN7-LAB.cmd").write_text(LAUNCHER, encoding="ascii")
+    (args.out / "SMOKE-PDF-WIN7.cmd").write_text(PDF_SMOKE, encoding="ascii")
+    (args.out / "pdf-smoke-input.txt").write_text(PDF_SMOKE_INPUT, encoding="ascii")
     provenance = (
         "source_sha=" + args.revision + "\n"
         "patched_exe_sha256=" + digest + "\n"
         "patched_exe_bytes=" + str(len(data)) + "\n"
+        "shiva_pdf_source_commit=40b72a90b1dac39812c77c7321e57d613a81cb51\n"
+        "shiva_pdf_sha256=" + sidecar_digest + "\n"
+        "shiva_pdf_bytes=" + str(len(sidecar)) + "\n"
+        "shiva_pdf_pe_audit_no_known_win8_imports=true\n"
+        "shiva_pdf_smoke_tested_on_windows2022=true\n"
         "pe_rewrite=combase.dll to ole32.dll for 2 verified Co* imports\n"
         "runtime_win7_verified=false\n"
         "production_release=false\n"
@@ -163,11 +212,17 @@ def main() -> None:
     (args.out / "PROVENANCE.txt").write_text(provenance, encoding="ascii")
     archive = args.out / "Akula-Win7-LAB-portable.zip"
     with zipfile.ZipFile(archive, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
-        for name in ("akula-app.exe", "START-WIN7-LAB.cmd", "README-WIN7-LAB.txt", "PROVENANCE.txt"):
+        for name in ("akula-app.exe", "shiva-pdf-preview.exe", "START-WIN7-LAB.cmd",
+                     "SMOKE-PDF-WIN7.cmd", "pdf-smoke-input.txt",
+                     "README-WIN7-LAB.txt", "PROVENANCE.txt"):
             zf.write(args.out / name, arcname=name)
     with zipfile.ZipFile(archive) as zf:
-        if zf.testzip() is not None or len(zf.namelist()) != 4:
+        if zf.testzip() is not None or len(zf.namelist()) != 7:
             fail("portable archive integrity check failed")
+        if hashlib.sha256(zf.read("shiva-pdf-preview.exe")).hexdigest() != sidecar_digest:
+            fail("PDF sidecar changed in portable archive")
+        if hashlib.sha256(zf.read("akula-app.exe")).hexdigest() != digest:
+            fail("Akula changed in portable archive")
     print("WIN7_LAB_PORTABLE_READY", archive, digest, archive.stat().st_size)
 
 
