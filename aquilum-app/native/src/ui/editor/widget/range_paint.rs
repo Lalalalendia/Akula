@@ -73,6 +73,103 @@ mod tests {
         (*seed >> 32) as usize % limit
     }
 
+    // Native pixels, not just paragraph-index parity: selection and search
+    // must remain inside the horizontally scrolled fenced-code viewport.
+    #[test]
+    fn horizontal_fence_scroll_clips_search_and_selection_pixels() {
+        use std::sync::Arc;
+
+        use masonry::app::{RenderRoot, RenderRootOptions, WindowSizePolicy};
+        use masonry::core::{
+            NewWidget, PointerEvent, PointerId, PointerInfo, PointerScrollEvent,
+            PointerState, PointerType, ScrollDelta, WidgetTag,
+        };
+        use masonry::dpi::{PhysicalPosition, PhysicalSize};
+
+        let _theme_lock = crate::ui::theme::test_lock();
+        const W: u16 = 260;
+        const H: u16 = 230;
+        const TAG: WidgetTag<TextEditor> = WidgetTag::named("range-paint-clipped-code");
+        let code = "needle_marker ".repeat(80);
+        let source = format!("~~~rust\n{code}\n~~~");
+        let body = "~~~rust\n".len();
+        let select = body + 2 * "needle_marker ".len()..body + 4 * "needle_marker ".len();
+
+        let frame = |marked: bool| {
+            let options = RenderRootOptions {
+                default_properties: Arc::new(masonry::theme::default_property_set()),
+                use_system_fonts: true,
+                size_policy: WindowSizePolicy::User,
+                size: PhysicalSize::new(u32::from(W), u32::from(H)),
+                scale_factor: 1.0,
+                test_font: None,
+            };
+            let mut root = RenderRoot::new(
+                NewWidget::new(TextEditor::new(&source).markdown()).with_tag(TAG).erased(),
+                |_| {}, options,
+            );
+            let id = root.get_widget_with_tag(TAG).unwrap().id();
+            root.focus_on(Some(id));
+            let _ = root.redraw();
+            let y = root.get_widget_with_tag(TAG).unwrap().inner()
+                .top_of(body).expect("code laid out") + 7.0;
+            let pointer = PointerInfo {
+                pointer_id: Some(PointerId::PRIMARY),
+                persistent_device_id: None,
+                pointer_type: PointerType::Mouse,
+            };
+            let state = PointerState {
+                position: PhysicalPosition::new(85.0, y),
+                count: 1,
+                scale_factor: 1.0,
+                ..PointerState::default()
+            };
+            root.handle_pointer_event(PointerEvent::Scroll(PointerScrollEvent {
+                pointer,
+                delta: ScrollDelta::PixelDelta(PhysicalPosition::new(-180.0, 0.0)),
+                state,
+            }));
+            if marked {
+                root.edit_widget(id, |mut widget| {
+                    TextEditor::select_byte_range(&mut widget.downcast(), select.start, select.end);
+                });
+                root.edit_widget(id, |mut widget| {
+                    let _ = TextEditor::find(&mut widget.downcast(), "needle");
+                });
+            }
+            let (layers, _) = root.redraw();
+            let editor = root.get_widget_with_tag(TAG).unwrap();
+            assert!(editor.inner().code_scroll_for_test(0) > 0.0);
+            let viewport = editor.inner().code_viewport(1).expect("code clip");
+            let mut renderer = crate::render::Renderer::new(2);
+            renderer.render(&layers, W, H, 1.0, crate::ui::theme::background())
+                .expect("native raster");
+            (renderer.frame_pixels().to_vec(), viewport)
+        };
+
+        let (plain, clip) = frame(false);
+        let (marked, other_clip) = frame(true);
+        assert_eq!(clip, other_clip);
+        assert_eq!(plain.len(), marked.len());
+        let mut changed_inside = 0;
+        let top = (clip.y0.ceil() as usize + 2).min(H as usize);
+        let bottom = (clip.y1.floor() as usize).saturating_sub(2).min(H as usize);
+        assert!(bottom > top);
+        for y in top..bottom {
+            for x in 0..usize::from(W) {
+                let idx = y * usize::from(W) + x;
+                if plain[idx] != marked[idx] {
+                    assert!(
+                        (x as f64) >= clip.x0 - 1.0 && (x as f64) <= clip.x1 + 1.0,
+                        "selection/search leaked outside horizontally scrolled code clip at {x},{y}"
+                    );
+                    changed_inside += 1;
+                }
+            }
+        }
+        assert!(changed_inside > 8, "control: selection and search should change visible code pixels");
+    }
+
     #[test]
     fn paint_range_bounds_match_full_scan_for_unicode_windows_and_boundaries() {
         let note = (0..256).map(|i| match i % 7 {
