@@ -177,6 +177,37 @@ fn recovery_of_external_conflict_leaves_original_and_backup_unchanged() {
 }
 
 #[test]
+fn recovery_confirmation_rechecks_external_edit_after_dialog_is_shown() {
+    use crate::ui::dialog::DialogAnswer;
+    let mut h = Harness::new();
+    let path = h.write_note("confirm-race.md", "last confirmed");
+    assert!(h.app.open(&mut h.root, path.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    let draft = "unpublished private draft 🐱";
+    h.app.commit_text(&mut h.root, crop::Rope::from(draft));
+    crate::disk::wait();
+    drop(h.app.note.take());
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    let layer = match &h.app.popup {
+        Some(Popup::Recovery(state)) => state.dialog.layer,
+        _ => panic!("recovery prompt was not shown"),
+    };
+    // The source changes AFTER the initial recovery dialog is created.
+    std::fs::write(&path, "external update during confirmation").unwrap();
+    h.send(layer, DialogAnswer::Confirm);
+    assert!(h.app.popup.is_none());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "external update during confirmation");
+    assert_ne!(h.app.text.to_string(), draft, "stale candidate must not enter the editor");
+    let record = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &path,
+    ).unwrap().unwrap();
+    assert_eq!(record.body.to_string(), draft);
+    assert!(record.source_changed);
+}
+
+#[test]
 fn unsaved_text_is_written_on_shutdown() {
     let mut h = Harness::new();
     let path = h.vault.path().join("a.md");
