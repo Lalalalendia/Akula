@@ -76,7 +76,7 @@ fn protected(dir: &File, name: &str, maximum: u64) -> Result<Vec<u8>, BootstrapH
 
 /// Exact public key PEM stored by root_stage_v1.py. The PEM must not carry
 /// a second key or a different verifier identity from release.ed25519.
-fn expected_pub_pem(key: &[u8; 32]) -> Vec<u8> {
+pub(super) fn expected_pub_pem(key: &[u8; 32]) -> Vec<u8> {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut der = Vec::with_capacity(SPKI_PREFIX.len() + key.len());
     der.extend_from_slice(SPKI_PREFIX);
