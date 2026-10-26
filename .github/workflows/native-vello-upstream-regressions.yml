@@ -79,6 +79,8 @@ jobs:
           else
             cargo test --release --locked -p vello_cpu --features multithreading flush_completes_with_one_cpu_worker -- --nocapture --test-threads=1
           fi
+          # Run the regression itself, not just a filtered unrelated Vello test.
+          cargo test --release --locked -p vello_cpu --features multithreading --lib neutral_grays_remain_finite_under_color_and_luminosity_blends -- --nocapture
 
       - name: Supported sequential offset-filter root-mask checks (where present)
         working-directory: aquilum-app

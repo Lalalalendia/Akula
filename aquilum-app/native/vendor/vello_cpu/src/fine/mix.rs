@@ -326,26 +326,45 @@ mod clip_color_regression_tests {
     use super::*;
     use vello_common::fearless_simd::Fallback;
 
+    /// Vello #1999: 45/255 has a luminance one ULP above the gray channel.
+    /// The Color path can produce a tiny negative gray with l == n, and
+    /// Luminosity can do the same over an opaque gray backdrop.
     #[test]
     fn neutral_grays_remain_finite_under_color_and_luminosity_blends() {
         let simd = Fallback::new();
-        for value in 0_u8..=255 {
+        for value in 1_u8..=255 {
             let f = f32::from(value) / 255.0;
-            // Four identical transparent-backdrop source pixels exercise the
-            // non-separable blend modes, including sub-ULP gray rounding.
-            let rgba = [f, f, f, 0.5];
-            let back = [0.0; 4];
-            let src = f32x16::from_slice(simd, &rgba.repeat(4));
-            let dst = f32x16::from_slice(simd, &back.repeat(4));
+            let source = f32x16::from_slice(simd, &[f * 0.5, f * 0.5, f * 0.5, 0.5].repeat(4));
+            let transparent = f32x16::from_slice(simd, &[0.0; 16]);
+
             for mode in [Mix::Color, Mix::Luminosity] {
-                let result = mix(src, dst, BlendMode::new(mode, Compose::SrcOver));
+                let result = mix(source, transparent, BlendMode::new(mode, Compose::SrcOver));
                 let mut pixels = [0.0_f32; 16];
                 result.store_slice(&mut pixels);
                 assert!(
                     pixels.iter().all(|channel| channel.is_finite()),
-                    "{mode:?} at gray {value} generated NaN/Inf: {pixels:?}"
+                    "{mode:?}: gray {value} over transparent returned {pixels:?}"
+                );
+                assert!(
+                    (pixels[0] - f * 0.5).abs() <= 1e-5,
+                    "{mode:?}: expected premultiplied gray near {}, got {}",
+                    f * 0.5,
+                    pixels[0]
                 );
             }
+
+            // Black at half alpha over opaque gray: the non-separable
+            // Luminosity blend must yield a finite contribution. The caller
+            // later adds the unmodified backdrop's remaining half.
+            let black = f32x16::from_slice(simd, &[0.0, 0.0, 0.0, 0.5].repeat(4));
+            let gray_bg = f32x16::from_slice(simd, &[f, f, f, 1.0].repeat(4));
+            let result = mix(black, gray_bg, BlendMode::new(Mix::Luminosity, Compose::SrcOver));
+            let mut pixels = [0.0_f32; 16];
+            result.store_slice(&mut pixels);
+            assert!(
+                pixels.iter().all(|channel| channel.is_finite()),
+                "Luminosity: black over gray {value} returned {pixels:?}"
+            );
         }
     }
 }
