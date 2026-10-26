@@ -75,6 +75,7 @@ fn stop_color(stops: &ColorStops, t: f32) -> crate::color::DynamicColor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
     use crate::color::{AlphaColor, DynamicColor, Srgb};
 
     fn stops() -> ColorStops {
