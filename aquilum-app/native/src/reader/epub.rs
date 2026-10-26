@@ -5,26 +5,14 @@ use super::dom::{Dom, NodeId};
 use super::text::{decode, numeric_entities, parse_xml};
 use super::zip::Zip;
 mod limits;
+mod toc;
+pub(crate) use toc::Entry as TocEntry;
 pub struct Epub {
     zip: Zip,
     pub sections: Vec<(String, String)>,
+    pub toc: Vec<TocEntry>,
 }
 
-
-fn join(base: &str, href: &str) -> String {
-    let href = crate::paths::percent_decode(href.split('#').next().unwrap_or(href));
-    let mut parts: Vec<&str> = base.split('/').filter(|p| !p.is_empty()).collect();
-    for part in href.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            part => parts.push(part),
-        }
-    }
-    parts.join("/")
-}
 
 fn descendants<'a>(dom: &'a Dom, root: NodeId, name: &'a str) -> impl Iterator<Item = NodeId> + 'a {
     let mut stack = vec![root];
@@ -65,11 +53,12 @@ impl Epub {
             .copied()
             .filter(|&c| opf.name(c) == Some("itemref"))
             .map(|itemref| {
-                let href = opf.attr(itemref, "idref").and_then(|id| manifest.get(id)).map_or(String::new(), |href| join(&folder, href));
+                let href = opf.attr(itemref, "idref").and_then(|id| manifest.get(id)).map_or(String::new(), |href| toc::join(&folder, href));
                 (href, Cfi::Point(vec![element_path(&opf, itemref)]).to_string())
             })
             .collect::<Vec<_>>();
-        limits::valid_spine(&zip, &sections).then_some(Epub { zip, sections })
+        let toc = toc::parse(&zip, &opf, &opf_path, &sections);
+        limits::valid_spine(&zip, &sections).then_some(Epub { zip, sections, toc })
     }
 
     pub fn size(&self, index: usize) -> usize {
@@ -79,7 +68,7 @@ impl Epub {
     pub fn resource(&self, index: usize, src: &str) -> Option<Vec<u8>> {
         let (path, _) = self.sections.get(index)?;
         let folder = path.rsplit_once('/').map_or("", |(dir, _)| dir);
-        self.zip.read_limited(&join(folder, src), limits::MAX_RESOURCE_BYTES)
+        self.zip.read_limited(&toc::join(folder, src), limits::MAX_RESOURCE_BYTES)
     }
 
     pub fn section(&self, index: usize) -> Option<Dom> {
