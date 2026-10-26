@@ -68,7 +68,7 @@ impl Epub {
                 let href = opf.attr(itemref, "idref").and_then(|id| manifest.get(id)).map_or(String::new(), |href| join(&folder, href));
                 (href, Cfi::Point(vec![element_path(&opf, itemref)]).to_string())
             })
-            .collect();
+            .collect::<Vec<_>>();
         limits::valid_spine(&zip, &sections).then_some(Epub { zip, sections })
     }
 
