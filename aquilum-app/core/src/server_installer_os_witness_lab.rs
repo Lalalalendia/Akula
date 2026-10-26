@@ -103,6 +103,7 @@ fn pinned_bytes<const N: usize>(
 }
 /// Root-owned witness actor, provisioned OUTSIDE candidate/SSH/client traffic.
 /// Must be instantiated only in a dedicated OS-owned witness service.
+mod accessors;
 pub struct OsWitnessLab {
     ledger: InertWitnessLedgerLab,
     signer: Ed25519KeyPair,
@@ -195,12 +196,6 @@ impl OsWitnessLab {
             ed25519_public: public,
         };
         Ok(Self { ledger, signer, trust })
-    }
-    pub fn trusted_witness(&self) -> TrustedWitnessSigner {
-        self.trust.clone()
-    }
-    pub fn current_checkpoint(&self) -> Result<WitnessCheckpoint, OsWitnessError> {
-        self.ledger.current_checkpoint().map_err(OsWitnessError::Witness)
     }
     /// Exactly one new B1b1c CAS is written, fsynced and read back before the
     /// independently held witness key signs the specific accepted revision.

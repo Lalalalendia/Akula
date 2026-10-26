@@ -26,12 +26,12 @@ pub fn write(
         let (result, history_changed) = {
             let _publication = core.ordinary_note_publication_lease()?;
             core.with_unenrolled_host_epoch(path, |permit| {
-                let (before, result) = {
-                    let _guard = core.file_mutation_guard_for_host_write(permit)?;
-                    let before = core.history.disk_before(path, expected_hash);
-                    let result = write_file_atomic_impl(path, content, expected_hash)?;
-                    (before, result)
-                };
+                let mut file_gate_guard = core.file_mutation_guard_for_host_write(permit)?;
+                let before = core.history.disk_before(path, expected_hash);
+                let result = write_file_atomic_impl(path, content, expected_hash)?;
+                file_gate_guard.release_process_lock();
+                #[cfg(test)]
+                super::interprocess_lock::pause_file_gate_after_primary_before_history();
                 let write = NoteWrite {
                     disk_before: before, text: content, hash: &result.hash,
                     source, name: version_name,
@@ -71,12 +71,12 @@ pub fn write(
         // Only enabled for opt-in S3 builds; the unarmed route stays cheap.
         #[cfg(feature = "host-custody")]
         let _publication = core.ordinary_note_publication_lease()?;
-        let (before, result) = {
-            let _guard = core.file_mutation_guard_for_write()?;
-            let before = core.history.disk_before(path, expected_hash);
-            let result = write_file_atomic_impl(path, content, expected_hash)?;
-            (before, result)
-        };
+        let mut file_gate_guard = core.file_mutation_guard_for_write()?;
+        let before = core.history.disk_before(path, expected_hash);
+        let result = write_file_atomic_impl(path, content, expected_hash)?;
+        file_gate_guard.release_process_lock();
+        #[cfg(test)]
+        super::interprocess_lock::pause_file_gate_after_primary_before_history();
         #[cfg(feature = "save-stage-probe")]
         let profile_primary = profile_start.elapsed();
         let write = NoteWrite {
@@ -265,19 +265,17 @@ fn write_checked_history_under_gate(
         }));
     }
 
-    // Keep lock order: held external OS lock -> Core File Gate -> release
-    // File Gate -> HistoryService state and filesystem locks.
-    let (before, result) = {
-        let _guard = core.file_mutation_guard_for_custody_write()
-            .map_err(CheckedHistoryError::Primary)?;
-        prewrite().map_err(CheckedHistoryError::Primary)?;
-        let before = core.history.disk_before(path, Some(expected_hash));
-        let result = write_file_atomic_impl(path, content, Some(expected_hash))
-            .map_err(CheckedHistoryError::Primary)?;
-        #[cfg(test)]
-        p0g3d08c_abort_only_after_primary_published(path);
-        (before, result)
-    };
+    // Keep lock order: held external OS lock -> Core File Gate interlock ->
+    // release the process-local mutex -> HistoryService state and filesystem locks.
+    let mut file_gate_guard = core.file_mutation_guard_for_custody_write()
+        .map_err(CheckedHistoryError::Primary)?;
+    prewrite().map_err(CheckedHistoryError::Primary)?;
+    let before = core.history.disk_before(path, Some(expected_hash));
+    let result = write_file_atomic_impl(path, content, Some(expected_hash))
+        .map_err(CheckedHistoryError::Primary)?;
+    #[cfg(test)]
+    p0g3d08c_abort_only_after_primary_published(path);
+    file_gate_guard.release_process_lock();
     let write = NoteWrite {
         disk_before: before, text: content, hash: &result.hash,
         source, name: version_name,
@@ -315,10 +313,9 @@ pub fn create(
         let (result, changed) = {
             let _publication = core.ordinary_note_publication_lease()?;
             core.with_unenrolled_host_epoch(path, |permit| {
-                let result = {
-                    let _guard = core.file_mutation_guard_for_host_write(permit)?;
-                    create_file_impl(path, content)?
-                };
+                let mut file_gate_guard = core.file_mutation_guard_for_host_write(permit)?;
+                let result = create_file_impl(path, content)?;
+                file_gate_guard.release_process_lock();
                 let history = if is_note(path) {
                     let write = NoteWrite {
                         disk_before: Some((String::new(), SystemTime::now())),
@@ -346,10 +343,9 @@ pub fn create(
     let (result, history_outcome) = {
         #[cfg(feature = "host-custody")]
         let _publication = core.ordinary_note_publication_lease()?;
-        let result = {
-            let _guard = core.file_mutation_guard_for_write()?;
-            create_file_impl(path, content)?
-        };
+        let mut file_gate_guard = core.file_mutation_guard_for_write()?;
+        let result = create_file_impl(path, content)?;
+        file_gate_guard.release_process_lock();
         let history = if is_note(path) {
             let write = NoteWrite {
                 disk_before: Some((String::new(), SystemTime::now())),

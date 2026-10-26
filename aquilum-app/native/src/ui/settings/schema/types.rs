@@ -1,6 +1,4 @@
 use aquilum_core::settings::models::AppConfig;
-use aquilum_core::sync::NativeRecoveryDecision;
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Bool(bool),
@@ -19,21 +17,10 @@ pub enum Setter {
 
 mod context;
 pub use context::Context;
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Action {
-    InspectRecovery(String),
-    RequestRecoveryReview(NativeRecoveryDecision),
-    OpenTrash,
-    Restore(String),
-    TrashPage(usize),
-    CreateTemplates,
-    NewToken,
-    Copy(usize, String),
-    OpenUrl(&'static str),
-    CheckUpdates,
-    InstallUpdate,
-}
+mod actions;
+pub use actions::{Action, CloudProvider};
+mod server_probe;
+pub use server_probe::ServerProbeView;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Button {

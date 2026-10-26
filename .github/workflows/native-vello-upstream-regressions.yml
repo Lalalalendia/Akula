@@ -67,6 +67,19 @@ jobs:
           set -euo pipefail
           cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_colr_fractional_fallback_cpu -- --ignored --nocapture --test-threads=1
 
+      - name: Vello one-worker flush under single-CPU Linux affinity (Windows parity)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            cpu="$(python3 -c 'import os; print(min(os.sched_getaffinity(0)))')"
+            echo "Running Vello flush test with CPU affinity: $cpu"
+            taskset -c "$cpu" timeout 900s cargo test --release --locked -p vello_cpu --features multithreading flush_completes_with_one_cpu_worker -- --nocapture --test-threads=1
+          else
+            cargo test --release --locked -p vello_cpu --features multithreading flush_completes_with_one_cpu_worker -- --nocapture --test-threads=1
+          fi
+
       - name: Supported sequential offset-filter root-mask checks (where present)
         working-directory: aquilum-app
         shell: bash
