@@ -1,6 +1,77 @@
 # Genuine Win32 Ctrl+A/Ctrl+V/Ctrl+Z acceptance on an installed Akula.
 # This runs only after NSIS install on a clean GitHub-hosted Windows runner.
 # The test creates its *own* disposable vault note; no user notes are used.
+# Restrict the additional destructive shortcuts to the disposable *installed*
+# long-note test. Do not expand the shared SelectAll/Copy-only helper.
+if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows' -or
+    [IntPtr]::Size -ne 8) { throw 'CI-only Win32 large-note shortcut helper' }
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class AkulaBetaLargeShortcutInput {
+  [StructLayout(LayoutKind.Explicit, Size=40)]
+  public struct Input {
+    [FieldOffset(0)] public uint Type;
+    [FieldOffset(8)] public ushort VirtualKey;
+    [FieldOffset(10)] public ushort ScanCode;
+    [FieldOffset(12)] public uint Flags;
+    [FieldOffset(16)] public uint Time;
+    [FieldOffset(24)] public IntPtr Extra;
+  }
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+  [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, [In] Input[] inputs, int size);
+  public static void PressCtrl(IntPtr hwnd, int expectedPid, ushort key) {
+    if (key != 0x41 && key != 0x43 && key != 0x56 && key != 0x5a && key != 0x59)
+      throw new InvalidOperationException("Only synthetic SelectAll/Copy/Paste/Undo/Redo shortcuts are permitted");
+    if (hwnd == IntPtr.Zero || Marshal.SizeOf(typeof(Input)) != 40)
+      throw new InvalidOperationException("Invalid x64 OS keyboard layout or target");
+    uint owner;
+    if (GetWindowThreadProcessId(hwnd,out owner) == 0 || owner != (uint)expectedPid)
+      throw new InvalidOperationException("Large-note shortcut PID does not match Akula");
+    if (GetForegroundWindow() != hwnd)
+      throw new InvalidOperationException("Large-note shortcut target is not foreground");
+    const uint KEYBOARD=1, UP=2;
+    var inputs = new Input[] {
+      new Input { Type=KEYBOARD, VirtualKey=0x11 },
+      new Input { Type=KEYBOARD, VirtualKey=key },
+      new Input { Type=KEYBOARD, VirtualKey=key, Flags=UP },
+      new Input { Type=KEYBOARD, VirtualKey=0x11, Flags=UP }
+    };
+    if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length)
+      throw new InvalidOperationException("Incomplete synthetic OS shortcut delivery");
+  }
+}
+'@ -ErrorAction Stop
+
+function Send-AkulaBetaLargeShortcut {
+  param(
+    [Parameter(Mandatory)][System.Diagnostics.Process]$Process,
+    [Parameter(Mandatory)][ValidateSet('SelectAll','Copy','Paste','Undo','Redo')][string]$Action
+  )
+  $Process.Refresh()
+  if ($Process.HasExited -or $Process.MainWindowHandle -eq [IntPtr]::Zero -or
+      $Process.MainWindowTitle -notlike 'Large paste proof*' -or
+      $Process.MainWindowTitle -notlike '*Akula*') { throw 'Wrong synthetic large-note target' }
+  $hwnd = [IntPtr]$Process.MainWindowHandle
+  [AkulaBetaGuiInput]::ShowWindow($hwnd,9) | Out-Null
+  $foreground=$false
+  for ($attempt=0;$attempt -lt 15;$attempt++) {
+    [AkulaBetaGuiInput]::SetForegroundWindow($hwnd) | Out-Null
+    Start-Sleep -Milliseconds 250
+    if ([AkulaBetaGuiInput]::GetForegroundWindow() -eq $hwnd) { $foreground=$true; break }
+  }
+  if (!$foreground) { throw 'Cannot foreground synthetic large note' }
+  $vk = switch ($Action) {
+    'SelectAll' { [uint16]0x41 }
+    'Copy' { [uint16]0x43 }
+    'Paste' { [uint16]0x56 }
+    'Undo' { [uint16]0x5a }
+    'Redo' { [uint16]0x59 }
+  }
+  [AkulaBetaLargeShortcutInput]::PressCtrl($hwnd, $Process.Id, $vk)
+}
+
 function Test-AkulaBetaReplaceAll {
   param(
     [Parameter(Mandatory)][string]$Executable,
@@ -74,9 +145,9 @@ function Test-AkulaBetaReplaceAll {
     if ($clipboard.TrimEnd([char[]]@([char]13, [char]10)) -cne $replacement) {
       throw 'Synthetic clipboard contents differ before paste'
     }
-    Send-AkulaBetaShortcut -Process $app -Action SelectAll -ExpectedNoteTitle 'Large paste proof'
+    Send-AkulaBetaLargeShortcut -Process $app -Action SelectAll
     Start-Sleep -Milliseconds 300
-    Send-AkulaBetaShortcut -Process $app -Action Paste -ExpectedNoteTitle 'Large paste proof'
+    Send-AkulaBetaLargeShortcut -Process $app -Action Paste
     Await-AkulaDiskContent -Process $app -Expected $replacement -Phase 'Ctrl+A then Ctrl+V'
     if ((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -eq $originalHash) {
       throw 'GUI paste did not change the synthetic long note'
@@ -87,9 +158,9 @@ function Test-AkulaBetaReplaceAll {
     # writes and no user content in logs; Ctrl+A/C do not change undo history.
     $beforeUndoPoison = 'AKULA_BEFORE_UNDO_POISON_' + [Guid]::NewGuid().ToString('N')
     Set-Clipboard -Value $beforeUndoPoison -ErrorAction Stop
-    Send-AkulaBetaShortcut -Process $app -Action SelectAll -ExpectedNoteTitle 'Large paste proof'
+    Send-AkulaBetaLargeShortcut -Process $app -Action SelectAll
     Start-Sleep -Milliseconds 300
-    Send-AkulaBetaShortcut -Process $app -Action Copy -ExpectedNoteTitle 'Large paste proof'
+    Send-AkulaBetaLargeShortcut -Process $app -Action Copy
     $pasteStillResponsive = $false
     $clipboardKind = 'poison'
     $clipboardChars = 0
@@ -122,7 +193,7 @@ function Test-AkulaBetaReplaceAll {
       throw 'Installed GUI did not serve exact Ctrl+A/C clipboard readback after paste, before Ctrl+Z'
     }
 
-    Send-AkulaBetaShortcut -Process $app -Action Undo -ExpectedNoteTitle 'Large paste proof'
+    Send-AkulaBetaLargeShortcut -Process $app -Action Undo
     try {
       Await-AkulaDiskContent -Process $app -Expected $original -Phase 'Ctrl+Z restore'
     } catch {
@@ -150,9 +221,9 @@ function Test-AkulaBetaReplaceAll {
       try {
         $poison = 'AKULA_UNDO_DIAG_POISON_' + [Guid]::NewGuid().ToString('N')
         Set-Clipboard -Value $poison -ErrorAction Stop
-        Send-AkulaBetaShortcut -Process $app -Action SelectAll -ExpectedNoteTitle 'Large paste proof'
+        Send-AkulaBetaLargeShortcut -Process $app -Action SelectAll
         Start-Sleep -Milliseconds 300
-        Send-AkulaBetaShortcut -Process $app -Action Copy -ExpectedNoteTitle 'Large paste proof'
+        Send-AkulaBetaLargeShortcut -Process $app -Action Copy
         for ($probe = 0; $probe -lt 15; $probe++) {
           Start-Sleep -Milliseconds 200
           $copied = Get-Clipboard -Raw -ErrorAction Stop
@@ -182,9 +253,9 @@ function Test-AkulaBetaReplaceAll {
     }
     # Repeat the full-document replacement through real Ctrl+Y and undo it
     # once more. Never publish a replaced note as a successful restoration.
-    Send-AkulaBetaShortcut -Process $app -Action Redo -ExpectedNoteTitle 'Large paste proof'
+    Send-AkulaBetaLargeShortcut -Process $app -Action Redo
     Await-AkulaDiskContent -Process $app -Expected $replacement -Phase 'Ctrl+Y redo paste'
-    Send-AkulaBetaShortcut -Process $app -Action Undo -ExpectedNoteTitle 'Large paste proof'
+    Send-AkulaBetaLargeShortcut -Process $app -Action Undo
     Await-AkulaDiskContent -Process $app -Expected $original -Phase 'final Ctrl+Z restore'
     if ((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -ne $originalHash) {
       throw 'Ctrl+Y then Ctrl+Z did not recover exact original source bytes'
@@ -200,9 +271,9 @@ function Test-AkulaBetaReplaceAll {
     Await-AkulaLargeNote -Process $app
     $poison = 'AKULA_LONG_READBACK_POISON_' + [Guid]::NewGuid().ToString('N')
     Set-Clipboard -Value $poison -ErrorAction Stop
-    Send-AkulaBetaShortcut -Process $app -Action SelectAll -ExpectedNoteTitle 'Large paste proof'
+    Send-AkulaBetaLargeShortcut -Process $app -Action SelectAll
     Start-Sleep -Milliseconds 300
-    Send-AkulaBetaShortcut -Process $app -Action Copy -ExpectedNoteTitle 'Large paste proof'
+    Send-AkulaBetaLargeShortcut -Process $app -Action Copy
     $readbackOk = $false
     for ($poll = 0; $poll -lt 40; $poll++) {
       Start-Sleep -Milliseconds 200

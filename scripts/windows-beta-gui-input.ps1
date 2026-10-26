@@ -201,16 +201,15 @@ function Send-AkulaBetaText {
 function Send-AkulaBetaShortcut {
   param(
     [Parameter(Mandatory)][System.Diagnostics.Process]$Process,
-    [Parameter(Mandatory)][ValidateSet('SelectAll', 'Copy', 'Paste', 'Undo', 'Redo')][string]$Action,
-    [ValidateSet('First note', 'Large paste proof')][string]$ExpectedNoteTitle = 'First note'
+    [Parameter(Mandatory)][ValidateSet('SelectAll', 'Copy')][string]$Action
   )
   $Process.Refresh()
   if ($Process.HasExited -or $Process.MainWindowHandle -eq [IntPtr]::Zero) {
     throw 'Native shortcut target has no installed Akula window'
   }
-  if ($Process.MainWindowTitle -notlike "$ExpectedNoteTitle*" -or
+  if ($Process.MainWindowTitle -notlike 'First note*' -or
       $Process.MainWindowTitle -notlike '*Akula*') {
-    throw 'Native shortcut target is not the expected synthetic note'
+    throw 'Native shortcut target is not the reopened synthetic note'
   }
   $hwnd = [IntPtr]$Process.MainWindowHandle
   [AkulaBetaGuiInput]::ShowWindow($hwnd, 9) | Out-Null
@@ -224,13 +223,6 @@ function Send-AkulaBetaShortcut {
     }
   }
   if (!$focused) { throw 'Cannot focus reopened Akula before native Ctrl shortcut' }
-  # PowerShell 5.1 does not recognize [ushort]; [uint16] matches the C# Win32 signature.
-  $key = switch ($Action) {
-    'SelectAll' { [uint16]0x41 }
-    'Copy' { [uint16]0x43 }
-    'Paste' { [uint16]0x56 }
-    'Undo' { [uint16]0x5a }
-    'Redo' { [uint16]0x59 }
-  }
+  $key = if ($Action -eq 'SelectAll') { [uint16]0x41 } else { [uint16]0x43 }
   [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $Process.Id, $key)
 }
