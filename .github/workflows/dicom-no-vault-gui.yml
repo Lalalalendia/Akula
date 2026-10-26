@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/dicom-no-vault-gui.yml'
       - 'aquilum-app/native/src/dicom.rs'
+      - 'aquilum-app/native/src/dicom/**'
       - 'aquilum-app/native/assets/locales/ru.json'
       - 'aquilum-app/native/assets/locales/en.json'
       - 'aquilum-app/native/src/app/tabs/open.rs'
