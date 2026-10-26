@@ -239,9 +239,9 @@ mod tests {
             assert!(queue.status().error.is_none(), "retention cannot silently fail");
             last = Some((revision, index));
         }
-        let bucket = super::folder(data.path(), workspace, false).unwrap().unwrap();
-        let relative = super::checked_relative(vault.path(), &doc).unwrap();
-        let records = super::records(&bucket, &format!("{}-", super::key(&relative))).unwrap();
+        let bucket = super::super::folder(data.path(), workspace, false).unwrap().unwrap();
+        let relative = super::super::checked_relative(vault.path(), &doc).unwrap();
+        let records = super::super::records(&bucket, &format!("{}-", super::super::key(&relative))).unwrap();
         assert_eq!(records.len(), 1, "successive full-text edits must not exhaust AppData");
         let restored = inspect(data.path(), vault.path(), workspace, &doc).unwrap().unwrap();
         assert_eq!(restored.revision, last.unwrap().0);
