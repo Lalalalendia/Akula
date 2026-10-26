@@ -50,6 +50,10 @@ impl Note {
         self.shadow.as_ref().map(|shadow| shadow.request(source.clone())).transpose()
     }
 
+    pub(crate) fn approve_recovery_capture(&self) {
+        if let Some(shadow) = &self.shadow { shadow.allow_after_review(); }
+    }
+
     pub(crate) fn saved_ack(&self) {
         if let Some(shadow) = &self.shadow {
             shadow.after_save_ack();

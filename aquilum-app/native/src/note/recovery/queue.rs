@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crop::Rope;
 use uuid::Uuid;
 
-use super::{checked_relative, clear_after_verified_save, inspect, invalid, stage};
+use super::{checked_relative, clear_after_verified_save, denied, inspect, invalid, stage};
 
 struct Context {
     data: PathBuf,
@@ -21,6 +21,7 @@ struct Context {
 #[derive(Default)]
 struct State {
     next_revision: u64,
+    blocked_by_existing: bool,
     pending: Option<(u64, Rope)>,
     running: bool,
     durable: Option<u64>,
@@ -50,7 +51,9 @@ impl SnapshotQueue {
         checked_relative(vault, document)?;
         // Prior revisions may survive a process crash. Never reuse a revision
         // number after restart and silently overwrite a different snapshot.
-        let previous = inspect(data, vault, workspace, document)?.map_or(0, |entry| entry.revision);
+        let prior = inspect(data, vault, workspace, document)?;
+        let previous = prior.as_ref().map_or(0, |entry| entry.revision);
+        let blocked = prior.as_ref().is_some_and(|entry| !entry.already_saved);
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH)
             .map_err(io::Error::other)?
             .as_nanos();
@@ -63,7 +66,7 @@ impl SnapshotQueue {
                 document: document.to_path_buf(),
                 baseline: baseline.to_owned(),
             }),
-            state: Arc::new(Mutex::new(State { next_revision: stamp.max(previous), ..State::default() })),
+            state: Arc::new(Mutex::new(State { next_revision: stamp.max(previous), blocked_by_existing: blocked, ..State::default() })),
         })
     }
 
@@ -72,6 +75,9 @@ impl SnapshotQueue {
     /// The returned revision is NOT an fsync acknowledgment.
     pub(in crate::note) fn request(&self, body: Rope) -> io::Result<u64> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.blocked_by_existing {
+            return Err(denied("unreviewed recovery draft must not be superseded"));
+        }
         let revision = state.next_revision.checked_add(1)
             .ok_or_else(|| invalid("recovery revision counter exhausted"))?;
         state.next_revision = revision;
@@ -85,6 +91,13 @@ impl SnapshotQueue {
             crate::disk::run(move || drain(context, state));
         }
         Ok(revision)
+    }
+
+    /// A prior-session draft is protected until the user explicitly elects
+    /// to recover it. Ordinary note edits or automatic File Gate ACKs cannot
+    /// silently replace or delete the only copy of that draft.
+    pub(in crate::note) fn allow_after_review(&self) {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).blocked_by_existing = false;
     }
 
     /// Never clear a shadow on enqueue or a guessed save: a successful File
@@ -210,6 +223,26 @@ mod tests {
     }
 
     #[test]
+    fn old_unsaved_draft_survives_new_process_edits_and_ack_until_review() {
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("note.md");
+        fs::write(&doc, "last confirmed").unwrap();
+        let workspace = Uuid::new_v4();
+        let baseline = digest(&doc);
+        stage(data.path(), vault.path(), workspace, &doc, &baseline, 31, "prior crash draft").unwrap();
+        let new_process = SnapshotQueue::new(data.path(), vault.path(), workspace, &doc, &baseline).unwrap();
+        assert!(new_process.request(Rope::from("new edit")).is_err());
+        fs::write(&doc, "new edit saved by File Gate").unwrap();
+        new_process.after_save_ack();
+        crate::disk::wait();
+        let candidate = inspect(data.path(), vault.path(), workspace, &doc).unwrap().unwrap();
+        assert_eq!(candidate.revision, 31);
+        assert_eq!(candidate.body, "prior crash draft");
+        assert!(candidate.source_changed);
+    }
+
+    #[test]
     fn reopening_queue_chooses_revision_above_previous_snapshot() {
         let data = tempfile::tempdir().unwrap();
         let vault = tempfile::tempdir().unwrap();
@@ -221,6 +254,9 @@ mod tests {
         let previous = u64::MAX - 2;
         stage(data.path(), vault.path(), workspace, &doc, &baseline, previous, "unsaved old").unwrap();
         let queue = SnapshotQueue::new(data.path(), vault.path(), workspace, &doc, &baseline).unwrap();
+        assert!(queue.request(Rope::from("unreviewed new")).is_err());
+        assert_eq!(inspect(data.path(), vault.path(), workspace, &doc).unwrap().unwrap().body, "unsaved old");
+        queue.allow_after_review(); // explicitly approved previous draft
         let next = queue.request(Rope::from("unsaved new")).unwrap();
         assert_eq!(next, u64::MAX - 1);
         crate::disk::wait();

@@ -97,6 +97,7 @@ impl App {
             || candidate.baseline!=state.candidate.baseline
             || candidate.source_changed || candidate.already_saved {return false;}
         // Only a user-confirmed action can promote the draft to File Gate.
+        if let Some(note)=&self.note {note.approve_recovery_capture();}
         self.commit_text(root,candidate.body);
         true
     }
