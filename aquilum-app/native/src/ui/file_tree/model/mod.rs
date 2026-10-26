@@ -1,11 +1,11 @@
 mod counts;
 mod edit;
 mod load;
+mod rows;
 mod select;
 mod sort;
 #[cfg(test)]
 mod tests;
-
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 

@@ -1,11 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use aquilum_core::files::models::{FileItem, FileItemType};
 use aquilum_core::files::workspace::read_directory_impl;
 
 use super::comparable;
-
+mod index;
+pub(crate) use index::IndexedCounts;
 #[derive(Default)]
 pub struct Counts {
     own: BTreeMap<String, u32>,
@@ -16,7 +17,6 @@ fn read(dir: &Path) -> (u32, Vec<PathBuf>) {
     let folders = items.iter().filter(|item| item.item_type == FileItemType::Folder).map(|item| PathBuf::from(&item.id)).collect();
     (items.len() as u32, folders)
 }
-
 fn subtree(key: &str) -> std::ops::Range<String> {
     format!("{key}/")..format!("{key}0")
 }
@@ -56,9 +56,9 @@ impl Counts {
         }
         let (items, folders) = read(dir);
         self.own.insert(key.clone(), items);
-        let present: Vec<String> = folders.iter().map(|f| comparable(f)).collect();
+        let present: HashSet<String> = folders.iter().map(|f| comparable(f)).collect();
         let prefix_len = key.len() + 1;
-        let gone: Vec<String> = self.own.range(subtree(&key)).map(|(k, _)| k).filter(|k| !k[prefix_len..].contains('/') && !present.contains(k)).cloned().collect();
+        let gone: Vec<String> = self.own.range(subtree(&key)).map(|(k, _)| k).filter(|k| !k[prefix_len..].contains('/') && !present.contains(k.as_str())).cloned().collect();
         for key in gone {
             self.forget(&key);
         }
