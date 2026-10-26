@@ -32,7 +32,7 @@ fn journey_r06_game_session_links_npc_location_and_keeps_session_notes() {
         h.app.on_core_events(&mut h.root);
         matches!(&h.app.popup, Some(Popup::Search(state)) if state.result_count() >= 3)
     }), "поиск не видит персонажа в нескольких сессиях");
-    assert!(h.app.search_key(&mut h.root, &Key::Named(NamedKey::Escape), Modifiers::empty()));
+    assert!(h.app.search_key(&mut h.root, &Key::Named(NamedKey::Escape), Modifiers::empty()).is_some());
 
     assert!(h.app.open(&mut h.root, current.clone()));
     assert!(h.app.open_target(
