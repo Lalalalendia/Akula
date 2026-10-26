@@ -104,6 +104,8 @@ jobs:
           set -euo pipefail
           cargo test --release --locked -p aquilum-native --bin aquilum-native filter_route_is_serial_even_when_adaptive_is_disabled -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native filter_layer_survives_serial_fallback_without_panic -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native multi_filter_chain_ -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native mask_filter_preflight_ -- --nocapture --test-threads=1
 
       - name: Supported sequential offset-filter root-mask checks (where present)
         working-directory: aquilum-app

@@ -1,13 +1,13 @@
 pub(super) mod convert;
 mod cull;
 mod error;
+mod filter_chain;
 mod filter_route;
 mod mask;
 #[cfg(any(test, not(feature = "installed")))]
 mod mipmap;
 mod runs;
 mod sink;
-
 use std::collections::VecDeque;
 
 use masonry::kurbo::{Affine, Rect};
@@ -31,7 +31,7 @@ pub struct Painter {
     pub(super) settings: RenderSettings,
     pub(super) error: Option<PaintError>,
     pub(super) clip_depth: u32,
-    pub(super) groups: Vec<bool>,
+    pub(super) groups: Vec<usize>,
     pub(super) mask_cache: VecDeque<CachedMask>,
     pub(super) frame: Rect,
     pub(super) shift: Affine,
