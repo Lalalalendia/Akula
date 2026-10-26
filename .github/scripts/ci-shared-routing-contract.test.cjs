@@ -5,10 +5,10 @@ const fs=require('node:fs');
 const path=require('node:path');
 const core=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
 const shared=fs.readFileSync(path.join(__dirname,'../workflows/ci-shared-manifest-labs.yml'),'utf8');
-const routeEntries=[["host-custody","sync-host-custody.yml",["core","native"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock","owned_s3_minio"]],["s3-platform","sync-s3-platform.yml",["core","lock","native"]],["pinned-read","sync-pinned-read.yml",["core","lock","owned_pinned_read"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock","owned_s3_reservation"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock","owned_windows_beta"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock","owned_linux_beta"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]],["device-roster","sty-device-roster-lab.yml",["core"]],["native-positive","sync-native-positive-host.yml",["native"]]];
+const routeEntries=[["host-custody","sync-host-custody.yml",["core","native"]],["b0c-ssh-native","core-server-bootstrap-b0c-windows-ssh.yml",["native","owned_b0c_ssh"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock","owned_s3_minio"]],["s3-platform","sync-s3-platform.yml",["core","lock","native"]],["pinned-read","sync-pinned-read.yml",["core","lock","owned_pinned_read"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock","owned_s3_reservation"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock","owned_windows_beta"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock","owned_linux_beta"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]],["device-roster","sty-device-roster-lab.yml",["core"]],["native-positive","sync-native-positive-host.yml",["native"]]];
 
-test('28 owned routes preserve direct-only versus required callable owners',()=>{
-  assert.equal(routeEntries.length,28);
+test('29 owned routes preserve direct-only versus required callable owners',()=>{
+  assert.equal(routeEntries.length,29);
   assert.match(shared,/^on:\n  workflow_call:/m);
   for(const [id,file,keys] of routeEntries){
     const body=fs.readFileSync(path.join(__dirname,'../workflows',file),'utf8');
@@ -53,7 +53,8 @@ test('ordinary Core PRs schedule no independent perf workflows; opt-in routes re
   const perf=fs.readFileSync(path.join(__dirname,'../workflows/core-perf.yml'),'utf8');
   const compare=fs.readFileSync(path.join(__dirname,'../workflows/core-perf-compare.yml'),'utf8');
   assert.match(perf,/^on:\n  workflow_call:/m);
-  assert.match(perf,/types: \[labeled, edited\]/);
+  assert.match(perf,/types: \[labeled\]/,'label-based opt-in remains');
+  assert.doesNotMatch(perf,/types: \[[^\]]*edited/,'PR description edits must not spawn optional perf workflow');
   assert.doesNotMatch(perf,/types: \[opened, synchronize/);
   assert.match(perf,/^  workflow_dispatch:/m,'manual baseline remains');
   assert.match(perf,/^  paired:\n/m,'paired comparison is called from one baseline workflow');
@@ -262,7 +263,7 @@ test('Linux beta source-only, mixed lock and workflow edits remain mandatory wit
 });
 
 
-test('Pinned Read keeps 46 exact sources on both OS, main required and non-main direct only',()=>{
+test('Pinned Read keeps 51 exact sources on both OS, main required and non-main direct only',()=>{
   const route=require('./ci-shared-manifest-route.cjs');
   const {parse,matches}=require('./ci-file-ratchet.cjs');
   const body=fs.readFileSync(path.join(__dirname,'../workflows/sync-pinned-read.yml'),'utf8');
@@ -293,6 +294,11 @@ test('Pinned Read keeps 46 exact sources on both OS, main required and non-main 
   "aquilum-app/core/src/sync/sealed_archive.rs",
   "aquilum-app/core/src/sync/local_create_tests.rs",
   "aquilum-app/core/src/sync/journal.rs",
+  "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+  "aquilum-app/core/src/sync/journal/publication_recovery.rs",
+  "aquilum-app/core/src/sync/journal/phase_transitions.rs",
+  "aquilum-app/core/src/sync/journal/tests/mod.rs",
+  "aquilum-app/core/src/sync/journal/tests/recovery.rs",
   "aquilum-app/core/src/sync/core_scan.rs",
   "aquilum-app/core/src/sync/path.rs",
   "aquilum-app/core/src/search/paths.rs",
@@ -325,10 +331,10 @@ test('Pinned Read keeps 46 exact sources on both OS, main required and non-main 
   "aquilum-app/core/src/sync/mod.rs",
   ".github/workflows/sync-pinned-read.yml"
 ];
-  assert.equal(originalPaths.length,46);
+  assert.equal(originalPaths.length,51);
   assert.deepEqual(configured,originalPaths,'all former paths still trigger non-main PR acceptance');
   assert.deepEqual(route.OWNED_SUITES.owned_pinned_read,originalPaths,
-    'all 46 paths also trigger mandatory main-branch OS checks');
+    'all 51 paths also trigger mandatory main-branch OS checks');
   assert.equal(parse(body).t,'paths');
   for(const source of originalPaths){
     assert.equal(matches(parse(body),source),true,source+' direct for non-main PR');
@@ -428,7 +434,7 @@ test('Reserved S3 OS acceptance preserves all 14 glob owners for main and non-ma
 });
 
 
-test('S3 MinIO preserves 23 direct non-main source paths and required main glob routing',()=>{
+test('S3 MinIO preserves 28 direct non-main source paths and required main glob routing',()=>{
   const owned=require('./ci-shared-manifest-route.cjs');
   const {parse,matches}=require('./ci-file-ratchet.cjs');
   const body=fs.readFileSync(path.join(__dirname,'../workflows/sync-s3-minio.yml'),'utf8');
@@ -441,6 +447,11 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   "aquilum-app/core/src/sync/s3_preimage_capture.rs",
   "aquilum-app/core/src/sync/host_custody_registry.rs",
   "aquilum-app/core/src/sync/journal.rs",
+  "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+  "aquilum-app/core/src/sync/journal/publication_recovery.rs",
+  "aquilum-app/core/src/sync/journal/phase_transitions.rs",
+  "aquilum-app/core/src/sync/journal/tests/mod.rs",
+  "aquilum-app/core/src/sync/journal/tests/recovery.rs",
   "aquilum-app/core/src/sync/local_create_tests.rs",
   "aquilum-app/core/src/sync/local_create.rs",
   "aquilum-app/core/src/sync/s3_transport/**",
@@ -457,7 +468,7 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   "aquilum-app/core/src/sync/mod.rs",
   ".github/workflows/sync-s3-minio.yml"
 ];
-  assert.equal(oldPaths.length,23,'full original source path coverage');
+  assert.equal(oldPaths.length,28,'full original source path coverage');
   assert.deepEqual(oldPaths.filter(p=>p.includes('*')),
     ['aquilum-app/core/src/sync/s3_transport/**'],'preserve exact nested transport glob');
   assert.match(body,/^on:\n  workflow_call:\n  pull_request:\n/m);
@@ -471,7 +482,7 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   assert.deepEqual(parse(body),{t:'paths',p:oldPaths},
     'non-main pull_request.paths must retain all original patterns');
   assert.deepEqual(owned.OWNED_SUITES.owned_s3_minio,oldPaths,
-    'required Main route owns exact same 23 path patterns');
+    'required Main route owns exact same 28 path patterns');
   for(const entry of oldPaths){
     assert.equal(matches(parse(body),entry),true,entry+' direct non-main match');
     assert.equal(owned.assess({paths:[entry]}).owned_s3_minio,true,entry+' required main source-only');
@@ -502,4 +513,164 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   assert.match(shared,/^      owned_s3_minio:\n        required: true\n        type: boolean$/m);
   assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/,
     'Main PR gate must still fail closed for MinIO');
+});
+
+test('B0c Windows owned sources run only through required main route; non-main and manual remain',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const router=require('./ci-shared-manifest-route.cjs');
+  const file='.github/workflows/core-server-bootstrap-b0c-windows-ssh.yml';
+  const body=fs.readFileSync(path.join(__dirname,'../workflows/core-server-bootstrap-b0c-windows-ssh.yml'),'utf8');
+  const policy=parse(body);
+  assert.match(body,/^on:\n  workflow_call:\n  pull_request:\n    branches-ignore: \[main\]\n    paths:/m);
+  assert.equal(matches(policy,router.NATIVE),false,'native manifest must not launch directly');
+  const owners=[
+    "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs",
+    "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs",
+    "aquilum-app/core/src/server_bootstrap_modules.rs",
+    "aquilum-app/core/tests/server_bootstrap_b0c_windows.rs",
+    "scripts/ci/akula-b0c-windows-loopback-sshd.py",
+    ".github/workflows/core-server-bootstrap-b0c-windows-ssh.yml",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0C.md",
+    "aquilum-app/native/src/app/settings/server.rs",
+    "aquilum-app/native/src/app/settings/server_state.rs",
+    "aquilum-app/native/src/ui/settings/schema/server/server_status.rs",
+    "aquilum-app/native/src/ui/settings/schema/server/identity.rs",
+    "aquilum-app/native/assets/locales/ru.json",
+    "aquilum-app/native/assets/locales/en.json",
+    "aquilum-app/native/src/ui/settings/schema/tests.rs",
+  ];
+  assert.deepEqual(router.OWNED_SUITES.owned_b0c_ssh,owners,'exact previous 14 source owners');
+  const direct=body.split('    paths:\n')[1]?.split('  workflow_dispatch:')[0]||'';
+  const directOwners=[...direct.matchAll(/^      - "([^"]+)"$/gm)].map(m=>m[1]);
+  assert.deepEqual(directOwners,owners,'non-main PRs retain all source triggers');
+  assert.match(body,/^  workflow_dispatch:/m,'manual Windows lab remains');
+  for(const owner of owners){
+    assert.equal(matches(policy,owner),true,owner+' still directly tested on non-main');
+    assert.equal(router.assess({paths:[owner]}).owned_b0c_ssh,true,owner+' required on main');
+    assert.equal(router.assess({paths:[owner,router.NATIVE]}).owned_b0c_ssh,true,owner+' mixed diff required');
+  }
+  assert.equal(router.assess({paths:['README.md']}).owned_b0c_ssh,false);
+  assert.equal(router.assess({paths:[router.NATIVE]}).owned_b0c_ssh,false);
+  assert.ok(core.includes("owned_b0c_ssh: ${{ steps.scope.outputs.owned_b0c_ssh }}"),'classifier exports B0c owner');
+  assert.ok(core.includes("owned_b0c_ssh: ${{ needs.classify.outputs.owned_b0c_ssh == 'true' }}"),'required B0c input wired');
+  assert.match(core,/SHARED_RISKY: .*owned_b0c_ssh/);
+  assert.match(shared,/^      owned_b0c_ssh:\n        required: true\n        type: boolean$/m);
+  assert.ok(shared.includes("if: ${{ inputs.native || inputs.owned_b0c_ssh }}"),'one callable B0c route for native risk or source owners');
+  assert.match(shared,/\["route-b0c-ssh-native",\["native","owned_b0c_ssh"\]\]/);
+  assert.match(shared,/needs: \[[^\n]*route-b0c-ssh-native[^\n]*\]/);
+  assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+});
+
+test('extracted journal publication/recovery retains fail-closed OS and S3 owners',()=>{
+  const route=require('./ci-shared-manifest-route.cjs');
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const p='aquilum-app/core/src/sync/journal/publication_recovery.rs';
+  const child=fs.readFileSync(path.join(__dirname,'../../'+p),'utf8');
+  const root=fs.readFileSync(path.join(__dirname,'../../aquilum-app/core/src/sync/journal.rs'),'utf8');
+  assert.ok(root.includes('mod publication_recovery;'));
+  assert.ok(child.startsWith('use super::*;'));
+  assert.ok(child.includes('impl SqliteSyncJournal {'));
+  const methods=["record_local_publication_attempt_once","record_native_local_publication_observation_once","read_native_local_publication_observation","local_publication_count","local_publication_review_queue","check_local_recovery_case","record_local_recovery_case_once","read_local_recovery_case","require_appdata_outside_vault","validated_forensic_digest","record_local_recovery_copy_once","read_local_recovery_copy","recovery_review_snapshot","read_recovery_review_rows","recovery_review_history","append_recovery_review"];
+  for(const name of methods){
+    assert.ok(child.includes('fn '+name+'('),name+' survives');
+    assert.ok(!root.includes('fn '+name+'('),name+' not duplicated');
+  }
+  const routes=[['owned_pinned_read','sync-pinned-read.yml'],
+    ['owned_s3_minio','sync-s3-minio.yml'],
+    ['owned_s3_reservation','sync-reserved-s3-transaction.yml']];
+  for(const [owner,file] of routes){
+    const workflow=fs.readFileSync(path.join(__dirname,'../workflows',file),'utf8');
+    assert.equal(matches(parse(workflow),p),true,file+' non-main source route');
+    assert.equal(route.assess({paths:[p]})[owner],true,owner+' main required');
+    assert.equal(route.assess({paths:[p,route.LOCK]})[owner],true,owner+' mixed lock required');
+  }
+  assert.ok(core.includes('needs: [classify, required-tests, native-frames, shared-labs]'));
+  assert.equal(route.assess({paths:['README.md']}).owned_s3_minio,false);
+});
+
+test('extracted journal phase transitions retain public APIs and all protected source routes',()=>{
+  const route=require('./ci-shared-manifest-route.cjs');
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const p='aquilum-app/core/src/sync/journal/phase_transitions.rs';
+  const source=fs.readFileSync(path.join(__dirname,'../../'+p),'utf8');
+  const root=fs.readFileSync(path.join(__dirname,'../../aquilum-app/core/src/sync/journal.rs'),'utf8');
+  assert.ok(source.startsWith('use super::*;'));
+  assert.ok(source.includes('impl SqliteSyncJournal {'));
+  assert.ok(root.includes('mod phase_transitions;'));
+  for(const name of ['begin','mark_staged','mark_applied','mark_verified','commit','recovery_queue']){
+    assert.ok(source.includes('pub fn '+name+'('),'public method preserved: '+name);
+    assert.ok(!root.includes('pub fn '+name+'('),'no duplicate method: '+name);
+  }
+  for(const [suite,file] of [
+    ['owned_pinned_read','sync-pinned-read.yml'],
+    ['owned_s3_minio','sync-s3-minio.yml'],
+    ['owned_s3_reservation','sync-reserved-s3-transaction.yml']]){
+    const yaml=fs.readFileSync(path.join(__dirname,'../workflows',file),'utf8');
+    assert.ok(yaml.includes('branches-ignore: [main]'),'non-main direct route: '+file);
+    assert.equal(matches(parse(yaml),p),true,'direct source: '+file);
+    assert.equal(route.assess({paths:[p]})[suite],true,'main required route: '+suite);
+    assert.equal(route.assess({paths:[p,route.LOCK]})[suite],true,'mixed Cargo and source: '+suite);
+  }
+  assert.ok(core.includes('needs: [classify, required-tests, native-frames, shared-labs]'));
+});
+
+test('Text Delta standalone suite has a single required owner and all leafs retain S3 refusal',()=>{
+  const {ownedRoutes}=require('./ci-shared-manifest-route.cjs');
+  const {textDeltaModuleRequired}=require('./ci-rust-scope.cjs');
+  const lab=fs.readFileSync(path.join(__dirname,'../workflows/sync-text-delta-rust.yml'),'utf8');
+  const standalone='.github/workflows/text-delta-codec-isolated.yml';
+  const files=[
+    'modules/text-delta-codec/src/codec.rs',
+    'modules/text-delta-codec/src/lib.rs',
+    'modules/text-delta-codec/src/new_codec_helper.rs',
+    'modules/text-delta-codec/tests/adversarial.rs',
+    'modules/text-delta-codec/Cargo.toml',
+    standalone,
+  ];
+  for(const file of files){
+    assert.equal(ownedRoutes([file]).owned_text_delta,true,'all standalone paths retain protected S3 refusal: '+file);
+    assert.equal(textDeltaModuleRequired([file]),true,'main required-tests must run codec suite: '+file);
+  }
+  assert.equal(ownedRoutes(['docs/unrelated.md']).owned_text_delta,false,'unrelated PR skips Text Delta');
+  assert.equal(textDeltaModuleRequired(['docs/unrelated.md']),false,'unrelated PR avoids standalone Rust');
+  assert.match(core,/cargo test --manifest-path modules\/text-delta-codec\/Cargo\.toml -- --nocapture/);
+  assert.match(core,/text_delta_module_required: \$\{\{ needs\.classify\.outputs\.text_delta_module_required == 'true' \}\}/);
+  assert.match(shared,/text_delta_module_required:\n        required: true\n        type: boolean/);
+  assert.match(shared,/codec_already_tested: \$\{\{ inputs\.text_delta_module_required \}\}/);
+  assert.match(lab,/codec_already_tested:\n        required: false\n        type: boolean\n        default: false/);
+  assert.match(lab,/if: \$\{\{ !inputs\.codec_already_tested \}\}/);
+  assert.match(lab,/new_text_delta_is_not_a_legacy_pack/,'negative S3 V2 must always run');
+  assert.match(shared,/route-text-delta:\n    name: Impacted shared manifest \/ text-delta/);
+  assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/,'Main PR gate is fail closed');
+});
+
+test('Text Delta lightweight S3 test runs the actual pack parser; full AWS remains fail-closed',()=>{
+  const {textDeltaPackFastPath,textDeltaPackBoundaryChanged}=require('./ci-rust-scope.cjs');
+  const read=p=>fs.readFileSync(path.join(__dirname,'../../',p),'utf8');
+  const manifest=read('aquilum-app/core/Cargo.toml');
+  const mod=read('aquilum-app/core/src/sync/mod.rs');
+  const transport=read('aquilum-app/core/src/sync/s3_transport.rs');
+  const parser=read('aquilum-app/core/src/sync/s3_transport/pack_probe.rs');
+  const app=read('.github/workflows/app-checks.yml');
+  const shared=read('.github/workflows/ci-shared-manifest-labs.yml');
+  const lab=read('.github/workflows/sync-text-delta-rust.yml');
+  assert.match(manifest,/^sync-s3-pack-lab = \["sync-text-delta"\]$/m);
+  assert.match(mod,/#\[cfg\(any\(feature = "sync-s3", feature = "sync-s3-pack-lab"\)\)\]\s*#\[path = "s3_transport\/pack_probe\.rs"\]\s*mod s3_pack_probe;/);
+  assert.match(transport,/use super::s3_pack_probe as pack_probe;/);
+  assert.doesNotMatch(transport,/^mod pack_probe;/m);
+  assert.match(parser,/fn ingest_verified_pack\(/);
+  assert.match(parser,/fn new_text_delta_is_not_a_legacy_pack\(/);
+  assert.match(app,/text_delta_pack_fast_path: \$\{\{ steps\.scope\.outputs\.text_delta_pack_fast_path \}\}/);
+  assert.match(app,/text_delta_pack_boundary_changed: \$\{\{ steps\.scope\.outputs\.text_delta_pack_boundary_changed \}\}/);
+  assert.match(shared,/lightweight_pack_probe: \$\{\{ inputs\.text_delta_pack_fast_path \}\}/);
+  assert.match(shared,/verify_lightweight_boundary: \$\{\{ inputs\.text_delta_pack_boundary_changed \}\}/);
+  assert.match(lab,/if: \$\{\{ inputs\.lightweight_pack_probe \|\| inputs\.verify_lightweight_boundary \}\}/);
+  assert.match(lab,/if: \$\{\{ !inputs\.lightweight_pack_probe \}\}/);
+  assert.match(lab,/--features sync-s3-pack-lab new_text_delta_is_not_a_legacy_pack/);
+  assert.match(lab,/--features sync-s3,sync-text-delta new_text_delta_is_not_a_legacy_pack/);
+  assert.equal(textDeltaPackFastPath(['modules/text-delta-codec/src/codec.rs',
+    'aquilum-app/core/src/sync/s3_transport/pack_probe.rs']),false);
+  assert.equal(textDeltaPackBoundaryChanged([
+    'aquilum-app/core/src/sync/s3_transport/pack_probe.rs']),true);
+  assert.match(app,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
 });

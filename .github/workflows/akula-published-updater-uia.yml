@@ -1,6 +1,6 @@
-# AKULA-INSTALLED-UPDATER-UIA-01: fail-closed Windows installed updater proof.
-# Does not build, publish, sign, or change the public v0.3.12 release.
-name: Akula installed manual signed GUI updater 0.3.11 to 0.3.12
+# AKULA-INSTALLED-UPDATER-UIA-02: fail-closed Windows installed updater proof.
+# Does not build or publish. Runs installed GUI UIA against exact publicly released signed v0.3.14.
+name: Akula installed manual signed GUI updater 0.3.13 to 0.3.14
 
 on:
   pull_request:

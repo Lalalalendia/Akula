@@ -247,6 +247,7 @@
       "probing": "Проверяем SSH и параметры сервера…",
       "verifiedReadOnly": "Сервер проверен · Node ещё не установлен",
       "unsupported": "Сервер не подходит для установки Node",
+      "adminAuthorizationRequired": "SSH проверен · для установки нужны полномочия администратора",
       "verificationFailed": "Не удалось проверить сервер или его ключ",
       "observedFacts": "Сведения о сервере",
       "observedFactsHint": "Получены после проверки подписанного SSH-соединения",

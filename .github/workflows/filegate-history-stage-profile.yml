@@ -1,12 +1,10 @@
 name: File Gate History stages (diagnostic)
 
 on:
+  # Stage timing is optional diagnostic data, not File Gate acceptance.
+  # Do not run a release-mode profiler for unrelated source edits.
   pull_request:
     paths:
-      - "aquilum-app/core/src/files/document.rs"
-      - "aquilum-app/core/src/files/gate/write.rs"
-      - "aquilum-app/core/src/history/service.rs"
-      - "aquilum-app/core/src/history/store.rs"
       - ".github/workflows/filegate-history-stage-profile.yml"
   workflow_dispatch:
 
@@ -14,8 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: filegate-stage-${{ github.ref }}
-  cancel-in-progress: true
+  group: filegate-stage-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   stages:
