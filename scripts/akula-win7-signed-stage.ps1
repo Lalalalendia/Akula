@@ -17,7 +17,7 @@ if ($LASTEXITCODE -ne 0 -or $shivaActual -cne $pin) {
 $target = 'x86_64-win7-windows-msvc'
 $dir = Join-Path $root 'win7-full-results'
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
-$env:RUSTFLAGS = '--cfg windows_slim_errors'
+$env:RUSTFLAGS = '--cfg windows_slim_errors -C target-feature=+crt-static'
 $env:CARGO_INCREMENTAL = '0'
 & rustc +nightly -Vv | Set-Content -LiteralPath (Join-Path $dir 'compiler.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Win7 compiler cannot be queried' }
@@ -65,6 +65,9 @@ function Get-VerifiedPeAudit {
 }
 
 $baseAudit = Get-VerifiedPeAudit -Binary $exe -Output $dir
+if (@($baseAudit.external_crt_imported_dlls).Count -ne 0) {
+    throw "Signed candidate Akula has external UCRT/VC runtime dependencies: $($baseAudit.external_crt_imported_dlls -join ', ')"
+}
 if ($null -ne $baseAudit.imports.'combase.dll') {
     $comImports = @($baseAudit.imports.'combase.dll')
     if ($comImports.Count -ne 2 -or $comImports -notcontains 'CoTaskMemFree' -or
@@ -82,6 +85,9 @@ if ($null -ne $baseAudit.imports.'combase.dll') {
 }
 $shivaAuditDir = Join-Path $dir 'shiva-audit'
 $shivaAudit = Get-VerifiedPeAudit -Binary $shiva -Output $shivaAuditDir
+if (@($shivaAudit.external_crt_imported_dlls).Count -ne 0) {
+    throw "Signed candidate Shiva has external UCRT/VC runtime dependencies: $($shivaAudit.external_crt_imported_dlls -join ', ')"
+}
 if (@($shivaAudit.potentially_risky_imported_dlls) -contains 'combase.dll') {
     throw 'Win7 Shiva directly imports COMBASE'
 }
@@ -112,6 +118,9 @@ Remove-Item Env:\SHIVA_FONT_DIR -ErrorAction SilentlyContinue
 if ($LASTEXITCODE -ne 0) { throw 'Win7 staging rejected the audited binary pair' }
 $patched = Join-Path $root 'win7-lab-output/akula-app.exe'
 $patchedAudit = Get-VerifiedPeAudit -Binary $patched -Output (Join-Path $root 'win7-lab-output/pe-audit')
+if (@($patchedAudit.external_crt_imported_dlls).Count -ne 0) {
+    throw 'Win7 signed candidate staged executable reintroduced external CRT imports'
+}
 if (@($patchedAudit.potentially_risky_imported_dlls) -contains 'combase.dll') {
     throw 'COMBASE dependency remained in signed-candidate binary'
 }

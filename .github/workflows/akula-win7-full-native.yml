@@ -11,6 +11,8 @@ on:
       - 'scripts/akula-win7-signed-stage.ps1'
       - '.github/scripts/akula-win7-portable-package.py'
       - '.github/scripts/akula-win7-portable-package.test.py'
+      - '.github/scripts/akula-win7-dumpbin-audit.py'
+      - '.github/scripts/akula-win7-dumpbin-audit.test.py'
       - 'scripts/akula-win7-sp1-acceptance.ps1'
   workflow_dispatch:
 concurrency:
@@ -74,10 +76,16 @@ jobs:
           python .github/scripts/akula-win7-portable-package.test.py
           if ($LASTEXITCODE -ne 0) { throw 'Win7 COM import staging unit tests failed' }
 
+      - name: Detect dynamic CRT prerequisites on Windows 7
+        shell: pwsh
+        run: |
+          python .github/scripts/akula-win7-dumpbin-audit.test.py
+          if ($LASTEXITCODE -ne 0) { throw 'External CRT import classification tests failed' }
+
       - name: Build entire native Akula for Windows 7
         shell: pwsh
         env:
-          RUSTFLAGS: '--cfg windows_slim_errors'
+          RUSTFLAGS: '--cfg windows_slim_errors -C target-feature=+crt-static'
           CARGO_INCREMENTAL: '0'
         run: |
           New-Item -ItemType Directory -Force win7-full-results | Out-Null
@@ -110,12 +118,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'dumpbin headers failed' }
           python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin "$out/full-imports.txt" --out $out --sha256 $hash --bytes $bytes
           if ($LASTEXITCODE -ne 0) { throw 'Full import parser failed' }
+          $audit = Get-Content "$out/full-audit.json" -Raw | ConvertFrom-Json
+          if (@($audit.external_crt_imported_dlls).Count -ne 0) {
+            throw "Akula still dynamically imports UCRT/VC runtime: $($audit.external_crt_imported_dlls -join ', ')"
+          }
+          "external_crt_dll_count=0" | Add-Content "$out/status.txt"
           Get-Content "$out/full-audit.md" | Add-Content $env:GITHUB_STEP_SUMMARY
 
       - name: Build pinned Shiva PDF CLI for Windows 7 (same Rust target as Akula)
         shell: pwsh
         env:
-          RUSTFLAGS: '--cfg windows_slim_errors'
+          RUSTFLAGS: '--cfg windows_slim_errors -C target-feature=+crt-static'
           CARGO_INCREMENTAL: '0'
         run: |
           $ErrorActionPreference = 'Stop'
@@ -158,6 +171,10 @@ jobs:
           $audit = Get-Content "$out/full-audit.json" -Raw | ConvertFrom-Json
           if (@($audit.known_post_win7_imports).Count -ne 0) { throw 'Shiva still has post-Windows-7 static imports' }
           if (@($audit.potentially_risky_imported_dlls) -contains 'combase.dll') { throw 'Shiva has unapproved combase.dll direct dependency' }
+          if (@($audit.external_crt_imported_dlls).Count -ne 0) {
+            throw "Shiva still dynamically imports UCRT/VC runtime: $($audit.external_crt_imported_dlls -join ', ')"
+          }
+          "shiva_external_crt_dll_count=0" | Add-Content win7-full-results/status.txt
           # Shiva requires a pre-authorized font directory. Use a font
           # from this Windows installation, not a downloaded/bundled font.
           $fontDir = Join-Path $env:RUNNER_TEMP 'shiva-smoke-fonts'
@@ -188,12 +205,25 @@ jobs:
 
       - name: Package the exact Win7-target executable as portable trial ZIP
         shell: pwsh
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
+          # GITHUB_SHA is a synthetic merge SHA for pull_request events.
+          # Checkout uses the exact PR head, and provenance must record it.
+          $actualSourceSha = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0 -or $actualSourceSha -notmatch '^[a-f0-9]{40}$' -or
+              $actualSourceSha -cne $env:EXPECTED_SOURCE_SHA.ToLowerInvariant()) {
+            throw 'The Win7 source checkout SHA differs from the requested PR head'
+          }
           $source = '.artifacts/cargo-native/x86_64-win7-windows-msvc/release/aquilum-native.exe'
-          python .github/scripts/akula-win7-portable-package.py --exe $source --audit win7-full-results/full-audit.json --sidecar .artifacts/shiva-win7/x86_64-win7-windows-msvc/release/shiva.exe --sidecar-audit win7-full-results/shiva-audit/full-audit.json --out win7-lab-output --revision $env:GITHUB_SHA
+          python .github/scripts/akula-win7-portable-package.py --exe $source --audit win7-full-results/full-audit.json --sidecar .artifacts/shiva-win7/x86_64-win7-windows-msvc/release/shiva.exe --sidecar-audit win7-full-results/shiva-audit/full-audit.json --out win7-lab-output --revision $actualSourceSha
           if ($LASTEXITCODE -ne 0) { throw 'Win7 portable package verification failed' }
           if (!(Test-Path 'win7-lab-output/Akula-Win7-LAB-portable.zip')) { throw 'Test ZIP was not created' }
+          $provenance = Get-Content -LiteralPath win7-lab-output/PROVENANCE.txt -Raw
+          if (!$provenance.Contains("source_sha=$actualSourceSha")) {
+            throw 'Win7 package provenance did not preserve the checked-out source SHA'
+          }
 
       - name: Exercise the exact packaged Windows 7 PDF smoke command on runner
         shell: pwsh

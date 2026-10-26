@@ -10,6 +10,19 @@ $exe = Join-Path $trial 'akula-app.exe'
 $sidecar = Join-Path $trial 'shiva-pdf-preview.exe'
 $mainAuditPath = Join-Path $trial 'pe-audit/full-audit.json'
 $sidecarAuditPath = Join-Path $root 'win7-full-results/shiva-audit/full-audit.json'
+$provenancePath = Join-Path $trial 'PROVENANCE.txt'
+if (!(Test-Path -LiteralPath $provenancePath -PathType Leaf)) {
+    throw 'Win7 NSIS requires exact checked-out source provenance'
+}
+$checkout = (git rev-parse HEAD).Trim().ToLowerInvariant()
+if ($LASTEXITCODE -ne 0 -or $checkout -notmatch '^[a-f0-9]{40}$') {
+    throw 'Cannot determine checked-out Win7 source commit'
+}
+$provenance = Get-Content -LiteralPath $provenancePath -Raw
+$sourceLine = [regex]::Match($provenance, '(?m)^source_sha=([a-fA-F0-9]{40})\r?$')
+if (!$sourceLine.Success -or $sourceLine.Groups[1].Value.ToLowerInvariant() -cne $checkout) {
+    throw 'Win7 NSIS source provenance does not match exact checked-out source'
+}
 foreach ($file in @($exe, $sidecar, $mainAuditPath, $sidecarAuditPath)) {
     if (!(Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing Win7 LAB evidence: $file" }
 }
@@ -23,6 +36,9 @@ foreach ($entry in @(@{name='Akula'; path=$exe; audit=$mainAudit},
     }
     if (@($entry.audit.known_post_win7_imports).Count -ne 0) {
         throw "$($entry.name) still has known Windows 8+ imports"
+    }
+    if (@($entry.audit.external_crt_imported_dlls).Count -ne 0) {
+        throw "$($entry.name) has external UCRT/VC runtime imports; clean Win7 SP1 would require a redistributable"
     }
     if (@($entry.audit.potentially_risky_imported_dlls) -contains 'combase.dll') {
         throw "$($entry.name) directly imports combase.dll"
