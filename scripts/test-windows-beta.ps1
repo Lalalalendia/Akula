@@ -248,6 +248,19 @@ Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
 Assert-LegacyUntouched
 
+# DESK-15 installed-app recovery: use a fresh throwaway vault/data directory.
+# A separate STA PowerShell process proves real foreground OS typing, hard-kill,
+# UIA confirmation, File Gate cleanup and exact GUI readback after restart.
+$recoveryScript = Join-Path $PSScriptRoot 'windows-beta-recovery.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $recoveryScript -ExePath $exe
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula hard-kill recovery acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'DESK-15 isolated acceptance changed the original beta smoke note'
+}
+Assert-LegacyUntouched
+
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
 if (!(Test-Path $uninstall)) { throw 'Akula uninstaller missing' }
 $removed = Start-Process $uninstall -ArgumentList '/S' -Wait -PassThru
