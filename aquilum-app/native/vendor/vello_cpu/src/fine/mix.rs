@@ -1,7 +1,7 @@
 // Copyright 2025 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::peniko::{BlendMode, Mix};
+use crate::peniko::{BlendMode, Compose, Mix};
 use crate::util::Premultiply;
 use vello_common::fearless_simd::*;
 
@@ -271,23 +271,20 @@ fn sat<S: Simd>(r: f32x4<S>, g: f32x4<S>, b: f32x4<S>) -> f32x4<S> {
 #[inline(always)]
 fn clip_color<S: Simd>(r: &mut f32x4<S>, g: &mut f32x4<S>, b: &mut f32x4<S>) {
     let simd = r.simd;
+    let zero = f32x4::splat(simd, 0.0);
 
     let l = lum(*r, *g, *b);
     let n = r.min(g.min(*b));
     let x = r.max(g.max(*b));
+    let below = l - n;
+    let above = x - l;
+    let clip_low = simd.simd_lt_f32x4(n, zero) & simd.simd_gt_f32x4(below, zero);
+    let clip_high =
+        simd.simd_gt_f32x4(x, f32x4::splat(simd, 1.0)) & simd.simd_gt_f32x4(above, zero);
 
     for c in [r, g, b] {
-        *c = simd.select_f32x4(
-            simd.simd_lt_f32x4(n, f32x4::splat(simd, 0.0)),
-            l + (((*c - l) * l) / (l - n)),
-            *c,
-        );
-
-        *c = simd.select_f32x4(
-            simd.simd_gt_f32x4(x, f32x4::splat(simd, 1.0)),
-            l + (((*c - l) * (1.0 - l)) / (x - l)),
-            *c,
-        );
+        *c = simd.select_f32x4(clip_low, l + (((*c - l) * l) / below), *c);
+        *c = simd.select_f32x4(clip_high, l + (((*c - l) * (1.0 - l)) / above), *c);
     }
 }
 
@@ -322,4 +319,33 @@ fn scale_sat_channel<S: Simd>(c: f32x4<S>, mn: f32x4<S>, sat: f32x4<S>, s: f32x4
         f32x4::splat(simd, 0.0),
         (c - mn) * s / sat,
     )
+}
+
+#[cfg(test)]
+mod clip_color_regression_tests {
+    use super::*;
+    use vello_common::fearless_simd::Fallback;
+
+    #[test]
+    fn neutral_grays_remain_finite_under_color_and_luminosity_blends() {
+        let simd = Fallback::new();
+        for value in 0_u8..=255 {
+            let f = f32::from(value) / 255.0;
+            // Four identical transparent-backdrop source pixels exercise the
+            // non-separable blend modes, including sub-ULP gray rounding.
+            let rgba = [f, f, f, 0.5];
+            let back = [0.0; 4];
+            let src = f32x16::from_slice(simd, &rgba.repeat(4));
+            let dst = f32x16::from_slice(simd, &back.repeat(4));
+            for mode in [Mix::Color, Mix::Luminosity] {
+                let result = mix(src, dst, BlendMode::new(mode, Compose::SrcOver));
+                let mut pixels = [0.0_f32; 16];
+                result.store_slice(&mut pixels);
+                assert!(
+                    pixels.iter().all(|channel| channel.is_finite()),
+                    "{mode:?} at gray {value} generated NaN/Inf: {pixels:?}"
+                );
+            }
+        }
+    }
 }
