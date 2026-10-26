@@ -46,7 +46,7 @@ These tests use generated data, not actual patient records. Do **not** upload me
 - [Windows native CI](https://github.com/Lalalalendia/Akula/actions/runs/40393286476) — SUCCESS.
 - [Windows no-vault GUI launch](https://github.com/Lalalalendia/Akula/actions/runs/40393556511) — real release executable launched without a workspace; both DICOM source buttons found via UI Automation.
 - [Windows source-loss simulation](https://github.com/Lalalalendia/Akula/actions/runs/40392477029) — ZIP/folder removed and restored during navigation, then resumed successfully.
-- [End-to-end selected source GUI](https://github.com/Lalalalendia/Akula/actions/runs/40395011135) — added to CI; check **run conclusion** before claiming a successful image preview.
+- [End-to-end selected source GUI](https://github.com/Lalalalendia/Akula/actions/runs/40395011135) — SUCCESS: the first DICOM slice opens in real Windows GUI for ZIP and folder. The later [run 40410083550](https://github.com/Lalalalendia/Akula/actions/runs/40410083550) additionally verifies navigation and reconnect behavior.
 - **Not verified:** a physical, intermittently disconnecting optical drive in a real Windows desktop session, some compressed transfer syntaxes, 7z/RAR, clinical conformance.
 
 Use temporary local data directories for preview tests. Never replace the signed installed release with the unsigned development binary.
@@ -63,7 +63,7 @@ Use temporary local data directories for preview tests. Never replace the signed
 
 This step is **not covered by GitHub Actions**. Test only on a local PC with an inserted CD/DVD and the unsigned experimental preview; never substitute it for a signed installed Akula application.
 
-1. Extract the Windows archive, confirm that the EXE SHA-256 matches the supplied `SHA256.txt`, and start `aquilum-native-dicom-preview.exe`. On the no-workspace page choose **DICOM: open folder without import**, then select the CD/DVD root (for example, `F:\\`). Alternatively, from PowerShell in the extracted folder run: `& .\\aquilum-native-dicom-preview.exe --data-dir \"$env:TEMP\\akula-dicom-optical-test\" --open-dicom \"F:\\\"` with the correct drive letter.
+1. Extract the Windows archive, confirm that the EXE SHA-256 matches the supplied `SHA256.txt`, and start `aquilum-native-dicom-preview.exe`. On the no-workspace page choose **DICOM: open folder without import**, then select the CD/DVD root (for example, `F:\`). Alternatively, in PowerShell from the extracted folder run: `& .\aquilum-native-dicom-preview.exe --data-dir "$env:TEMP\akula-dicom-optical-test" --open-dicom "F:\"` with the correct drive letter.
 2. Confirm the first image appears and the page reports the current slice and series. If there are multiple slices, use the left/right arrow keys; use PageUp/PageDown only when multiple series are present. A one-image disc does not have to advance.
 3. Check that the app remains responsive while the optical drive spins, and that an inaccessible/unsupported medium shows an error instead of silently importing anything.
 4. Close the viewer before physically ejecting the disc, reinsert the same disc, and reopen it. Do not force-eject a busy disc and do not unplug an active drive merely to reproduce the CI simulation.
