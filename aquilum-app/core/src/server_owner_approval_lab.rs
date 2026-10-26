@@ -17,7 +17,6 @@ use crate::server_release_floor_lab::{LabPlanBinding, ProposedFloor, TrustedFloo
 use crate::server_staging_lab::{ApprovedPlanDigest, InstallId, StageReceipt};
 use ring::signature;
 
-const APPROVAL_DOMAIN: &[u8] = b"Akula B1b1b owner approval v1: inert witness CAS\0";
 pub const MAX_APPROVAL_VALIDITY_SECONDS: u64 = 15 * 60;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,33 +48,32 @@ impl SignedApprovalClaim {
     /// Canonical binary encoding. Every fixed-width integer is big-endian.
     /// No JSON, URL, shell, path, arbitrary file or string normalization.
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(512);
-        out.extend_from_slice(APPROVAL_DOMAIN);
-        out.push(1); // schema version
-        out.push(u8::try_from(self.approver_id.len()).unwrap_or(u8::MAX));
-        out.extend_from_slice(self.approver_id.as_bytes());
-
-        out.extend_from_slice(&self.scope_binding.install_id.0);
-        out.extend_from_slice(&self.scope_binding.plan_digest.0);
-        out.extend_from_slice(&self.scope_binding.pinned_host_key_sha256);
-        out.extend_from_slice(&self.scope_binding.signed_manifest_fingerprint);
-
-        for head in [self.previous_head, self.proposed_head] {
-            out.extend_from_slice(&head.generation.to_be_bytes());
-            out.extend_from_slice(&head.floor.sequence.to_be_bytes());
-            for part in [head.floor.version.major, head.floor.version.minor, head.floor.version.patch] {
-                out.extend_from_slice(&part.to_be_bytes());
-            }
-            out.extend_from_slice(&head.floor.signed_manifest_fingerprint);
-            out.extend_from_slice(&head.chain_tip);
-        }
-        out.extend_from_slice(&self.staged_package_sha256);
-        out.extend_from_slice(&self.staged_package_size.to_be_bytes());
-        out.extend_from_slice(&self.expected_witness_revision.to_be_bytes());
-        out.extend_from_slice(&self.approval_nonce);
-        out.extend_from_slice(&self.issued_at_unix.to_be_bytes());
-        out.extend_from_slice(&self.expires_at_unix.to_be_bytes());
-        out
+        use crate::server_owner_approval_wire::{OwnerApprovalWireV1, OwnerFloorWire};
+        let head = |head: TrustedFloorHead| OwnerFloorWire {
+            generation: head.generation,
+            sequence: head.floor.sequence,
+            version: [
+                head.floor.version.major, head.floor.version.minor,
+                head.floor.version.patch,
+            ],
+            manifest_fingerprint: head.floor.signed_manifest_fingerprint,
+            chain_tip: head.chain_tip,
+        };
+        OwnerApprovalWireV1 {
+            approver_id: self.approver_id.clone(),
+            install_id: self.scope_binding.install_id.0,
+            plan_digest: self.scope_binding.plan_digest.0,
+            ssh_host_sha256: self.scope_binding.pinned_host_key_sha256,
+            manifest_fingerprint: self.scope_binding.signed_manifest_fingerprint,
+            previous: head(self.previous_head),
+            proposed: head(self.proposed_head),
+            staged_package_sha256: self.staged_package_sha256,
+            staged_package_size: self.staged_package_size,
+            expected_witness_revision: self.expected_witness_revision,
+            approval_nonce: self.approval_nonce,
+            issued_at_unix: self.issued_at_unix,
+            expires_at_unix: self.expires_at_unix,
+        }.canonical_bytes()
     }
 
     fn validate_fields(&self, now_unix: u64) -> Result<(), ApprovalError> {

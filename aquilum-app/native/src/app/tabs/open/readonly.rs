@@ -1,5 +1,4 @@
 use super::*;
-
 impl App {
     /// First-stage format view: no TextEditor and no save path for structured files.
     /// Reopening always reparses from disk rather than reusing a stale tab cache.

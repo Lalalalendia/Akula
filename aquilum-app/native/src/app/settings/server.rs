@@ -7,13 +7,14 @@
 #![cfg(all(windows, feature = "server-readonly-preflight"))]
 
 use super::{App, Effect, Popup, Section};
-use aquilum_core::server_bootstrap_lab::{MachineArch, SupportedOs};
 use aquilum_core::server_bootstrap_ssh_windows_lab::WindowsOpenSshPinnedProbe;
 use aquilum_core::settings::models::ServerBootstrapDraft;
 use crate::ui::settings::schema::ServerProbeView;
 use crate::ui::settings::schema::server::identity::probe_target;
 use masonry::app::RenderRoot;
 use std::sync::Arc;
+
+mod facts;
 
 /// One bounded probe result, scoped to the exact public settings snapshot.
 /// This is session-only state, NOT a persistent "installed" receipt.
@@ -48,35 +49,7 @@ impl App {
                         &target, &draft.host_public_key,
                     ).ok()?
                 };
-                let os = match &facts.os {
-                    SupportedOs::Ubuntu => "Ubuntu",
-                    SupportedOs::Debian => "Debian",
-                    SupportedOs::Other => "Other",
-                };
-                let arch = match &facts.arch {
-                    MachineArch::X86_64 => "x86_64",
-                    MachineArch::Aarch64 => "aarch64",
-                    MachineArch::Other => "other",
-                };
-                let summary = format!(
-                    "{os} / {arch}; {} CPU; {} MiB RAM; {} MiB free disk; systemd {}; sudo {}",
-                    facts.cpu_count, facts.ram_mib, facts.free_disk_mib,
-                    if facts.has_systemd { "yes" } else { "no" },
-                    if facts.has_sudo_rights { "yes" } else { "no" },
-                );
-                // The peer's read-only facts are NOT an installation grant.
-                // A valid signed SSH host KEX can still describe an
-                // unsupported Linux runtime; report that distinction.
-                let supported = !matches!(facts.os, SupportedOs::Other)
-                    && !matches!(facts.arch, MachineArch::Other)
-                    && facts.has_systemd && facts.has_sudo_rights
-                    && facts.cpu_count > 0 && facts.ram_mib >= 512
-                    && facts.free_disk_mib >= 1024;
-                Some(if supported {
-                    ServerProbeView::Observed { facts: summary }
-                } else {
-                    ServerProbeView::Unsupported { facts: summary }
-                })
+                Some(facts::classify(facts))
             })().unwrap_or(ServerProbeView::Failed);
             let _ = sender.send(ProbeReport { draft, view });
             wake();

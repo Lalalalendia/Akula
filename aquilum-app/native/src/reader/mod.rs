@@ -10,7 +10,7 @@ pub mod page;
 pub mod quotes;
 pub mod session;
 mod text;
-mod zip;
+pub(crate) mod zip;
 #[cfg(test)]
 pub(crate) mod tests;
 
