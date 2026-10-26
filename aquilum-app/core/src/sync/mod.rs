@@ -80,6 +80,9 @@ mod provider;
 mod s3;
 mod s3_manifest;
 mod s3_pack_index;
+// Gated pure verifier: no S3 transport, key custody, file changes, or Sync.
+#[cfg(feature = "signed-vault-root-lab")]
+mod s3_signed_root_paev1;
 mod s3_manifest_delta;
 mod s3_coord_v2;
 #[cfg(feature = "sync-s3")]
@@ -161,6 +164,12 @@ pub use s3_manifest::{
     S3ManifestError, S3ManifestShardRefV1, S3ManifestShardV1, S3ManifestV1,
     S3RevisionRefV1, MAX_MANIFEST_BYTES, MAX_REVISIONS, MAX_SHARD_BYTES,
     MAX_SHARD_ENTRIES, MAX_SHARDS,
+};
+#[cfg(feature = "signed-vault-root-lab")]
+pub use s3_signed_root_paev1::{
+    verify_signed_root, ApprovedPublisherKeys, ApprovedV2RootScope,
+    DecodedDsseEnvelope, DecodedSignature, SignedRootError,
+    SignedRootObservation, ROOT_PAYLOAD_TYPE,
 };
 pub use s3_pack_index::{
     S3PackedHeadV2, S3PackIndexRootV2, S3PackIndexShardV2,

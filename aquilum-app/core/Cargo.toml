@@ -42,6 +42,8 @@ server-root-stage-ssh-lab = ["server-owner-windows-signer", "server-bootstrap-b0
 server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
 # Linux-only inert release-floor chain lab, requiring verified staged bytes.
 server-bootstrap-b1b1-floor-lab = ["server-bootstrap-b1b-custody-lab"]
+# Offline signature verification experiment; not used by installed Akula.
+signed-vault-root-lab = []
 # Detached operator signature and inert witness CAS request, never installs.
 server-bootstrap-b1b1b-approval-lab = ["server-bootstrap-b1b1-floor-lab"]
 # Linux-only inert local cooperating-writer CAS witness laboratory.

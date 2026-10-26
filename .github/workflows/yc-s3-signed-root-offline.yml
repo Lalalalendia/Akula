@@ -1,0 +1,58 @@
+name: YC-S3-T01d offline signed Vault root
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/sync/s3_signed_root_paev1.rs'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
+      - 'docs/sync/YC-S3-T01d-E1-signed-root-lab.md'
+      - '.github/workflows/yc-s3-signed-root-offline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pure-verifier:
+    name: Pure Ed25519 DSSE (no network / no sync)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          cache-workspace-crates: true
+          save-if: false
+      - name: Prove DSSE/Ed25519 root verifier and adversarial negative matrix
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-root-lab s3_signed_root_paev1::tests -- --test-threads=1
+      - name: Prove default Akula Core has no signed-root experiment enabled
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
+          if grep -Eq 'signed-vault-root-lab' native/Cargo.toml; then
+            echo 'Native application must never implicitly enable signed-root experiment'
+            exit 1
+          fi
