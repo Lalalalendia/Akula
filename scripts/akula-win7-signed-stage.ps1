@@ -65,10 +65,20 @@ function Get-VerifiedPeAudit {
 }
 
 $baseAudit = Get-VerifiedPeAudit -Binary $exe -Output $dir
-$comImports = @($baseAudit.imports.'combase.dll')
-if ($comImports.Count -ne 2 -or $comImports -notcontains 'CoTaskMemFree' -or
-    $comImports -notcontains 'CoCreateFreeThreadedMarshaler') {
-    throw 'Unrecognized COMBASE dependency; only the exact audited two exports may be remapped'
+if ($null -ne $baseAudit.imports.'combase.dll') {
+    $comImports = @($baseAudit.imports.'combase.dll')
+    if ($comImports.Count -ne 2 -or $comImports -notcontains 'CoTaskMemFree' -or
+        $comImports -notcontains 'CoCreateFreeThreadedMarshaler') {
+        throw 'Unrecognized COMBASE dependency; only two audited exports may be remapped'
+    }
+} else {
+    # The full installed,S3 release build already imports these functions
+    # from OLE32; no PE rewrite must be performed in that case.
+    $ole32 = @($baseAudit.imports.'ole32.dll')
+    if ($ole32 -notcontains 'CoTaskMemFree' -or
+        $ole32 -notcontains 'CoCreateFreeThreadedMarshaler') {
+        throw 'Pre-compatible Akula source lacks verified Win7 OLE32 exports'
+    }
 }
 $shivaAuditDir = Join-Path $dir 'shiva-audit'
 $shivaAudit = Get-VerifiedPeAudit -Binary $shiva -Output $shivaAuditDir
@@ -96,7 +106,8 @@ if ($bytes.Length -lt 64 -or [Text.Encoding]::ASCII.GetString($bytes, 0, 5) -cne
 Remove-Item Env:\SHIVA_FONT_DIR -ErrorAction SilentlyContinue
 
 # Fail-closed, previously lab-audited COMBASE -> OLE32 import descriptor
-# remapping. Re-audit the patched bytes before NSIS packaging and signing.
+# remapping, or retain already compatible OLE32. Re-audit the exact staged
+# bytes before NSIS packaging and signing.
 & python .github/scripts/akula-win7-portable-package.py --exe $exe --audit (Join-Path $dir 'full-audit.json') --sidecar $shiva --sidecar-audit (Join-Path $shivaAuditDir 'full-audit.json') --out win7-lab-output --revision $checkout
 if ($LASTEXITCODE -ne 0) { throw 'Win7 staging rejected the audited binary pair' }
 $patched = Join-Path $root 'win7-lab-output/akula-app.exe'

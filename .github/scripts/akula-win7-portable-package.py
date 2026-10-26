@@ -109,9 +109,10 @@ the same Windows 7 target. The Shiva PDF converter belongs next to Akula.
 Both were PE-audited; Shiva passed a text-to-PDF test on Windows Server 2022,
 which is NOT proof of a native Windows 7 runtime test.
 
-The experimental Akula EXE was compiled with the Win7 target, and the import
-descriptor for 2 COM functions was remapped from combase.dll to ole32.dll.
-The resulting import table is audited after patching, not just before.
+The experimental Akula EXE was compiled with the Win7 target. If the
+independently audited COM functions already use ole32.dll, the EXE is retained
+byte-for-byte. Only an exact two-export combase.dll import may be rewritten
+to ole32.dll before the independent post-stage import-table audit.
 
 System may need Windows 7 SP1, its supported system updates, UCRT KB2999226,
 and a suitable Microsoft Visual C++ 64-bit runtime. Avoid third-party DLL sites.
@@ -166,6 +167,32 @@ exit /b 0
 PDF_SMOKE_INPUT = "Akula Windows 7 PDF companion sample.\r\nA test of Shiva text-to-PDF.\r\n"
 
 
+def com_rewrite_offset(report: dict, descriptors: list[tuple[int, bytes]]) -> int | None:
+    """Keep already Win7-compatible OLE32, or authorize one exact COM rewrite.
+
+    Both independent dumpbin evidence and actual PE descriptor layout must
+    agree. A new/unknown COMBASE export always fails closed.
+    """
+    imports = report.get("imports")
+    if not isinstance(imports, dict):
+        fail("missing audited PE import map")
+    expected = {"CoCreateFreeThreadedMarshaler", "CoTaskMemFree"}
+    com_exports = imports.get("combase.dll", [])
+    ole_exports = imports.get("ole32.dll", [])
+    if not isinstance(com_exports, list) or not isinstance(ole_exports, list):
+        fail("invalid audited COM export lists")
+    com_offsets = [offset for offset, name in descriptors if name == b"combase.dll"]
+    if com_offsets:
+        if len(com_offsets) != 1 or set(com_exports) != expected or len(com_exports) != 2:
+            fail("unexpected combase.dll exports: cannot safely remap")
+        return com_offsets[0]
+    if "combase.dll" in imports or com_exports:
+        fail("PE descriptors and COMBASE audit disagree")
+    if b"ole32.dll" not in (name for _, name in descriptors) or not expected.issubset(set(ole_exports)):
+        fail("Akula lacks both audited Win7 OLE32 COM exports")
+    return None
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--exe", type=Path, required=True)
@@ -176,11 +203,10 @@ def main() -> None:
     p.add_argument("--revision", required=True)
     args = p.parse_args()
     report = json.loads(args.audit.read_text(encoding="utf-8"))
-    expected = {"CoCreateFreeThreadedMarshaler", "CoTaskMemFree"}
-    if set(report.get("imports", {}).get("combase.dll", [])) != expected:
-        fail("unexpected combase.dll exports: cannot safely remap")
     if report.get("known_post_win7_imports"):
         fail("known Windows 8+ static imports remain")
+    if report.get("imported_function_count", 0) < 1:
+        fail("empty Akula PE import report")
 
     sidecar_report = json.loads(args.sidecar_audit.read_text(encoding="utf-8"))
     sidecar = args.sidecar.read_bytes()
@@ -199,20 +225,23 @@ def main() -> None:
         fail("Shiva PDF sidecar PE import list is empty")
 
     data = bytearray(args.exe.read_bytes())
+    input_digest = hashlib.sha256(data).hexdigest()
+    if report.get("binary_sha256", "").lower() != input_digest or report.get("binary_bytes") != len(data):
+        fail("Akula source EXE differs from its independent PE audit")
     descriptors = find_import_dll_offsets(data)
-    combase = [offset for offset, dll in descriptors if dll == b"combase.dll"]
-    if len(combase) != 1:
-        fail("expected exactly one combase.dll import descriptor")
-    offset = combase[0]
-    before = b"combase.dll\x00"
-    after = b"ole32.dll\x00\x00\x00"
-    if len(before) != len(after) or data[offset:offset + len(before)] != before:
-        fail("unexpected name bytes at import descriptor")
-    data[offset:offset + len(before)] = after
-
+    offset = com_rewrite_offset(report, descriptors)
+    rewrite = "not_needed_already_ole32"
+    if offset is not None:
+        before = b"combase.dll\x00"
+        after = b"ole32.dll\x00\x00\x00"
+        if len(before) != len(after) or data[offset:offset + len(before)] != before:
+            fail("unexpected bytes at approved COMBASE import descriptor")
+        data[offset:offset + len(before)] = after
+        rewrite = "combase_to_ole32_exact_two_exports"
     updated_dlls = [name for _, name in find_import_dll_offsets(data)]
     if b"combase.dll" in updated_dlls or b"ole32.dll" not in updated_dlls:
-        fail("COMBASE import descriptor rewrite not verified")
+        fail("Win7 COM import layout was not verified")
+
     args.out.mkdir(parents=True, exist_ok=True)
     exe = args.out / "akula-app.exe"
     exe.write_bytes(data)
@@ -226,13 +255,14 @@ def main() -> None:
     provenance = (
         "source_sha=" + args.revision + "\n"
         "patched_exe_sha256=" + digest + "\n"
+        "original_exe_sha256=" + input_digest + "\n"
         "patched_exe_bytes=" + str(len(data)) + "\n"
         "shiva_pdf_source_commit=40b72a90b1dac39812c77c7321e57d613a81cb51\n"
         "shiva_pdf_sha256=" + sidecar_digest + "\n"
         "shiva_pdf_bytes=" + str(len(sidecar)) + "\n"
         "shiva_pdf_pe_audit_no_known_win8_imports=true\n"
         "shiva_pdf_smoke_tested_on_windows2022=true\n"
-        "pe_rewrite=combase.dll to ole32.dll for 2 verified Co* imports\n"
+        "pe_rewrite=" + rewrite + "\n"
         "runtime_win7_verified=false\n"
         "production_release=false\n"
     )
