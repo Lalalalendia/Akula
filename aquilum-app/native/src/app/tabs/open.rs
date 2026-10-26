@@ -14,6 +14,12 @@ fn is_structured_file(path: &Path) -> bool {
     path.extension().and_then(|value| value.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas") || ext.eq_ignore_ascii_case("base"))
 }
+#[cfg(feature = "dicom-preview")]
+fn retain_dicom_grants(grants: &mut std::collections::HashSet<PathBuf>, tabs: &crate::tabs::Tabs) {
+    // Closing the last tab revokes its externally selected DICOM path.
+    grants.retain(|path| tabs.tabs().iter().any(|tab| tab.path.as_deref() == Some(path.as_path())));
+}
+
 const MAX_INACTIVE_NOTES: usize = 2;
 const MAX_INACTIVE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -65,6 +71,8 @@ fn record_stage(update: impl FnOnce(&mut TabSwitchStages)) {
 
 impl App {
     pub(in crate::app) fn show_active(&mut self, root: &mut RenderRoot) {
+        #[cfg(feature = "dicom-preview")]
+        retain_dicom_grants(&mut self.dicom_external_sources, &self.tabs);
         // Closing/renaming a tab also invalidates any cached text associated
         // with its old identity; workspace switches clear the cache outright.
         self.inactive_notes.retain(|entry| {
@@ -374,5 +382,24 @@ mod structured_tab_tests {
         assert!(is_structured_file(Path::new("items.BASE")));
         assert!(!is_structured_file(Path::new("note.md")));
         assert!(!is_structured_file(Path::new("report.pdf")));
+    }
+}
+
+#[cfg(all(test, feature = "dicom-preview"))]
+mod dicom_permission_lifetime_tests {
+    use super::*;
+    #[test]
+    fn source_permission_is_revoked_after_the_last_tab_closes() {
+        let selected = PathBuf::from("selected-study.zip");
+        let stale = PathBuf::from("not-open-anymore.dcm");
+        let mut tabs = crate::tabs::Tabs::default();
+        tabs.open_new(selected.clone());
+        let mut grants = std::collections::HashSet::from([selected.clone(), stale.clone()]);
+        retain_dicom_grants(&mut grants, &tabs);
+        assert!(grants.contains(&selected));
+        assert!(!grants.contains(&stale));
+        tabs.close(tabs.active_id());
+        retain_dicom_grants(&mut grants, &tabs);
+        assert!(grants.is_empty());
     }
 }

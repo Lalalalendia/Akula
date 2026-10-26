@@ -46,7 +46,7 @@ impl App {
         }
         #[cfg(feature = "dicom-preview")]
         if !folder && tab.is_none() && targets.len() == 1 && crate::dicom::is_candidate(&clicked) {
-            labels.push(("Открыть DICOM без импорта".to_owned(), crate::ui::icons::SEARCH));
+            labels.push((t("dicom.openCurrentFile"), crate::ui::icons::SEARCH));
         }
         let colored = folder && tab.is_none();
         if colored {
@@ -54,9 +54,9 @@ impl App {
             labels.push(("Импортировать PDF в Akula".to_owned(), crate::ui::icons::UPLOAD));
             #[cfg(feature = "dicom-preview")]
             {
-                labels.push(("DICOM: открыть эту папку напрямую".to_owned(), crate::ui::icons::SEARCH));
-                labels.push(("DICOM: выбрать внешнюю папку".to_owned(), crate::ui::icons::FOLDER));
-                labels.push(("DICOM: выбрать ZIP или файл".to_owned(), crate::ui::icons::SEARCH));
+                labels.push((t("dicom.openCurrentFolder"), crate::ui::icons::SEARCH));
+                labels.push((t("dicom.openFolder"), crate::ui::icons::FOLDER));
+                labels.push((t("dicom.openFile"), crate::ui::icons::SEARCH));
             }
         }
         #[cfg(feature = "dicom-preview")]

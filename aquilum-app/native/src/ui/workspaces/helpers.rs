@@ -9,8 +9,8 @@ pub fn no_vault(error: Option<&str>) -> (NewWidget<Flex>, WidgetId, Option<Widge
     let (mut folder_id, mut file_id) = (None, None);
     #[cfg(feature = "dicom-preview")]
     {
-        let folder = NewWidget::new(TextButton::new("DICOM: открыть папку без импорта", Variant::Ghost).with_icon(icons::FOLDER_OPEN));
-        let file = NewWidget::new(TextButton::new("DICOM: открыть ZIP или файл", Variant::Ghost).with_icon(icons::FILE));
+        let folder = NewWidget::new(TextButton::new(t("dicom.openFolder"), Variant::Ghost).with_icon(icons::FOLDER_OPEN));
+        let file = NewWidget::new(TextButton::new(t("dicom.openFile"), Variant::Ghost).with_icon(icons::FILE));
         folder_id = Some(folder.id());
         file_id = Some(file.id());
         controls = controls.with_fixed(folder).with_fixed(file);

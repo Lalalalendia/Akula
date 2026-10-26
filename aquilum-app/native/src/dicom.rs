@@ -129,6 +129,8 @@ fn scan_folder(vault: &Path, folder: &Path) -> Result<Vec<PathBuf>, String> {
     let mut result = Vec::new();
     let mut visited = 0_usize;
     while let Some((directory, depth)) = stack.pop() {
+        // Check scope before enumerating Windows junctions and reparse points.
+        admit(vault, &directory)?;
         if depth > 8 { return Err("DICOM: слишком глубокое дерево папок".into()); }
         for entry in fs::read_dir(directory).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;

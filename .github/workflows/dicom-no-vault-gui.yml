@@ -5,6 +5,13 @@ on:
       - 'feat/dicom-readonly-preview-20261026'
     paths:
       - '.github/workflows/dicom-no-vault-gui.yml'
+      - 'aquilum-app/native/src/dicom.rs'
+      - 'aquilum-app/native/assets/locales/ru.json'
+      - 'aquilum-app/native/assets/locales/en.json'
+      - 'aquilum-app/native/src/app/tabs/open.rs'
+      - 'aquilum-app/native/src/app/file_menu.rs'
+      - 'aquilum-app/native/src/ui/new_tab.rs'
+      - 'aquilum-app/native/src/ui/workspaces/helpers.rs'
       - 'aquilum-app/native/src/args.rs'
       - 'aquilum-app/native/src/host/create.rs'
       - 'aquilum-app/native/src/app/tabs/open/dicom.rs'
@@ -69,7 +76,7 @@ jobs:
             $nodes = $element.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
             $names = @($nodes | ForEach-Object { $_.Current.Name } | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
             $names | Out-File -FilePath 'shots\accessibility-names.txt' -Encoding utf8
-            $folder = @($names | Where-Object { $_ -like '*DICOM*папку*' }).Count -gt 0
+            $folder = @($names | Where-Object { $_ -like '*DICOM*folder*' -or $_ -like '*DICOM*папку*' }).Count -gt 0
             $archive = @($names | Where-Object { $_ -like '*DICOM*ZIP*' }).Count -gt 0
             if (!$folder -or !$archive) {
               Write-Host 'DICOM_GUI_ACCESSIBILITY_BUTTONS_NOT_FOUND: inspect screenshot and accessibility-names.txt'
@@ -130,6 +137,25 @@ jobs:
               if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
             }
           }
+      - name: Prepare isolated, unsigned portable test executable
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path preview | Out-Null
+          $exe = '.artifacts\\cargo-native\\release\\aquilum-native.exe'
+          Copy-Item -LiteralPath $exe -Destination 'preview\\aquilum-native-dicom-preview.exe'
+          $hash = (Get-FileHash -LiteralPath 'preview\\aquilum-native-dicom-preview.exe' -Algorithm SHA256).Hash
+          "$hash  aquilum-native-dicom-preview.exe" | Out-File 'preview\\SHA256.txt' -Encoding ascii
+          "UNSIGNED EXPERIMENTAL TEST ONLY. Not an installer, not a medical device, not an approved Akula release. Source commit: $env:GITHUB_SHA. No auto-update or patient-data upload. Run only after verifying source and hash." | Out-File 'preview\\README.txt' -Encoding utf8
+          Write-Host "AKULA_DICOM_PORTABLE_TEST_READY sha256=$hash"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: akula-dicom-unsigned-test-${{ github.run_id }}
+          path: preview/
+          if-no-files-found: error
+          retention-days: 3
       - name: Upload no-patient screenshot and accessibility labels only
         if: always()
         uses: actions/upload-artifact@v4

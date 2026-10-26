@@ -9,6 +9,8 @@ on:
       - 'aquilum-app/native/src/dicom/**'
       - 'aquilum-app/native/src/app/book/**'
       - 'aquilum-app/native/src/app/mod.rs'
+      - 'aquilum-app/native/assets/locales/ru.json'
+      - 'aquilum-app/native/assets/locales/en.json'
       - 'aquilum-app/native/src/host/create.rs'
       - 'aquilum-app/native/src/args.rs'
       - 'aquilum-app/native/src/ui/workspaces/helpers.rs'
@@ -108,6 +110,8 @@ jobs:
           cargo test -p aquilum-native --features dicom-preview --locked dicom_file_tree_tests -- --nocapture
           cargo test -p aquilum-native --features dicom-preview --locked dicom_external_surface_tests -- --nocapture
           cargo test -p aquilum-native --features dicom-preview --locked dicom_menu_readonly_tests -- --nocapture
+          cargo test -p aquilum-native --features dicom-preview --locked dicom_permission_lifetime_tests -- --nocapture
+          cargo test -p aquilum-native --features dicom-preview --locked dicom_locale_tests -- --nocapture
       - name: Capture resolved Cargo lockfile for later audited commit
         if: always()
         uses: actions/upload-artifact@v4
