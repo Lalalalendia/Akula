@@ -1,5 +1,5 @@
 use super::*;
-
+mod dicom;
 impl App {
     pub fn root_widget(&mut self, system_dark: bool) -> NewWidget<dyn Widget> {
         self.system_dark = system_dark;
@@ -43,7 +43,6 @@ impl App {
             max_width_ch: config.editor.max_width_ch,
         });
     }
-
     fn build_ui(&mut self) -> NewWidget<dyn Widget> {
         self.apply_appearance();
         let workspace_name = self
@@ -70,17 +69,7 @@ impl App {
             tabs,
             active_tab: self.tabs.active_index(),
             empty_tab: self.tabs.active().path.is_none() && self.note.is_none() && self.tree.root().is_some(),
-            // Selected external DICOM source is a temporary viewer,
-            // not a workspace; it must still be visible on the no-vault screen.
-            vault_open: {
-                #[cfg(feature = "dicom-preview")]
-                { is_preview_surface_available(
-                    self.tree.root(), self.tabs.active().path.as_deref(),
-                    &self.dicom_external_sources
-                ) }
-                #[cfg(not(feature = "dicom-preview"))]
-                { self.tree.root().is_some() }
-            },
+            vault_open: self.preview_surface_available(),
             vault_error: self.vault_error.as_deref(),
             panel_open: target.1,
             panel_from: from.1,
@@ -92,29 +81,5 @@ impl App {
         let (widget, chrome) = ui::root(self.tree.widget(), parts);
         self.chrome = Some(chrome);
         widget.erased()
-    }
-}
-
-#[cfg(feature = "dicom-preview")]
-fn is_preview_surface_available(
-    workspace: Option<&Path>, active: Option<&Path>, granted: &HashSet<PathBuf>,
-) -> bool {
-    workspace.is_some() || active.is_some_and(|p| granted.contains(p))
-}
-
-#[cfg(all(test, feature = "dicom-preview"))]
-mod dicom_external_surface_tests {
-    use super::*;
-
-    #[test]
-    fn explicitly_selected_dicom_is_visible_without_opening_vault() {
-        let folder = PathBuf::from("test.zip");
-        let mut granted = HashSet::new();
-        assert!(!is_preview_surface_available(None, Some(&folder), &granted));
-        granted.insert(folder.clone());
-        assert!(is_preview_surface_available(None, Some(&folder), &granted));
-        assert!(!is_preview_surface_available(None, Some(Path::new("unselected.zip")), &granted));
-        assert!(is_preview_surface_available(Some(Path::new("workspace")), None, &granted));
-        assert!(!is_preview_surface_available(None, None, &granted));
     }
 }
