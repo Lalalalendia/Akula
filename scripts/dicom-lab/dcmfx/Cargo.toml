@@ -1,0 +1,6 @@
+[package]
+name = "akula-dcmfx-probe"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+dcmfx = "0.52.1"
