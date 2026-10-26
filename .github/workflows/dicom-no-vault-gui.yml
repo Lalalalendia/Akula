@@ -1,0 +1,86 @@
+name: DICOM no-vault Windows GUI smoke (non-release)
+on:
+  push:
+    branches:
+      - 'feat/dicom-readonly-preview-20261026'
+    paths:
+      - '.github/workflows/dicom-no-vault-gui.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dicom-no-vault-gui-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-gui:
+    runs-on: windows-2022
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: dicom-no-vault-gui
+          cache-on-failure: true
+      - name: Compile real native executable with DICOM preview (not an installer)
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}\.artifacts\cargo-native
+        run: |
+          cargo build --release --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed,dicom-preview
+          if ($LASTEXITCODE -ne 0) { throw 'DICOM GUI build failed' }
+          if (!(Test-Path -LiteralPath '.artifacts\cargo-native\release\aquilum-native.exe')) { throw 'Native executable missing' }
+      - name: Launch GUI with NO Akula vault and inspect DICOM entry points
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path 'shots' | Out-Null
+          $data = Join-Path $env:RUNNER_TEMP 'akula-dicom-empty-workspace'
+          New-Item -ItemType Directory -Force -Path $data | Out-Null
+          $exe = (Resolve-Path '.artifacts\cargo-native\release\aquilum-native.exe').Path
+          $process = Start-Process -FilePath $exe -ArgumentList @('--data-dir', $data) -PassThru
+          try {
+            $window = [IntPtr]::Zero
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Milliseconds 500
+              $process.Refresh()
+              if ($process.HasExited) { throw "DICOM GUI exited: $($process.ExitCode)" }
+              if ($process.MainWindowHandle -ne 0) { $window = $process.MainWindowHandle; break }
+            }
+            if ($window -eq [IntPtr]::Zero) { throw 'Akula GUI did not open a Windows window' }
+            Start-Sleep -Seconds 2
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            try {
+              $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+              $bitmap.Save((Join-Path $PWD 'shots\dicom-no-vault.png'))
+            } finally { $graphics.Dispose(); $bitmap.Dispose() }
+            if ((Get-Item 'shots\dicom-no-vault.png').Length -lt 1500) { throw 'GUI screenshot is empty' }
+            Add-Type -AssemblyName UIAutomationClient
+            Add-Type -AssemblyName UIAutomationTypes
+            $element = [System.Windows.Automation.AutomationElement]::FromHandle($window)
+            $nodes = $element.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+            $names = @($nodes | ForEach-Object { $_.Current.Name } | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+            $names | Out-File -FilePath 'shots\accessibility-names.txt' -Encoding utf8
+            $folder = @($names | Where-Object { $_ -like '*DICOM*папку*' }).Count -gt 0
+            $archive = @($names | Where-Object { $_ -like '*DICOM*ZIP*' }).Count -gt 0
+            if (!$folder -or !$archive) {
+              Write-Host 'DICOM_GUI_ACCESSIBILITY_BUTTONS_NOT_FOUND: inspect screenshot and accessibility-names.txt'
+              throw 'No-vault DICOM buttons are absent from accessibility tree'
+            }
+            Write-Host 'AKULA_DICOM_NO_VAULT_GUI_PASS folder_button=1 archive_button=1'
+          } finally {
+            $process.Refresh()
+            if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+      - name: Upload no-patient screenshot and accessibility labels only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-dicom-no-vault-ui-${{ github.run_id }}
+          path: shots/
+          if-no-files-found: warn
+          retention-days: 7
