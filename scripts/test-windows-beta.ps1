@@ -248,6 +248,17 @@ Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
 Assert-LegacyUntouched
 
+# Installed NSIS + foreground OS keyboard regression for the 30k and 100k
+# whole-note replacement path. Test-only vault, never developer/user files.
+. (Join-Path $PSScriptRoot 'windows-beta-replace-all.ps1')
+foreach ($lines in @(30000,100000)) {
+  Test-AkulaBetaReplaceAll -Executable $exe -Vault $vault -DataDir $akulaData -LineCount $lines
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'Large-document acceptance changed the original smoke-test note'
+}
+Assert-LegacyUntouched
+
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
 if (!(Test-Path $uninstall)) { throw 'Akula uninstaller missing' }
 $removed = Start-Process $uninstall -ArgumentList '/S' -Wait -PassThru
