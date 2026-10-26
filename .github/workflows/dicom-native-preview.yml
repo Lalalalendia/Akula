@@ -105,6 +105,7 @@ jobs:
         run: |
           cargo test -p aquilum-native --features dicom-preview --locked dicom_file_tree_tests -- --nocapture
           cargo test -p aquilum-native --features dicom-preview --locked dicom_external_surface_tests -- --nocapture
+          cargo test -p aquilum-native --features dicom-preview --locked dicom_menu_readonly_tests -- --nocapture
       - name: Capture resolved Cargo lockfile for later audited commit
         if: always()
         uses: actions/upload-artifact@v4

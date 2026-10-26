@@ -14,6 +14,11 @@ const MENU_DICOM_PICK_FOLDER: usize = 6;
 const MENU_DICOM_PICK_FILE: usize = 7;
 #[cfg(feature = "dicom-preview")]
 const MENU_DICOM_FILE: usize = 3;
+#[cfg(feature = "dicom-preview")]
+fn readonly_dicom_target(clicked: &Path, targets: &[PathBuf]) -> bool {
+    crate::dicom::is_candidate(clicked) || targets.iter().any(|path| crate::dicom::is_candidate(path))
+}
+
 
 impl App {
     pub(super) fn open_file_menu(
@@ -54,7 +59,16 @@ impl App {
                 labels.push(("DICOM: выбрать ZIP или файл".to_owned(), crate::ui::icons::SEARCH));
             }
         }
-        let items: Vec<crate::ui::menu::Entry<'_>> = labels.iter().map(|(label, icon)| crate::ui::menu::Entry { label, icon: Some(*icon), disabled: false }).collect();
+        #[cfg(feature = "dicom-preview")]
+        let protect = readonly_dicom_target(&clicked, &targets);
+        #[cfg(not(feature = "dicom-preview"))]
+        let protect = false;
+        // Medical sources are previewed in place. Do not offer the usual
+        // Rename/Duplicate/Delete commands that mutate their originals.
+        let items: Vec<crate::ui::menu::Entry<'_>> = labels.iter().enumerate()
+            .map(|(at, (label, icon))| crate::ui::menu::Entry {
+                label, icon: Some(*icon), disabled: protect && at <= MENU_DELETE,
+            }).collect();
         let names: Vec<String> = std::iter::once(t("palette.none")).chain(palette::NAMES.iter().map(|name| palette::label(name))).collect();
         let theme = crate::ui::theme::current();
         let swatches: Vec<Swatch<'_>> = names.iter().zip(std::iter::once(None).chain(palette::NAMES.iter().map(|name| palette::color(name, &theme)))).map(|(label, color)| Swatch { label, color }).collect();
@@ -118,4 +132,23 @@ impl App {
         self.on_titlebar(root, &crate::ui::titlebar::TitlebarAction::Select(id), self.window)
     }
 
+}
+
+#[cfg(all(test, feature = "dicom-preview"))]
+mod dicom_menu_readonly_tests {
+    use super::*;
+
+    #[test]
+    fn medical_zip_dicomdir_and_multiselect_cannot_offer_destructive_actions() {
+        let base = tempfile::tempdir().unwrap();
+        let study = base.path().join("study");
+        std::fs::create_dir(&study).unwrap();
+        std::fs::write(study.join("DICOMDIR"), [0u8; 132]).unwrap();
+        assert!(readonly_dicom_target(&study, &[]));
+        assert!(readonly_dicom_target(Path::new("case.zip"), &[]));
+        assert!(readonly_dicom_target(Path::new("slice.DCM"), &[]));
+        let candidates = vec![PathBuf::from("note.md"), PathBuf::from("other.dcm")];
+        assert!(readonly_dicom_target(Path::new("note.md"), &candidates));
+        assert!(!readonly_dicom_target(Path::new("ordinary.md"), &[]));
+    }
 }

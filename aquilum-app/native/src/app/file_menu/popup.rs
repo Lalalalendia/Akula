@@ -16,6 +16,10 @@ impl App {
                 if let MenuChoice::Item(_) | MenuChoice::Sub(_) = choice {
                     root.remove_layer(layer);
                 }
+                #[cfg(feature = "dicom-preview")]
+                let protect = readonly_dicom_target(&clicked, &targets);
+                #[cfg(not(feature = "dicom-preview"))]
+                let protect = false;
                 match choice {
                     MenuChoice::Sub(index) => {
                         let folders: Vec<PathBuf> = targets.into_iter().filter(|path| path.is_dir()).collect();
@@ -48,15 +52,15 @@ impl App {
                         && targets.len() == 1 && pdf_preview::is_pdf_path(&clicked) => {
                         self.prompt_pdf_preview(root, clicked);
                     }
-                    MenuChoice::Item(MENU_DUPLICATE) => file_ops::duplicate_all(&self.workspace.core, targets),
-                    MenuChoice::Item(MENU_DELETE) => self.confirm_delete(root, targets),
+                    MenuChoice::Item(MENU_DUPLICATE) if !protect => file_ops::duplicate_all(&self.workspace.core, targets),
+                    MenuChoice::Item(MENU_DELETE) if !protect => self.confirm_delete(root, targets),
                     MenuChoice::Item(MENU_CLOSE) if let Some(tab) = tab => {
                         self.tabs.close(tab);
                         self.show_active(root);
                         return Outcome { title: true, ..Outcome::default() };
                     }
-                    MenuChoice::Item(MENU_RENAME) if tab.is_some() => self.start_tab_rename(root, &clicked),
-                    MenuChoice::Item(MENU_RENAME) => self.tree.start_rename(root, clicked),
+                    MenuChoice::Item(MENU_RENAME) if tab.is_some() && !protect => self.start_tab_rename(root, &clicked),
+                    MenuChoice::Item(MENU_RENAME) if !protect => self.tree.start_rename(root, clicked),
                     MenuChoice::Item(_) | MenuChoice::Dismissed | MenuChoice::Hover(_) => {}
                 }
             }
