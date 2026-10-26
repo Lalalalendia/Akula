@@ -79,6 +79,26 @@ fn main() {
         assert_eq!(second.frame.unwrap().rgba.len(), expected_bytes);
     }
     println!("DICOM_NATIVE_ASYNC_OK frames={count} rgba_bytes={expected_bytes}");
+    if in_place {
+        // Simulate USB/DVD disconnection without copying anything into the vault.
+        // The worker must report a recoverable read error, retain the previous
+        // frame index, and resume on the same selected source once it returns.
+        let parked = source.with_extension("simulated_disconnected");
+        assert!(!parked.exists());
+        std::fs::rename(&source, &parked).expect("temporarily detach synthetic media");
+        assert!(worker.request(dicom::Navigation::Frame(1)));
+        let disconnected = next_event(&worker);
+        assert!(disconnected.error.is_some(), "lost media must produce an error");
+        assert!(disconnected.frame.is_none(), "failed read must not replace the displayed frame");
+        assert!(disconnected.label.contains("срез 2/3"), "failed read must roll back selection");
+        std::fs::rename(&parked, &source).expect("restore synthetic media");
+        assert!(worker.request(dicom::Navigation::Frame(1)));
+        let recovered = next_event(&worker);
+        assert!(recovered.error.is_none(), "{:?}", recovered.error);
+        assert_eq!(recovered.frame.unwrap().rgba.len(), expected_bytes);
+        assert!(recovered.label.contains("срез 3/3"));
+        println!("DICOM_MEDIA_LOSS_AND_RECOVERY_OK source={filename} resumed_slice=3");
+    }
     if filename == "study.zip" {
         assert!(dicom::Study::open(&vault, &vault.join("unsafe.zip")).is_err());
         println!("DICOM_UNSAFE_ZIP_REJECTED");
