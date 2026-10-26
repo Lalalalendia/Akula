@@ -104,6 +104,46 @@ jobs:
           Add-Type -AssemblyName UIAutomationClient
           Add-Type -AssemblyName UIAutomationTypes
           $exe = (Resolve-Path '.artifacts\cargo-native\release\aquilum-native.exe').Path
+          # Send a native Windows key message to the actual winit window.
+          # Tests the GUI navigation path rather than calling Rust model methods.
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class DicomGuiKey {
+              [DllImport("user32.dll", SetLastError=true)]
+              public static extern bool PostMessage(IntPtr hwnd, uint msg, UIntPtr key, IntPtr info);
+              [DllImport("user32.dll")]
+              public static extern uint MapVirtualKey(uint code, uint mapType);
+          }
+          '@
+          function Send-DicomKey([IntPtr]$hwnd, [uint32]$vk) {
+            $scan = [DicomGuiKey]::MapVirtualKey($vk, 0)
+            $base = [long]1 -bor ([long]$scan -shl 16) -bor 0x01000000
+            if (![DicomGuiKey]::PostMessage($hwnd, 0x0100, [UIntPtr]::new([uint64]$vk), [IntPtr]::new($base))) {
+              throw "Failed to post DICOM keydown for VK=$vk"
+            }
+            $released = $base -bor 0xC0000000
+            if (![DicomGuiKey]::PostMessage($hwnd, 0x0101, [UIntPtr]::new([uint64]$vk), [IntPtr]::new($released))) {
+              throw "Failed to post DICOM keyup for VK=$vk"
+            }
+          }
+          function Wait-DicomSlice([IntPtr]$hwnd, [string]$slice, [bool]$readError = $false) {
+            $last = @()
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              Start-Sleep -Milliseconds 250
+              $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+              $nodes = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+              $last = @($nodes | ForEach-Object { $_.Current.Name } | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+              $matching = @($last | Where-Object {
+                $_ -like "*DICOM*серия*срез $slice*" -and
+                (($readError -and $_ -like '*ошибка чтения*') -or
+                 (!$readError -and $_ -notlike '*ошибка чтения*'))
+              })
+              if ($matching.Count -gt 0) { return [string]$matching[0] }
+            }
+            $last | Out-File -FilePath "shots\dicom-navigation-failure.txt" -Encoding utf8
+            throw "DICOM GUI did not reach slice $slice (readError=$readError)"
+          }
           foreach ($kind in @('study.zip', 'loose_folder')) {
             $source = (Resolve-Path "scripts/dicom-native-smoke/fixture/$kind").Path
             $data = Join-Path $env:RUNNER_TEMP "akula-dicom-open-$($kind.Replace('.', '-'))"
@@ -131,6 +171,30 @@ jobs:
               $names | Out-File -FilePath "shots\$kind-accessibility.txt" -Encoding utf8
               if (!$loaded) { throw "No rendered DICOM frame in Windows GUI for $kind" }
               Write-Host "AKULA_DICOM_INPLACE_GUI_PASS source=$kind first_slice=1/3 no_vault=1"
+              Send-DicomKey $handle 0x27 # VK_RIGHT: 1/3 -> 2/3
+              $null = Wait-DicomSlice $handle '2/3'
+              Send-DicomKey $handle 0x27 # VK_RIGHT: 2/3 -> 3/3
+              $null = Wait-DicomSlice $handle '3/3'
+              Send-DicomKey $handle 0x25 # VK_LEFT: 3/3 -> 2/3
+              $null = Wait-DicomSlice $handle '2/3'
+              Write-Host "AKULA_DICOM_GUI_NAVIGATION_PASS source=$kind sequence=1-2-3-2"
+              # Remove and restore the already-open source, never modifying its bytes.
+              # This simulates drive disappearance; it is not a physical DVD test.
+              $offline = "$source.simulated-disconnect"
+              if (Test-Path -LiteralPath $offline) { throw "Test offline path already exists: $offline" }
+              try {
+                Move-Item -LiteralPath $source -Destination $offline -ErrorAction Stop
+                Send-DicomKey $handle 0x27 # Next frame must fail without changing 2/3
+                $null = Wait-DicomSlice $handle '2/3' $true
+                Write-Host "AKULA_DICOM_GUI_MEDIA_LOSS_PASS source=$kind last_slice=2/3"
+              } finally {
+                if (Test-Path -LiteralPath $offline) {
+                  Move-Item -LiteralPath $offline -Destination $source -ErrorAction Stop
+                }
+              }
+              Send-DicomKey $handle 0x27 # Retry after reconnect: 2/3 -> 3/3
+              $null = Wait-DicomSlice $handle '3/3'
+              Write-Host "AKULA_DICOM_GUI_MEDIA_RECOVERY_PASS source=$kind recovered_slice=3/3"
               if ($before -and (Get-FileHash $source -Algorithm SHA256).Hash -ne $before) { throw "Source archive modified: $kind" }
             } finally {
               $process.Refresh()
