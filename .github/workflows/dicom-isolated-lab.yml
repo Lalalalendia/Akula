@@ -43,6 +43,17 @@ jobs:
           sha=$(git -C scripts/dicom-lab/_upstream/dcmfx rev-parse HEAD)
           test "$sha" = '74246499134f85003ec6e50286377ddc55565d0c'
           echo "DCMFX_PIN_OK $sha"
+      - name: Fetch pinned DICOM-rs RLE fix (source code, not a released crate)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q scripts/dicom-lab/_upstream/dicom-rs
+          git -C scripts/dicom-lab/_upstream/dicom-rs remote add origin https://github.com/Enet4/dicom-rs.git
+          git -C scripts/dicom-lab/_upstream/dicom-rs fetch -q --depth 1 origin bcc6907c62a99a0a53523b5e80a22002ad12a63d
+          git -C scripts/dicom-lab/_upstream/dicom-rs checkout -q --detach FETCH_HEAD
+          sha=$(git -C scripts/dicom-lab/_upstream/dicom-rs rev-parse HEAD)
+          test "$sha" = 'bcc6907c62a99a0a53523b5e80a22002ad12a63d'
+          echo "DICOM_RS_RLE_FIX_PIN_OK $sha"
       - name: Compile all three probes and retain each error
         shell: bash
         run: |

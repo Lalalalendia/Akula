@@ -7,7 +7,7 @@ on \`lab/dicom-rust-compare-20261026\`. The workflow deliberately is not
 attached to the main app Cargo workspace or the default branch's PR gates.
 
 Three independent standalone Rust packages:
-- DICOM-rs 0.10.0 (MIT OR Apache-2.0), pure native decoder features.
+- DICOM-rs source 0.10.0 at pinned merge commit bcc6907c62a99a0a53523b5e80a22002ad12a63d (MIT OR Apache-2.0), including #844 RLE regression fix. The published 0.10.0 had an 8-bit monochrome RLE shift; see baseline run #40357312297 (7/8 hashes).
 - DCMfx 0.52.1 from pinned upstream commit 74246499134f85003ec6e50286377ddc55565d0c
   (AGPLv3: license evaluation required before any app integration).
 - dicom-toolkit 0.5.0 (MIT OR Apache-2.0).

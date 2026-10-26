@@ -3,6 +3,6 @@ name = "akula-dicom-rs-probe"
 version = "0.1.0"
 edition = "2024"
 [dependencies]
-dicom-object = "0.10.0"
-dicom-pixeldata = "0.10.0"
+dicom-object = { path = "../_upstream/dicom-rs/object" }
+dicom-pixeldata = { path = "../_upstream/dicom-rs/pixeldata" }
 sha2 = "0.10"
