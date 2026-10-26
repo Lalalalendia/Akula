@@ -297,7 +297,7 @@ jobs:
               $img = [System.Drawing.Bitmap]::FromFile((Join-Path $out $name))
               try {
                 $green = 0
-                for ($y=[int]($img.Height*0.545); $y -lt [int]($img.Height*0.78); $y+=2) {
+                for ($y=[int]($img.Height*0.495); $y -lt [int]($img.Height*0.565); $y+=2) {
                   for ($x=[int]($img.Width*0.32); $x -lt [int]($img.Width*0.61); $x+=2) {
                     $pixel = $img.GetPixel($x,$y)
                     if ($pixel.G -gt 75 -and $pixel.G -gt $pixel.R*1.3 -and $pixel.G -gt $pixel.B*1.1) { $green++ }
@@ -341,7 +341,7 @@ jobs:
               Start-Sleep -Milliseconds 650
               Capture 'opened-stable.png'
               if ((GreenCodePixels 'opened-stable.png') -lt 150) { continue }
-              $codeSettled = ChangedPixels 'opened.png' 'opened-stable.png' 0.33 0.545 0.61 0.63
+              $codeSettled = ChangedPixels 'opened.png' 'opened-stable.png' 0.33 0.495 0.61 0.565
               if ($codeSettled -le 45) {
                 Copy-Item -LiteralPath (Join-Path $out 'opened-stable.png') -Destination (Join-Path $out 'opened.png') -Force
                 $ready = $true
@@ -356,14 +356,14 @@ jobs:
             # Code body lies below the title and the fixed fence header.
             # The previous (310,155) position targeted the H1, not the code.
             $targetX = $rect.Left + [Math]::Min(420,[int]($width * 0.42))
-            $targetY = $rect.Top + [Math]::Min(365,[int]($height * 0.565))
+            $targetY = $rect.Top + [Math]::Min(338,[int]($height * 0.52))
             if (![AkulaWin32]::SetCursorPos($targetX,$targetY)) { throw 'Cannot target code panel' }
             [AkulaWin32]::mouse_event(0x1000,0,0,-240,[UIntPtr]::Zero)
             Start-Sleep -Milliseconds 800
             Capture 'after-horizontal-wheel.png'
-            # Deterministic 1000x650 window: observe green rendered code text (y≈355-410)
+            # Deterministic 1000x650 window: observe unwrapped code line (y≈328-359)
             # and the fixed fence header (y≈300), after the stable baseline witness.
-            $codePixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.33 0.545 0.61 0.63
+            $codePixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.33 0.495 0.61 0.565
             $headerPixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.30 0.45 0.60 0.49
             if ($codePixelsChanged -lt 450) {
               throw "Horizontal wheel did not shift code-body pixels: changed=$codePixelsChanged"
