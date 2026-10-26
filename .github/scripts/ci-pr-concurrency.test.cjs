@@ -5,7 +5,7 @@ const cp = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {topBlock, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, changedWorkflows, audit} = require('./ci-pr-concurrency.cjs');
+const {topBlock, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, allowedTextDeltaMigration, changedWorkflows, audit} = require('./ci-pr-concurrency.cjs');
 const group = '  group: $' + '{{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}';
 const cancel = "  cancel-in-progress: $" + "{{ github.event_name == 'pull_request' }}";
 const good = ['name: Optional lab','on:','  pull_request:','    paths:',"      - 'modules/test/**'",'  workflow_dispatch:','concurrency:',group,cancel,'jobs:','  test:','    runs-on: ubuntu-latest','    steps:','      - run: true'].join('\n')+'\n';
@@ -257,4 +257,68 @@ test('only byte-exact Linux beta migration may remove a protected PR trigger',()
     false,'missing previous source must not lose its PR test');
   assert.equal(allowedLinuxBetaMigration(old,candidate,()=>{throw Error('no evidence');}),
     false,'missing evidence always fails closed');
+});
+
+
+
+test('B1b2b protected PR trigger migration requires exact old owners and fail-closed gate',()=>{
+  const {allowedB1b2bMigration}=require('./ci-pr-concurrency.cjs');
+  const name='.github/workflows/core-server-bootstrap-b1b2b-ubuntu.yml';
+  const read=p=>fs.readFileSync(path.join(__dirname,'../..',p),'utf8');
+  const after=read(name);
+  const oldHeader="on:\n  workflow_call:\n  pull_request:\n    branches: [main]\n    paths:\n      - \"aquilum-app/core/examples/akula_b1b2b_release_fixture.rs\"\n      - \"scripts/ci/akula-b1b2b-ubuntu-vm.sh\"\n      - \"scripts/ci/akula-b1b2b-guest-lab.sh\"\n      - \"scripts/ci/akula-b1b2b-node-wrapper.sh\"\n      - \"docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B.md\"\n      - \"docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B1.md\"\n      - \"docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B2.md\"\n      - \".github/workflows/core-server-bootstrap-b1b2b-ubuntu.yml\"\n\n      - \"aquilum-app/core/src/server_release_lab.rs\"\n      - \"aquilum-app/core/src/bin/akula_node_lab.rs\"\n  workflow_dispatch:\n";
+  const newHeader="on:\n  workflow_call:\n  workflow_dispatch:\n";
+  assert.equal(after.split(newHeader).length,2);
+  const before=after.replace(newHeader,oldHeader);
+  assert.equal(allowedB1b2bMigration(before,after,read),true);
+  assert.equal(allowedB1b2bMigration(before,after.replace('workflow_dispatch:','push:'),read),false);
+  assert.equal(allowedB1b2bMigration(before,after.replace('cargo build --locked','cargo build --offline'),read),false);
+  assert.equal(allowedB1b2bMigration(before.replace('branches: [main]','branches: [develop]'),after,read),false);
+  assert.equal(allowedB1b2bMigration(before.replace('scripts/ci/akula-b1b2b-guest-lab.sh','scripts/ci/wrong-guest.sh'),after,read),false);
+  const route='.github/scripts/ci-shared-manifest-route.cjs';
+  const app='.github/workflows/app-checks.yml';
+  const shared='.github/workflows/ci-shared-manifest-labs.yml';
+  const altered=[
+    [route,read(route).replace('    "scripts/ci/akula-b1b2b-guest-lab.sh",\n','')],
+    [app,read(app).replace("needs.classify.outputs.owned_b1b2b_vm == 'true'","false")],
+    [app,read(app).replace('needs: [classify, required-tests, native-frames, shared-labs]','needs: [classify, required-tests, native-frames]')],
+    [app,read(app).replace('if [ "$ROUTED_SHARED_RESULT" != success ]; then','echo bypass')],
+    [shared,read(shared).replace('inputs.core || inputs.owned_b1b2b_vm','inputs.core')],
+    [shared,read(shared).replace('["core","owned_b1b2b_vm"]','["core"]')],
+    [shared,read(shared).replace('route-b0c-ssh-native, route-b1b2b-ubuntu','route-b0c-ssh-native')],
+  ];
+  for(const [key,modified] of altered){
+    assert.notEqual(read(key),modified,'negative mutation must change fixture: '+key);
+    assert.equal(allowedB1b2bMigration(before,after,p=>p===key?modified:read(p)),false,'must fail closed for '+key);
+  }
+  assert.equal(allowedB1b2bMigration(before,after,()=>{throw Error('no evidence');}),false);
+});
+
+test('Text Delta PR owner may migrate only to a proven required Main gate',()=>{
+  const name='.github/workflows/text-delta-codec-isolated.yml';
+  const read=p=>fs.readFileSync(path.join(__dirname,'../..',p),'utf8');
+  const after=read(name);
+  const replacement="on:\n"
+    +"  # PR source owners run in the required Application checks / Main PR gate.\n"
+    +"  workflow_dispatch:\n";
+  const original="on:\n  pull_request:\n    paths:\n"
+    +"      - 'modules/text-delta-codec/**'\n"
+    +"      - '.github/workflows/text-delta-codec-isolated.yml'\n"
+    +"  workflow_dispatch:\n";
+  assert.equal(after.split(replacement).length,2,'exact migration header');
+  const before=after.replace(replacement,original);
+  assert.equal(allowedTextDeltaMigration(before,after,read),true,'fully protected route');
+  assert.equal(allowedTextDeltaMigration(before,after.replace('workflow_dispatch:','push:'),read),false);
+  assert.equal(allowedTextDeltaMigration(before.replace('modules/text-delta-codec/**','modules/other/**'),after,read),false);
+  assert.equal(allowedTextDeltaMigration(before,after,()=>{throw Error('missing route');}),false);
+  const appPath='.github/workflows/app-checks.yml';
+  const app=read(appPath);
+  for(const [label,from,to] of [
+    ['missing Main dependency','needs: [classify, required-tests, native-frames, shared-labs]','needs: [classify, native-frames, shared-labs]'],
+    ['missing Cargo step','cargo test --manifest-path modules/text-delta-codec/Cargo.toml -- --nocapture','echo bypass'],
+    ['missing conditional',"if: needs.classify.outputs.text_delta_module_required == 'true'",'if: false']
+  ]){
+    assert.ok(app.includes(from),label+' fixture');
+    assert.equal(allowedTextDeltaMigration(before,after,p=>p===appPath?app.replace(from,to):read(p)),false,label);
+  }
 });

@@ -52,6 +52,45 @@ const INSTALLED_OWNER_PATHS=new Set(["aquilum-app/core/src/sync/host_install_uni
 // Preserve the exact former pull_request.path owners. These source-owned labs
 // run through the required Main PR gate, including mixed source/manifest diffs.
 const OWNED_SUITES=Object.freeze({
+  "owned_b1b2b_vm": [
+    "aquilum-app/core/examples/akula_b1b2b_release_fixture.rs",
+    "scripts/ci/akula-b1b2b-ubuntu-vm.sh",
+    "scripts/ci/akula-b1b2b-guest-lab.sh",
+    "scripts/ci/akula-b1b2b-node-wrapper.sh",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B.md",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B1.md",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B2.md",
+    ".github/workflows/core-server-bootstrap-b1b2b-ubuntu.yml",
+    "aquilum-app/core/src/server_release_lab.rs",
+    "aquilum-app/core/src/bin/akula_node_lab.rs"
+  ],
+  "owned_b1c1_vm": [
+    ".github/workflows/core-server-bootstrap-b1c1-real-elf-vm.yml",
+    "aquilum-app/core/tests/server_bootstrap_b1c0.rs",
+    "aquilum-app/core/src/server_installer_fixed_node_lab.rs",
+    "aquilum-app/core/src/server_installer_pinned_release_lab.rs",
+    "aquilum-app/core/src/server_installer_os_witness_lab.rs",
+    "scripts/ci/akula-b1b2b-ubuntu-vm.sh",
+    "scripts/ci/akula-b1c1-vm-hook.sh",
+    "scripts/ci/akula-b1c1-guest-lab.sh",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1C1.md",
+  ],
+  "owned_b0c_ssh": [
+    "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs",
+    "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs",
+    "aquilum-app/core/src/server_bootstrap_modules.rs",
+    "aquilum-app/core/tests/server_bootstrap_b0c_windows.rs",
+    "scripts/ci/akula-b0c-windows-loopback-sshd.py",
+    ".github/workflows/core-server-bootstrap-b0c-windows-ssh.yml",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0C.md",
+    "aquilum-app/native/src/app/settings/server.rs",
+    "aquilum-app/native/src/app/settings/server_state.rs",
+    "aquilum-app/native/src/ui/settings/schema/server/server_status.rs",
+    "aquilum-app/native/src/ui/settings/schema/server/identity.rs",
+    "aquilum-app/native/assets/locales/ru.json",
+    "aquilum-app/native/assets/locales/en.json",
+    "aquilum-app/native/src/ui/settings/schema/tests.rs"
+  ],
   "owned_host_custody": [
     "aquilum-app/core/src/app_core.rs",
     "aquilum-app/core/src/app_core_installed_host_tests.rs",
@@ -76,6 +115,8 @@ const OWNED_SUITES=Object.freeze({
     ".github/workflows/sync-protection.yml"
   ],
   "owned_text_delta": [
+    "modules/text-delta-codec/**",
+    ".github/workflows/text-delta-codec-isolated.yml",
     "aquilum-app/core/src/sync/text_delta_codec.rs",
     "aquilum-app/core/src/sync/mod.rs",
     "aquilum-app/core/src/sync/s3_transport/pack_probe.rs",
@@ -128,6 +169,11 @@ const OWNED_SUITES=Object.freeze({
     "aquilum-app/core/src/sync/sealed_archive.rs",
     "aquilum-app/core/src/sync/local_create_tests.rs",
     "aquilum-app/core/src/sync/journal.rs",
+    "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+    "aquilum-app/core/src/sync/journal/publication_recovery.rs",
+    "aquilum-app/core/src/sync/journal/phase_transitions.rs",
+    "aquilum-app/core/src/sync/journal/tests/mod.rs",
+    "aquilum-app/core/src/sync/journal/tests/recovery.rs",
     "aquilum-app/core/src/sync/core_scan.rs",
     "aquilum-app/core/src/sync/path.rs",
     "aquilum-app/core/src/search/paths.rs",
@@ -185,6 +231,11 @@ const OWNED_SUITES=Object.freeze({
     "aquilum-app/core/src/sync/s3_preimage_capture.rs",
     "aquilum-app/core/src/sync/host_custody_registry.rs",
     "aquilum-app/core/src/sync/journal.rs",
+    "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+    "aquilum-app/core/src/sync/journal/publication_recovery.rs",
+    "aquilum-app/core/src/sync/journal/phase_transitions.rs",
+    "aquilum-app/core/src/sync/journal/tests/mod.rs",
+    "aquilum-app/core/src/sync/journal/tests/recovery.rs",
     "aquilum-app/core/src/sync/local_create_tests.rs",
     "aquilum-app/core/src/sync/local_create.rs",
     "aquilum-app/core/src/sync/s3_transport/**",
