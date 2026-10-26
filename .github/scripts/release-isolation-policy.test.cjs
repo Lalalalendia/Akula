@@ -134,6 +134,13 @@ test('single published Akula installer includes opt-in S3 feature', () => {
   assert.match(file('scripts/akula-win7-signed-stage.ps1'),
     /cargo \+nightly build[^\n]*--features installed,s3-pair-beta[^\n]*--target \$target[^\n]*-Z build-std=std,panic_abort/,
     'the one signed EXE must include opt-in S3 and use the audited Windows 7 target');
+  assert.match(file('scripts/akula-win7-signed-stage.ps1'),
+    /\$env:RUSTFLAGS = '--cfg windows_slim_errors -C target-feature=\+crt-static'/,
+    'the protected Win7 signed candidate must not require a separately installed UCRT/VC runtime');
+  assert.match(file('scripts/akula-win7-signed-stage.ps1'),
+    /external_crt_imported_dlls/,
+    'the signed candidate must reject dynamic UCRT/VC runtime imports');
+
   assert.match(active, /scripts\/test-windows-beta\.ps1/);
   assert.match(active, /--title "Akula v\$\{version\}" --latest/);
   assert.doesNotMatch(active, /--features installed,s3-pair-beta\s+--bin\s+different-app/);
