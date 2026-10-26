@@ -1,4 +1,5 @@
 mod pass;
+mod viewport_guard;
 
 use masonry::app::{VisualLayerKind, VisualLayerPlan};
 use masonry::imaging::record::{Scene, replay_transformed};
@@ -258,6 +259,7 @@ impl Renderer {
 
     #[allow(clippy::too_many_arguments)]
     pub fn draw(&mut self, layers: &VisualLayerPlan, width: u16, height: u16, scale: f64, background: Color, full: bool, canvas: &mut dyn Canvas) -> Result<Vec<Area>, PaintError> {
+        viewport_guard::validate(width, height)?;
         self.params = Some((width, height, scale, background));
         if full {
             self.stamps.forget();
