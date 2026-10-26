@@ -9,6 +9,8 @@ on:
       - 'aquilum-app/native/src/dicom/**'
       - 'aquilum-app/native/src/app/book/**'
       - 'aquilum-app/native/src/app/mod.rs'
+      - 'aquilum-app/native/src/host/create.rs'
+      - 'aquilum-app/native/src/args.rs'
       - 'aquilum-app/native/src/ui/workspaces/helpers.rs'
       - 'aquilum-app/native/src/ui/shell.rs'
       - 'aquilum-app/native/src/ui/new_tab.rs'

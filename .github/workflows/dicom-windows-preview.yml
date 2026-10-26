@@ -11,6 +11,8 @@ on:
       - 'aquilum-app/native/src/app/file_menu.rs'
       - 'aquilum-app/native/src/app/file_menu/popup.rs'
       - 'aquilum-app/native/src/app/init/bootstrap.rs'
+      - 'aquilum-app/native/src/host/create.rs'
+      - 'aquilum-app/native/src/args.rs'
       - 'aquilum-app/native/src/ui/workspaces/helpers.rs'
       - 'aquilum-app/native/src/ui/shell.rs'
       - 'aquilum-app/native/src/ui/new_tab.rs'

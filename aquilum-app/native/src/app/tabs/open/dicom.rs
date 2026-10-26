@@ -52,7 +52,7 @@ impl App {
             .is_some_and(|root| crate::dicom::admit(&root, path).is_ok())
     }
 
-    pub(in crate::app) fn open_dicom_external(&mut self, root: &mut RenderRoot, path: PathBuf) -> bool {
+    pub(crate) fn open_dicom_external(&mut self, root: &mut RenderRoot, path: PathBuf) -> bool {
         if !path.is_dir() && !crate::dicom::is_candidate(&path) {
             self.show_open_error(root, &path, "DICOM: выберите папку, ZIP или файл DICOM");
             return false;

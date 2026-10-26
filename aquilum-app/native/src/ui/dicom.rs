@@ -70,6 +70,7 @@ impl DicomPage {
                     }
                     self.line.clear();
                     ctx.request_layout();
+                    ctx.request_accessibility_update();
                     ctx.request_paint_only();
                 }
                 Ok(None) => break,
