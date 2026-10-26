@@ -66,6 +66,7 @@ impl PaintSink for Painter {
             }
         };
         self.set_transform(clip_transform);
+        if let Err(err) = self.check_filter_budget(group.filters) { self.set_error_once(err); return; }
         let blend: Option<BlendMode> = Some(group.composite.blend);
         let opacity = Some(group.composite.alpha);
         let (width, height) = (self.width(), self.height());
@@ -105,8 +106,7 @@ impl PaintSink for Painter {
     }
 
     fn fill(&mut self, draw: FillRef<'_>) {
-        // IMG-PERF-08 developer-only provenance between the actual editor
-        // ImageBrush ID and Akula's CPU painter scene-culling boundary.
+        // IMG-PERF-08: trace ImageBrush IDs at the paint/culling boundary.
         // A MediaView::paint call alone is not proof its image fill survived
         // ancestor clips, region culling and sprite handling. Log at most
         // one record per (brush ID, offscreen state, sprite state).
