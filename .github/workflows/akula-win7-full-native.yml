@@ -11,6 +11,7 @@ on:
       - 'scripts/akula-win7-signed-stage.ps1'
       - '.github/scripts/akula-win7-portable-package.py'
       - '.github/scripts/akula-win7-portable-package.test.py'
+      - 'scripts/akula-win7-sp1-acceptance.ps1'
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -39,7 +40,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($file in @('scripts/akula-win7-nsis-candidate.ps1', 'scripts/akula-win7-signed-stage.ps1')) {
+          foreach ($file in @('scripts/akula-win7-nsis-candidate.ps1', 'scripts/akula-win7-signed-stage.ps1',
+                              'scripts/akula-win7-sp1-acceptance.ps1')) {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE $file), [ref]$tokens, [ref]$errors) | Out-Null
@@ -49,6 +51,21 @@ jobs:
           foreach ($token in @('scripts/akula-win7-signed-stage.ps1', 'scripts/akula-win7-nsis-candidate.ps1',
                               'Sign tested Windows NSIS bytes', 'Verify public key, both detached signatures')) {
             if (!$publisher.Contains($token)) { throw "Signed Akula workflow lost required Win7 or trust gate: $token" }
+          }
+
+      - name: Check Win7 SP1 native acceptance harness guard and evidence contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $script = Get-Content -LiteralPath 'scripts/akula-win7-sp1-acceptance.ps1' -Raw
+          foreach ($required in @('Get-WmiObject Win32_OperatingSystem', 'ServicePackMajorVersion',
+                                   'if (-not $DisposableVm)', 'installed_app_and_shiva_hashes=PASS',
+                                   'pdf_roundtrip=PASS', 'cover_uncover_20=COMPLETED_REQUIRES_VISUAL_REVIEW',
+                                   'Cold-reopened', 'Sha256 $Installer', 'Start-Process -FilePath $Installer')) {
+            if (-not $script.Contains($required)) { throw "Win7 acceptance scenario missing: $required" }
+          }
+          if ($script -match 'Invoke-WebRequest|Invoke-RestMethod|iex\b|DownloadString') {
+            throw 'Win7 acceptance harness must not download or execute network content'
           }
 
       - name: Verify fail-closed COM import staging decisions
@@ -245,6 +262,7 @@ jobs:
           path: |
             win7-lab-output/Akula-Win7-LAB-portable.zip
             win7-lab-output/PROVENANCE.txt
+            scripts/akula-win7-sp1-acceptance.ps1
             win7-lab-output/pe-audit/full-audit.md
             win7-lab-output/pe-audit/full-audit.json
             dist/Akula_*-setup.exe
