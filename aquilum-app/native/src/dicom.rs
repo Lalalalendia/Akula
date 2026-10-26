@@ -9,6 +9,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+#[path = "dicom/worker.rs"]
 mod worker;
 pub use worker::{DicomWorker, FrameUpdate, Navigation};
 
