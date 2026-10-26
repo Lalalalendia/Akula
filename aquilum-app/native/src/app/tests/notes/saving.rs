@@ -93,6 +93,32 @@ fn dirty_edit_offers_explicit_review_after_window_note_is_lost() {
 }
 
 #[test]
+fn closing_recovery_modal_never_sticks_or_discards_the_shadow() {
+    use crate::ui::dialog::DialogAnswer;
+    let mut h = Harness::new();
+    let path = h.write_note("recover-close.md", "persisted");
+    assert!(h.app.open(&mut h.root, path.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    h.app.commit_text(&mut h.root, crop::Rope::from("unsaved private draft"));
+    crate::disk::wait();
+    drop(h.app.note.take());
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    let layer = match &h.app.popup {
+        Some(Popup::Recovery(state)) => state.dialog.layer,
+        _ => panic!("recovery confirmation expected"),
+    };
+    h.send(layer, DialogAnswer::Closed);
+    assert!(h.app.popup.is_none(), "closed modal must unlock other actions");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "persisted");
+    let record = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &path,
+    ).unwrap().unwrap();
+    assert_eq!(record.body.to_string(), "unsaved private draft");
+}
+
+#[test]
 fn unsaved_text_is_written_on_shutdown() {
     let mut h = Harness::new();
     let path = h.vault.path().join("a.md");

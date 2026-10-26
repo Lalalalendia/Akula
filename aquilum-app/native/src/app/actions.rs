@@ -4,8 +4,8 @@ impl App {
     /// Действие виджета; `window` — размер окна в логических пикселях (для меню у края).
     pub fn on_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: ErasedAction, window: Size) -> Outcome {
         if action.downcast_ref::<DialogAnswer>() == Some(&DialogAnswer::Closed) {
-            root.remove_layer(id);
-            return Outcome::default();
+            if matches!(self.popup, Some(Popup::Recovery(_))) { return self.on_popup_action(root, id, &action); }
+            root.remove_layer(id); return Outcome::default();
         }
         if self.on_suggest_pick(root, id, &action) || self.on_find_action(root, id, &action) || self.on_sash(root, id, &action) {
             return Outcome::default();

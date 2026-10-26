@@ -17,7 +17,7 @@ impl Default for RecoveryUi {
     }
 }
 pub(super) struct RecoveryPrompt {
-    dialog: DialogIds, workspace: Uuid, path: PathBuf, candidate: RecoveryCandidate,
+    pub(super) dialog: DialogIds, workspace: Uuid, path: PathBuf, candidate: RecoveryCandidate,
 }
 impl App {
     pub(super) fn arm_note_recovery(&mut self, note: &mut Note) {
@@ -104,10 +104,10 @@ impl App {
 
     pub(super) fn on_note_recovery_action(&mut self, root: &mut RenderRoot,
         id: WidgetId, action: &ErasedAction, state: RecoveryPrompt)->Outcome {
-        let Some(answer)=state.dialog.answer(id,action) else {
-            self.popup=Some(Popup::Recovery(state));return Outcome::default();
-        };
-        crate::ui::dialog::close(root,state.dialog.layer);
+        let closed=id==state.dialog.layer && action.downcast_ref::<DialogAnswer>()==Some(&DialogAnswer::Closed);
+        let answer=if closed {Some(DialogAnswer::Cancel)} else {state.dialog.answer(id,action)};
+        let Some(answer)=answer else {self.popup=Some(Popup::Recovery(state));return Outcome::default();};
+        if closed {root.remove_layer(state.dialog.layer);} else {crate::ui::dialog::close(root,state.dialog.layer);}
         if answer==DialogAnswer::Cancel {
             // A user who postponed review can reach the same held draft by
             // reopening the tab; no bytes were discarded.
