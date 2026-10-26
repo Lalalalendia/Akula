@@ -610,6 +610,7 @@ jobs:
       owned_b0c_ssh: ${{ needs.classify.outputs.owned_b0c_ssh == 'true' }}
       owned_sync_protection: ${{ needs.classify.outputs.owned_sync_protection == 'true' }}
       owned_text_delta: ${{ needs.classify.outputs.owned_text_delta == 'true' }}
+      text_delta_module_required: ${{ needs.classify.outputs.text_delta_module_required == 'true' }}
       owned_appimage: ${{ needs.classify.outputs.owned_appimage == 'true' }}
       owned_windows_beta: ${{ needs.classify.outputs.owned_windows_beta == 'true' }}
       owned_linux_beta: ${{ needs.classify.outputs.owned_linux_beta == 'true' }}

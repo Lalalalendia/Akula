@@ -613,3 +613,33 @@ test('extracted journal phase transitions retain public APIs and all protected s
   }
   assert.ok(core.includes('needs: [classify, required-tests, native-frames, shared-labs]'));
 });
+
+test('Text Delta standalone suite has a single required owner and all leafs retain S3 refusal',()=>{
+  const {ownedRoutes}=require('./ci-shared-manifest-route.cjs');
+  const {textDeltaModuleRequired}=require('./ci-rust-scope.cjs');
+  const lab=fs.readFileSync(path.join(__dirname,'../workflows/sync-text-delta-rust.yml'),'utf8');
+  const standalone='.github/workflows/text-delta-codec-isolated.yml';
+  const files=[
+    'modules/text-delta-codec/src/codec.rs',
+    'modules/text-delta-codec/src/lib.rs',
+    'modules/text-delta-codec/src/new_codec_helper.rs',
+    'modules/text-delta-codec/tests/adversarial.rs',
+    'modules/text-delta-codec/Cargo.toml',
+    standalone,
+  ];
+  for(const file of files){
+    assert.equal(ownedRoutes([file]).owned_text_delta,true,'all standalone paths retain protected S3 refusal: '+file);
+    assert.equal(textDeltaModuleRequired([file]),true,'main required-tests must run codec suite: '+file);
+  }
+  assert.equal(ownedRoutes(['docs/unrelated.md']).owned_text_delta,false,'unrelated PR skips Text Delta');
+  assert.equal(textDeltaModuleRequired(['docs/unrelated.md']),false,'unrelated PR avoids standalone Rust');
+  assert.match(core,/cargo test --manifest-path modules\/text-delta-codec\/Cargo\.toml -- --nocapture/);
+  assert.match(core,/text_delta_module_required: \$\{\{ needs\.classify\.outputs\.text_delta_module_required == 'true' \}\}/);
+  assert.match(shared,/text_delta_module_required:\n        required: true\n        type: boolean/);
+  assert.match(shared,/codec_already_tested: \$\{\{ inputs\.text_delta_module_required \}\}/);
+  assert.match(lab,/codec_already_tested:\n        required: false\n        type: boolean\n        default: false/);
+  assert.match(lab,/if: \$\{\{ !inputs\.codec_already_tested \}\}/);
+  assert.match(lab,/new_text_delta_is_not_a_legacy_pack/,'negative S3 V2 must always run');
+  assert.match(shared,/route-text-delta:\n    name: Impacted shared manifest \/ text-delta/);
+  assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/,'Main PR gate is fail closed');
+});

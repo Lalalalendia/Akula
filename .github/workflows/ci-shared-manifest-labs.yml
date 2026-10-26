@@ -33,6 +33,9 @@ on:
       owned_text_delta:
         required: true
         type: boolean
+      text_delta_module_required:
+        required: true
+        type: boolean
       owned_appimage:
         required: true
         type: boolean
@@ -165,6 +168,8 @@ jobs:
     name: Impacted shared manifest / text-delta
     if: ${{ inputs.core || inputs.lock || inputs.owned_text_delta }}
     uses: ./.github/workflows/sync-text-delta-rust.yml
+    with:
+      codec_already_tested: ${{ inputs.text_delta_module_required }}
 
   route-appimage-beta:
     name: Impacted shared manifest / appimage-beta
