@@ -24,6 +24,9 @@ foreach ($entry in @(@{name='Akula'; path=$exe; audit=$mainAudit},
     if (@($entry.audit.known_post_win7_imports).Count -ne 0) {
         throw "$($entry.name) still has known Windows 8+ imports"
     }
+    if (@($entry.audit.external_crt_imported_dlls).Count -ne 0) {
+        throw "$($entry.name) has external UCRT/VC runtime imports; clean Win7 SP1 would require a redistributable"
+    }
     if (@($entry.audit.potentially_risky_imported_dlls) -contains 'combase.dll') {
         throw "$($entry.name) directly imports combase.dll"
     }
