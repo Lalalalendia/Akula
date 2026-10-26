@@ -3,6 +3,7 @@
 //! signature and cannot prove zero data loss before its durable-write ACK.
 #![allow(dead_code)]
 mod queue;
+pub(super) use queue::{CaptureStatus, SnapshotQueue};
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};

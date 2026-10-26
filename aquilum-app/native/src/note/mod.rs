@@ -1,11 +1,9 @@
+mod bridge;
 mod read;
 mod recovery;
 mod save;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::TryRecvError;
+use std::sync::{atomic::{AtomicBool, Ordering}, mpsc::{Receiver, Sender, TryRecvError, channel}, Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use aquilum_core::Core;
@@ -45,6 +43,7 @@ pub struct Note {
     save_safety: Arc<SaveSafety>,
     revision: u64,
     reload_job: Option<ReloadJob>,
+    shadow: Option<recovery::SnapshotQueue>,
 }
 
 impl Note {
@@ -56,7 +55,7 @@ impl Note {
     /// Construct an ordinary clean note only after a raw on-disk BLAKE3 match.
     /// The caller must compare the cached digest to the *current* file bytes.
     pub(crate) fn from_verified_cache(path: PathBuf, text: crop::Rope, hash: String) -> (Note, crop::Rope) {
-        let note = Note { path, hash: Arc::new(Mutex::new(hash)), pending: None, save_error: None, replaced: None, queued: 0, done: channel(), save_safety: Arc::new(SaveSafety::default()), revision: 0, reload_job: None };
+        let note = Note { path, hash: Arc::new(Mutex::new(hash)), pending: None, save_error: None, replaced: None, queued: 0, done: channel(), save_safety: Arc::new(SaveSafety::default()), revision: 0, reload_job: None, shadow: None };
         (note, text)
     }
 
