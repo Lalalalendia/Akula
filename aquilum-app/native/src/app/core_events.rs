@@ -1,11 +1,11 @@
 use super::*;
-
 impl App {
     pub fn on_core_events(&mut self, root: &mut RenderRoot) -> bool {
         let mut title = false;
         while let Ok(picked) = self.picked_rx.try_recv() {
             title |= self.on_picked(root, picked);
         }
+        self.on_transfer_picked(root);
         self.refresh_covers(root);
         let requests = self.embeds.as_ref().map(embeds::Embeds::take_requests).unwrap_or_default();
         for request in requests {
@@ -22,8 +22,9 @@ impl App {
         self.on_home_resolved(root);
         self.on_link_titles(root);
         self.on_graph_results(root);
-        self.on_update(root);
+        self.poll_update_and_server_probe(root);
         self.on_retention_done(root);
+        #[cfg(feature = "dropbox-readonly-preview")] self.poll_dropbox_settings(root);
         self.undo_failed_renames(root);
         self.poll_find(root);
         let mut links_changed = false;

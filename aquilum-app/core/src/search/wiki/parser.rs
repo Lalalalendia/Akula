@@ -1,7 +1,9 @@
 use super::target::{is_attachment, parts};
 use crate::text::utf16::utf16_len;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::ops::Range;
+
+mod excluded;
+use excluded::excluded_ranges;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WikiLink {
@@ -31,8 +33,18 @@ fn scan_candidates(source: &str) -> Vec<WikiLink> {
     let mut found = Vec::new();
     let mut cursor = 0;
     let mut excluded_at = 0;
+    // Search directly for the two-byte opener instead of branching on each
+    // byte of prose. Keep the old overlap handling for escaped openers.
+    let opener = memchr::memmem::Finder::new(b"[[");
     while cursor + 3 < bytes.len() {
-        if bytes[cursor] != b'[' || bytes[cursor + 1] != b'[' || escaped(bytes, cursor) {
+        let Some(next) = opener.find(&bytes[cursor..]) else {
+            break;
+        };
+        cursor += next;
+        if cursor + 3 >= bytes.len() {
+            break;
+        }
+        if escaped(bytes, cursor) {
             cursor += 1;
             continue;
         }
@@ -77,25 +89,6 @@ fn scan_candidates(source: &str) -> Vec<WikiLink> {
         })
         .collect()
 }
-fn excluded_ranges(source: &str) -> Vec<Range<usize>> {
-    let mut ranges = Vec::new();
-    let mut block_start = None;
-    for (event, range) in Parser::new_ext(source, Options::all()).into_offset_iter() {
-        match event {
-            Event::Code(_) | Event::Html(_) | Event::InlineHtml(_) => ranges.push(range),
-            Event::Start(Tag::CodeBlock(_)) => block_start = Some(range.start),
-            Event::End(TagEnd::CodeBlock) => {
-                if let Some(start) = block_start.take() {
-                    ranges.push(start..range.end);
-                }
-            }
-            _ => {}
-        }
-    }
-    ranges.sort_by_key(|range| range.start);
-    ranges
-}
-
 fn find_close(bytes: &[u8], mut cursor: usize) -> Option<usize> {
     while cursor + 1 < bytes.len() {
         if bytes[cursor] == b'\n' || bytes[cursor] == b'\r' {

@@ -100,8 +100,16 @@ pub struct RootVerifiedFd{
     valid_from_unix:u64,
     valid_until_unix:u64,
     pub receipt:VerifiedPackageReceipt,
+    verified_publisher_key:[u8;32],
+    verified_publisher_id:String,
 }
 impl RootVerifiedFd{
+    /// The exact signer used for B1a validation of this pinned FD; not a
+    /// second, caller-supplied identity disconnected from that validation.
+    #[cfg(feature = "server-root-b0v3-gate-lab")]
+    pub fn verified_publisher(&self)->(&str,[u8;32]){
+        (&self.verified_publisher_id,self.verified_publisher_key)
+    }
     pub fn stable(&self)->Result<(),PinError>{
         if !same_object(&self.meta,&self.file.metadata()?){
             return Err(PinError::ChangedInode);
@@ -121,6 +129,48 @@ impl RootVerifiedFd{
         }
         Ok(())
     }
+
+    /// B1c0 isolated test-only bridge: stream bytes from the SAME previously
+    /// authenticated inode without trusting any path re-open or client data.
+    /// Rehash the exact byte length before the caller may commit a fixed file.
+    /// The caller must hold its own protected transaction lock and cleanly
+    /// handle a partial destination after any failure.
+    #[cfg(feature = "server-bootstrap-b1c0-fixed-node-lab")]
+    pub(crate) fn copy_rechecked_bytes(
+        &self, destination: &mut File, now_unix: u64,
+    ) -> Result<(), PinError> {
+        use ring::{constant_time, digest};
+        use std::io::Write;
+        use std::os::unix::fs::FileExt;
+        self.valid_at(now_unix)?;
+        let mut hash = digest::Context::new(&digest::SHA256);
+        let mut offset = 0u64;
+        let mut buf = [0u8; 32 * 1024];
+        while offset < self.receipt.byte_length {
+            let remain = self.receipt.byte_length - offset;
+            let want = usize::try_from(remain.min(buf.len() as u64))
+                .map_err(|_| PinError::Release(ReleaseError::SizeMismatch))?;
+            let n = self.file.read_at(&mut buf[..want], offset)?;
+            if n == 0 {
+                return Err(PinError::Release(ReleaseError::SizeMismatch));
+            }
+            destination.write_all(&buf[..n])?;
+            hash.update(&buf[..n]);
+            offset = offset.checked_add(n as u64)
+                .ok_or(PinError::Release(ReleaseError::SizeMismatch))?;
+        }
+        let mut extra = [0u8; 1];
+        if self.file.read_at(&mut extra, offset)? != 0 {
+            return Err(PinError::Release(ReleaseError::SizeMismatch));
+        }
+        if constant_time::verify_slices_are_equal(
+            hash.finish().as_ref(), &self.receipt.package_sha256,
+        ).is_err() {
+            return Err(PinError::Release(ReleaseError::PackageDigestMismatch));
+        }
+        self.valid_at(now_unix)?;
+        Ok(())
+    }
     pub fn inode_identity(&self)->(u64,u64){
         (self.meta.dev(),self.meta.ino())
     }
@@ -136,47 +186,8 @@ pub fn verify_root_staged(
     let dir=File::from(open(dir_path,
         OFlags::RDONLY|OFlags::DIRECTORY|OFlags::NOFOLLOW|OFlags::CLOEXEC,
         Mode::empty()).map_err(os)?);
-    let d=dir.metadata()?;
-    if !d.is_dir()||d.uid()!=0||d.nlink()==0||
-        d.permissions().mode()&0o7777!=0o700
-    {
-        return Err(PinError::BadOwnerOrMode);
-    }
-    if trust.trusted_signer.ed25519_public==[0;32]||
-       trust.approved_package_sha256==[0;32]||
-       trust.approved_manifest_fingerprint==[0;32]||
-       trust.approved_release_sequence==0{
-        return Err(PinError::BadTrustAnchor);
-    }
-    let (mut mf,_)=open_fixed(&dir,"manifest",0o400,MAX_MANIFEST as u64)?;
-    let mut raw=Vec::new();
-    mf.read_to_end(&mut raw)?;
-    let manifest=decode_b1a_wire(&raw)?;
-    let (mut sf,_)=open_fixed(&dir,"signature",0o400,64)?;
-    let mut sig=[0u8;64];
-    sf.read_exact(&mut sig)?;
-    let auth=verify_signed_release(
-        &SignedRelease{manifest,signature:sig},
-        &trust.trusted_signer,trust.previous_floor,now_unix)?;
-    let floor=auth.release_floor_candidate();
-    let valid_from_unix=auth.manifest().not_before_unix;
-    let valid_until_unix=auth.manifest().expires_unix;
-    if floor.sequence!=trust.approved_release_sequence||
-        floor.signed_manifest_fingerprint!=trust.approved_manifest_fingerprint||
-        auth.manifest().package_sha256!=trust.approved_package_sha256{
-        return Err(PinError::WrongPolicyScope);
-    }
-    let (mut file,before)=open_fixed(&dir,"node",0o400,MAX_NODE_PACKAGE_BYTES)?;
-    if before.len()!=auth.manifest().package_size{
-        return Err(PinError::Release(ReleaseError::SizeMismatch));
-    }
-    let receipt=auth.verify_package_stream(&mut file)?;
-    let after=file.metadata()?;
-    if !same_object(&before,&after){
-        return Err(PinError::ChangedInode);
-    }
-    file.seek(SeekFrom::Start(0))?;
-    Ok(RootVerifiedFd{
-        file,meta:after,receipt,valid_from_unix,valid_until_unix,
-    })
+    verify_root_staged_dir(&dir, trust, now_unix)
 }
+
+mod verify_dir;
+pub(crate) use verify_dir::verify_root_staged_dir;

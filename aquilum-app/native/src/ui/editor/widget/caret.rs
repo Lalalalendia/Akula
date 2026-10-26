@@ -96,7 +96,20 @@ impl TextEditor {
         let i = self.doc.at_y(point.y.clamp(0.0, self.doc.height()));
         let p = self.doc.paragraph(i);
         if matches!(p.fold, Fold::Head | Fold::Member) {
-            return (p.start, Affinity::Downstream);
+            // A folded embed occupies multiple source lines but one visual
+            // rectangle. The top half maps before the source, the bottom half
+            // after its *last* member line. This also handles a hidden member
+            // selected by the height index.
+            let Some(head) = (0..=i).rev().find(|&j| self.doc.paragraph(j).fold == Fold::Head) else {
+                return (p.start, Affinity::Downstream);
+            };
+            let below = point.y > (self.doc.top(head) + self.doc.bottom(head)) / 2.0;
+            let at = if below {
+                self.doc.folded_end(head).saturating_add(1).min(self.doc.len())
+            } else {
+                self.doc.paragraph(head).start
+            };
+            return (at, Affinity::Downstream);
         }
         let local = point - self.doc.origin(i) + Vec2::new(self.code_offset_at(i), 0.0);
         let Some(layout) = p.laid() else { return (p.start, Affinity::Downstream) };
@@ -177,5 +190,54 @@ impl TextEditor {
         let moved = if end { selection.line_end(layout, false) } else { selection.line_start(layout, false) };
         let focus = moved.focus();
         (p.start + focus.index(), focus.affinity())
+    }
+}
+
+
+#[cfg(test)]
+mod folded_hit_tests {
+    use super::*;
+    use masonry::parley::{FontContext, LayoutContext};
+
+    fn check_folded_edges(source: &str, expected_after: usize) {
+        let mut editor = TextEditor::new(source).markdown();
+        editor.doc.keep = (0.0, 10_000.0);
+        editor.doc.layout(
+            &mut FontContext::default(),
+            &mut LayoutContext::new(),
+            &editor.styles,
+            Some(600.0),
+            None,
+            None,
+        );
+        assert_eq!(editor.doc.paragraph(0).fold, Fold::Head, "source: {source:?}");
+        assert_eq!(editor.doc.paragraph(1).fold, Fold::Member);
+        assert_eq!(editor.doc.paragraph(2).fold, Fold::Member);
+        assert_eq!(
+            editor.doc.folded_end(0).saturating_add(1).min(editor.doc.len()),
+            expected_after,
+            "bottom half must land after the complete folded source",
+        );
+        let (top, bottom) = (editor.doc.top(0), editor.doc.bottom(0));
+        assert!(bottom - top > 4.0, "folded embed has no visible height");
+        let hit = |portion: f64| editor.hit(Point::new(12.0, top + (bottom - top) * portion));
+        assert_eq!(hit(0.25), (0, Affinity::Downstream));
+        assert_eq!(hit(0.50), (0, Affinity::Downstream));
+        assert_eq!(hit(0.75), (expected_after, Affinity::Downstream));
+    }
+
+    #[test]
+    fn clicks_above_and_below_a_folded_table_target_the_right_source_edge() {
+        let prefix = "| а | б |\n| --- | --- |\n| 1 | 2 |";
+        let with_tail = format!("{prefix}\nпосле");
+        check_folded_edges(&with_tail, prefix.len() + 1);
+        check_folded_edges(prefix, prefix.len());
+    }
+
+    #[test]
+    fn clicks_above_and_below_a_folded_formula_target_the_right_source_edge() {
+        let prefix = "$$\nx^2\n$$";
+        let with_tail = format!("{prefix}\nпосле");
+        check_folded_edges(&with_tail, prefix.len() + 1);
     }
 }

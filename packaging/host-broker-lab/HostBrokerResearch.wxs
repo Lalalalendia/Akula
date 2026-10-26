@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AKAI-HOST-INSTALL-01. Build/CI research only; NEVER a signed release.
+  An independent per-machine MSI, not the existing per-user Akula NSIS.
+  No installer-owned enrollment or positive Broker authority.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Akula Host Broker Research (no grants)"
+           Manufacturer="Akula"
+           Version="0.1.0.0"
+           UpgradeCode="83C1A34F-EC75-4444-8B3B-6C915FDBB60A"
+           Scope="perMachine"
+           InstallerVersion="500"
+           Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer Host Broker Research MSI is already installed." />
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="HOSTBROKER_INSTALL_DIR" Name="AkulaHostBrokerResearch" />
+    </StandardDirectory>
+    <DirectoryRef Id="HOSTBROKER_INSTALL_DIR">
+      <Component Id="HostBrokerResearchBinary" Bitness="always64" Guid="5A7F98BD-CE3F-4B70-A784-237B384D1C64">
+        <File Id="HostBrokerExe"
+              Name="akula-host-broker-lab.exe"
+              Source="$(BrokerExe)"
+              KeyPath="yes" />
+        <!-- Demand-only. A missing protected marker must prohibit startup;
+             the MSI itself must never bootstrap/create a grant registry. -->
+        <ServiceInstall Id="HostBrokerResearchService"
+                        Name="AkulaHostBrokerResearch"
+                        DisplayName="Akula Host Broker (research; non-authorizing)"
+                        Description="Standalone protected SCM/IPC experiment, without agent access."
+                        Type="ownProcess"
+                        Start="demand"
+                        Account="LocalSystem"
+                        Arguments="--service-custody-pipe"
+                        ErrorControl="normal"
+                        Vital="yes">
+          <!-- A dedicated service SID must be in the LocalSystem token;
+               a process token without it is not approved custody. -->
+          <ServiceConfig ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes" />
+        </ServiceInstall>
+        <!-- Windows Installer manages both registry/service and binary;
+             no custom action runs an arbitrary user-supplied executable. -->
+        <ServiceControl Id="UninstallResearchService"
+                        Name="AkulaHostBrokerResearch"
+                        Stop="uninstall"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+    </DirectoryRef>
+    <Feature Id="ResearchHostBroker" Title="Research-only Host Broker executable" Level="1">
+      <ComponentRef Id="HostBrokerResearchBinary" />
+    </Feature>
+  </Package>
+</Wix>

@@ -5,12 +5,24 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'scripts/linux-appimage-transaction-lab.rs'
+      - 'aquilum-app/native/src/updater/linux_transaction.rs'
+      - 'aquilum-app/native/src/updater/apply.rs'
+      - 'aquilum-app/native/src/updater/mod.rs'
+      - 'aquilum-app/native/src/updater/tests.rs'
+      - 'aquilum-app/native/src/updater/release.rs'
+      - '.github/scripts/release-isolation-policy.test.cjs'
       - '.github/workflows/linux-appimage-rollback-lab.yml'
       - 'docs/release/AKULA-LINUX-ROLLBACK-LAB-01.md'
+      - 'docs/release/AKULA-LINUX-RUNTIME-GATE-01.md'
   workflow_dispatch:
 permissions:
   contents: read
+
+# Coalesce superseded PR commits without cancelling manual or push runs.
+# A unique run_id suffix for non-PR events preserves every manual run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   linux-rollback-lab:
     runs-on: ubuntu-24.04
@@ -22,7 +34,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rustc --edition=2024 --test -D warnings scripts/linux-appimage-transaction-lab.rs \
+          rustc --edition=2024 --test -D warnings aquilum-app/native/src/updater/linux_transaction.rs \
             -o "$RUNNER_TEMP/akula-linux-rollback-lab"
       - name: Real two-process SIGKILL, OS flock, rename and cold recovery
         shell: bash
@@ -33,13 +45,24 @@ jobs:
           grep -Fq 'test tests::actual_sigkill_after_old_backup_then_independent_cold_recovery ... ok' "$RUNNER_TEMP/akula-linux-rollback-lab.log"
           grep -Fq 'test tests::actual_sigkill_after_new_publish_preserves_both_generations ... ok' "$RUNNER_TEMP/akula-linux-rollback-lab.log"
           grep -Fq 'test tests::actual_sigkill_halfway_through_rollback_restores_previous ... ok' "$RUNNER_TEMP/akula-linux-rollback-lab.log"
-          grep -Fq 'test result: ok. 10 passed; 0 failed;' "$RUNNER_TEMP/akula-linux-rollback-lab.log"
+          grep -Fq 'test tests::guarded_runtime_apply_refuses_payload_before_shutdown ... ok' "$RUNNER_TEMP/akula-linux-rollback-lab.log"
+          grep -Fq 'test result: ok. 11 passed; 0 failed;' "$RUNNER_TEMP/akula-linux-rollback-lab.log"
           echo 'AKULA_LINUX_APPIMAGE_ROLLBACK_LAB_PASS actual_sigkill=3 old_and_new_preserved=1'
+      - name: Native Linux apply uses shared fail-closed transaction gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'mod linux_transaction;' aquilum-app/native/src/updater/mod.rs
+          grep -Fq 'super::linux_transaction::guarded_runtime_apply(payload, before_exit)' aquilum-app/native/src/updater/apply.rs
+          ! grep -Fq 'std::fs::rename(&fresh, &image)' aquilum-app/native/src/updater/apply.rs
+          grep -Fq 'installed_linux_apply_refuses_unauthorized_bytes_without_shutdown' aquilum-app/native/src/updater/tests.rs
+          echo 'AKULA_LINUX_RUNTIME_HOLD_PASS unsafe_overwrite_removed=1'
       - name: Old Aquilum release and installed updater remain disabled
         shell: bash
         run: |
           set -euo pipefail
           node --test .github/scripts/release-isolation-policy.test.cjs
-          grep -Fq 'pub(super) const PUBLIC_KEY: &str = "";' aquilum-app/native/src/updater/release.rs
-          grep -A2 'const fn channel_ready()' aquilum-app/native/src/updater/release.rs | grep -Fq 'false'
-          echo 'AKULA_RELEASE_HOLD_PASS signing=disabled updater=disabled'
+          # Linux rollback/update authority must remain OFF even though the
+          # independently signed Windows beta is now allowed.
+          grep -A2 'const fn channel_ready()' aquilum-app/native/src/updater/release.rs | grep -Fq 'cfg!(all(target_os = "windows", feature = "installed"))'
+          echo 'AKULA_RELEASE_HOLD_PASS publisher_root=pinned linux_updater=disabled'

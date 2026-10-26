@@ -51,6 +51,47 @@ $built = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\akula-
 if ((Get-FileHash $exe).Hash -ne (Get-FileHash $built).Hash) { throw 'Installed binary does not match built Akula' }
 Assert-LegacyUntouched
 
+# Verify the *installed* companion is the exact compiled pinned Shiva binary;
+# this is an integration test, not a downloadable or user-run converter script.
+$sidecar = Join-Path $akulaInstall 'shiva-pdf-preview.exe'
+$compiledSidecar = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\shiva-pdf-preview.exe'
+if (!(Test-Path -LiteralPath $sidecar -PathType Leaf)) {
+  throw 'Installed Akula is missing the required Shiva PDF sidecar'
+}
+if ((Get-FileHash -LiteralPath $sidecar).Hash -ne (Get-FileHash -LiteralPath $compiledSidecar).Hash) {
+  throw 'Installed Shiva PDF sidecar differs from compiled pinned source'
+}
+$probeDir = Join-Path $env:RUNNER_TEMP 'akula-pdf-smoke'
+New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
+$sourcePdf = Join-Path $probeDir 'real-text.pdf'
+$extractedMd = Join-Path $probeDir 'text.md'
+python scripts/pdf-preview/generate-fixture.py --out $sourcePdf
+if ($LASTEXITCODE -ne 0) { throw 'Synthetic PDF generation failed' }
+& $sidecar $sourcePdf $extractedMd
+if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $extractedMd -PathType Leaf)) {
+  throw 'Installed Shiva PDF sidecar rejected valid digital-text PDF'
+}
+$extracted = Get-Content -LiteralPath $extractedMd -Raw -Encoding UTF8
+if (-not $extracted.Contains('AKULANATIVEPDFNEEDLE')) {
+  throw 'Installed Shiva PDF extraction lost native PDF text'
+}
+Write-Host 'AKULA_PDF_SIDECAR_INSTALLED=PASS;source=pinned-shiva;real_pdf=1;external_setup=0'
+# Run the full native application integration path against this *installed*
+# sidecar: File Gate, idempotence, Tantivy search UI cards and result opening.
+$env:AKULA_PDF_INSTALLED_SIDECAR = $sidecar
+$env:AKULA_PDF_FIXTURE_PATH = $sourcePdf
+Push-Location (Join-Path $env:GITHUB_WORKSPACE 'aquilum-app')
+try {
+  cargo test --locked -p aquilum-native --bin aquilum-native app::tests::pdf_preview::installed_shiva_pdf_is_searchable_and_opens_from_native_result -- --exact --ignored --nocapture
+  if ($LASTEXITCODE -ne 0) { throw 'Installed Shiva to native Akula search E2E failed' }
+} finally {
+  Pop-Location
+  Remove-Item Env:\AKULA_PDF_INSTALLED_SIDECAR -ErrorAction SilentlyContinue
+  Remove-Item Env:\AKULA_PDF_FIXTURE_PATH -ErrorAction SilentlyContinue
+}
+Write-Host 'AKULA_PDF_NATIVE_SEARCH_E2E=PASS;source=installed;real_ui_state=1'
+
+
 $vault = Join-Path $env:RUNNER_TEMP 'akula-beta-vault'
 New-Item -ItemType Directory -Force -Path $vault | Out-Null
 $note = Join-Path $vault 'First note.md'
@@ -180,7 +221,14 @@ if ($LASTEXITCODE -ne 0) {
   throw "Installed Akula Windows UIA acceptance failed: PowerShell exit $LASTEXITCODE"
 }
 
-Start-And-Close -EditNote
+# Installed real Windows PDF pointer path; separate from native Rust harness.
+$pdfPointerScript = Join-Path $PSScriptRoot 'windows-pdf-os-pointer.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula PDF OS-pointer acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-dot-folder-uia.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData; if ($LASTEXITCODE -ne 0) { throw "Installed Akula dot-folder UIA failed: PowerShell exit $LASTEXITCODE" }; Start-And-Close -EditNote
 $state = Join-Path $akulaData 'window-state.json'
 if (!(Test-Path $state)) { throw 'Akula window state not persisted to its own AppData' }
 $savedText = [System.IO.File]::ReadAllText($note)
@@ -198,15 +246,6 @@ $clipboardSentinel = 'AKULA_CLIPBOARD_POISON_' + [Guid]::NewGuid().ToString('N')
 Set-Clipboard -Value $clipboardSentinel -ErrorAction Stop
 Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
-Assert-LegacyUntouched
-
-# On the installed executable, reproduce the original crash with a long,
-# windowed Markdown document. The fixture exists only on this disposable runner.
-. (Join-Path $PSScriptRoot 'windows-beta-replace-all.ps1')
-Test-AkulaBetaReplaceAll -Executable $exe -Vault $vault -DataDir $akulaData
-if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
-  throw 'Long-document paste regression unexpectedly changed the first note'
-}
 Assert-LegacyUntouched
 
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'

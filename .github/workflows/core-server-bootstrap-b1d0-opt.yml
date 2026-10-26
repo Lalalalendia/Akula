@@ -1,0 +1,95 @@
+name: Akula B1d0 direct durable /opt first-Node transaction and crash HOLD
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actual-root-opt-commit-and-failpoints:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-bootstrap-b1d0-direct-opt-v1
+          cache-workspace-crates: true
+      - name: Parse modified Rust before allowing root execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 aquilum-app/core/src/server_installer_fixed_node_lab.rs \
+            aquilum-app/core/src/server_installer_durable_node.rs \
+            aquilum-app/core/src/server_installer_os_witness_lab.rs \
+            aquilum-app/core/tests/server_bootstrap_b1d0.rs
+      - name: Compile opt-in first-install contract and unchanged default Core
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core \
+            --features server-bootstrap-b1d0-durable-node \
+            --test server_bootstrap_b1d0 --no-run
+          cargo test --locked -p aquilum-core \
+            --features server-bootstrap-b1c0-fixed-node-lab \
+            --test server_bootstrap_b1c0 --no-run
+          cargo check --locked -p aquilum-core --no-default-features
+          # The fixture test reads an ACTUAL compiled Linux ELF. No runner
+          # provides this binary unless we compile it on the same exact HEAD.
+          cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
+      - name: Real root-owned /opt CAS-committed first file and conservative restart HOLD
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e /opt/akula-b1d0-ci-node
+          test ! -L /opt/akula-b1d0-ci-node
+          # Prevent a silent test skip / stale runner image from looking green.
+          test -x .artifacts/cargo-native/debug/akula-node-lab || {
+            echo "B1D0_FAIL: signed real Node ELF was not built" >&2
+            exit 1
+          }
+          # Production destination must never be created by this test.
+          test ! -e /opt/akula-node
+          test ! -e /var/lib/akula/server-bootstrap
+          # Ubuntu hosted runners commonly customize /opt ownership/mode
+          # for preinstalled tools. Production must REJECT this, not relax
+          # the strict root:root 0755 requirement. A private mount namespace
+          # bind-mounts a fresh root-owned 0755 directory over /opt for ONLY
+          # this disposable root test process; the runner /opt is untouched.
+          echo "B1D0_RUNNER_OPT_BEFORE=$(stat -c '%u:%a' /opt)"
+          lab_opt=/var/tmp/akula-b1d0-opt-ci-root
+          test ! -e "$lab_opt" && test ! -L "$lab_opt"
+          sudo -n install -d -o root -g root -m 0755 "$lab_opt"
+          test "$(sudo -n stat -c '%u:%a' "$lab_opt")" = "0:755"
+          found=0
+          for bin in .artifacts/cargo-native/debug/deps/server_bootstrap_b1d0-*; do
+            if [[ -f "$bin" && -x "$bin" && "$bin" != *.d ]]; then
+              sudo -n unshare --mount --propagation private -- bash -c '
+                set -euo pipefail
+                mount --bind /var/tmp/akula-b1d0-opt-ci-root /opt
+                test "$(stat -c "%u:%a" /opt)" = "0:755"
+                test ! -e /opt/akula-node
+                test ! -e /opt/akula-b1d0-ci-node
+                export GITHUB_ACTIONS=true RUNNER_OS=Linux
+                export AKULA_B1D0_CI=STRICT_ROOT_ONE_SHOT_FILE_ONLY
+                export AKULA_B1D0_REAL_ELF="$1"
+                "$2" --test-threads=1 --nocapture
+              ' akula-b1d0-ci "$PWD/.artifacts/cargo-native/debug/akula-node-lab" "$PWD/$bin" \
+                | tee "$RUNNER_TEMP/b1d0-root-tests.log"
+              found=$((found + 1))
+            fi
+          done
+          test "$found" -eq 1
+          sudo -n rmdir -- "$lab_opt"
+          test ! -e /opt/akula-b1d0-ci-node
+          test ! -e /opt/akula-node
+          grep -Fq 'B1D0_SIGNED_REAL_AKULA_NODE_ELF_DIRECT_OPT_HOLD_PASS' \
+            "$RUNNER_TEMP/b1d0-root-tests.log"
+          echo "B1D0_DURABLE_FIRST_NODE_CAS_FILE_AND_RESTART_HOLD_PASS"

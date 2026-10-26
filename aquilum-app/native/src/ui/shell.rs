@@ -38,6 +38,7 @@ pub struct Chrome {
     pub home_button: Option<WidgetId>,
     pub graph_page: Handle<Slot>,
     pub graph_button: Option<WidgetId>,
+    pub transfer_button: WidgetId,
     pub focus_hidden: Vec<Handle<Visible>>,
     pub focus_shown: Handle<Visible>,
 }
@@ -129,6 +130,7 @@ pub fn root(tree: NewWidget<impl Widget>, parts: RootParts<'_>) -> (NewWidget<im
         home_button: rail.home_button,
         graph_page: graph_handle,
         graph_button: rail.graph_button,
+        transfer_button: rail.transfer_button,
         focus_hidden,
         focus_shown: titlebar.settings_shown,
     };

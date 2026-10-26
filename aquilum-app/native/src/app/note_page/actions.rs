@@ -7,7 +7,7 @@ use super::super::{App, Outcome};
 use crate::ui::editor::TextEditor;
 use crate::ui::scroll::ScrollArea;
 use crate::ui::note::{MetadataToggled, TitleAction, TitleField};
-use crate::ui::widgets::Pressed;
+use crate::ui::widgets::{Caption, CaptionAction, Pressed};
 
 impl App {
     pub(in crate::app) fn on_note_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction) -> Option<Outcome> {
@@ -40,6 +40,19 @@ impl App {
         }
 
         let ids = self.note_ids.as_ref()?;
+        if id == ids.name.id() && action.downcast_ref::<CaptionAction>() == Some(&CaptionAction::CopyFileName) {
+            // Resolve the *active* filename at click time. Never copy a stale
+            // cached Caption or the editable file stem, nor the full path.
+            let name = self.note.as_ref()
+                .and_then(|note| note.path.file_name())
+                .map(|name| name.to_string_lossy().into_owned());
+            if let Some(name) = name.filter(|name| !name.is_empty()) {
+                let copied = arboard::Clipboard::new()
+                    .and_then(|mut clipboard| clipboard.set_text(name)).is_ok();
+                ids.name.edit(root, |mut caption| Caption::set_copy_feedback(&mut caption, copied));
+            }
+            return Some(Outcome::default());
+        }
         if id == ids.scroll.id() {
             if action.downcast_ref::<crate::ui::scroll::Scrolled>().is_some() {
                 self.capture_view(root);

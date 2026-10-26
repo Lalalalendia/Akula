@@ -1,0 +1,22 @@
+[package]
+name = "akula-server-staging-b1b0"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "Inert Linux B1b0 private staging parity laboratory"
+
+# Standalone until verified and attached through the existing Core API.
+[workspace]
+
+[dependencies]
+akula-server-release-b1a = { path = "../bootstrap-b1a" }
+blake3 = "1.8.5"
+ring = "0.17.14"
+serde = { version = "1", features = ["derive"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "=0.38.44", features = ["fs", "process"] }
+
+[dev-dependencies]
+tempfile = "3"

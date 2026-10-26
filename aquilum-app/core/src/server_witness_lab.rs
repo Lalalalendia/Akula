@@ -444,6 +444,18 @@ impl InertWitnessLedgerLab {
     /// The caller MUST separately control signed-approval issuance and supply
     /// the independently trusted checkpoint; the returned decision does NOT
     /// authorize any installer/service operation.
+    /// Read the locally durable checkpoint under the same cross-process
+    /// flock used by CAS. This is NOT an external monotonic authority:
+    /// restoring a filesystem snapshot can still roll the local state back.
+    pub fn current_checkpoint(&self) -> Result<WitnessCheckpoint, WitnessError> {
+        let _guard = self.local.lock().map_err(|_| WitnessError::PoisonedLock)?;
+        fs::flock(&self.dir, FlockOperation::LockExclusive).map_err(errno)?;
+        let scanned = self.scan_locked().map(|state| state.checkpoint);
+        let unlock = fs::flock(&self.dir, FlockOperation::Unlock).map_err(errno);
+        unlock?;
+        scanned
+    }
+
     pub fn record_signed_approval(
         &self,
         signed: &SignedOwnerApproval,

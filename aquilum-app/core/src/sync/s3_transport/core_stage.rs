@@ -190,7 +190,7 @@ impl AwsS3ProbeClient {
 }
 
 #[cfg(test)]
-mod tests {
+mod tests { include!("core_stage_e2e01_tests.rs");
     use super::*;
     use crate::sync::{
         DocumentId, OperationId, RevisionId, S3ConnectionProfile, S3HeadJournal,

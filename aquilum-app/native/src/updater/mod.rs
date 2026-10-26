@@ -1,12 +1,26 @@
 mod apply;
 mod download_guard;
 mod release;
+#[cfg(target_os = "linux")]
+#[allow(dead_code)] // Transaction engine compiled; publisher approval remains HOLD.
+mod linux_transaction;
+#[cfg(target_os = "linux")]
+#[allow(dead_code)] // Private stage verification does not enable updater publication.
+mod linux_signed_stage;
 #[cfg(target_os = "macos")]
 mod tar;
 #[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
 mod macos_transaction;
 #[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
 mod startup_ack;
+
+#[cfg(target_os = "linux")]
+mod linux_first_gui_ack;
+
+#[cfg(all(target_os = "linux", feature = "installed"))]
+pub(crate) fn on_first_presented_frame() {
+    linux_first_gui_ack::on_first_presented_frame();
+}
 
 #[cfg(all(target_os = "macos", feature = "installed"))]
 pub(crate) fn on_first_presented_frame() {
@@ -19,7 +33,7 @@ use std::sync::{Arc, Mutex};
 
 use release::{PUBLIC_KEY, Release, find, verify};
 
-pub use apply::apply;
+pub(crate) use apply::apply;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Status {
@@ -36,6 +50,11 @@ pub enum Status {
 #[derive(Clone)]
 pub struct Updater {
     status: Arc<Mutex<Status>>,
+    // A Windows installer may only cross the apply boundary as a sealed,
+    // publisher-authenticated SignedCandidate, never arbitrary bytes.
+    #[cfg(target_os = "windows")]
+    payload: Arc<Mutex<Option<release::SignedCandidate>>>,
+    #[cfg(not(target_os = "windows"))]
     payload: Arc<Mutex<Option<Vec<u8>>>>,
     wake: Arc<dyn Fn() + Send + Sync>,
 }
@@ -102,15 +121,38 @@ impl Updater {
         let agent = aquilum_core::web_agent::web_agent("updates");
         let response = agent.get(&release.url).call().map_err(|e| e.to_string())?;
         let total = download_guard::content_length(response.header("Content-Length"))?;
-        let data = download_guard::read_payload(response.into_reader(), total, |done, total| {
-            self.set(Status::Downloading {
-                version: release.version.clone(),
-                done,
-                total,
-            });
-        })?;
+        // The publisher-authenticated manifest determines the exact download
+        // budget. Never allocate according to an untrusted HTTP header alone.
+        let data = download_guard::read_signed_payload(
+            response.into_reader(), total, release.size,
+            |done, total| {
+                self.set(Status::Downloading {
+                    version: release.version.clone(),
+                    done,
+                    total,
+                });
+            },
+        )?;
+        // Confirm both independently signed package bytes AND the manifest
+        // (which binds version, product, SHA-256, size and platform).
         verify(&data, &release.signature, PUBLIC_KEY)?;
-        *self.payload.lock().unwrap_or_else(|e| e.into_inner()) = Some(data);
+        let candidate = release::admit_signed_payload(
+            &release.manifest, &release.manifest_signature, data,
+        )?;
+        if candidate.version() != release.version
+            || candidate.sha256() != release.sha256
+            || candidate.bytes().len() as u64 != release.size
+        {
+            return Err("signed update offer changed between discovery and download".into());
+        }
+        #[cfg(target_os = "windows")]
+        {
+            *self.payload.lock().unwrap_or_else(|e| e.into_inner()) = Some(candidate);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            *self.payload.lock().unwrap_or_else(|e| e.into_inner()) = Some(candidate.into_bytes());
+        }
         Ok(())
     }
 
@@ -118,7 +160,20 @@ impl Updater {
         self.set(Status::Failed(error));
     }
 
-    pub fn take_ready(&self) -> Option<Vec<u8>> {
+    // A single GUI call-site retains the same name on each target, but the
+    // Windows type is non-forgeable outside signed manifest admission.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn take_ready(&self) -> Option<release::SignedCandidate> {
+        if !matches!(self.status(), Status::Ready(_)) {
+            return None;
+        }
+        let candidate = self.payload.lock().unwrap_or_else(|e| e.into_inner()).take()?;
+        self.set(Status::Installing);
+        Some(candidate)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub(crate) fn take_ready(&self) -> Option<Vec<u8>> {
         if !matches!(self.status(), Status::Ready(_)) {
             return None;
         }

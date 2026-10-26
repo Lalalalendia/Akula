@@ -14,7 +14,6 @@ use std::time::{Duration, Instant};
 use super::scroll::{self, close};
 use super::sprite::Sprite;
 use region::{Past, Region};
-
 #[derive(Clone, Copy)]
 struct Draw {
     hash: u64,
@@ -82,8 +81,7 @@ pub struct Damage {
     pub moves: Vec<Move>,
 }
 
-/// Test-only breakdown of the non-raster damage detector. Timings exclude
-/// scene recording, vello scene encoding and rasterization.
+/// Test-only timing of damage detection; excludes scene encoding and rasterization.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct DamageStats {
@@ -109,6 +107,7 @@ pub struct Tracker {
     past: Vec<Past>,
     pub live: Vec<(u64, Rect, Affine, RoundedRect)>,
     pub sprites: Vec<Sprite>,
+    pub has_filters: bool,
     covered: Vec<Rect>,
     #[cfg(test)]
     pub(crate) last_stats: DamageStats,
@@ -118,7 +117,7 @@ pub struct Tracker {
 
 impl Tracker {
     pub fn new() -> Self {
-        Tracker { frame: Rect::ZERO, stack: Vec::new(), draws: Vec::new(), previous: Vec::new(), forced: None, regions: Vec::new(), past: Vec::new(), live: Vec::new(), sprites: Vec::new(), covered: Vec::new(), #[cfg(test)] last_stats: DamageStats::default(), #[cfg(test)] causes: Vec::new() }
+        Tracker { frame: Rect::ZERO, stack: Vec::new(), draws: Vec::new(), previous: Vec::new(), forced: None, regions: Vec::new(), past: Vec::new(), live: Vec::new(), sprites: Vec::new(), has_filters: false, covered: Vec::new(), #[cfg(test)] last_stats: DamageStats::default(), #[cfg(test)] causes: Vec::new() }
     }
 
     pub fn forget(&mut self) {
@@ -133,6 +132,7 @@ impl Tracker {
         self.draws.clear();
         self.live.clear();
         self.sprites.clear();
+        self.has_filters = false;
         self.forced = None;
         self.regions = scroll::snapshot()
             .into_iter()

@@ -1,11 +1,11 @@
 name: Akula Bootstrap B1b3a pinned Linux helper IPC preflight
 
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths:
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/core/src/lib.rs"
+
       - "aquilum-app/core/src/server_installer_ipc_lab.rs"
       - "aquilum-app/core/tests/server_bootstrap_b1b3a.rs"
       - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B3A.md"
@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: akula-bootstrap-b1b3a-${{ github.event.pull_request.number || github.ref }}
+  group: akula-bootstrap-b1b3a-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:

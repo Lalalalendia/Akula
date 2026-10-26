@@ -1,3 +1,4 @@
+mod present;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 
@@ -5,7 +6,7 @@ use softbuffer::{Context, Surface};
 use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
 
-use super::{Area, Canvas, Target};
+use super::{Canvas, Target};
 
 pub struct Output {
     surface: Surface<OwnedDisplayHandle, Rc<dyn Window>>,
@@ -59,17 +60,7 @@ impl Output {
         self.fresh
     }
 
-    pub fn present(&mut self, dirty: &[Area]) {
-        let Ok(mut buffer) = self.surface.buffer_mut() else { return };
-        if buffer.len() == self.pixels.len() {
-            buffer.copy_from_slice(&self.pixels);
-        }
-        let mut areas = dirty.to_vec();
-        super::merge(&mut areas);
-        let rects: Vec<softbuffer::Rect> = areas.iter().filter_map(|a| Some(softbuffer::Rect { x: a.x, y: a.y, width: NonZeroU32::new(a.w)?, height: NonZeroU32::new(a.h)? })).collect();
-        let _ = buffer.present_with_damage(&rects);
-        self.fresh = false;
-    }
+
 }
 
 impl Canvas for Output {

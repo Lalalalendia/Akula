@@ -1,0 +1,59 @@
+name: Akula Bootstrap B1c0 fixed signed-Node CAS filesystem commit
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Only PR revisions supersede earlier PR revisions; manual labs stay independent.
+  group: b1c0-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  real-root-fixed-node-after-signed-cas:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-bootstrap-b1c0-fixed-node-v1
+          cache-workspace-crates: true
+      - name: Rust parsing and formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 aquilum-app/core/src/server_installer_fixed_node_lab.rs \
+            aquilum-app/core/src/server_installer_pinned_release_lab.rs \
+            aquilum-app/core/tests/server_bootstrap_b1c0.rs
+      - name: Compile ONLY opt-in root CI transaction and unchanged default Core
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1c0-fixed-node-lab \
+            --test server_bootstrap_b1c0 --no-run
+          cargo check --locked -p aquilum-core --no-default-features
+      - name: Real root-only CAS + fixed-path signed file commit, negative tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e /run/akula-b1c0-one-shot-ci
+          found=0
+          for candidate in .artifacts/cargo-native/debug/deps/server_bootstrap_b1c0-*; do
+            if [[ -f "$candidate" && -x "$candidate" && "$candidate" != *.d ]]; then
+              sudo -n env GITHUB_ACTIONS=true RUNNER_OS=Linux \
+                "$PWD/$candidate" --test-threads=1 --nocapture
+              found=$((found + 1))
+            fi
+          done
+          test "$found" -eq 1
+          test ! -e /run/akula-b1c0-one-shot-ci
+          echo "B1C0_ROOT_SIGNED_CAS_FIXED_NODE_FILE_PASS"

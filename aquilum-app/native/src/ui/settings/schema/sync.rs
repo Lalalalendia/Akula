@@ -1,7 +1,9 @@
 use super::*;
 use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryDecision};
-use aquilum_core::settings::models::YandexS3Onboarding;
-
+mod yandex;
+#[cfg(feature = "dropbox-readonly-preview")] mod dropbox;
+#[cfg(feature = "dropbox-readonly-preview")] pub(super) use dropbox::dropbox_setup;
+pub(super) use yandex::yandex_setup;
 /// User-controlled *documentation* endpoints. Never use arbitrary input as a
 /// link target, endpoint or credential provider inside this setup surface.
 pub(super) const YANDEX_CONSOLE: &str = "https://console.yandex.cloud/";
@@ -9,70 +11,6 @@ pub(super) const YANDEX_ACCOUNT_DOCS: &str = "https://yandex.cloud/ru/docs/iam/o
 pub(super) const YANDEX_KEY_DOCS: &str = "https://yandex.cloud/ru/docs/iam/operations/sa/create-access-key";
 pub(super) const YANDEX_BUCKET_DOCS: &str = "https://yandex.cloud/ru/docs/storage/operations/buckets/create";
 pub(super) const YANDEX_AWS_PROFILE_DOCS: &str = "https://yandex.cloud/ru/docs/storage/quickstart/quickstart-aws-cli";
-
-/// YC-S3-T01, UI stage only. A validated draft is NOT authorization, remote
-/// account identity proof, a live S3 HEAD, or permission to start syncing.
-/// Explicitly no field accepts a secret: native TextEditor fields are plaintext.
-pub(super) fn yandex_setup(config: &AppConfig) -> Block {
-    let draft = &config.s3_onboarding;
-    let rows = vec![
-        info(t("settings.yandex.explanation"), Some(t("settings.yandex.explanationHint")),
-            Control::Status { text: t("settings.yandex.inactive"), tone: Tone::Danger }),
-        info(t("settings.yandex.stepAccount"), Some(t("settings.yandex.stepAccountHint")),
-            Control::Buttons(vec![
-                Button::new(t("settings.yandex.openConsole"), Action::OpenUrl(YANDEX_CONSOLE)),
-                Button::new(t("settings.yandex.accountDocs"), Action::OpenUrl(YANDEX_ACCOUNT_DOCS)),
-            ])),
-        info(t("settings.yandex.stepKey"), Some(t("settings.yandex.stepKeyHint")),
-            Control::Buttons(vec![
-                Button::new(t("settings.yandex.keyDocs"), Action::OpenUrl(YANDEX_KEY_DOCS)),
-            ])),
-        info(t("settings.yandex.stepBucket"), Some(t("settings.yandex.stepBucketHint")),
-            Control::Buttons(vec![
-                Button::new(t("settings.yandex.bucketDocs"), Action::OpenUrl(YANDEX_BUCKET_DOCS)),
-            ])),
-        row(
-            t("settings.yandex.bucket"),
-            Some(t("settings.yandex.bucketHint")),
-            Control::Text { value: draft.bucket.clone(), commit: true },
-            |c, v| {
-                let value = text(v);
-                if YandexS3Onboarding::valid_bucket(&value) {
-                    c.s3_onboarding.bucket = value;
-                }
-            },
-        ),
-        row(
-            t("settings.yandex.profile"),
-            Some(t("settings.yandex.profileHint")),
-            Control::Text { value: draft.aws_profile_name.clone(), commit: true },
-            |c, v| {
-                let value = text(v);
-                if YandexS3Onboarding::valid_profile_name(&value) {
-                    c.s3_onboarding.aws_profile_name = value;
-                }
-            },
-        ),
-        info(t("settings.yandex.profileHelp"), Some(t("settings.yandex.profileHelpHint")),
-            Control::Buttons(vec![
-                Button::new(t("settings.yandex.profileDocs"), Action::OpenUrl(YANDEX_AWS_PROFILE_DOCS)),
-            ])),
-        info(t("settings.yandex.endpoint"), Some(t("settings.yandex.endpointHint")),
-            Control::Status { text: "https://storage.yandexcloud.net".into(), tone: Tone::Secondary }),
-        info(t("settings.yandex.region"), Some(t("settings.yandex.regionHint")),
-            Control::Status { text: "ru-central1".into(), tone: Tone::Secondary }),
-        info(t("settings.yandex.credentialSafety"), Some(t("settings.yandex.credentialSafetyHint")),
-            Control::Status { text: t("settings.yandex.neverPasteKeys"), tone: Tone::Danger }),
-        info(t("settings.yandex.connectionTest"), Some(t("settings.yandex.connectionTestHint")),
-            Control::Buttons(vec![
-                // Explicitly unavailable until keychain + read-only probe +
-                // Yandex-specific trust bootstrap are implemented and tested.
-                Button::new(t("settings.yandex.checkConnection"), Action::OpenUrl(YANDEX_KEY_DOCS)).enabled(false),
-            ])),
-    ];
-    Block { title: t("settings.yandex.title"), rows }
-}
-
 /// A read-only native safety surface. In particular, DO NOT add generic
 /// Action::Restore, cleanup, "retry sync" or stage-delete controls here:
 /// the current M1d journal has no cross-process provenance/durability receipt.
@@ -171,6 +109,48 @@ pub(super) fn sync_recovery(ctx: &Context) -> Vec<Block> {
                         Action::RequestRecoveryReview(NativeRecoveryDecision::EscalateManualReview)),
                 ]),
             ));
+        }
+    }
+    // S3-E2E-01: separate cloud-VaultId visibility gate. The ordinary
+    // local-workspace dashboard must NOT equate workspace UUID and cloud ID.
+    // This preview is strictly observational: no action buttons, receipts,
+    // File Gate grants, S3 ACK or baseline promotion.
+    #[cfg(feature = "s3-e2e01-review-preview")]
+    if let Some(s3_status) = ctx.s3_bound_publications.as_ref() {
+        let (value, tone) = match s3_status {
+            NativeRecoveryOverview::JournalNotConfigured =>
+                (t("settings.sync.s3BoundNotConfigured"), Tone::Muted),
+            NativeRecoveryOverview::NoLocalPublicationClaims =>
+                (t("settings.sync.s3BoundNoClaims"), Tone::Secondary),
+            NativeRecoveryOverview::RequiresReview { .. } =>
+                (t("settings.sync.s3BoundHold"), Tone::Danger),
+            NativeRecoveryOverview::InspectionUnavailable =>
+                (t("settings.sync.s3BoundUnavailable"), Tone::Danger),
+        };
+        rows.push(info(
+            t("settings.sync.s3BoundTitle"),
+            Some(t("settings.sync.s3BoundHint")),
+            Control::Status { text: value, tone },
+        ));
+        if let NativeRecoveryOverview::RequiresReview { total_claims, examples } =
+            s3_status
+        {
+            rows.push(info(
+                t("settings.sync.s3BoundCount"),
+                Some(t("settings.sync.s3BoundNoAck")),
+                Control::Status {
+                    text: total_claims.to_string(),
+                    tone: Tone::Danger,
+                },
+            ));
+            rows.extend(examples.iter().map(|case| info(
+                case.historical_path.clone(),
+                Some(t("settings.sync.s3BoundHistoricalPath")),
+                Control::Status {
+                    text: t("settings.sync.s3BoundHold"),
+                    tone: Tone::Danger,
+                },
+            )));
         }
     }
     if let Some(notice) = &ctx.sync_notice {

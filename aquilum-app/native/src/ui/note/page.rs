@@ -142,7 +142,7 @@ pub fn page(view: NoteView<'_>) -> (NewWidget<Flex>, NoteIds) {
     let search = Visible::new(search, !view.focus_mode);
     let more = NewWidget::new(IconButton::new(icons::MORE_HORIZONTAL, t("editor.noteActions")));
     let more_id = more.id();
-    let name = NewWidget::new(Caption::new(view.file_name));
+    let name = NewWidget::new(Caption::new(view.file_name).copyable_file_name());
     let name_handle = Handle::of(&name);
     let name = Visible::new(name, !view.focus_mode);
     let left = Flex::row().cross_axis_alignment(CrossAxisAlignment::Center).with_fixed(back).with_fixed(forward);

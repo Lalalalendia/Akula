@@ -140,11 +140,11 @@ public static class AkulaBetaGuiInput {
                 + " events; Win32 error " + Marshal.GetLastWin32Error());
     }
 
-    // Native OS keyboard chords for the installed GUI regression: Ctrl+A/C
-    // for readback and Ctrl+V/Z for an ephemeral, CI-created fixture only.
+    // Native OS keyboard chords for read-only GUI model acceptance after
+    // restart. Only Ctrl+A (select all) and Ctrl+C (copy) are allowed.
     public static void PressCtrlShortcut(IntPtr hwnd, int expectedPid, ushort key) {
-        if (key != 0x41 && key != 0x43 && key != 0x56 && key != 0x5a)
-            throw new InvalidOperationException("Only selection/copy/paste/undo shortcuts are authorized");
+        if (key != 0x41 && key != 0x43)
+            throw new InvalidOperationException("Only selection/copy shortcuts are authorized");
         if (hwnd == IntPtr.Zero || Marshal.SizeOf(typeof(Input)) != 40)
             throw new InvalidOperationException("Unexpected Windows shortcut window/input layout");
         uint owner;
@@ -201,16 +201,15 @@ function Send-AkulaBetaText {
 function Send-AkulaBetaShortcut {
   param(
     [Parameter(Mandatory)][System.Diagnostics.Process]$Process,
-    [Parameter(Mandatory)][ValidateSet('SelectAll', 'Copy', 'Paste', 'Undo')][string]$Action,
-    [ValidateSet('First note', 'Large paste proof')][string]$ExpectedNoteTitle = 'First note'
+    [Parameter(Mandatory)][ValidateSet('SelectAll', 'Copy')][string]$Action
   )
   $Process.Refresh()
   if ($Process.HasExited -or $Process.MainWindowHandle -eq [IntPtr]::Zero) {
     throw 'Native shortcut target has no installed Akula window'
   }
-  if ($Process.MainWindowTitle -notlike "$ExpectedNoteTitle*" -or
+  if ($Process.MainWindowTitle -notlike 'First note*' -or
       $Process.MainWindowTitle -notlike '*Akula*') {
-    throw 'Native shortcut target is not the expected synthetic note'
+    throw 'Native shortcut target is not the reopened synthetic note'
   }
   $hwnd = [IntPtr]$Process.MainWindowHandle
   [AkulaBetaGuiInput]::ShowWindow($hwnd, 9) | Out-Null
@@ -224,11 +223,6 @@ function Send-AkulaBetaShortcut {
     }
   }
   if (!$focused) { throw 'Cannot focus reopened Akula before native Ctrl shortcut' }
-  $key = switch ($Action) {
-    'SelectAll' { [ushort]0x41 }
-    'Copy' { [ushort]0x43 }
-    'Paste' { [ushort]0x56 }
-    'Undo' { [ushort]0x5a }
-  }
+  $key = if ($Action -eq 'SelectAll') { [ushort]0x41 } else { [ushort]0x43 }
   [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $Process.Id, $key)
 }

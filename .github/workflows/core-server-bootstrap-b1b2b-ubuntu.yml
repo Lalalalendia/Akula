@@ -1,27 +1,14 @@
 name: Akula Bootstrap B1b2b signed Node in independent Ubuntu VM
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - "aquilum-app/core/examples/akula_b1b2b_release_fixture.rs"
-      - "scripts/ci/akula-b1b2b-ubuntu-vm.sh"
-      - "scripts/ci/akula-b1b2b-guest-lab.sh"
-      - "scripts/ci/akula-b1b2b-node-wrapper.sh"
-      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B.md"
-      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B1.md"
-      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B2.md"
-      - ".github/workflows/core-server-bootstrap-b1b2b-ubuntu.yml"
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/core/src/server_release_lab.rs"
-      - "aquilum-app/core/src/bin/akula_node_lab.rs"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: akula-bootstrap-b1b2b-${{ github.event.pull_request.number || github.ref }}
+  group: akula-bootstrap-b1b2b-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
@@ -33,20 +20,40 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
+      # Reuse the same cache as the required main gate; never save from PRs.
+      - name: Restore shared main Rust cache (read-only)
+        id: main-cache
+        uses: swatinem/rust-cache@v2
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
-          shared-key: akula-bootstrap-b1b2b-ubuntu-vm-v1
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
           cache-workspace-crates: true
+          save-if: false
+      - name: Record cache and KVM availability (diagnostic)
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.main-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          printf 'B1b2b shared main Rust cache hit: %s\n' "${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -c /dev/kvm ]]; then
+            echo 'B1b2b KVM device: present' >> "$GITHUB_STEP_SUMMARY"
+            stat -c 'B1B2B_KVM_DEVICE mode=%a owner=%U group=%G' /dev/kvm
+          else
+            echo 'B1b2b KVM device: absent; TCG fallback' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Build exact checked-out read-only Node and B1a wire verifier
         working-directory: aquilum-app
         shell: bash
         run: |
           set -euo pipefail
+          start=$SECONDS
           rustfmt --edition 2021 core/examples/akula_b1b2b_release_fixture.rs
           cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
           cargo build --locked -p aquilum-core --features server-bootstrap-b1a-release-lab --example akula_b1b2b_release_fixture
           cargo test --locked -p aquilum-core --features server-bootstrap-b1a-release-lab --test server_bootstrap_b1a -- --nocapture
+          printf 'B1b2b host Rust build and tests: %s seconds\n' "$((SECONDS - start))" >> "$GITHUB_STEP_SUMMARY"
       - name: Check CI-only test scripts syntax
         shell: bash
         run: |
@@ -58,4 +65,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          start=$SECONDS
           bash scripts/ci/akula-b1b2b-ubuntu-vm.sh
+          printf 'B1b2b QEMU guest, signed release and recovery: %s seconds\n' "$((SECONDS - start))" >> "$GITHUB_STEP_SUMMARY"

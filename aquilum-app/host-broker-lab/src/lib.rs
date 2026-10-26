@@ -70,6 +70,11 @@ mod windows_cancellable_pipe;
 #[cfg(windows)]
 pub mod windows_store_custody;
 
+// OS-handle-backed physical directory identity probe. Observation only:
+// neither a caller's path nor FILE_ID_INFO can mint host authority.
+#[cfg(windows)]
+mod windows_root_observation;
+
 // This P2P policy kernel is UNIT-TEST ONLY: no production enrollment or
 // channel-binding constructor exists, and no Allow variant can escape.
 #[cfg(test)]

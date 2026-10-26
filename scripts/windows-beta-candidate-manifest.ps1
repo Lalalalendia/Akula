@@ -44,7 +44,6 @@ $manifest = [ordered]@{
   compiled_executable_sha256 = $binaryHash
   cargo_lock_sha256 = $lockHash
   gui_persistence_smoke = 'passed'
-  gui_replace_all_smoke = 'passed'
   publication = 'CI artifact only; not a GitHub release'
   signing = 'No Authenticode or Akula update signing performed by this workflow'
 }

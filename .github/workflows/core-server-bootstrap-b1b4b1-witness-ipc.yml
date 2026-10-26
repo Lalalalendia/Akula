@@ -1,0 +1,73 @@
+name: Akula Bootstrap B1b4b1 real root-owned read-only witness IPC
+
+on:
+  workflow_call:
+  pull_request:
+    # main PRs run the mandatory Main PR gate; retain the legacy experiment lane.
+    branches:
+      - experiment/akula-server-bootstrap-b1b4b-os-witness-cas
+    paths:
+
+      - "aquilum-app/core/src/server_installer_ipc_lab.rs"
+      - "aquilum-app/core/src/server_installer_os_witness_lab.rs"
+      - "aquilum-app/core/tests/server_bootstrap_b1b4b.rs"
+      - "aquilum-app/core/src/bin/akula_witness_b1b4b1_lab.rs"
+      - "aquilum-app/core/examples/akula_b1b4b1_witness_fixture.rs"
+      - "scripts/ci/akula-b1b4b1-witness-ipc-lab.sh"
+      - ".github/workflows/core-server-bootstrap-b1b4b1-witness-ipc.yml"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B4B1.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # New PR revisions supersede old ones; explicit manual runs remain independent.
+  group: akula-b1b4b1-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  actual-root-witness-read-only-ipc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-bootstrap-b1b4b1-witness-ipc-v1
+          cache-workspace-crates: true
+      - name: Parse Rust and Bash before running privileges
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 aquilum-app/core/src/bin/akula_witness_b1b4b1_lab.rs aquilum-app/core/examples/akula_b1b4b1_witness_fixture.rs aquilum-app/core/src/server_installer_ipc_lab.rs
+          bash -n scripts/ci/akula-b1b4b1-witness-ipc-lab.sh
+      - name: Build actual root-owned witness and nonshipping synthetic fixture
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo build --locked -p aquilum-core --features server-bootstrap-b1b4b1-witness-ipc-lab --bin akula-witness-b1b4b1-lab --example akula_b1b4b1_witness_fixture
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b4b1-witness-ipc-lab --test server_bootstrap_b1b4b --no-run
+          cargo check --locked -p aquilum-core --no-default-features
+      - name: Repeat B1b4b0 real root-signed CAS proofs
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=0
+          for binary in .artifacts/cargo-native/debug/deps/server_bootstrap_b1b4b-*; do
+            if [[ -f "$binary" && -x "$binary" && "$binary" != *.d ]]; then
+              sudo -n "$PWD/$binary" --nocapture
+              count=$((count + 1))
+            fi
+          done
+          test "$count" -eq 1
+      - name: Real root-owned systemd witness with strict kernel peer UID
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/akula-b1b4b1-witness-ipc-lab.sh

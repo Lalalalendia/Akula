@@ -85,7 +85,9 @@ jobs:
 
   macos-installer:
     name: macOS installer BSD-lock and crash recovery
-    runs-on: macos-latest
+    # Stable Intel runner keeps BSD lock/restore evidence on x86_64 macOS.
+    # This retains ALL tests; previous macos-latest jobs were cancelled before execution.
+    runs-on: macos-15-intel
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7

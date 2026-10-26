@@ -73,9 +73,9 @@ impl Host {
         let present_start = Instant::now();
         #[cfg(feature = "memory-probe")]
         let presented = !drawn.is_empty();
-        #[cfg(all(target_os = "macos", feature = "installed"))]
+        #[cfg(all(any(target_os = "macos", target_os = "linux"), feature = "installed"))]
         let startup_frame_presented = !drawn.is_empty();
-        if !drawn.is_empty() {
+        if !drawn.is_empty() || cfg!(target_os = "windows") {
             output.present(&drawn);
         }
         self.layers = Some(layers);
@@ -84,7 +84,7 @@ impl Host {
         // ACK only after a nonempty frame is presented AND the native window
         // has been revealed; scheduling it before reveal could acknowledge a
         // hidden app which never reached its visible GUI startup path.
-        #[cfg(all(target_os = "macos", feature = "installed"))]
+        #[cfg(all(any(target_os = "macos", target_os = "linux"), feature = "installed"))]
         if startup_frame_presented {
             crate::updater::on_first_presented_frame();
         }

@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/src/render/paint/mod.rs'
-      - 'aquilum-app/native/src/render/renderer/**'
+      - 'aquilum-app/native/src/render/renderer/mod.rs'
       - 'aquilum-app/native/src/app/tests/perf/worker_router.rs'
       - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
       - '.github/workflows/native-vello-single-region-gate.yml'

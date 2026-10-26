@@ -1,7 +1,7 @@
 use std::path::PathBuf;
-
 use winit::dpi::PhysicalSize;
-
+mod w4_pilot;
+pub use w4_pilot::run_w4_pilot_if_requested;
 #[cfg(not(feature = "installed"))]
 use crate::replay;
 

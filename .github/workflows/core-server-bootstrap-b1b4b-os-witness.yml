@@ -1,0 +1,63 @@
+name: Akula Bootstrap B1b4b OS-owned CAS witness proof
+
+on:
+  workflow_call:
+  pull_request:
+    # main PRs use required Main gate; retain the independent experimental proof.
+    branches:
+      - experiment/akula-server-bootstrap-b1b4a-cas-fence
+    paths:
+
+      - "aquilum-app/core/src/server_witness_lab.rs"
+      - "aquilum-app/core/src/server_installer_os_witness_lab.rs"
+      - "aquilum-app/core/tests/server_bootstrap_b1b4b.rs"
+      - ".github/workflows/core-server-bootstrap-b1b4b-os-witness.yml"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B4B.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Only PR revisions supersede earlier PR revisions; manual labs stay independent.
+  group: b1b4b-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  real-root-local-witness-cas:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-bootstrap-b1b4b-os-witness-v1
+          cache-workspace-crates: true
+      - name: Parse Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 aquilum-app/core/src/server_installer_os_witness_lab.rs aquilum-app/core/tests/server_bootstrap_b1b4b.rs
+      - name: Compile lab and default Core
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b4b-os-witness-lab --test server_bootstrap_b1b4b --no-run
+          cargo check --locked -p aquilum-core --no-default-features
+      - name: Real UID0 protected signing key and durable CAS tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=0
+          for binary in .artifacts/cargo-native/debug/deps/server_bootstrap_b1b4b-*; do
+            if [[ -f "$binary" && -x "$binary" && "$binary" != *.d ]]; then
+              sudo -n "$PWD/$binary" --nocapture
+              count=$((count + 1))
+            fi
+          done
+          test "$count" -eq 1

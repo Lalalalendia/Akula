@@ -4,16 +4,20 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/core/src/lib.rs"
-      - "aquilum-app/core/src/server_release_lab.rs"
+      - "modules/bootstrap-b1a/**"
       - "aquilum-app/core/src/server_staging_lab.rs"
       - "aquilum-app/core/tests/server_bootstrap_b1b0.rs"
+      - "modules/bootstrap-b1b0/**"
       - ".github/workflows/core-server-bootstrap-b1b0-staging.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  # Only PR revisions supersede earlier PR revisions; manual labs stay independent.
+  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   inert-custody-lab:
@@ -24,11 +28,21 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+      - name: Verify isolated B1b0 matches unchanged Core source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmp aquilum-app/core/src/server_staging_lab.rs modules/bootstrap-b1b0/src/server_staging_lab.rs
       - name: Format isolated Rust lab sources
         shell: bash
         run: |
           set -euo pipefail
           rustfmt --edition 2021 aquilum-app/core/src/server_staging_lab.rs aquilum-app/core/tests/server_bootstrap_b1b0.rs
+      - name: Run standalone B1b0 adversarial parity tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path modules/bootstrap-b1b0/Cargo.toml -- --nocapture
       - name: Test inert sealed-artifact staging and crash refusals
         working-directory: aquilum-app
         shell: bash
