@@ -1,6 +1,7 @@
 pub(super) mod convert;
 mod cull;
 mod error;
+mod filter_route;
 mod mask;
 #[cfg(any(test, not(feature = "installed")))]
 mod mipmap;
@@ -119,28 +120,6 @@ impl Painter {
         }
     }
 
-    /// Route once for the ENTIRE frame, before encoding its first dirty region.
-    /// Never route fragmented or empty damage to serial even if each individual
-    /// rectangle is small: that case was falsified by Akula #173/#187.
-    pub(crate) fn route_for_damage(&mut self, areas: &[(u16, u16, u16, u16)]) {
-        let Some(limit) = self.serial_limit_px else { return };
-        let use_serial = match areas {
-            &[(_, _, w, h)] if w > 0 && h > 0 => u64::from(w) * u64::from(h) <= limit,
-            _ => false,
-        };
-        if use_serial != self.serial_active {
-            // The previous frame called finish() before rasterizing. Each
-            // context retains its own dispatcher and allocations when inactive.
-            let alternate = self.serial_ctx.as_mut().expect("serial companion context");
-            std::mem::swap(&mut self.ctx, alternate);
-            self.serial_active = use_serial;
-            #[cfg(test)]
-            {
-                self.test_route_switches += 1;
-            }
-        }
-    }
-
     /// Existing #166 test caller; routing now has the single-rectangle guard.
     #[cfg(test)]
     pub(crate) fn enable_dual_dispatch_for_test(&mut self, max_serial_pixels: u64) {
@@ -236,6 +215,7 @@ mod adaptive_route_tests {
         painter.route_for_damage(&small);
         assert!(painter.serial_active, "routing must still work after trim");
     }
+
 
     #[test]
     fn zero_worker_renderer_never_allocates_a_companion() {

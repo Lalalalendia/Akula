@@ -155,7 +155,7 @@ impl Renderer {
         }
         let painter = &mut self.painter;
         painter.seconds = seconds;
-        painter.route_for_damage(&damage.areas);
+        painter.route_for_scene(&damage.areas, self.tracker.has_filters);
         #[cfg(not(feature = "installed"))]
         let mip_before = stage_on.then(|| painter.mip_diagnostic_counters());
         let mut result = Ok(());
