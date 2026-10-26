@@ -1,5 +1,5 @@
 use super::*;
-
+mod dicom;
 impl App {
     pub fn root_widget(&mut self, system_dark: bool) -> NewWidget<dyn Widget> {
         self.system_dark = system_dark;
@@ -43,7 +43,6 @@ impl App {
             max_width_ch: config.editor.max_width_ch,
         });
     }
-
     fn build_ui(&mut self) -> NewWidget<dyn Widget> {
         self.apply_appearance();
         let workspace_name = self
@@ -70,7 +69,7 @@ impl App {
             tabs,
             active_tab: self.tabs.active_index(),
             empty_tab: self.tabs.active().path.is_none() && self.note.is_none() && self.tree.root().is_some(),
-            vault_open: self.tree.root().is_some(),
+            vault_open: self.preview_surface_available(),
             vault_error: self.vault_error.as_deref(),
             panel_open: target.1,
             panel_from: from.1,

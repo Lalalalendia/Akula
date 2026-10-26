@@ -1,4 +1,5 @@
-use std::collections::HashSet;
+#[cfg(feature = "dicom-preview")] mod dicom;
+mod changes;
 use std::path::{Path, PathBuf};
 
 use aquilum_core::files::models::{FileItem, FileItemType};
@@ -29,35 +30,11 @@ impl TreeModel {
         self.rebuild();
     }
 
-    pub fn refresh_paths(&mut self, changed: &[PathBuf]) {
-        let mut dirs = HashSet::new();
-        for path in changed {
-            let mut current = path.parent();
-            while let Some(dir) = current {
-                if self.directories.contains_key(&comparable(dir)) {
-                    dirs.insert(dir.to_path_buf());
-                    break;
-                }
-                current = dir.parent();
-            }
-        }
-        for dir in dirs {
-            self.load(&dir);
-        }
-        self.recount(changed);
-        self.rebuild();
-    }
-
-    fn recount(&mut self, changed: &[PathBuf]) {
-        let known: HashSet<PathBuf> = changed.iter().filter_map(|path| path.ancestors().skip(1).find(|dir| self.counts.knows(dir))).map(Path::to_path_buf).collect();
-        for dir in known {
-            self.counts.refresh(&dir);
-        }
-    }
-
     pub(super) fn load(&mut self, dir: &Path) {
         match read_directory_impl(dir) {
             Ok(mut items) => {
+                #[cfg(feature = "dicom-preview")]
+                dicom::append_dicom_entries(dir, &mut items);
                 if self.sort.by_time() {
                     self.stamp(&items);
                 }
