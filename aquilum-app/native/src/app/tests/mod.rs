@@ -27,7 +27,7 @@ mod text_files;
 mod tree_pins;
 mod tree_toolbar;
 mod wide;
-mod wiki; mod user_scenarios; mod scenario_course_engineering; mod scenario_research_writing;
+mod wiki; mod user_scenarios; mod scenario_course_engineering; mod scenario_research_writing; mod scenario_games_projects_trip;
 
 use std::cell::RefCell;
 use std::rc::Rc;
