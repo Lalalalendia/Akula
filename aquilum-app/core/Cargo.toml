@@ -214,6 +214,14 @@ name = "akula-root-b1d0-helper"
 path = "src/bin/akula_root_b1d0_helper.rs"
 required-features = ["server-root-b0v3-gate-lab"]
 
+# Explicit, NON-SHIPPING UID0-only fixed signed-helper file publication.
+# This is not called from the helper, Windows Akula, SSH, IPC or systemd.
+# Reuses independent root trust + B1a signature verification; still HOLD.
+[[bin]]
+name = "akula-root-helper-publish-lab"
+path = "src/bin/akula_root_helper_publish_lab.rs"
+required-features = ["server-root-b0v3-gate-lab"]
+
 # Independently reviewed UID0 ceremony for fixed AF_UNIX local account;
 # no socket listener, install dispatch or executable activation.
 [[bin]]
