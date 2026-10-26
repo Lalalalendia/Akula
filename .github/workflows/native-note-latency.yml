@@ -290,16 +290,23 @@ jobs:
                 $img.Dispose()
               }
             }
-            Capture 'opened.png'
-            # Code body lies below the title and the fixed fence header.
-            # The previous (310,155) position targeted the H1, not the code.
-            $targetX = $rect.Left + [Math]::Min(420,[int]($width * 0.42))
-            $targetY = $rect.Top + [Math]::Min(338,[int]($height * 0.52))
-            if (![AkulaWin32]::SetCursorPos($targetX,$targetY)) { throw 'Cannot target code panel' }
-            [AkulaWin32]::mouse_event(0x1000,0,0,-240,[UIntPtr]::Zero)
-            Start-Sleep -Milliseconds 800
-            Capture 'after-horizontal-wheel.png'
-            # A dispatched wheel event is not a scroll witness. Require a substantial
+            function GreenCodePixels([string]$name) {
+              # This fixture contains a long Rust string; in the isolated default light
+              # theme its syntax-highlighted code has green glyphs. This rejects
+              # a console/desktop screenshot even if HWND appeared already.
+              $img = [System.Drawing.Bitmap]::FromFile((Join-Path $out $name))
+              try {
+                $green = 0
+                for ($y=[int]($img.Height*0.545); $y -lt [int]($img.Height*0.78); $y+=2) {
+                  for ($x=[int]($img.Width*0.32); $x -lt [int]($img.Width*0.61); $x+=2) {
+                    $pixel = $img.GetPixel($x,$y)
+                    if ($pixel.G -gt 75 -and $pixel.G -gt $pixel.R*1.3 -and $pixel.G -gt $pixel.B*1.1) { $green++ }
+                  }
+                }
+                return $green
+              } finally { $img.Dispose() }
+            }
+            # Compare PNGs from the verified, stable Akula frame. Require a substantial
             # native bitmap change *inside the body*, but not in the fixed header.
             # An inserted caret accounts for only ~50-150 pixels and must not pass.
             function ChangedPixels([string]$before, [string]$after,
@@ -321,11 +328,44 @@ jobs:
                 $b.Dispose()
               }
             }
-            # Deterministic 1000x650 window: the first unwrapped code line (y≈330)
-            # and the fixed fence header (y≈300), not the blank area beneath a single line.
-            $codePixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.33 0.495 0.61 0.545
+            $ready = $false
+            for ($attempt=0; $attempt -lt 35; $attempt++) {
+              $app.Refresh()
+              if ($app.HasExited) { throw 'Akula exited before a stable code frame' }
+              if ([AkulaWin32]::GetForegroundWindow() -ne $hwnd) {
+                [void][AkulaWin32]::SetForegroundWindow($hwnd)
+              }
+              Start-Sleep -Milliseconds 400
+              Capture 'opened.png'
+              if ((GreenCodePixels 'opened.png') -lt 150) { continue }
+              Start-Sleep -Milliseconds 650
+              Capture 'opened-stable.png'
+              if ((GreenCodePixels 'opened-stable.png') -lt 150) { continue }
+              $codeSettled = ChangedPixels 'opened.png' 'opened-stable.png' 0.33 0.545 0.61 0.63
+              if ($codeSettled -le 45) {
+                Copy-Item -LiteralPath (Join-Path $out 'opened-stable.png') -Destination (Join-Path $out 'opened.png') -Force
+                $ready = $true
+                break
+              }
+            }
+            if (!$ready) { throw 'No stable native Akula code frame witnessed; refusing scroll measurement' }
+            if ([AkulaWin32]::GetForegroundWindow() -ne $hwnd) {
+              throw 'Native Akula window not foreground after stabilization'
+            }
+
+            # Code body lies below the title and the fixed fence header.
+            # The previous (310,155) position targeted the H1, not the code.
+            $targetX = $rect.Left + [Math]::Min(420,[int]($width * 0.42))
+            $targetY = $rect.Top + [Math]::Min(365,[int]($height * 0.565))
+            if (![AkulaWin32]::SetCursorPos($targetX,$targetY)) { throw 'Cannot target code panel' }
+            [AkulaWin32]::mouse_event(0x1000,0,0,-240,[UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 800
+            Capture 'after-horizontal-wheel.png'
+            # Deterministic 1000x650 window: observe green rendered code text (y≈355-410)
+            # and the fixed fence header (y≈300), after the stable baseline witness.
+            $codePixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.33 0.545 0.61 0.63
             $headerPixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.30 0.45 0.60 0.49
-            if ($codePixelsChanged -lt 320) {
+            if ($codePixelsChanged -lt 450) {
               throw "Horizontal wheel did not shift code-body pixels: changed=$codePixelsChanged"
             }
             if ($headerPixelsChanged -gt 120) {
@@ -357,6 +397,7 @@ jobs:
               horizontal_code_pixels_changed = $codePixelsChanged
               fixed_code_header_pixels_changed = $headerPixelsChanged
               screenshot_region_scroll_witness = $true
+              stable_code_frame_witness = $ready
               os_find_keys_injected = $true
               screenshot_sha256 = $hashes
               pixel_change_does_not_prove_highlight_correctness = $true
