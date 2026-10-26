@@ -3,14 +3,14 @@ use std::{env,time::Instant};
 fn main(){
     let path=env::args().nth(1).expect("path");
     let start=Instant::now();
-    let result=(|| -> Result<(usize,usize,usize),Box<dyn std::error::Error>>{
-        let ds=DataSet::read_p10_file(&path,None)?;
+    let result=(|| -> Result<(usize,usize,usize),String>{
+        let ds=DataSet::read_p10_file(&path,None).map_err(|e| format!("{e:?}"))?;
         let parse_us=start.elapsed().as_micros() as usize;
-        let frames=ds.get_pixel_data_frames()?;
-        let renderer=PixelDataRenderer::from_data_set(&ds)?;
+        let frames=ds.get_pixel_data_frames().map_err(|e| format!("{e:?}"))?;
+        let renderer=PixelDataRenderer::from_data_set(&ds).map_err(|e| format!("{e:?}"))?;
         let mut count=0; let mut bytes=0;
         for mut frame in frames {
-            let image=renderer.render_frame(&mut frame,None)?;
+            let image=renderer.render_frame(&mut frame,None).map_err(|e| format!("{e:?}"))?;
             bytes+=image.as_raw().len();
             count+=1;
         }
