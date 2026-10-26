@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use zip::ZipArchive;
 
 const MAX_ENTRIES: usize = 10_000;
@@ -34,7 +34,11 @@ pub fn candidates(path: &Path) -> Result<Vec<String>, String> {
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| format!("ZIP: запись {i}: {e}"))?;
         if entry.is_dir() { continue; }
-        let name = entry.name().to_owned();
+        // zip 9 returns a checked name; reject invalid ZIP text rather than
+        // treating it as a path or silently skipping the entry.
+        let name = entry.name()
+            .map_err(|e| format!("ZIP: некорректное имя записи {i}: {e}"))?
+            .into_owned();
         if !safe_member(&name) {
             return Err(format!("ZIP: небезопасный путь внутри архива: {name:?}"));
         }
@@ -68,7 +72,7 @@ pub fn read_member(path: &Path, name: &str) -> Result<Vec<u8>, String> {
     if !safe_member(name) { return Err("ZIP: небезопасный путь".into()); }
     let mut zip = ZipArchive::new(File::open(path).map_err(|e| format!("ZIP: {e}"))?)
         .map_err(|e| format!("ZIP: {e}"))?;
-    let mut member = zip.by_name(name).map_err(|e| format!("ZIP: нет изображения {name}: {e}"))?;
+    let member = zip.by_name(name).map_err(|e| format!("ZIP: нет изображения {name}: {e}"))?;
     if member.size() < 132 || member.size() > MAX_ENTRY_BYTES {
         return Err("ZIP: недопустимый размер изображения".into());
     }
