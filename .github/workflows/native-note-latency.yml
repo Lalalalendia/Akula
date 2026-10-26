@@ -246,7 +246,8 @@ jobs:
           $doc = [System.Text.StringBuilder]::new()
           [void]$doc.AppendLine('# Windows code search diagnostic')
           [void]$doc.AppendLine('~~~rust')
-          [void]$doc.AppendLine(('let needle_marker = "hello"; ' * 90))
+          # Unbroken repeated token guarantees horizontal overflow; a spaced sequence may wrap.
+          [void]$doc.AppendLine(('let needle_marker = "' + ('needle0123456789_' * 90) + '";'))
           [void]$doc.AppendLine('~~~')
           for ($i=0; $i -lt 30000; $i++) {
             [void]$doc.AppendLine("Paragraph $i : UTF-8 Привет 中文 and regular Markdown.")
@@ -290,12 +291,45 @@ jobs:
               }
             }
             Capture 'opened.png'
-            $targetX = $rect.Left + [Math]::Min(310,[int]($width / 2))
-            $targetY = $rect.Top + [Math]::Min(155,[int]($height / 3))
+            # Code body lies below the title and the fixed fence header.
+            # The previous (310,155) position targeted the H1, not the code.
+            $targetX = $rect.Left + [Math]::Min(420,[int]($width * 0.42))
+            $targetY = $rect.Top + [Math]::Min(370,[int]($height * 0.57))
             if (![AkulaWin32]::SetCursorPos($targetX,$targetY)) { throw 'Cannot target code panel' }
             [AkulaWin32]::mouse_event(0x1000,0,0,-240,[UIntPtr]::Zero)
             Start-Sleep -Milliseconds 800
             Capture 'after-horizontal-wheel.png'
+            # A dispatched wheel event is not a scroll witness. Require a substantial
+            # native bitmap change *inside the body*, but not in the fixed header.
+            # An inserted caret accounts for only ~50-150 pixels and must not pass.
+            function ChangedPixels([string]$before, [string]$after,
+                                   [double]$left, [double]$top,
+                                   [double]$right, [double]$bottom) {
+              $a = [System.Drawing.Bitmap]::FromFile((Join-Path $out $before))
+              $b = [System.Drawing.Bitmap]::FromFile((Join-Path $out $after))
+              try {
+                if ($a.Width -ne $b.Width -or $a.Height -ne $b.Height) { throw 'Screenshot dimensions changed' }
+                $changed = 0
+                for ($y=[int]($a.Height*$top); $y -lt [int]($a.Height*$bottom); $y++) {
+                  for ($x=[int]($a.Width*$left); $x -lt [int]($a.Width*$right); $x++) {
+                    if ($a.GetPixel($x,$y).ToArgb() -ne $b.GetPixel($x,$y).ToArgb()) { $changed++ }
+                  }
+                }
+                return $changed
+              } finally {
+                $a.Dispose()
+                $b.Dispose()
+              }
+            }
+            # Deterministic 1000x650 window: code text region and fixed fence header.
+            $codePixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.33 0.55 0.61 0.85
+            $headerPixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.30 0.45 0.60 0.49
+            if ($codePixelsChanged -lt 450) {
+              throw "Horizontal wheel did not shift code-body pixels: changed=$codePixelsChanged"
+            }
+            if ($headerPixelsChanged -gt 120) {
+              throw "Fixed fenced-code header moved during scroll: changed=$headerPixelsChanged"
+            }
             if ([AkulaWin32]::GetForegroundWindow() -ne $hwnd) { throw 'Native window lost focus' }
             [System.Windows.Forms.SendKeys]::SendWait('^f')
             Start-Sleep -Milliseconds 350
@@ -319,6 +353,9 @@ jobs:
               hwnd_height = $height
               foreground_verified = $true
               os_horizontal_wheel_injected = $true
+              horizontal_code_pixels_changed = $codePixelsChanged
+              fixed_code_header_pixels_changed = $headerPixelsChanged
+              screenshot_region_scroll_witness = $true
               os_find_keys_injected = $true
               screenshot_sha256 = $hashes
               pixel_change_does_not_prove_highlight_correctness = $true
@@ -331,7 +368,7 @@ jobs:
               if (!$app.WaitForExit(20000)) { Stop-Process -Id $app.Id -Force }
             }
           }
-          'Windows real-window code-scroll/search witness captured. Not installed NSIS, not J2 p95.' |
+          "Windows real-window code scroll: bodyPixels=$codePixelsChanged headerPixels=$headerPixelsChanged. Not installed NSIS, not J2 p95." |
             Out-File -Append -Encoding utf8 -FilePath $env:GITHUB_STEP_SUMMARY
       - name: Save Win32 GUI screenshots and source witness
         if: always()
