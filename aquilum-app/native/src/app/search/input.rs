@@ -23,8 +23,8 @@ impl App {
         let Some(result) = state.results.get(state.selected) else { return Outcome::default() };
         let path = PathBuf::from(&result.path);
         let offset = result.match_offset;
-        self.close_search(root);
         let title = self.open_in_with_offset(root, path, new_tab, Some(offset));
+        self.close_search(root);
         Outcome { title, ..Outcome::default() }
     }
 
