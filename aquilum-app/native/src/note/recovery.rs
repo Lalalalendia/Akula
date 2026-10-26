@@ -107,7 +107,7 @@ fn key(relative: &str) -> String {
 }
 
 fn wire(image: &Shadow) -> io::Result<Vec<u8>> {
-    let payload = serde_json::to_vec(image)?;
+    let payload = serde_json::to_vec(image).map_err(io::Error::other)?;
     if payload.len() > MAX_WIRE - MAGIC.len() - 4 - 32 {
         return Err(invalid("snapshot exceeds maximum wire size"));
     }
@@ -133,7 +133,7 @@ fn decode(bytes: &[u8]) -> io::Result<Shadow> {
     if blake3::hash(&bytes[..end]).as_bytes().as_slice() != &bytes[end..] {
         return Err(invalid("recovery checksum mismatch"));
     }
-    let record: Shadow = serde_json::from_slice(&bytes[offset + 4..end])?;
+    let record: Shadow = serde_json::from_slice(&bytes[offset + 4..end]).map_err(io::Error::other)?;
     if record.version != 1
         || record.body.len() > MAX_TEXT
         || blake3::hash(record.body.as_bytes()).to_hex().as_str() != record.body_hash
