@@ -1,0 +1,61 @@
+name: DICOM pinned lockfile promotion
+on:
+  push:
+    branches:
+      - 'feat/dicom-readonly-preview-20261026'
+    paths:
+      - '.github/workflows/dicom-lock-sync.yml'
+permissions:
+  contents: write
+  actions: read
+jobs:
+  sync-lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Download verified previous native check lockfile
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dicom-lock"
+          gh run download 40381021639 --repo "$GITHUB_REPOSITORY" --name dicom-native-lock-40381021639 --dir "$RUNNER_TEMP/dicom-lock"
+          echo '8f06b2243cfb1ba176b10e051edce04e8b81ae538fb41c113723c2ad8d773290  '"$RUNNER_TEMP/dicom-lock/Cargo.lock" | sha256sum -c -
+      - name: Verify only additive lockfile dependency records
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,subprocess,tomllib
+          from pathlib import Path
+          original=tomllib.loads(subprocess.check_output(['git','show','HEAD:aquilum-app/Cargo.lock']).decode())
+          new=tomllib.loads((Path(os.environ['RUNNER_TEMP'])/'dicom-lock'/'Cargo.lock').read_text())
+          def key(p): return (p['name'],p['version'],p.get('source',''))
+          old={key(p) for p in original['package']}
+          wanted={key(p) for p in new['package']}
+          removed=old-wanted
+          assert not removed, f'Existing lock entries changed or disappeared: {sorted(removed)[:25]}'
+          added=wanted-old
+          assert any(x[0]=='dicom-pixeldata' and 'bcc6907c' in x[2] for x in added), 'pinned DICOM was not added'
+          print('LOCK_ADDITIONS_OK',len(added))
+          for x in sorted(added): print('ADDED',*x)
+          PY
+      - name: Commit resolved optional dependencies only to isolated feature branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/dicom-lock/Cargo.lock" aquilum-app/Cargo.lock
+          git add aquilum-app/Cargo.lock
+          if git diff --cached --quiet; then
+            echo 'LOCK_ALREADY_CURRENT'
+            exit 0
+          fi
+          git diff --cached --stat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'build(dicom): pin resolved optional DICOM dependencies'
+          git push origin HEAD:refs/heads/feat/dicom-readonly-preview-20261026
