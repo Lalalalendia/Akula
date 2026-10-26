@@ -7,8 +7,8 @@ use masonry::imaging::record::{Scene, replay_transformed};
 use masonry::kurbo::Affine;
 use vello_cpu::{Mask, Pixmap, RenderSettings};
 
-use super::Painter;
-use super::error::PaintError;
+use super::{Painter, error::PaintError};
+mod filter_preflight;
 
 #[derive(Clone)]
 pub struct CachedMask {
@@ -33,7 +33,7 @@ pub fn get_or_render_mask(
         return Ok(entry.mask.clone());
     }
 
-    let mut sub = Painter::new(width, height, settings);
+    let mut sub = Painter::new(width, height, filter_preflight::settings(scene, settings));
     replay_transformed(scene, &mut sub, transform);
     sub.finish()?;
     let mut pixmap = Pixmap::new(width, height);
