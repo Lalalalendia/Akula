@@ -1,0 +1,29 @@
+name: DICOM ZIP lockfile promotion (one-shot feature branch)
+on:
+  push:
+    branches:
+      - 'feat/dicom-readonly-preview-20261026'
+    paths:
+      - '.github/workflows/dicom-zip-lock-commit.yml'
+permissions:
+  contents: write
+jobs:
+  commit-lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve Cargo.lock only and commit with branch lease
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'feat/dicom-readonly-preview-20261026'
+          cargo metadata --manifest-path aquilum-app/Cargo.toml --format-version 1 > /dev/null
+          git status --short
+          changed="$(git diff --name-only)"
+          test "$changed" = 'aquilum-app/Cargo.lock'
+          grep -Fq 'name = "zip"' aquilum-app/Cargo.lock
+          git add -- aquilum-app/Cargo.lock
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'build(dicom): lock direct ZIP reader dependencies on preview branch'
+          git push origin HEAD:refs/heads/feat/dicom-readonly-preview-20261026
