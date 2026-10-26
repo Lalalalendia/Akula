@@ -225,22 +225,13 @@ pub(super) fn stage(
     }
 }
 
-/// Return the newest candidate for explicit user review; NEVER write to Vault.
-pub(super) fn inspect(
-    data: &Path,
-    vault: &Path,
-    workspace: Uuid,
-    document: &Path,
-) -> io::Result<Option<Candidate>> {
-    let relative = checked_relative(vault, document)?;
-    let Some(bucket) = folder(data, workspace, false)? else { return Ok(None) };
-    let prefix = format!("{}-", key(&relative));
+fn records(bucket: &Path, prefix: &str) -> io::Result<Vec<PathBuf>> {
     let mut names = Vec::new();
-    for entry in fs::read_dir(&bucket)? {
+    for entry in fs::read_dir(bucket)? {
         let entry = entry?;
-        let file_name = entry.file_name();
-        let name = file_name.to_str().ok_or_else(|| invalid("unreadable snapshot filename"))?;
-        if name.starts_with(&prefix) {
+        let filename = entry.file_name();
+        let name = filename.to_str().ok_or_else(|| invalid("unreadable snapshot filename"))?;
+        if name.starts_with(prefix) {
             if !name.ends_with(".shadow") || name.len() != prefix.len() + 20 + ".shadow".len()
                 || !name[prefix.len()..prefix.len() + 20].bytes().all(|b| b.is_ascii_digit())
             {
@@ -253,15 +244,34 @@ pub(super) fn inspect(
         }
     }
     names.sort();
-    let Some(path) = names.pop() else { return Ok(None) };
-    let record = decode(&read_bounded(&path)?)?;
+    Ok(names)
+}
+
+fn verified_record(path: &Path, workspace: Uuid, relative: &str) -> io::Result<Shadow> {
+    let record = decode(&read_bounded(path)?)?;
     if record.workspace != workspace.to_string() || record.relative != relative {
         return Err(invalid("snapshot identity mismatch"));
     }
-    let expected_name = format!("{}-{:020}.shadow", key(&relative), record.revision);
-    if path.file_name().and_then(|n| n.to_str()) != Some(expected_name.as_str()) {
+    let expected = format!("{}-{:020}.shadow", key(relative), record.revision);
+    if path.file_name().and_then(|n| n.to_str()) != Some(expected.as_str()) {
         return Err(invalid("snapshot revision does not match filename"));
     }
+    Ok(record)
+}
+
+/// Return the newest candidate for explicit user review; NEVER write to Vault.
+pub(super) fn inspect(
+    data: &Path,
+    vault: &Path,
+    workspace: Uuid,
+    document: &Path,
+) -> io::Result<Option<Candidate>> {
+    let relative = checked_relative(vault, document)?;
+    let Some(bucket) = folder(data, workspace, false)? else { return Ok(None) };
+    let prefix = format!("{}-", key(&relative));
+    let mut names = records(&bucket, &prefix)?;
+    let Some(path) = names.pop() else { return Ok(None) };
+    let record = verified_record(&path, workspace, &relative)?;
     let disk = aquilum_core::files::document::read_file_hash_impl(document)
         .map_err(|_| denied("cannot verify current source, manual review required"))?;
     Ok(Some(Candidate {
@@ -282,7 +292,24 @@ pub(super) fn clear_after_verified_save(
     if candidate.revision != revision || !candidate.already_saved {
         return Ok(false);
     }
-    fs::remove_file(candidate.file)?;
+    // Once the newest revision has an exact on-disk ACK, all older
+    // snapshots for this same note are superseded. Validate the entire set
+    // BEFORE deleting any record: a corrupted older backup requires review
+    // and must not be concealed by partial garbage collection.
+    let relative = checked_relative(vault, document)?;
+    let Some(bucket) = folder(data, workspace, false)? else { return Ok(false) };
+    let names = records(&bucket, &format!("{}-", key(&relative)))?;
+    for path in &names {
+        let record = verified_record(path, workspace, &relative)?;
+        if record.revision > revision {
+            return Ok(false);
+        }
+    }
+    for path in names {
+        fs::remove_file(path)?;
+    }
+    #[cfg(unix)]
+    File::open(&bucket)?.sync_all()?;
     Ok(true)
 }
 
@@ -344,6 +371,76 @@ mod tests {
         assert!(!clear_after_verified_save(data.path(), vault.path(), id, &doc, 8).unwrap());
         assert!(clear_after_verified_save(data.path(), vault.path(), id, &doc, 9).unwrap());
         assert!(inspect(data.path(), vault.path(), id, &doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn acknowledged_newest_revision_prunes_stale_drafts_without_losing_source() {
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("multi.md");
+        fs::write(&doc, "base").unwrap();
+        let id = Uuid::new_v4();
+        let baseline = digest(&doc);
+        stage(data.path(), vault.path(), id, &doc, &baseline, 41, "first").unwrap();
+        stage(data.path(), vault.path(), id, &doc, &baseline, 42, "second").unwrap();
+        fs::write(&doc, "second").unwrap();
+        assert!(!clear_after_verified_save(data.path(), vault.path(), id, &doc, 41).unwrap());
+        assert!(clear_after_verified_save(data.path(), vault.path(), id, &doc, 42).unwrap());
+        assert!(inspect(data.path(), vault.path(), id, &doc).unwrap().is_none());
+        assert_eq!(fs::read_to_string(doc).unwrap(), "second");
+    }
+
+    #[test]
+    fn corrupt_older_revision_blocks_cleanup_without_deleting_newest() {
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("multi.md");
+        fs::write(&doc, "base").unwrap();
+        let id = Uuid::new_v4();
+        let baseline = digest(&doc);
+        let old = stage(data.path(), vault.path(), id, &doc, &baseline, 41, "first").unwrap();
+        let new = stage(data.path(), vault.path(), id, &doc, &baseline, 42, "second").unwrap();
+        fs::write(&old, b"truncated").unwrap();
+        fs::write(&doc, "second").unwrap();
+        assert!(clear_after_verified_save(data.path(), vault.path(), id, &doc, 42).is_err());
+        assert!(new.exists(), "latest approved snapshot must survive a corrupt older record");
+        assert_eq!(fs::read_to_string(doc).unwrap(), "second");
+    }
+
+    // This child intentionally bypasses all destructors and shutdown hooks.
+    #[test]
+    fn abrupt_child_exit_after_snapshot_sync() {
+        let Ok(data) = std::env::var("AKULA_DESK15_CRASH_CHILD_DATA") else { return };
+        let vault = PathBuf::from(std::env::var("AKULA_DESK15_CRASH_CHILD_VAULT").unwrap());
+        let workspace = Uuid::parse_str(&std::env::var("AKULA_DESK15_CRASH_CHILD_ID").unwrap()).unwrap();
+        let doc = vault.join("unsaved.md");
+        stage(Path::new(&data), &vault, workspace, &doc, &digest(&doc), 87, "unsaved 😀\nline two").unwrap();
+        std::process::exit(37);
+    }
+
+    #[test]
+    fn synced_snapshot_survives_forced_process_exit_without_touching_file() {
+        use std::process::Command;
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("unsaved.md");
+        fs::write(&doc, "last disk version").unwrap();
+        let id = Uuid::new_v4();
+        let status = Command::new(std::env::current_exe().unwrap())
+            .arg("abrupt_child_exit_after_snapshot_sync")
+            .arg("--nocapture")
+            .env("AKULA_DESK15_CRASH_CHILD_DATA", data.path())
+            .env("AKULA_DESK15_CRASH_CHILD_VAULT", vault.path())
+            .env("AKULA_DESK15_CRASH_CHILD_ID", id.to_string())
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(37), "child must skip graceful shutdown");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), "last disk version");
+        let restored = inspect(data.path(), vault.path(), id, &doc).unwrap().unwrap();
+        assert_eq!(restored.revision, 87);
+        assert_eq!(restored.body, "unsaved 😀\nline two");
+        assert!(!restored.source_changed);
+        assert!(!restored.already_saved);
     }
 
     #[test]
