@@ -136,6 +136,7 @@ fn append_dicom_entries(dir: &Path, items: &mut Vec<FileItem>) {
     for entry in entries.flatten() {
         let Ok(file_type) = entry.file_type() else { continue; };
         if !file_type.is_file() || file_type.is_symlink()
+            || entry.file_name().to_string_lossy().starts_with('.')
             || aquilum_core::search::paths::is_hidden_name(&entry.file_name()) {
             continue;
         }
