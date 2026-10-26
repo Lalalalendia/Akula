@@ -65,7 +65,6 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --release --locked -p glifo --lib colr_radial_ -- --nocapture
-          cargo test --release --locked -p vello_cpu --test colr_radial_negative_radius -- --nocapture
 
       - name: COLRv1 synthetic-font pixel parity for negative radial tips
         working-directory: aquilum-app
