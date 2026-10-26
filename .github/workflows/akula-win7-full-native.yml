@@ -9,6 +9,8 @@ on:
       - 'aquilum-app/native/src/touchpad/compat.rs'
       - 'scripts/akula-win7-nsis-candidate.ps1'
       - 'scripts/akula-win7-signed-stage.ps1'
+      - '.github/scripts/akula-win7-portable-package.py'
+      - '.github/scripts/akula-win7-portable-package.test.py'
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -48,6 +50,12 @@ jobs:
                               'Sign tested Windows NSIS bytes', 'Verify public key, both detached signatures')) {
             if (!$publisher.Contains($token)) { throw "Signed Akula workflow lost required Win7 or trust gate: $token" }
           }
+
+      - name: Verify fail-closed COM import staging decisions
+        shell: pwsh
+        run: |
+          python .github/scripts/akula-win7-portable-package.test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Win7 COM import staging unit tests failed' }
 
       - name: Build entire native Akula for Windows 7
         shell: pwsh
