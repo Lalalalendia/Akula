@@ -80,7 +80,7 @@ p2p-device-identity = ["dep:windows"]
 # Owner-signed read-only roster lab; not pairing, identity or Vault grants.
 device-roster-lab = []
 # Pure, bounded and explicitly opt-in text delta representation. Not a sync sender.
-sync-text-delta = ["dep:zstd"]
+sync-text-delta = ["dep:akula-text-delta-codec"]
 # Separately selected packaged build: force every default Core::open through
 # the compiler-pinned local host registry. No AWS SDK or S3 engine implied.
 sync-installed-host = ["host-custody"]
@@ -136,6 +136,7 @@ path = "src/bin/akula_node.rs"
 required-features = ["node-v1"]
 
 [dependencies]
+akula-text-delta-codec = { path = "../../modules/text-delta-codec", optional = true }
 akula-node-catalog = { path = "../../modules/node-catalog", optional = true }
 akula-server-release-b1a = { path = "../../modules/bootstrap-b1a", optional = true }
 akula-server-bootstrap-b0 = { path = "../../modules/bootstrap-b0", optional = true }
@@ -158,8 +159,7 @@ ureq = "2.12"
 httparse = "1"
 yrs = "0.28"
 memchr = "2"
-# Local in-memory compression only; no S3, host File Gate or UI activation.
-zstd = { version = "=0.13.3", optional = true }
+# Codec and compression are now isolated behind akula-text-delta-codec.
 
 # Official AWS Rust SDK used only for opt-in S3 provider capability tests.
 # RUSTSEC-2026-0387: block optional SigV4a until the SDK migrates away from

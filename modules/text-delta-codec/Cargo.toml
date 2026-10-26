@@ -1,13 +1,13 @@
 [package]
-name = "akula-text-delta-parity"
+name = "akula-text-delta-codec"
 version = "0.1.0"
 edition = "2021"
 publish = false
 license = "AGPL-3.0-only"
-description = "Standalone compilation parity lab for the existing bounded text delta codec; not production sync"
+description = "Pure bounded Text Delta wire codec; no File Gate, network or publisher"
 
 # This module is intentionally outside the primary Cargo workspace.
-# It compiles the original Core source without changing production linkage.
+# Core imports this crate only through its explicit sync-text-delta feature.
 [workspace]
 
 [dependencies]
