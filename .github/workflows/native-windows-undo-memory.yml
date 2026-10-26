@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/benchmarks/native_windows_undo_memory.ps1'
+      - 'scripts/windows-beta-gui-input.ps1'
       - '.github/workflows/native-windows-undo-memory.yml'
   workflow_dispatch:
 
