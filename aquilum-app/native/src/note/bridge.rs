@@ -68,6 +68,63 @@ mod tests {
     }
 
     #[test]
+    fn exact_file_gate_save_ack_removes_only_matching_recovery_records() {
+        use std::sync::Arc;
+        use aquilum_core::Core;
+
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let path = vault.path().join("note.md");
+        std::fs::write(&path, "disk").unwrap();
+        let core = Arc::new(Core::open(data.path(), Arc::new(|_| {})));
+        let workspace = Uuid::new_v4();
+        let (mut note, _) = Note::open(path.clone()).unwrap();
+        note.arm_shadow(data.path(), vault.path(), workspace).unwrap();
+        note.snapshot_unsaved(&Rope::from("first")).unwrap();
+        let next = Rope::from("second 😀");
+        note.snapshot_unsaved(&next).unwrap();
+        note.edit(std::time::Duration::ZERO);
+        note.flush(&core, &next);
+        // File Gate ACK is received synchronously; cleanup is a subsequent
+        // verified job on the serial disk worker.
+        crate::disk::wait();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "second 😀");
+        assert!(note.shadow_status().unwrap().error.is_none());
+        assert!(super::super::recovery::inspect(data.path(), vault.path(), workspace, &path)
+            .unwrap().is_none(), "only exact File Gate ACK may retire shadow snapshots");
+        core.shutdown();
+    }
+
+    #[test]
+    fn conflict_or_external_divergence_never_clears_unsaved_snapshot() {
+        use std::sync::Arc;
+        use aquilum_core::Core;
+
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let path = vault.path().join("note.md");
+        std::fs::write(&path, "baseline").unwrap();
+        let core = Arc::new(Core::open(data.path(), Arc::new(|_| {})));
+        let workspace = Uuid::new_v4();
+        let (mut note, _) = Note::open(path.clone()).unwrap();
+        note.arm_shadow(data.path(), vault.path(), workspace).unwrap();
+        let changed = Rope::from("my unsaved 🐱");
+        note.snapshot_unsaved(&changed).unwrap();
+        crate::disk::wait();
+        std::fs::write(&path, "other process").unwrap();
+        note.edit(std::time::Duration::ZERO);
+        note.flush(&core, &changed);
+        crate::disk::wait();
+        let candidate = super::super::recovery::inspect(data.path(), vault.path(), workspace, &path)
+            .unwrap().unwrap();
+        assert_eq!(candidate.body, "my unsaved 🐱");
+        assert!(candidate.source_changed);
+        assert!(!candidate.already_saved);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "other process");
+        core.shutdown();
+    }
+
+    #[test]
     fn no_shadow_sink_is_a_noop_for_the_existing_editor_save_path() {
         let vault = tempfile::tempdir().unwrap();
         let path = vault.path().join("original.md");
