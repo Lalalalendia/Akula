@@ -158,30 +158,8 @@ impl TextEditor {
             self.include_caret();
         }
         match event {
-            TextEvent::Keyboard(key) => {
-                // A full-document paste dirties layout until the next frame.
-                // Selection, copy and undo depend on the persistent Rope, not
-                // laid-out paragraphs: do not drop these OS shortcuts while
-                // a frame is pending. Geometry/table commands still require
-                // a measured document.
-                let measured = self.laid_out();
-                let source_shortcut = self.table.is_none()
-                    && matches!(
-                        crate::ui::keymap::command(
-                            &[crate::ui::keymap::Scope::Text], &key.key, key.modifiers
-                        ),
-                        Some(
-                            crate::ui::keymap::Command::SelectAll
-                                | crate::ui::keymap::Command::Copy
-                                | crate::ui::keymap::Command::Undo
-                                | crate::ui::keymap::Command::Redo
-                        )
-                    );
-                if measured {
-                    if !self.media_key(ctx, key) && !self.table_key(ctx, key) {
-                        self.keyboard(ctx, key);
-                    }
-                } else if source_shortcut {
+            TextEvent::Keyboard(key) if self.laid_out() || self.source_shortcut(key) => {
+                if !self.laid_out() || (!self.media_key(ctx, key) && !self.table_key(ctx, key)) {
                     self.keyboard(ctx, key);
                 }
             }

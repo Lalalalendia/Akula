@@ -20,8 +20,7 @@ use masonry::core::{
 use masonry::layout::{LenReq, Length};
 use crate::ui::editor::TextAction;
 
-use super::document::Document;
-use super::markdown::Fonts;
+use super::{document::Document, markdown::Fonts};
 use super::history::History;
 use crate::ui::theme;
 
@@ -42,6 +41,7 @@ mod geometry;
 use geometry::{rect, visible};
 mod keys;
 mod lifecycle;
+mod source_shortcut;
 mod links;
 mod media;
 mod marks;
