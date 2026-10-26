@@ -288,7 +288,7 @@ version = "0.1.0"
 
 [[package]]
 name = "aquilum-core"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "akula-node-catalog",
  "akula-text-delta-codec",
@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "aquilum-native"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "accesskit_macos",
  "accesskit_unix",
