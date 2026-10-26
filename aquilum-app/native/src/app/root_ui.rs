@@ -70,7 +70,16 @@ impl App {
             tabs,
             active_tab: self.tabs.active_index(),
             empty_tab: self.tabs.active().path.is_none() && self.note.is_none() && self.tree.root().is_some(),
-            vault_open: self.tree.root().is_some(),
+            // A temporary explicitly chosen DICOM source can be viewed even
+            // when the user has not opened an Akula workspace.
+            vault_open: self.tree.root().is_some()
+                || {
+                    #[cfg(feature = "dicom-preview")]
+                    { self.tabs.active().path.as_deref().is_some_and(|p|
+                        self.dicom_external_sources.contains(p)) }
+                    #[cfg(not(feature = "dicom-preview"))]
+                    { false }
+                },
             vault_error: self.vault_error.as_deref(),
             panel_open: target.1,
             panel_from: from.1,

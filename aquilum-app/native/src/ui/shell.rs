@@ -28,6 +28,10 @@ pub struct Chrome {
     pub close_tab: WidgetId,
     pub workspaces: WidgetId,
     pub open_vault: WidgetId,
+    pub dicom_no_vault_folder: Option<WidgetId>,
+    pub dicom_no_vault_file: Option<WidgetId>,
+    pub dicom_new_tab_folder: Option<WidgetId>,
+    pub dicom_new_tab_file: Option<WidgetId>,
     pub sidebar: Handle<Collapse>,
     pub sidebar_sash: WidgetId,
     pub note_page: Handle<Slot>,
@@ -76,10 +80,10 @@ pub fn root(tree: NewWidget<impl Widget>, parts: RootParts<'_>) -> (NewWidget<im
     let titlebar = titlebar(tabs, active_tab, panel_open, panel_from, focus_mode);
     let focus_hidden = vec![titlebar.toggle_shown];
     let (panel, panel_handle, panel_parts) = backlinks::panel(panel_mode, has_analysis, panel_width, panel_open, panel_from);
-    let (empty, create_note, open_file, close_tab) = new_tab_view();
+    let (empty, create_note, open_file, close_tab, dicom_new_tab_folder, dicom_new_tab_file) = new_tab_view();
     let version_page = Slot::new(NewWidget::new(Flex::column()).erased());
     let version_handle = Handle::of(&version_page);
-    let (no_vault, open_vault) = workspaces::no_vault(vault_error);
+    let (no_vault, open_vault, dicom_no_vault_folder, dicom_no_vault_file) = workspaces::no_vault(vault_error);
     let active = if !vault_open {
         3
     } else if graph_active {
@@ -120,6 +124,10 @@ pub fn root(tree: NewWidget<impl Widget>, parts: RootParts<'_>) -> (NewWidget<im
         close_tab,
         workspaces: sidebar.workspaces,
         open_vault,
+        dicom_no_vault_folder,
+        dicom_no_vault_file,
+        dicom_new_tab_folder,
+        dicom_new_tab_file,
         sidebar: sidebar.handle,
         sidebar_sash: sidebar.sash,
         note_page: note_handle,

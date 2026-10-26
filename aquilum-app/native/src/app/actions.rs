@@ -85,6 +85,19 @@ impl App {
             if id == chrome.open_vault {
                 return self.pick_workspace(root);
             }
+            #[cfg(feature = "dicom-preview")]
+            {
+                if chrome.dicom_no_vault_folder == Some(id)
+                    || chrome.dicom_new_tab_folder == Some(id) {
+                    self.pick_dicom_source(true);
+                    return Outcome::default();
+                }
+                if chrome.dicom_no_vault_file == Some(id)
+                    || chrome.dicom_new_tab_file == Some(id) {
+                    self.pick_dicom_source(false);
+                    return Outcome::default();
+                }
+            }
         }
         let title = self.on_main_action(root, id, &action, window);
         Outcome { title, ..Outcome::default() }
