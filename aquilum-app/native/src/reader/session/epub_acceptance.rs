@@ -302,3 +302,52 @@ fn epub_saved_cfi_survives_reopen_and_font_or_scroll_changes() {
     assert_eq!(invalid.section(), 0);
     assert_eq!(invalid.page, 0);
 }
+
+
+#[test]
+fn epub_rejects_oversized_declared_spine_before_inflating() {
+    let (_dir, path) = synthetic_epub();
+    let mut bytes = std::fs::read(&path).unwrap();
+    let filename = b"OPS/chapters/0.xhtml";
+    let marker = 0x0201_4b50u32.to_le_bytes();
+    let central = bytes
+        .windows(4)
+        .enumerate()
+        .find_map(|(at, data)| {
+            if data != marker { return None; }
+            let name_at = at + 46;
+            bytes.get(name_at..name_at + filename.len())
+                .filter(|name| *name == filename)
+                .map(|_| at)
+        })
+        .expect("first XHTML central-directory entry");
+    bytes[central + 24..central + 28].copy_from_slice(&(33 * 1024 * 1024u32).to_le_bytes());
+    std::fs::write(&path, bytes).unwrap();
+    assert!(crate::reader::Book::open(&path).is_none(), "oversized declared EPUB section must fail before decode");
+}
+
+#[test]
+fn epub_rejects_truncated_section_instead_of_silently_rendering_empty() {
+    let (_dir, path) = synthetic_epub();
+    let mut bytes = std::fs::read(&path).unwrap();
+    let filename = b"OPS/chapters/0.xhtml";
+    let marker = 0x0201_4b50u32.to_le_bytes();
+    let central = bytes
+        .windows(4)
+        .enumerate()
+        .find_map(|(at, data)| {
+            if data != marker { return None; }
+            let name_at = at + 46;
+            bytes.get(name_at..name_at + filename.len())
+                .filter(|name| *name == filename)
+                .map(|_| at)
+        })
+        .expect("first XHTML central-directory entry");
+    // Metadata claims a larger payload than the actual stored member. The
+    // bounded ZIP reader must refuse this entry, never accept a truncated DOM.
+    let original_size = u32::from_le_bytes(bytes[central + 24..central + 28].try_into().unwrap());
+    bytes[central + 24..central + 28].copy_from_slice(&(original_size + 1).to_le_bytes());
+    std::fs::write(&path, bytes).unwrap();
+    let book = crate::reader::Book::open(&path).expect("size remains below cap");
+    assert!(book.document(0).is_none(), "truncated entry must not appear as valid XHTML");
+}
