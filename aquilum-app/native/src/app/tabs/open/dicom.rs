@@ -86,3 +86,28 @@ impl App {
     }
 
 }
+
+#[cfg(feature = "dicom-preview")]
+pub(super) fn retain_dicom_grants(grants: &mut std::collections::HashSet<PathBuf>, tabs: &crate::tabs::Tabs) {
+    // Closing the last tab revokes its externally selected DICOM path.
+    grants.retain(|path| tabs.tabs().iter().any(|tab| tab.path.as_deref() == Some(path.as_path())));
+}
+
+#[cfg(all(test, feature = "dicom-preview"))]
+mod dicom_permission_lifetime_tests {
+    use super::*;
+    #[test]
+    fn source_permission_is_revoked_after_the_last_tab_closes() {
+        let selected = PathBuf::from("selected-study.zip");
+        let stale = PathBuf::from("not-open-anymore.dcm");
+        let mut tabs = crate::tabs::Tabs::default();
+        tabs.open_new(selected.clone());
+        let mut grants = std::collections::HashSet::from([selected.clone(), stale.clone()]);
+        retain_dicom_grants(&mut grants, &tabs);
+        assert!(grants.contains(&selected));
+        assert!(!grants.contains(&stale));
+        tabs.close(tabs.active_id());
+        retain_dicom_grants(&mut grants, &tabs);
+        assert!(grants.is_empty());
+    }
+}

@@ -3,7 +3,6 @@ use crate::frontmatter::PAGES;
 use crate::vault_files::{self, Source};
 use masonry::app::RenderRoot;
 use std::path::PathBuf;
-
 impl App {
     pub(in crate::app) fn on_picked(&mut self, root: &mut RenderRoot, picked: Picked) -> bool {
         let current = |note: &PathBuf| self.note.as_ref().is_some_and(|n| n.is(note));
@@ -40,5 +39,4 @@ impl App {
         }
         false
     }
-
 }

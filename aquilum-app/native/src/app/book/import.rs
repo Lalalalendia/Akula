@@ -19,7 +19,6 @@ pub(in crate::app) enum Picked {
     BookCover(PathBuf, PathBuf),
     Book(PathBuf, Option<PathBuf>),
 }
-
 const BOOK_EXTENSIONS: [&str; 6] = ["epub", "fb2", "mobi", "azw3", "azw", "prc"];
 const BYTES_PER_PAGE: u64 = 1024;
 
@@ -89,7 +88,6 @@ impl App {
             }
         });
     }
-
 
     pub(super) fn import_cover(&self, source: Source<'_>) -> Option<String> {
         let workspace = self.tree.root()?.to_path_buf();

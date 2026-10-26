@@ -15,8 +15,7 @@ mod media;
 mod pdf_preview;
 mod note_page;
 mod panel;
-#[cfg(feature = "memory-probe")]
-mod probe;
+#[cfg(feature = "memory-probe")] mod probe;
 mod reader;
 mod root_ui;
 mod search;
@@ -26,11 +25,9 @@ mod templates;
 mod transfer;
 mod widths;
 mod workspaces;
-#[cfg(test)]
-mod tests;
+#[cfg(test)] mod tests;
 use std::collections::HashMap;
-#[cfg(feature = "dicom-preview")]
-use std::collections::HashSet;
+#[cfg(feature = "dicom-preview")] use std::collections::HashSet;
 use crate::ui::editor::TextEditor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -104,8 +101,7 @@ pub struct App {
     workspace: Workspace,
     #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview,
     tree: FileTree,
-    #[cfg(feature = "dicom-preview")]
-    dicom_external_sources: HashSet<PathBuf>,
+    #[cfg(feature = "dicom-preview")] dicom_external_sources: HashSet<PathBuf>,
     chrome: Option<Chrome>,
     interface: Interface,
     popup: Option<Popup>,
