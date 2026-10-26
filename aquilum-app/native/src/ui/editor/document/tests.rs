@@ -240,14 +240,14 @@ fn native_fenced_code_has_one_visual_line_while_prose_still_wraps() {
     let source = format!("{long}\n~~~rust\n{long}\n~~~\n{long}");
     let mut doc = markdown(&source);
     doc.keep = (0.0, 20_000.0);
-    doc.layout(
-        &mut FontContext::default(), &mut LayoutContext::new(),
-        &StyleSet::new(16.0), Some(160.0), None, None,
-    );
-    assert!(doc.paragraph(0).layout().lines().count() > 1, "ordinary text must wrap");
-    assert_eq!(doc.paragraph(2).layout().lines().count(), 1, "code body must not wrap");
-    assert!(f64::from(doc.paragraph(2).layout().width()) > 160.0, "code keeps its natural pixel width");
-    assert!(doc.paragraph(4).layout().lines().count() > 1, "following prose still wraps");
+    let (mut fcx, mut lcx, styles) = (FontContext::default(), LayoutContext::new(), StyleSet::new(16.0));
+    for width in [160.0, 320.0, 120.0] {
+        doc.layout(&mut fcx, &mut lcx, &styles, Some(width), None, None);
+        assert!(doc.paragraph(0).layout().lines().count() > 1, "ordinary text must wrap at {width}");
+        assert_eq!(doc.paragraph(2).layout().lines().count(), 1, "code must not wrap after resize to {width}");
+        assert!(f64::from(doc.paragraph(2).layout().width()) > width as f64, "code keeps natural width");
+        assert!(doc.paragraph(4).layout().lines().count() > 1, "following prose still wraps");
+    }
 }
 
 #[test]
