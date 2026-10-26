@@ -16,6 +16,9 @@ on:
       - 'aquilum-app/native/src/host/create.rs'
       - 'aquilum-app/native/src/app/tabs/open/dicom.rs'
       - 'aquilum-app/native/src/ui/dicom.rs'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
+      - 'scripts/dicom-native-smoke/**'
   workflow_dispatch:
 permissions:
   contents: read
