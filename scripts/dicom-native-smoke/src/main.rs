@@ -37,6 +37,8 @@ fn main() {
     let source = PathBuf::from(args.next().expect("DICOMDIR or image"));
     let filename = source.file_name().unwrap().to_string_lossy();
     let signed = filename == "SIGNED16.dcm";
+    let in_place = filename == "study.zip" || filename == "loose_folder";
+    let original_zip = if filename == "study.zip" { Some(std::fs::read(&source).expect("ZIP")) } else { None };
     let dimensions = if signed { (16, 16) } else { (8, 8) };
     let expected_bytes = dimensions.0 as usize * dimensions.1 as usize * 4;
 
@@ -57,10 +59,12 @@ fn main() {
         assert_ne!(frames[0], frames[1], "signed frame 0 and 1 must not collapse");
         assert_ne!(frames[1], frames[2], "signed frame 1 and 2 must not collapse");
         println!("DICOM_SIGNED16_VOI_OK frames={count} shape=16x16");
-    } else if filename == "DICOMDIR" {
+    } else if filename == "DICOMDIR" || in_place {
         assert_eq!(count, 3);
-        verify_inversion(&vault);
+        if filename == "DICOMDIR" { verify_inversion(&vault); }
     }
+    if let Some(before) = original_zip { assert_eq!(std::fs::read(&source).unwrap(), before, "ZIP was mutated"); }
+    if in_place { println!("DICOM_INPLACE_OK source={filename} frames={count}"); }
     println!("DICOM_NATIVE_CORE_OK frames={count} label={}", study.label());
 
     let worker = dicom::DicomWorker::start(vault, source);
@@ -75,4 +79,8 @@ fn main() {
         assert_eq!(second.frame.unwrap().rgba.len(), expected_bytes);
     }
     println!("DICOM_NATIVE_ASYNC_OK frames={count} rgba_bytes={expected_bytes}");
+    if filename == "study.zip" {
+        assert!(dicom::Study::open(&vault, &vault.join("unsafe.zip")).is_err());
+        println!("DICOM_UNSAFE_ZIP_REJECTED");
+    }
 }

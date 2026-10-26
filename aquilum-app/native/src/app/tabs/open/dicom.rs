@@ -79,7 +79,7 @@ impl App {
             let dialog = rfd::FileDialog::new();
             let picked = if folder { dialog.pick_folder() } else { dialog.pick_file() };
             if let Some(path) = picked
-                && sender.send(super::super::book::Picked::DicomExternal(path)).is_ok() {
+                && sender.send(crate::app::book::Picked::DicomExternal(path)).is_ok() {
                 wake();
             }
         });

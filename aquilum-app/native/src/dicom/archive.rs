@@ -2,7 +2,7 @@
 //! Only STORE and DEFLATE member codecs are enabled in Cargo.
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::{Read, Cursor};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use zip::ZipArchive;
 

@@ -4,6 +4,7 @@ from pathlib import Path
 import argparse
 import numpy as np
 import pydicom
+import zipfile
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.fileset import FileSet
 from pydicom.uid import ExplicitVRLittleEndian, SecondaryCaptureImageStorage
@@ -93,5 +94,22 @@ def main():
     assert all(Path(i.path).suffix == "" for i in restored)
     print("SYNTHETIC_FILESET_OK images=3, extensionless=3, root=", a.directory)
     generate_medical_contrasts(a.directory)
+    # FileSet ZIP is opened directly; nothing is extracted into the vault.
+    archive = a.directory / 'study.zip'
+    with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as z:
+        for p in sorted(a.directory.rglob('*')):
+            if p.is_file() and p != archive and p.name not in {'MONO1.dcm', 'MONO2.dcm', 'SIGNED16.dcm'}:
+                z.write(p, arcname=p.relative_to(a.directory).as_posix())
+    loose = a.directory / 'loose_folder'
+    loose.mkdir(exist_ok=True)
+    with zipfile.ZipFile(archive) as z:
+        names = sorted(n for n in z.namelist() if n.rsplit('/', 1)[-1].startswith('IM'))
+        assert len(names) == 3
+        for i, n in enumerate(names):
+            destination = f'FRAME{i:04d}' if i == 0 else f'{i}.dcm'
+            (loose / destination).write_bytes(z.read(n))
+    with zipfile.ZipFile(a.directory / 'unsafe.zip', 'w') as z:
+        z.writestr('../escape.dcm', b'REJECT')
+    print('SYNTHETIC_INPLACE_OK zip=1 loose_folder=1 traversal_zip=1')
 if __name__ == "__main__":
     main()
