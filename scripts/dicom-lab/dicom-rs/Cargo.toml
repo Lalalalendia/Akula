@@ -1,0 +1,7 @@
+[package]
+name = "akula-dicom-rs-probe"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+dicom-object = "0.10.0"
+dicom-pixeldata = "0.10.0"
