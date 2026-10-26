@@ -52,6 +52,14 @@ const INSTALLED_OWNER_PATHS=new Set(["aquilum-app/core/src/sync/host_install_uni
 // Preserve the exact former pull_request.path owners. These source-owned labs
 // run through the required Main PR gate, including mixed source/manifest diffs.
 const OWNED_SUITES=Object.freeze({
+  "owned_b1d0_opt": [
+    "aquilum-app/core/src/server_installer_fixed_node_lab.rs",
+    "aquilum-app/core/src/server_installer_os_witness_lab.rs",
+    "aquilum-app/core/src/server_installer_durable_node.rs",
+    "aquilum-app/core/tests/server_bootstrap_b1d0.rs",
+    ".github/workflows/core-server-bootstrap-b1d0-opt.yml",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1D0.md"
+  ],
   "owned_b1b2b_vm": [
     "aquilum-app/core/examples/akula_b1b2b_release_fixture.rs",
     "scripts/ci/akula-b1b2b-ubuntu-vm.sh",
