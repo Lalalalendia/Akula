@@ -80,7 +80,7 @@ namespace AkulaWin7QA {
 '@
 function Snapshot([string]$file) {
     $screen = [Windows.Forms.Screen]::PrimaryScreen.Bounds
-    $bmp = New-Object Drawing.Bitmap($screen.Width, $screen.Height)
+    $bmp = New-Object -TypeName System.Drawing.Bitmap -ArgumentList @($screen.Width, $screen.Height)
     $graphics = [Drawing.Graphics]::FromImage($bmp)
     try {
         $graphics.CopyFromScreen($screen.Left, $screen.Top, 0, 0, $screen.Size)
