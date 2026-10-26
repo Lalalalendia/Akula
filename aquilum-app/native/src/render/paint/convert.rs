@@ -8,7 +8,7 @@ use masonry::kurbo::{Affine, BezPath, Rect, Shape as _, StrokeOpts, stroke};
 use masonry::peniko::{Brush, BrushRef, Fill, ImageData};
 #[cfg(any(test, not(feature = "installed")))]
 use masonry::peniko::{Extend, ImageQuality};
-use vello_cpu::filter_effects::{EdgeMode, Filter as VelloFilter, FilterGraph, FilterPrimitive};
+use vello_cpu::filter_effects::{EdgeMode, Filter as VelloFilter, FilterPrimitive};
 use vello_cpu::{Image, ImageSource, PaintType};
 #[cfg(any(test, not(feature = "installed")))]
 use vello_cpu::Pixmap;
@@ -556,10 +556,10 @@ pub fn clip_to_path(clip: ClipRef<'_>, tolerance: f64) -> (Affine, BezPath, Fill
 }
 
 pub fn filters_to_vello(filters: &[Filter]) -> Option<VelloFilter> {
-    let mut graph = FilterGraph::new();
-    let mut last = None;
-    for f in filters {
-        let primitive = match *f {
+    // Vello CPU supports exactly one filter primitive per graph. A group
+    // with several filters must be encoded as nested layers (filter_chain).
+    let [f] = filters else { return None };
+    let primitive = match *f {
             Filter::Flood { color } => FilterPrimitive::Flood { color },
             Filter::Blur { std_deviation_x, std_deviation_y } => FilterPrimitive::GaussianBlur {
                 std_deviation: std_deviation_x.max(std_deviation_y),
@@ -576,11 +576,7 @@ pub fn filters_to_vello(filters: &[Filter]) -> Option<VelloFilter> {
             }
             Filter::Offset { dx, dy } => FilterPrimitive::Offset { dx, dy },
         };
-        last = Some(graph.add(primitive, None));
-    }
-    let out = last?;
-    graph.set_output(out);
-    Some(VelloFilter { graph: Arc::new(graph) })
+    Some(VelloFilter::from_primitive(primitive))
 }
 
 pub fn invisible(brush: &BrushRef<'_>, composite: Composite) -> bool {
