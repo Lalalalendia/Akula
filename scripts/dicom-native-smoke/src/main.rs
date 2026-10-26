@@ -35,7 +35,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let vault = PathBuf::from(args.next().expect("vault"));
     let source = PathBuf::from(args.next().expect("DICOMDIR or image"));
-    let filename = source.file_name().unwrap().to_string_lossy();
+    let filename = source.file_name().unwrap().to_string_lossy().into_owned();
     let signed = filename == "SIGNED16.dcm";
     let in_place = filename == "study.zip" || filename == "loose_folder";
     let original_zip = if filename == "study.zip" { Some(std::fs::read(&source).expect("ZIP")) } else { None };
@@ -67,7 +67,7 @@ fn main() {
     if in_place { println!("DICOM_INPLACE_OK source={filename} frames={count}"); }
     println!("DICOM_NATIVE_CORE_OK frames={count} label={}", study.label());
 
-    let worker = dicom::DicomWorker::start(vault, source);
+    let worker = dicom::DicomWorker::start(vault.clone(), source.clone());
     let first = next_event(&worker);
     assert!(first.error.is_none(), "{:?}", first.error);
     assert_eq!(first.frame.as_ref().unwrap().rgba.len(), expected_bytes);
