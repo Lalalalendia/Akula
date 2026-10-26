@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crop::Rope;
 use uuid::Uuid;
 
-use super::{checked_relative, clear_after_verified_save, denied, inspect, invalid, stage};
+use super::{checked_relative, clear_after_verified_save, denied, inspect, invalid, retire_superseded, stage};
 
 struct Context {
     data: PathBuf,
@@ -161,8 +161,21 @@ fn drain(context: Arc<Context>, state: Arc<Mutex<State>>) {
         let mut entry = state.lock().unwrap_or_else(PoisonError::into_inner);
         match result {
             Ok(_) => {
-                entry.durable = Some(revision);
+                let previous = entry.durable.replace(revision);
                 entry.failure = None;
+                drop(entry);
+                // Do not retain a full 100k-line copy for every keystroke.
+                // Only a newer fully-published/verified snapshot can replace
+                // an earlier snapshot produced by this same live queue.
+                if let Some(previous) = previous {
+                    if let Err(error) = retire_superseded(
+                        &context.data, &context.vault, context.workspace,
+                        &context.document, previous, revision,
+                    ) {
+                        state.lock().unwrap_or_else(PoisonError::into_inner).failure =
+                            Some(format!("recovery snapshot retention needs review: {error}"));
+                    }
+                }
             }
             Err(error) => {
                 // Status remains observable; never mark a failed write durable.
@@ -206,6 +219,34 @@ mod tests {
         assert!(!queue.status().pending);
         assert!(queue.status().error.is_none());
         assert_eq!(fs::read_to_string(doc).unwrap(), "before");
+    }
+
+    #[test]
+    fn many_durable_100k_style_edits_keep_one_latest_shadow_not_a_disk_filling_history() {
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("large.md");
+        fs::write(&doc, "disk source").unwrap();
+        let workspace = Uuid::new_v4();
+        let queue = SnapshotQueue::new(data.path(), vault.path(), workspace, &doc, &digest(&doc)).unwrap();
+        let large = format!("{}\n", "Unicode 🐱漢字".repeat(300_000));
+        let mut last = None;
+        for index in 0..12 {
+            let body = Rope::from(format!("{large} edit #{index}"));
+            let revision = queue.request(body).unwrap();
+            crate::disk::wait();
+            assert_eq!(queue.status().durable_revision, Some(revision));
+            assert!(queue.status().error.is_none(), "retention cannot silently fail");
+            last = Some((revision, index));
+        }
+        let bucket = super::folder(data.path(), workspace, false).unwrap().unwrap();
+        let relative = super::checked_relative(vault.path(), &doc).unwrap();
+        let records = super::records(&bucket, &format!("{}-", super::key(&relative))).unwrap();
+        assert_eq!(records.len(), 1, "successive full-text edits must not exhaust AppData");
+        let restored = inspect(data.path(), vault.path(), workspace, &doc).unwrap().unwrap();
+        assert_eq!(restored.revision, last.unwrap().0);
+        assert!(restored.body.ends_with(" edit #11"));
+        assert_eq!(fs::read_to_string(&doc).unwrap(), "disk source");
     }
 
     #[test]
