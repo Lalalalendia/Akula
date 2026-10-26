@@ -2,9 +2,7 @@
 //! This module does NOT consume the nonce, call the witness, write /opt,
 //! provide a capability to an AF_UNIX peer, or activate any service.
 use super::*;
-use crate::server_owner_approval_lab::{
-    ExternalApprovalScope, SignedOwnerApproval,
-};
+use crate::server_owner_approval_lab::{ExternalApprovalScope, SignedOwnerApproval};
 use crate::server_release_floor_lab::ProposedFloor;
 use crate::server_release_lab::VerifiedPackageReceipt;
 use crate::server_staging_lab::StageReceipt;
@@ -86,11 +84,19 @@ mod tests {
     use crate::server_root_v3_guard::CheckedRootV3Scope;
     use crate::server_staging_lab::{ApprovedPlanDigest, InstallId};
 
-    fn fixture() -> (CheckedRootV3Scope, SignedOwnerApproval, VerifiedPackageReceipt) {
+    fn fixture() -> (
+        CheckedRootV3Scope,
+        SignedOwnerApproval,
+        VerifiedPackageReceipt,
+    ) {
         let manifest = [0x44; 32];
         let floor = ReleaseFloor {
             sequence: 1,
-            version: Version { major: 0, minor: 3, patch: 14 },
+            version: Version {
+                major: 0,
+                minor: 3,
+                patch: 14,
+            },
             signed_manifest_fingerprint: manifest,
         };
         let owner = SignedOwnerApproval {
@@ -137,8 +143,12 @@ mod tests {
     fn verified_first_install_claim_is_mapped_to_existing_cas_types() {
         let (checked, owner, receipt) = fixture();
         let result = bind_verified_b1d0_inputs(
-            checked, &owner, receipt.clone(), WitnessCheckpoint::genesis()
-        ).unwrap();
+            checked,
+            &owner,
+            receipt.clone(),
+            WitnessCheckpoint::genesis(),
+        )
+        .unwrap();
         assert_eq!(result.scope.install_id.0, checked.install_id);
         assert_eq!(result.scope.approved_plan_digest.0, checked.plan_digest);
         assert_eq!(result.scope.pinned_host_key_sha256, [0x33; 32]);
@@ -197,9 +207,8 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(
-                bind_verified_b1d0_inputs(
-                    checked, &owner, bad, WitnessCheckpoint::genesis()
-                ).is_err(),
+                bind_verified_b1d0_inputs(checked, &owner, bad, WitnessCheckpoint::genesis())
+                    .is_err(),
                 "case {case}: malformed verified FD receipt was accepted"
             );
         }
