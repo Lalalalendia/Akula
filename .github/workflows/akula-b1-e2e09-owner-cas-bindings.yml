@@ -1,0 +1,68 @@
+name: Akula B1-E2E-09 signed owner to B1d0 CAS inputs HOLD
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/server_root_v3_trust/owner_ipc/commit_intent.rs'
+      - 'aquilum-app/core/src/server_root_v3_trust/owner_ipc/commit_intent/**'
+      - '.github/workflows/akula-b1-e2e09-owner-cas-bindings.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checked-b1d0-inputs-hold:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app
+      - name: Check B1-E2E-09 files without formatting unrelated sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --config skip_children=true --check \
+            aquilum-app/core/src/server_root_v3_trust/owner_ipc/commit_intent.rs \
+            aquilum-app/core/src/server_root_v3_trust/owner_ipc/commit_intent/cas_inputs.rs \
+            aquilum-app/core/src/server_root_v3_trust/owner_ipc/commit_intent/tests.rs
+      - name: The default Core still has no root install feature
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core
+      - name: Exact owner scope to existing B1d0 CAS input correspondence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab --lib \
+            server_root_v3_trust::owner_ipc::commit_intent::cas_inputs::tests -- --nocapture
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab --lib \
+            server_root_v3_trust::owner_ipc::commit_intent::tests -- --nocapture
+      - name: Prove no activated IPC write/Node action in installed helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab \
+            --bin akula-root-b1d0-helper
+          helper=aquilum-app/target/debug/akula-root-b1d0-helper
+          set +e
+          output="$("$helper" --commit 2>&1)"
+          code=$?
+          set -e
+          test "$code" -eq 2
+          test "$output" = "AKULA_B1D0_ROOT_HELPER_HOLD"
