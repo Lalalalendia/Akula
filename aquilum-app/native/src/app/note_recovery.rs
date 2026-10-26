@@ -108,6 +108,11 @@ impl App {
             self.popup=Some(Popup::Recovery(state));return Outcome::default();
         };
         crate::ui::dialog::close(root,state.dialog.layer);
+        if answer==DialogAnswer::Cancel {
+            // A user who postponed review can reach the same held draft by
+            // reopening the tab; no bytes were discarded.
+            self.recovery.dismissed.remove(&(state.workspace,state.path.clone(),state.candidate.revision));
+        }
         if answer==DialogAnswer::Confirm {
             if state.candidate.source_changed {
                 crate::system::reveal(&state.candidate.backup_path);

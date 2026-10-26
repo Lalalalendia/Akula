@@ -76,6 +76,7 @@ impl SnapshotQueue {
     pub(in crate::note) fn request(&self, body: Rope) -> io::Result<u64> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         if state.blocked_by_existing {
+            state.failure = Some("unreviewed crash draft is held for recovery".into());
             return Err(denied("unreviewed recovery draft must not be superseded"));
         }
         let revision = state.next_revision.checked_add(1)
@@ -97,7 +98,9 @@ impl SnapshotQueue {
     /// to recover it. Ordinary note edits or automatic File Gate ACKs cannot
     /// silently replace or delete the only copy of that draft.
     pub(in crate::note) fn allow_after_review(&self) {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner).blocked_by_existing = false;
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.blocked_by_existing = false;
+        state.failure = None;
     }
 
     /// Never clear a shadow on enqueue or a guessed save: a successful File
