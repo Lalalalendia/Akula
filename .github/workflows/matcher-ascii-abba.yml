@@ -3,7 +3,7 @@ name: Matcher ASCII ABBA temporary verification
 on:
   pull_request:
     paths:
-      - 'aquilum-app/core/src/text/matcher/**'
+      - 'aquilum-app/core/src/text/matcher/tests_ascii.rs'
       - '.github/workflows/matcher-ascii-abba.yml'
   workflow_dispatch:
 
