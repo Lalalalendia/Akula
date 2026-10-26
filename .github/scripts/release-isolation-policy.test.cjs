@@ -125,6 +125,27 @@ test('signed Windows beta may publish only after manually approved independent v
   assert.match(publish, /--latest/);
 });
 
+test('every next signed Windows release verifies actual published Akula NSIS upgrade', () => {
+  const wf = file('.github/workflows/akula-windows-signed-candidate.yml');
+  const script = file('scripts/test-windows-signed-next-version-upgrade.ps1');
+  const build = wf.split('\n  independent-verification:\n')[0];
+  assert.match(build, /Test actual latest published Akula to next signed NSIS upgrade/);
+  assert.match(build, /run: \.\/scripts\/test-windows-signed-next-version-upgrade\.ps1/);
+  assert.match(build, /AKULA_SIGNED_NEXT_CANDIDATE_DISPOSABLE: '1'/);
+  assert.doesNotMatch(build, /inputs\.release_version == '0\.3\.14'/);
+  assert.match(script, /RUNNER_ENVIRONMENT -cne 'github-hosted'/);
+  assert.match(script, /GITHUB_REF -cne 'refs\/heads\/main'/);
+  assert.match(script, /AKULA_SIGNED_NEXT_CANDIDATE_DISPOSABLE -cne '1'/);
+  assert.match(script, /releases\/latest/);
+  assert.match(script, /scripts\/akula-version\.cjs assert-newer/);
+  assert.match(script, /browser_download_url/);
+  assert.match(script, /Get-FileHash/);
+  assert.match(script, /'\/S','\/R','\/UPDATE','\/ARGS'/);
+  assert.match(script, /Assert-Preserved/);
+  assert.match(script, /shiva-pdf-preview\.exe/);
+  assert.match(script, /AKULA_SIGNED_NEXT_UPGRADE_PASS/);
+});
+
 // One signed Akula update is installed over the previous version. S3 is a
 // user-invoked feature of that same executable, not a second release channel.
 test('single published Akula installer includes opt-in S3 feature', () => {
