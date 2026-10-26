@@ -24,6 +24,7 @@ pub mod palette;
 pub mod reader;
 pub mod suggest;
 pub mod viewer;
+#[cfg(feature = "dicom-preview")] pub mod dicom;
 pub mod tokens;
 pub mod widgets;
 pub mod workspaces;
@@ -37,7 +38,6 @@ mod shell;
 mod sidebar;
 #[cfg(test)]
 mod snapshot;
-
 use masonry::core::WidgetTag;
 
 pub use header::{controls_width, panel_label};

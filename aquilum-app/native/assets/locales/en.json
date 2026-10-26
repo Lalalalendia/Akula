@@ -1,4 +1,10 @@
 {
+  "dicom": {
+    "openFolder": "DICOM: open folder without import",
+    "openFile": "DICOM: open ZIP or file",
+    "openCurrentFolder": "DICOM: view this folder without import",
+    "openCurrentFile": "Open DICOM without import"
+  },
   "transfer": {
     "title": "File transfers",
     "close": "Close transfers",

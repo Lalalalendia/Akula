@@ -492,7 +492,7 @@ pub(crate) mod unpremultiply {
 
     #[inline(always)]
     pub(crate) fn scalar(component: u8, reciprocal: u16) -> u8 {
-        u16::from(component).wrapping_mul(reciprocal).div_256() as u8
+        ((u32::from(component) * u32::from(reciprocal) + 128) >> 8).min(255) as u8
     }
 
     #[inline(always)]

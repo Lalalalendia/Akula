@@ -2,6 +2,7 @@ mod checkpoints;
 mod classify;
 mod edges;
 mod edit;
+mod large_edit;
 mod embeds;
 mod estimate;
 mod full;
@@ -33,8 +34,7 @@ mod window;
 #[cfg(test)]
 mod window_tests;
 
-use std::collections::HashSet;
-use std::ops::Range;
+use std::{collections::HashSet, ops::Range};
 use std::sync::Arc;
 
 use super::embed::View;

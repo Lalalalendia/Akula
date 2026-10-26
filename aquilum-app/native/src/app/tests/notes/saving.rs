@@ -237,6 +237,33 @@ fn typed_edits_reach_the_file_behind_hidden_frontmatter() {
 }
 
 #[test]
+fn full_app_undo_after_30k_line_paste_restores_gui_and_disk_bytes() {
+    // Exercise the complete RenderRoot -> App::body_edited -> Note::save path,
+    // rather than only TextEditor state without a real persisted note.
+    let mut h = Harness::new();
+    let original: String =
+        (0..30_000).map(|n| format!("строка {n} — проверка окна Markdown редактора\n")).collect();
+    let path = h.write_note("Long undo.md", &original);
+    assert!(h.app.open(&mut h.root, path.clone()));
+    h.focus_editor();
+    h.key(Key::Character("a".into()), crate::test_dir::command());
+
+    let replacement = "AKULA_INTEGRATION_REPLACE_123456789";
+    h.root.handle_text_event(TextEvent::ClipboardPaste(replacement.into()));
+    h.deliver();
+    assert_eq!(h.body_text(), replacement);
+    assert_eq!(h.app.text.to_string(), replacement);
+    h.save_now();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), replacement);
+
+    h.key(Key::Character("z".into()), crate::test_dir::command());
+    assert_eq!(h.body_text(), original, "editor undo lost bytes");
+    assert_eq!(h.app.text.to_string(), original, "App missed the undo edit action");
+    h.save_now();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original, "File Gate did not publish the full undo");
+}
+
+#[test]
 fn large_note_typing_keeps_widget_and_saved_text_identical_with_hidden_unicode_frontmatter() {
     let mut h = Harness::new();
     let header = "---\ntags: [тест]\n---\n";
