@@ -160,7 +160,6 @@ impl App {
         self.leave_note();
         #[cfg(test)]
         record_stage(|s| s.leave = started.elapsed());
-
         let read = aq_trace::zone("открытие: чтение файла");
         #[cfg(test)]
         let started = std::time::Instant::now();
@@ -169,7 +168,8 @@ impl App {
         record_stage(|s| s.file_read = started.elapsed());
         drop(read);
         match opened {
-            Ok((note, text)) => {
+            Ok((mut note, text)) => {
+                self.arm_note_recovery(&mut note);
                 self.open_error = None;
                 self.open_error_ids = None;
                 self.text = text;

@@ -1,5 +1,4 @@
 use super::*;
-
 impl App {
     pub(in crate::app) fn on_popup_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction) -> Outcome {
         match self.popup.take() {
@@ -40,6 +39,7 @@ impl App {
                     MenuChoice::Item(_) | MenuChoice::Dismissed | MenuChoice::Hover(_) => {}
                 }
             }
+            Some(Popup::Recovery(prompt)) => return self.on_note_recovery_action(root, id, action, prompt),
             Some(Popup::PdfImport { dialog, source }) => match dialog.answer(id, action) {
                 Some(answer) => {
                     crate::ui::dialog::close(root, dialog.layer);

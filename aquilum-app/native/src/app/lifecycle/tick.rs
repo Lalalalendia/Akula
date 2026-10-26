@@ -1,5 +1,4 @@
 use super::super::*;
-
 impl App {
     pub fn tick(&mut self, root: &mut RenderRoot, now: Instant) {
         // Drain background S3 and SSH observations without network I/O on the GUI thread.
@@ -30,5 +29,6 @@ impl App {
             self.set_text(root, text);
             self.refresh_save_error(root);
         }
+        self.poll_note_recovery(root);
     }
 }

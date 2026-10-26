@@ -72,6 +72,27 @@ fn inserted_text_reaches_the_disk() {
 }
 
 #[test]
+fn dirty_edit_offers_explicit_review_after_window_note_is_lost() {
+    let mut h = Harness::new();
+    let path = h.write_note("recover.md", "original");
+    assert!(h.app.open(&mut h.root, path.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    h.app.commit_text(&mut h.root, crop::Rope::from("несохранённый текст 😀"));
+    crate::disk::wait();
+    let candidate = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &path,
+    ).unwrap().unwrap();
+    assert_eq!(candidate.body.to_string(), "несохранённый текст 😀");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "original");
+    drop(h.app.note.take()); // no File Gate flush
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    assert!(matches!(h.app.popup, Some(Popup::Recovery(_))));
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "original");
+}
+
+#[test]
 fn unsaved_text_is_written_on_shutdown() {
     let mut h = Harness::new();
     let path = h.vault.path().join("a.md");
