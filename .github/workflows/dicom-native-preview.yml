@@ -11,6 +11,10 @@ on:
       - 'aquilum-app/native/src/native_modules.rs'
       - 'aquilum-app/native/src/app/tabs/open.rs'
       - 'aquilum-app/native/src/app/tabs/open/dicom.rs'
+      - 'aquilum-app/native/src/ui/file_tree/model/load.rs'
+      - 'aquilum-app/native/src/ui/file_tree/actions.rs'
+      - 'aquilum-app/native/src/app/file_menu.rs'
+      - 'aquilum-app/native/src/app/file_menu/popup.rs'
       - 'scripts/dicom-native-smoke/**'
       - '.github/workflows/dicom-native-preview.yml'
   workflow_dispatch:
@@ -75,6 +79,11 @@ jobs:
         env:
           CARGO_TARGET_DIR: ../.artifacts/cargo-native
         run: cargo check -p aquilum-native --features dicom-preview
+      - name: Test native DICOM file-tree visibility without running unrelated tests
+        working-directory: aquilum-app
+        env:
+          CARGO_TARGET_DIR: ../.artifacts/cargo-native
+        run: cargo test -p aquilum-native --features dicom-preview dicom_file_tree_tests -- --nocapture
       - name: Capture resolved Cargo lockfile for later audited commit
         if: always()
         uses: actions/upload-artifact@v4
