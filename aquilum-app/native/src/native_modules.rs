@@ -7,6 +7,8 @@ mod poster;
 mod graph; mod reader;
 mod video;
 mod dates; mod docx;
+#[cfg(feature = "dicom-preview")]
+mod dicom;
 mod disk;
 mod file_ops;
 mod fling;

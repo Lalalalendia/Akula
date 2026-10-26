@@ -30,6 +30,8 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
 messaging-w4-pilot = []
 memory-probe = []
+# Opt-in experimental local DICOM viewing. Not included in the installed build.
+dicom-preview = ["dep:dicom-core", "dep:dicom-object", "dep:dicom-pixeldata"]
 # User-visible Windows read-only SSH verification. No install grant.
 server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
@@ -69,6 +71,11 @@ arboard = { version = "3", default-features = false, features = ["image-data", "
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Pinned after upstream #844: crates.io 0.10.0 incorrectly decodes 8-bit monochrome RLE.
+# All three packages share the same exact source revision.
+dicom-core = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
+dicom-object = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
+dicom-pixeldata = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", features = ["image"], optional = true }
 uuid = { version = "1.23.5", features = ["v4"] }
 rfd = "0.16"
 pulldown-cmark = { version = "0.13", default-features = false }
