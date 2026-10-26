@@ -14,9 +14,9 @@ use super::mask;
 
 impl PaintSink for Painter {
     fn push_clip(&mut self, clip: ClipRef<'_>) {
-        if self.error.is_some() || self.cull(&clip) {
-            return;
-        }
+        if self.error.is_some() { return; }
+        if let Err(err) = self.guard_clip(&clip) { self.set_error_once(err); return; }
+        if self.cull(&clip) { return; }
         if let ClipRef::Fill { transform, shape: GeometryRef::Rect(rect), fill_rule } = clip {
             let window = transform.transform_rect_bbox(rect);
             let [_, skew_y, skew_x, _, _, _] = transform.as_coeffs();
@@ -54,6 +54,7 @@ impl PaintSink for Painter {
     }
 
     fn push_group(&mut self, group: GroupRef<'_>) {
+        if let Some(clip) = group.clip.as_ref() { if let Err(err) = self.guard_clip(clip) { self.set_error_once(err); return; } }
         if self.error.is_some() || (self.culled > 0 || group.composite.alpha <= 0.0) && self.cull_inside() || group.clip.as_ref().is_some_and(|clip| self.cull(clip)) {
             return;
         }
@@ -106,10 +107,7 @@ impl PaintSink for Painter {
     }
 
     fn fill(&mut self, draw: FillRef<'_>) {
-        // IMG-PERF-08: trace ImageBrush IDs at the paint/culling boundary.
-        // A MediaView::paint call alone is not proof its image fill survived
-        // ancestor clips, region culling and sprite handling. Log at most
-        // one record per (brush ID, offscreen state, sprite state).
+        // IMG-PERF-08: optional ImageBrush visibility and culling trace.
         #[cfg(not(feature = "installed"))]
         {
             static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -138,6 +136,7 @@ impl PaintSink for Painter {
                 }
             }
         }
+        if let Err(err) = self.guard_geometry(&draw.shape, draw.transform) { self.set_error_once(err); return; }
         if self.error.is_some() || convert::invisible(&draw.brush, draw.composite) || self.offscreen(draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape))) {
             return;
         }
@@ -176,6 +175,7 @@ impl PaintSink for Painter {
     }
 
     fn stroke(&mut self, draw: StrokeRef<'_>) {
+        if let Err(err) = self.guard_stroke(&draw.shape, draw.transform, &draw.stroke) { self.set_error_once(err); return; }
         let w = draw.stroke.width.max(1.0) * draw.stroke.miter_limit.max(1.0);
         if self.error.is_some() || convert::invisible(&draw.brush, draw.composite) || self.offscreen(draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape).inflate(w, w))) {
             return;

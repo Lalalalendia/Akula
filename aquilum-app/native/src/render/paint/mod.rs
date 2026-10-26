@@ -5,12 +5,12 @@ mod filter_chain;
 mod filter_budget;
 mod filter_route;
 mod mask;
+mod path_guard;
 #[cfg(any(test, not(feature = "installed")))]
 mod mipmap;
 mod runs;
 mod sink;
 use std::collections::VecDeque;
-
 use masonry::kurbo::{Affine, Rect};
 use vello_cpu::{RenderContext, RenderSettings, Resources};
 
