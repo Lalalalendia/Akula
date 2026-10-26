@@ -8,14 +8,9 @@ impl App {
         }
         // Unlike an ordinary tab switch, explicitly closing a workspace must not
         // discard an unsaved conflict or a failed write from the active note.
-        if let Some(note) = self.note.as_mut() {
-            note.flush(&self.workspace.core, &self.text);
-            note.tick(&self.workspace.core, &self.text, std::time::Instant::now());
-            if note.save_error.is_some() {
-                self.refresh_save_error(root);
-                report!("база не закрыта: сохранение заметки требует проверки");
-                return Outcome::default();
-            }
+        if !self.save_before_workspace_change(root) {
+            report!("база не закрыта: сохранение заметки требует проверки");
+            return Outcome::default();
         }
         if let Err(error) = self.workspace.core.search.deactivate() {
             report!("база не закрыта: поисковый индекс не остановлен: {error:?}");
