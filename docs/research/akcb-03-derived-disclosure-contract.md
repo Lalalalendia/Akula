@@ -40,4 +40,4 @@ None of this proves confidentiality of production Dataview/Tantivy/vector/AI out
 
 ## Next gate
 
-Verify AKCB-01 and AKCB-02 on their exact CI heads, then run AKCB-03. AKCB-04 must prove source-complete lineage through a real query engine and a trusted host-root/identity issuer plus emission fence. No second Sync Core, File Gate or standalone permission database is permitted. 
+Verify AKCB-01 and AKCB-02 on their exact CI heads, then run AKCB-03. AKCB-04 must prove source-complete lineage through a real query engine and a trusted host-root/identity issuer plus emission fence. No second Sync Core, File Gate or standalone permission database is permitted.
