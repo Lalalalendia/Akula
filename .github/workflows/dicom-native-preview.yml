@@ -78,12 +78,12 @@ jobs:
         working-directory: aquilum-app
         env:
           CARGO_TARGET_DIR: ../.artifacts/cargo-native
-        run: cargo check -p aquilum-native --features dicom-preview
+        run: cargo check -p aquilum-native --features dicom-preview --locked
       - name: Test native DICOM file-tree visibility without running unrelated tests
         working-directory: aquilum-app
         env:
           CARGO_TARGET_DIR: ../.artifacts/cargo-native
-        run: cargo test -p aquilum-native --features dicom-preview dicom_file_tree_tests -- --nocapture
+        run: cargo test -p aquilum-native --features dicom-preview --locked dicom_file_tree_tests -- --nocapture
       - name: Capture resolved Cargo lockfile for later audited commit
         if: always()
         uses: actions/upload-artifact@v4
