@@ -5,6 +5,8 @@ on:
     paths:
       - 'aquilum-app/core/src/server_root_v3_trust/helper_install.rs'
       - 'aquilum-app/core/src/server_root_v3_trust/helper_install/**'
+      - 'aquilum-app/core/src/bin/akula_root_helper_publish_lab.rs'
+      - 'aquilum-app/core/Cargo.toml'
       - '.github/workflows/akula-b1-e2e08-helper-install.yml'
   workflow_dispatch:
 
@@ -35,7 +37,8 @@ jobs:
           set -euo pipefail
           rustfmt --edition 2021 --check \
             aquilum-app/core/src/server_root_v3_trust/helper_install.rs \
-            aquilum-app/core/src/server_root_v3_trust/helper_install/tests.rs
+            aquilum-app/core/src/server_root_v3_trust/helper_install/tests.rs \
+            aquilum-app/core/src/bin/akula_root_helper_publish_lab.rs
       - name: Unmodified default Core never acquires helper install feature
         shell: bash
         run: |
@@ -76,3 +79,35 @@ jobs:
           set -e
           test "$status" -eq 2
           test "$output" = "AKULA_B1D0_ROOT_HELPER_HOLD"
+      - name: Verify explicit administrative publisher refuses without enrolled root trust
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab \
+            --bin akula-root-helper-publish-lab
+          admin=aquilum-app/target/debug/akula-root-helper-publish-lab
+          test -x "$admin"
+          # A CI host must have no independently provisioned production trust.
+          test ! -e /var/lib/akula/server-bootstrap/trust/b0v3.enrollment
+          set +e
+          output="$("$admin" 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          test "$output" = "AKULA_B1D0_ADMIN_HELPER_PUBLICATION_REFUSED"
+          # Even UID0 cannot turn argv into an install or arbitrary path.
+          set +e
+          output="$(sudo -n -- "$admin" --install 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          test "$output" = "AKULA_B1D0_ADMIN_HELPER_PUBLICATION_REFUSED"
+          # Root without independent policy + signed helper also refuses.
+          set +e
+          output="$(sudo -n -- "$admin" 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          test "$output" = "AKULA_B1D0_ADMIN_HELPER_PUBLICATION_REFUSED"
+          test ! -e /usr/libexec/akula/akula-root-b1d0-helper
