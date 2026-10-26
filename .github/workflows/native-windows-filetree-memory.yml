@@ -56,6 +56,19 @@ jobs:
           $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
           if (!(Test-Path -LiteralPath $binary)) { throw 'Missing Akula.exe test binary' }
           Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Paired FileTree totals A/B (release diagnostic, not gating on time)
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --release --locked -p aquilum-native --features installed --bin aquilum-native benchmark_filetree_total_lookup_abba -- --ignored --nocapture --test-threads=1 2>&1 | Tee-Object -FilePath ../windows-filetree-count-ab.txt
+          if ($LASTEXITCODE -ne 0) { throw 'FileTree totals A/B test failed' }
+          $lines = @(Select-String -Path ../windows-filetree-count-ab.txt -Pattern 'FILETREE_TOTAL_AB notes=')
+          if ($lines.Count -ne 6) { throw "Expected 6 paired A/B results, got $($lines.Count)" }
+          "### FileTree totals A/B (same-process reference vs candidate, release)" | Out-File -Append -Encoding utf8 -FilePath $env:GITHUB_STEP_SUMMARY
+          "Includes index construction; does not establish GUI startup or installed latency." | Out-File -Append -Encoding utf8 -FilePath $env:GITHUB_STEP_SUMMARY
+          foreach ($line in $lines) { $line.Line | Out-File -Append -Encoding utf8 -FilePath $env:GITHUB_STEP_SUMMARY }
+
       - name: Run B2/B3 synthetic flat-vs-nested 1k/10k/50k cold-warm full matrix
         shell: pwsh
         timeout-minutes: 65
@@ -75,6 +88,7 @@ jobs:
         with:
           name: akula-b2-b3-tree-memory-${{ github.sha }}
           path: |
+            windows-filetree-count-ab.txt
             windows-filetree-memory/environment.json
             windows-filetree-memory/results.json
             windows-filetree-memory/summary.md

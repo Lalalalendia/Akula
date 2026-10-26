@@ -1,5 +1,8 @@
 use super::Counts;
 
+#[cfg(test)]
+mod benchmark;
+
 // This immutable snapshot is built once per tree rebuild. Subtree totals then
 // need two binary searches instead of walking all descendants for every row.
 pub(crate) struct IndexedCounts<'a> {
