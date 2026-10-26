@@ -448,6 +448,51 @@ mod tests {
     }
 
     #[test]
+    fn abrupt_child_exit_with_two_unsaved_tabs() {
+        let Ok(data) = std::env::var("AKULA_DESK15_TWO_TAB_CHILD_DATA") else { return };
+        let vault = PathBuf::from(std::env::var("AKULA_DESK15_TWO_TAB_CHILD_VAULT").unwrap());
+        let workspace = Uuid::parse_str(&std::env::var("AKULA_DESK15_TWO_TAB_CHILD_WORKSPACE").unwrap()).unwrap();
+        for (name, revision, body) in [
+            ("one.md", 81, "first tab 😀"),
+            ("two.md", 82, "second tab 漢字"),
+        ] {
+            let path = vault.join(name);
+            stage(Path::new(&data), &vault, workspace, &path, &digest(&path), revision, body).unwrap();
+        }
+        std::process::exit(47);
+    }
+
+    #[test]
+    fn two_unsaved_tabs_survive_abrupt_process_exit_without_overwriting_sources() {
+        use std::process::Command;
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let workspace = Uuid::new_v4();
+        for (name, original) in [("one.md", "disk one"), ("two.md", "disk two")] {
+            fs::write(vault.path().join(name), original).unwrap();
+        }
+        let child = Command::new(std::env::current_exe().unwrap())
+            .arg("abrupt_child_exit_with_two_unsaved_tabs")
+            .arg("--nocapture")
+            .env("AKULA_DESK15_TWO_TAB_CHILD_DATA", data.path())
+            .env("AKULA_DESK15_TWO_TAB_CHILD_VAULT", vault.path())
+            .env("AKULA_DESK15_TWO_TAB_CHILD_WORKSPACE", workspace.to_string())
+            .status().unwrap();
+        assert_eq!(child.code(), Some(47));
+        for (name, original, draft) in [
+            ("one.md", "disk one", "first tab 😀"),
+            ("two.md", "disk two", "second tab 漢字"),
+        ] {
+            let path = vault.path().join(name);
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+            let record = inspect(data.path(), vault.path(), workspace, &path).unwrap().unwrap();
+            assert_eq!(record.body, draft);
+            assert!(!record.source_changed);
+            assert!(!record.already_saved);
+        }
+    }
+
+    #[test]
     #[cfg(unix)]
     fn symlinked_recovery_bucket_is_refused_without_writing_outside_appdata() {
         use std::os::unix::fs::symlink;

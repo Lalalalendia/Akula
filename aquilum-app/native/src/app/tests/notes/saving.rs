@@ -119,6 +119,64 @@ fn closing_recovery_modal_never_sticks_or_discards_the_shadow() {
 }
 
 #[test]
+fn recovery_confirm_writes_through_file_gate_and_clears_only_after_ack() {
+    use crate::ui::dialog::DialogAnswer;
+    let mut h = Harness::new();
+    let path = h.write_note("recover-confirm.md", "confirmed disk");
+    assert!(h.app.open(&mut h.root, path.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    let draft = "unsaved кириллица 🐱";
+    h.app.commit_text(&mut h.root, crop::Rope::from(draft));
+    crate::disk::wait();
+    drop(h.app.note.take());
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    let layer = match &h.app.popup {
+        Some(Popup::Recovery(state)) => state.dialog.layer,
+        _ => panic!("expected a recovery prompt"),
+    };
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "confirmed disk");
+    h.send(layer, DialogAnswer::Confirm);
+    assert!(h.app.popup.is_none());
+    assert_eq!(h.app.text.to_string(), draft);
+    h.save_now();
+    crate::disk::wait();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), draft);
+    assert!(crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &path,
+    ).unwrap().is_none());
+}
+
+#[test]
+fn recovery_of_external_conflict_leaves_original_and_backup_unchanged() {
+    use crate::ui::dialog::DialogAnswer;
+    let mut h = Harness::new();
+    let path = h.write_note("recover-conflict.md", "old disk");
+    assert!(h.app.open(&mut h.root, path.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    h.app.commit_text(&mut h.root, crop::Rope::from("my unsaved 🐱"));
+    crate::disk::wait();
+    drop(h.app.note.take());
+    std::fs::write(&path, "external edit").unwrap();
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    let layer = match &h.app.popup {
+        Some(Popup::Recovery(state)) => state.dialog.layer,
+        _ => panic!("external conflict should offer manual review"),
+    };
+    h.send(layer, DialogAnswer::Cancel);
+    assert!(h.app.popup.is_none());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "external edit");
+    let record = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &path,
+    ).unwrap().unwrap();
+    assert_eq!(record.body.to_string(), "my unsaved 🐱");
+    assert!(record.source_changed);
+}
+
+#[test]
 fn unsaved_text_is_written_on_shutdown() {
     let mut h = Harness::new();
     let path = h.vault.path().join("a.md");
