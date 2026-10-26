@@ -101,7 +101,7 @@ mod tests {
         let path = pathological_cubic();
         assert!(matches!(guard_geometry(&GeometryRef::Path(&path), Affine::IDENTITY),
             Err(PaintError::GeometryBudget(_))));
-        let mut painter = Painter::new(64, 64, super::super::settings(0));
+        let mut painter = Painter::new(64, 64, crate::render::paint::settings(0));
         painter.begin(0, 0, 64, 64);
         painter.push_clip(ClipRef::Fill {
             shape: GeometryRef::Path(&path), transform: Affine::IDENTITY, fill_rule: Fill::NonZero,
@@ -134,7 +134,7 @@ mod tests {
         path.curve_to((50.0, 22.0), (50.0, 38.0), (50.0, 50.0));
         path.line_to((10.0, 50.0));
         path.close_path();
-        let mut painter = Painter::new(64, 64, super::super::settings(0));
+        let mut painter = Painter::new(64, 64, crate::render::paint::settings(0));
         painter.begin(0, 0, 64, 64);
         painter.push_clip(ClipRef::Fill {
             shape: GeometryRef::Path(&path), transform: Affine::IDENTITY, fill_rule: Fill::NonZero,
