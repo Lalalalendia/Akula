@@ -4,8 +4,8 @@ use masonry::properties::Gap;
 use masonry::properties::types::{CrossAxisAlignment, MainAxisAlignment};
 use masonry::widgets::Flex;
 
-use super::tokens::size;
-use super::widgets::LinkButton;
+use super::super::tokens::size;
+use super::super::widgets::LinkButton;
 use crate::i18n;
 
 pub(super) fn new_tab_view() -> (NewWidget<Flex>, WidgetId, WidgetId, WidgetId, Option<WidgetId>, Option<WidgetId>) {

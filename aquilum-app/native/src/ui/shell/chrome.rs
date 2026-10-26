@@ -1,4 +1,7 @@
-use super::{Handle, WidgetId, TabStrip, Collapse, IndexedStack, Slot, backlinks, Visible};
+use masonry::core::WidgetId;
+use super::{Handle, Collapse, IndexedStack, Slot, backlinks};
+use super::super::titlebar::TabStrip;
+use super::super::widgets::Visible;
 
 pub struct Chrome {
     pub toggle_sidebar: WidgetId,
