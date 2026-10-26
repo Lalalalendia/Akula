@@ -2,5 +2,8 @@
 name = "akula-dcmfx-probe"
 version = "0.1.0"
 edition = "2024"
+
 [dependencies]
-dcmfx = "0.52.1"
+# DCMfx is a nested Rust workspace in its upstream repository; it is not on crates.io.
+# The isolated workflow checks out its v0.52.1 source at the pinned commit.
+dcmfx = { path = "../_upstream/dcmfx/src/rust/dcmfx" }
