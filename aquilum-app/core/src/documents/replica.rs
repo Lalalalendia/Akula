@@ -74,13 +74,10 @@ impl Replica {
     }
 
     /// Calculate an atomic Yrs delta without mutating the live editor replica.
-    ///
-    /// The temporary document uses the same client ID, but never edits in
-    /// parallel with the live document. This prevents a new CRDT client
-    /// identity from being introduced on every keystroke. The caller must
-    /// persist the resulting delta before invoking apply_update on the live doc.
-    /// This snapshot-based staging is correctness-first: benchmark/optimize
-    /// large documents before the cloud sync executor is enabled.
+    /// The temporary document reuses its client ID without concurrent edits,
+    /// avoiding a new CRDT identity per keystroke. Persist the delta durably
+    /// before applying it to the live document. Correctness-first: benchmark
+    /// large documents before enabling cloud sync.
     pub fn stage_edits(&self, batches: &[Vec<TextEdit>]) -> Result<Vec<u8>, ReplicaError> {
         let baseline = self.doc.transact().state_vector();
         let options = Options {
