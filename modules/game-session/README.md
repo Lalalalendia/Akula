@@ -1,33 +1,40 @@
-# GNET-01: Connect Four game session
+# GNET-02 — in-memory transport and bounded game frames
 
-Small, deterministic Rust package with no external dependencies, sockets or Akula file access.
-Not yet a network game, installed feature, or complete room service.
-The main aquilum-app workspace and lockfile are untouched.
+This directory remains a zero-dependency, standalone Rust crate. GNET-01
+implements authoritative Connect Four rules. GNET-02 adds:
 
-## Contract
+- `GameTransport`: transport-agnostic interface for authenticated sender
+  identity, sending frames, and nonblocking receive polling.
+- `InMemoryTransport`: two ends linked by bounded queues, no network access.
+  The sender identity is assigned by the endpoint, never parsed from a packet.
+- `WireMessage`: versioned fixed-size binary command (37 bytes) and state
+  snapshot (79 bytes) frames. Bad magic, version, length, game state, turn
+  parity, gravity, or outcome is rejected.
+- 20-turn scenario crossing two in-memory endpoints and verifying both players'
+  identical game state after each turn. Repeat frames cannot duplicate moves.
 
-- Host plays Red; invited guest plays Yellow; only these identities have a view or can move.
-- The caller MUST take the PeerId from the authenticated transport, not from a message payload.
-- RoomId is not a password. GNET-04 must generate room IDs securely, admit peers,
-  manage invitation secrets, and ensure persistent increasing room epochs.
-- Sequences start at 1, strictly increase per accepted command and per player.
-- Repeated last accepted command has no effect; different payload at same sequence fails.
-- Replays from previous epochs or other rooms fail. Invalid moves do not advance sequence.
-- Player snapshots include the state, status, revision, identity of the seat, and own next sequence.
-- No network, persistence, transport, file permission or rejoin implementation is included.
+## Invariants
 
-## Verification
+- PeerId must be established by an authenticated real transport on GNET-03.
+- Room ID is a routing token, never an access secret. Admission and revocation
+  are GNET-04, not implemented here.
+- A client must trust snapshots only from the admitted host and reject stale
+  revisions. This will be enforced by the GNET-04 client controller.
+- This is NOT a working LAN transport; no sockets, OS network permission,
+  browser, Bluetooth, persistence, or cross-device acceptance is included.
+- The entire crate lives under `modules/game-session` and intentionally does
+  not change Akula's expensive root Rust workspace or its Cargo.lock.
 
-Run from repository root:
+## Focused verification
 
-    cargo fmt --manifest-path modules/game-session/Cargo.toml --all -- --check
-    cargo test --manifest-path modules/game-session/Cargo.toml --locked --offline --all-targets
-    cargo clippy --manifest-path modules/game-session/Cargo.toml --locked --offline --all-targets -- -D warnings
+From repository root:
 
-The path-filtered isolated workflow runs only this small package. Required Application checks
-still reports its stable policy gate, but modules/game-session does not enter main Rust workspace tests.
+```sh
+cargo fmt --manifest-path modules/game-session/Cargo.toml --all -- --check
+cargo test --manifest-path modules/game-session/Cargo.toml --locked --offline --all-targets
+cargo clippy --manifest-path modules/game-session/Cargo.toml --locked --offline --all-targets -- -D warnings
+```
 
-Next: GNET-02 in-memory transport and bounded message protocol; GNET-03 Roha LAN adapter;
-GNET-04 secure admission; GNET-05 physical two-PC acceptance with WAN disconnected.
+CI scope is limited by `.github/workflows/game-session-isolated.yml`.
 
-Source requirements: https://app.notion.com/p/40132a84beec8162aa47e0ef42e999fa
+Design and feature status: https://app.notion.com/p/40132a84beec8162aa47e0ef42e999fa
