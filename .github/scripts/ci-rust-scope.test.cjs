@@ -431,6 +431,7 @@ test('every standalone Rust module has a protected CI owner and executable Cargo
     'dropbox-secret-store':'dropbox-t0-isolated.yml',
     'dropbox-connect-lab':'dropbox-t0-isolated.yml',
     'text-delta-codec':'text-delta-codec-isolated.yml',
+    'game-session':'game-session-isolated.yml',
   };
   const moduleRoot=path.join(__dirname,'../../modules');
   const found=fs.readdirSync(moduleRoot,{withFileTypes:true})
