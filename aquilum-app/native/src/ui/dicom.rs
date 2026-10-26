@@ -52,6 +52,14 @@ impl DicomPage {
         ctx.request_anim_frame();
     }
 
+    fn display_label(&self) -> String {
+        match &self.failure {
+            Some(error) => format!("{} · ошибка чтения: {error}", self.label),
+            None if self.outstanding > 0 && self.image.is_none() => self.label.clone(),
+            None => format!("{} · колесо мыши — срез", self.label),
+        }
+    }
+
     fn refresh(&mut self, ctx: &mut UpdateCtx<'_>) {
         // Drain bounded response channel; render only the newest completed frame.
         for _ in 0..2 {
@@ -79,6 +87,7 @@ impl DicomPage {
                         self.outstanding = 0;
                         self.failure.get_or_insert_with(|| error.to_owned());
                         self.line.clear();
+                        ctx.request_accessibility_update();
                         ctx.request_paint_only();
                     }
                     break;
@@ -165,13 +174,7 @@ impl Widget for DicomPage {
         let theme = theme::current();
         let bounds = ctx.content_box();
         painter.fill(bounds, theme.bg_canvas).draw();
-        let label = if let Some(error) = &self.failure {
-            format!("DICOM: {error}")
-        } else if self.outstanding > 0 && self.image.is_none() {
-            self.label.clone()
-        } else {
-            format!("{} · колесо мыши — срез", self.label)
-        };
+        let label = self.display_label();
         let layout = self.line.layout(ctx, &label, (bounds.width() - 2.0 * MARGIN).max(1.0), Style::ui(16.0));
         render_text(painter, Affine::translate((MARGIN, 18.0)), layout, &[theme.text_primary.into()], true);
         if let Some(image) = &self.image {
@@ -182,7 +185,7 @@ impl Widget for DicomPage {
     }
     fn accessibility_role(&self) -> Role { Role::Image }
     fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, node: &mut Node) {
-        node.set_label(self.label.clone());
+        node.set_label(self.display_label());
     }
     fn children_ids(&self) -> ChildrenIds { ChildrenIds::new() }
 }
