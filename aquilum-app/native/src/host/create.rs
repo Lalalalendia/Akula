@@ -1,4 +1,5 @@
 use super::*;
+mod open_sources;
 
 impl Host {
     pub(super) fn create_window(&mut self, event_loop: &dyn ActiveEventLoop) {
@@ -50,13 +51,7 @@ impl Host {
             Err(err) => report(&format!("вывод кадра: {err}")),
         }
         self.touchpad = crate::touchpad::Touchpad::attach(&*window);
-        if let Some(note) = self.args.open.clone() {
-            // The session title was set before processing --open. Refresh it
-            // only after the requested document has actually become active.
-            if self.app.open(&mut root, note) {
-                window.set_title(&self.app.title());
-            }
-        }
+        self.open_requested_sources(&mut root, window.as_ref());
         if self.args.focus {
             root.focus_on(self.app.editor_id());
         }

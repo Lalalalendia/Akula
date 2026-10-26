@@ -388,7 +388,7 @@ jobs:
               $headerPixelsChanged = ChangedPixels 'before-horizontal-wheel.png' $frame 0.30 0.45 0.60 0.49
               Write-Host "CODE_HWHEEL direction=$direction bodyPixels=$codePixelsChanged headerPixels=$headerPixelsChanged"
               if ($headerPixelsChanged -gt 120) {
-                throw "Fixed code header moved while sending HWHEEL $direction: changed=$headerPixelsChanged"
+                throw "Fixed code header moved while sending HWHEEL ${direction}: changed=$headerPixelsChanged"
               }
               if ($codePixelsChanged -ge 450) {
                 $wheelDirection = $direction

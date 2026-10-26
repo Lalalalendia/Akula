@@ -1,0 +1,257 @@
+name: DICOM no-vault Windows GUI smoke (non-release)
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/dicom-no-vault-gui.yml'
+      - 'aquilum-app/native/src/dicom.rs'
+      - 'aquilum-app/native/src/dicom/**'
+      - 'aquilum-app/native/assets/locales/ru.json'
+      - 'aquilum-app/native/assets/locales/en.json'
+      - 'aquilum-app/native/src/app/tabs/open.rs'
+      - 'aquilum-app/native/src/app/file_menu.rs'
+      - 'aquilum-app/native/src/ui/new_tab.rs'
+      - 'aquilum-app/native/src/ui/workspaces/helpers.rs'
+      - 'aquilum-app/native/src/args.rs'
+      - 'aquilum-app/native/src/host/create.rs'
+      - 'aquilum-app/native/src/app/tabs/open/dicom.rs'
+      - 'aquilum-app/native/src/ui/dicom.rs'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
+      - 'scripts/dicom-native-smoke/**'
+      - 'aquilum-app/native/src/app/actions/dispatch.rs'
+      - 'aquilum-app/native/src/app/file_menu/**'
+      - 'aquilum-app/native/src/app/root_ui.rs'
+      - 'aquilum-app/native/src/app/root_ui/**'
+      - 'aquilum-app/native/src/app/tabs/open/**'
+      - 'aquilum-app/native/src/args/**'
+      - 'aquilum-app/native/src/host/create/**'
+      - 'aquilum-app/native/src/ui/file_tree/actions/**'
+      - 'aquilum-app/native/src/ui/file_tree/model/load/**'
+      - 'aquilum-app/native/src/ui/new_tab/**'
+      - 'aquilum-app/native/src/ui/shell/**'
+      - 'aquilum-app/native/src/ui/workspaces/helpers/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dicom-no-vault-gui-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-gui:
+    runs-on: windows-2022
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: dicom-no-vault-gui
+          cache-on-failure: true
+      - name: Compile real native executable with DICOM preview (not an installer)
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}\.artifacts\cargo-native
+        run: |
+          cargo build --release --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed,dicom-preview
+          if ($LASTEXITCODE -ne 0) { throw 'DICOM GUI build failed' }
+          if (!(Test-Path -LiteralPath '.artifacts\cargo-native\release\aquilum-native.exe')) { throw 'Native executable missing' }
+      - name: Launch GUI with NO Akula vault and inspect DICOM entry points
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path 'shots' | Out-Null
+          $data = Join-Path $env:RUNNER_TEMP 'akula-dicom-empty-workspace'
+          New-Item -ItemType Directory -Force -Path $data | Out-Null
+          $exe = (Resolve-Path '.artifacts\cargo-native\release\aquilum-native.exe').Path
+          $process = Start-Process -FilePath $exe -ArgumentList @('--data-dir', $data) -PassThru
+          try {
+            $window = [IntPtr]::Zero
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Milliseconds 500
+              $process.Refresh()
+              if ($process.HasExited) { throw "DICOM GUI exited: $($process.ExitCode)" }
+              if ($process.MainWindowHandle -ne 0) { $window = $process.MainWindowHandle; break }
+            }
+            if ($window -eq [IntPtr]::Zero) { throw 'Akula GUI did not open a Windows window' }
+            Start-Sleep -Seconds 2
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            try {
+              $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+              $bitmap.Save((Join-Path $PWD 'shots\dicom-no-vault.png'))
+            } finally { $graphics.Dispose(); $bitmap.Dispose() }
+            if ((Get-Item 'shots\dicom-no-vault.png').Length -lt 1500) { throw 'GUI screenshot is empty' }
+            Add-Type -AssemblyName UIAutomationClient
+            Add-Type -AssemblyName UIAutomationTypes
+            $element = [System.Windows.Automation.AutomationElement]::FromHandle($window)
+            $nodes = $element.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+            $names = @($nodes | ForEach-Object { $_.Current.Name } | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+            $names | Out-File -FilePath 'shots\accessibility-names.txt' -Encoding utf8
+            $folder = @($names | Where-Object { $_ -like '*DICOM*folder*' -or $_ -like '*DICOM*папку*' }).Count -gt 0
+            $archive = @($names | Where-Object { $_ -like '*DICOM*ZIP*' }).Count -gt 0
+            if (!$folder -or !$archive) {
+              Write-Host 'DICOM_GUI_ACCESSIBILITY_BUTTONS_NOT_FOUND: inspect screenshot and accessibility-names.txt'
+              throw 'No-vault DICOM buttons are absent from accessibility tree'
+            }
+            Write-Host 'AKULA_DICOM_NO_VAULT_GUI_PASS folder_button=1 archive_button=1'
+          } finally {
+            $process.Refresh()
+            if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate isolated DICOM media with no patient data
+        shell: pwsh
+        run: |
+          python -m pip install 'pydicom==3.0.1' 'numpy==2.2.6'
+          if ($LASTEXITCODE -ne 0) { throw 'pydicom dependency failed' }
+          python scripts/dicom-native-smoke/generate.py scripts/dicom-native-smoke/fixture
+          if ($LASTEXITCODE -ne 0) { throw 'synthetic DICOM fixture failed' }
+      - name: Launch real DICOM ZIP and folder with no vault or import
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
+          $exe = (Resolve-Path '.artifacts\cargo-native\release\aquilum-native.exe').Path
+          # UI Automation focus plus SendInput-backed SendKeys exercises the
+          # actual window input route. Posting WM_KEYDOWN alone did not move
+          # the slice in a real Windows GUI run.
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class DicomGuiKey {
+              [DllImport("user32.dll", SetLastError=true)]
+              public static extern bool SetForegroundWindow(IntPtr hwnd);
+              [DllImport("user32.dll")]
+              public static extern IntPtr GetForegroundWindow();
+          }
+          '@
+          function Send-DicomKey([IntPtr]$hwnd, [uint32]$vk) {
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+            $nodes = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+            $pages = @($nodes | Where-Object { $_.Current.Name -like '*DICOM*серия*срез*' })
+            if ($pages.Count -ne 1) { throw "Expected one DICOM image page, found $($pages.Count)" }
+            if (!$pages[0].Current.IsKeyboardFocusable) { throw 'DICOM image page is not keyboard focusable' }
+            $pages[0].SetFocus()
+            $null = [DicomGuiKey]::SetForegroundWindow($hwnd)
+            Start-Sleep -Milliseconds 200
+            if ([DicomGuiKey]::GetForegroundWindow() -ne $hwnd) {
+              throw "DICOM test cannot focus app window for VK=$vk"
+            }
+            $key = switch ($vk) {
+              0x27 { '{RIGHT}' }
+              0x25 { '{LEFT}' }
+              default { throw "Unexpected DICOM test virtual key $vk" }
+            }
+            [System.Windows.Forms.SendKeys]::SendWait($key)
+            Write-Host "AKULA_DICOM_GUI_KEY_SENT vk=$vk focused=1"
+          }
+          function Wait-DicomSlice([IntPtr]$hwnd, [string]$slice, [bool]$readError = $false) {
+            $last = @()
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              Start-Sleep -Milliseconds 250
+              $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+              $nodes = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+              $last = @($nodes | ForEach-Object { $_.Current.Name } | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+              $matching = @($last | Where-Object {
+                $_ -like "*DICOM*серия*срез $slice*" -and
+                (($readError -and $_ -like '*ошибка чтения*') -or
+                 (!$readError -and $_ -notlike '*ошибка чтения*'))
+              })
+              if ($matching.Count -gt 0) { return [string]$matching[0] }
+            }
+            $last | Out-File -FilePath "shots\dicom-navigation-failure.txt" -Encoding utf8
+            throw "DICOM GUI did not reach slice $slice (readError=$readError)"
+          }
+          foreach ($kind in @('study.zip', 'loose_folder')) {
+            $source = (Resolve-Path "scripts/dicom-native-smoke/fixture/$kind").Path
+            $data = Join-Path $env:RUNNER_TEMP "akula-dicom-open-$($kind.Replace('.', '-'))"
+            New-Item -ItemType Directory -Force -Path $data | Out-Null
+            $before = if ($kind -eq 'study.zip') { (Get-FileHash $source -Algorithm SHA256).Hash } else { $null }
+            $process = Start-Process -FilePath $exe -ArgumentList @('--data-dir', ('"' + $data + '"'), '--open-dicom', ('"' + $source + '"')) -PassThru
+            try {
+              $handle = [IntPtr]::Zero
+              for ($i = 0; $i -lt 60; $i++) {
+                Start-Sleep -Milliseconds 500
+                $process.Refresh()
+                if ($process.HasExited) { throw "DICOM GUI exited during $($kind): $($process.ExitCode)" }
+                if ($process.MainWindowHandle -ne 0) { $handle = $process.MainWindowHandle; break }
+              }
+              if ($handle -eq [IntPtr]::Zero) { throw "No window for $kind" }
+              $loaded = $false
+              $names = @()
+              for ($attempt = 0; $attempt -lt 40; $attempt++) {
+                Start-Sleep -Milliseconds 500
+                $element = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+                $nodes = $element.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+                $names = @($nodes | ForEach-Object { $_.Current.Name } | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+                if (@($names | Where-Object { $_ -like '*DICOM*серия*срез 1/3*' }).Count -gt 0) { $loaded = $true; break }
+              }
+              $names | Out-File -FilePath "shots\$kind-accessibility.txt" -Encoding utf8
+              if (!$loaded) { throw "No rendered DICOM frame in Windows GUI for $kind" }
+              Write-Host "AKULA_DICOM_INPLACE_GUI_PASS source=$kind first_slice=1/3 no_vault=1"
+              Send-DicomKey $handle 0x27 # VK_RIGHT: 1/3 -> 2/3
+              $null = Wait-DicomSlice $handle '2/3'
+              Send-DicomKey $handle 0x27 # VK_RIGHT: 2/3 -> 3/3
+              $null = Wait-DicomSlice $handle '3/3'
+              Send-DicomKey $handle 0x25 # VK_LEFT: 3/3 -> 2/3
+              $null = Wait-DicomSlice $handle '2/3'
+              Write-Host "AKULA_DICOM_GUI_NAVIGATION_PASS source=$kind sequence=1-2-3-2"
+              # Remove and restore the already-open source, never modifying its bytes.
+              # This simulates drive disappearance; it is not a physical DVD test.
+              $offline = "$source.simulated-disconnect"
+              if (Test-Path -LiteralPath $offline) { throw "Test offline path already exists: $offline" }
+              try {
+                Move-Item -LiteralPath $source -Destination $offline -ErrorAction Stop
+                Send-DicomKey $handle 0x27 # Next frame must fail without changing 2/3
+                $null = Wait-DicomSlice $handle '2/3' $true
+                Write-Host "AKULA_DICOM_GUI_MEDIA_LOSS_PASS source=$kind last_slice=2/3"
+              } finally {
+                if (Test-Path -LiteralPath $offline) {
+                  Move-Item -LiteralPath $offline -Destination $source -ErrorAction Stop
+                }
+              }
+              Send-DicomKey $handle 0x27 # Retry after reconnect: 2/3 -> 3/3
+              $null = Wait-DicomSlice $handle '3/3'
+              Write-Host "AKULA_DICOM_GUI_MEDIA_RECOVERY_PASS source=$kind recovered_slice=3/3"
+              if ($before -and (Get-FileHash $source -Algorithm SHA256).Hash -ne $before) { throw "Source archive modified: $kind" }
+            } finally {
+              $process.Refresh()
+              if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
+            }
+          }
+      - name: Prepare isolated, unsigned portable test executable
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path preview | Out-Null
+          $exe = '.artifacts\\cargo-native\\release\\aquilum-native.exe'
+          Copy-Item -LiteralPath $exe -Destination 'preview\\aquilum-native-dicom-preview.exe'
+          $hash = (Get-FileHash -LiteralPath 'preview\\aquilum-native-dicom-preview.exe' -Algorithm SHA256).Hash
+          "$hash  aquilum-native-dicom-preview.exe" | Out-File 'preview\\SHA256.txt' -Encoding ascii
+          "UNSIGNED EXPERIMENTAL TEST ONLY. Not an installer, not a medical device, not an approved Akula release. Source commit: $env:GITHUB_SHA. No auto-update or patient-data upload. Run only after verifying source and hash." | Out-File 'preview\\README.txt' -Encoding utf8
+          Write-Host "AKULA_DICOM_PORTABLE_TEST_READY sha256=$hash"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: akula-dicom-unsigned-test-${{ github.run_id }}
+          path: preview/
+          if-no-files-found: error
+          retention-days: 3
+      - name: Upload no-patient screenshot and accessibility labels only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-dicom-no-vault-ui-${{ github.run_id }}
+          path: shots/
+          if-no-files-found: warn
+          retention-days: 7

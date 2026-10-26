@@ -1,4 +1,10 @@
 {
+  "dicom": {
+    "openFolder": "DICOM: открыть папку без импорта",
+    "openFile": "DICOM: открыть ZIP или файл",
+    "openCurrentFolder": "DICOM: открыть эту папку напрямую",
+    "openCurrentFile": "Открыть DICOM без импорта"
+  },
   "transfer": {
     "title": "Передача файлов",
     "close": "Закрыть передачу",

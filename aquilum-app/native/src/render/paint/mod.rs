@@ -2,6 +2,7 @@ pub(super) mod convert;
 mod cull;
 mod error;
 mod filter_chain;
+mod filter_budget;
 mod filter_route;
 mod mask;
 #[cfg(any(test, not(feature = "installed")))]
@@ -22,7 +23,6 @@ pub fn settings(threads: u16) -> RenderSettings {
     let level = level.as_sse4_2().map_or(level, vello_cpu::Level::Sse4_2);
     RenderSettings { num_threads: threads, level }
 }
-
 const TOLERANCE: f64 = 0.1;
 
 pub struct Painter {
