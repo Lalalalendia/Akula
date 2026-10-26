@@ -5,6 +5,12 @@ on:
       - 'feat/dicom-readonly-preview-20261026'
     paths:
       - '.github/workflows/dicom-windows-preview.yml'
+      - 'aquilum-app/native/src/dicom.rs'
+      - 'aquilum-app/native/src/dicom/**'
+      - 'aquilum-app/native/src/ui/dicom.rs'
+      - 'aquilum-app/native/src/app/tabs/open/dicom.rs'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
 permissions:
   contents: read
 concurrency:
