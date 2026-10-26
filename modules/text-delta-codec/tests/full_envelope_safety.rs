@@ -65,3 +65,48 @@ fn full_frame_refuses_forged_base_metadata_even_with_external_base_bytes() {
         );
     }
 }
+
+#[test]
+fn full_frame_rejects_unknown_wire_versions_modes_and_reserved_bits() {
+    let (revision, _, frame) = full_frame();
+    // Reserved header bits must not be silently accepted as future features.
+    // An unknown schema or mode requires explicit negotiation, not guessing.
+    for (offset, mask, expected) in [
+        (8usize, 1u8, TextDeltaError::Unsupported),
+        (9, 0x80, TextDeltaError::Unsupported),
+        (10, 1, TextDeltaError::InvalidEnvelope),
+        (11, 1, TextDeltaError::InvalidEnvelope),
+    ] {
+        let mut forged = frame.clone();
+        forged[offset] ^= mask;
+        assert_eq!(
+            decode(&forged, revision, None),
+            Err(expected),
+            "unrecognized FullZstd header field at offset {offset}",
+        );
+    }
+}
+
+#[test]
+fn full_frame_rejects_forged_target_digest_and_payload_length_mismatch() {
+    let (revision, _, frame) = full_frame();
+
+    // Integrity covers decoded bytes, not merely a valid zstd stream.
+    let mut forged_digest = frame.clone();
+    forged_digest[76] ^= 1;
+    assert_eq!(decode(&forged_digest, revision, None), Err(TextDeltaError::Integrity));
+
+    // The 32-bit compressed length must match the exact wire frame boundary.
+    // Neither appended nor truncated attacker-controlled bytes are accepted.
+    let mut appended = frame.clone();
+    appended.push(0);
+    assert_eq!(decode(&appended, revision, None), Err(TextDeltaError::OverBudget));
+
+    let mut shortened = frame.clone();
+    shortened.pop();
+    assert_eq!(decode(&shortened, revision, None), Err(TextDeltaError::OverBudget));
+
+    let mut false_length = frame.clone();
+    false_length[116] ^= 1;
+    assert_eq!(decode(&false_length, revision, None), Err(TextDeltaError::OverBudget));
+}
