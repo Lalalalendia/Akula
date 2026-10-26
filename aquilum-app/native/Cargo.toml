@@ -31,7 +31,7 @@ installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
 messaging-w4-pilot = []
 memory-probe = []
 # Opt-in experimental local DICOM viewing. Not included in the installed build.
-dicom-preview = ["dep:dicom-core", "dep:dicom-object", "dep:dicom-pixeldata"]
+dicom-preview = ["dep:dicom-core", "dep:dicom-object", "dep:dicom-pixeldata", "dep:zip"]
 # User-visible Windows read-only SSH verification. No install grant.
 server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
@@ -76,6 +76,8 @@ sha2 = "0.10"
 dicom-core = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
 dicom-object = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
 dicom-pixeldata = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", features = ["image"], optional = true }
+# ZIP is read directly by a bounded ZIP reader; nothing is unpacked to the vault.
+zip = { version = "2.4.2", default-features = false, features = ["deflate"], optional = true }
 uuid = { version = "1.23.5", features = ["v4"] }
 rfd = "0.16"
 pulldown-cmark = { version = "0.13", default-features = false }

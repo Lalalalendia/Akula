@@ -11,3 +11,4 @@ dicom-pixeldata = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62
 
 [dev-dependencies]
 tempfile = "3"
+zip = { version = "2.4.2", default-features = false, features = ["deflate"] }

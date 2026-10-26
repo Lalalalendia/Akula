@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 #[path = "dicom/worker.rs"]
 mod worker;
 pub use worker::{DicomWorker, FrameUpdate, Navigation};
+#[path = "dicom/archive.rs"]
+mod archive;
 
 const PIXEL_DATA: Tag = Tag(0x7fe0, 0x0010);
 const DIRECTORY_RECORD_SEQUENCE: Tag = Tag(0x0004, 0x1220);
@@ -23,12 +25,16 @@ const NUMBER_OF_FRAMES: Tag = Tag(0x0028, 0x0008);
 const ROWS: Tag = Tag(0x0028, 0x0010);
 const COLUMNS: Tag = Tag(0x0028, 0x0011);
 const MAX_SOURCE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const MAX_DIRECTORY_ENTRIES: usize = 10_000;
 const MAX_DIRECTORY_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 4_194_304;
 const MAX_REFERENCES: usize = 512;
 const MAX_TOTAL_FRAMES: usize = 4096;
 
 pub fn is_candidate(path: &Path) -> bool {
+    if archive::is_zip(path) { return true; }
+    if path.is_dir() { return path.join("DICOMDIR").is_file(); }
     if path.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("DICOMDIR")) {
         return true;
     }
@@ -55,7 +61,7 @@ pub fn admit(vault: &Path, source: &Path) -> Result<PathBuf, String> {
         return Err("DICOM: необходим обычный файл или каталог".into());
     }
     if meta.is_file() {
-        let max = if is_dicomdir(source) { MAX_DIRECTORY_BYTES } else { MAX_SOURCE_BYTES };
+        let max = if is_dicomdir(source) { MAX_DIRECTORY_BYTES } else if archive::is_zip(source) { MAX_ARCHIVE_BYTES } else { MAX_SOURCE_BYTES };
         if meta.len() < 132 || meta.len() > max {
             return Err("DICOM: файл пустой или превышает лимит предварительного просмотра".into());
         }
@@ -116,9 +122,44 @@ fn file_set(vault: &Path, index: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(paths)
 }
 
+/// A directory is a valid source even when it has no DICOMDIR. Recursively
+/// enumerate bounded candidate files, without following symlinks or writing.
+fn scan_folder(vault: &Path, folder: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut stack = vec![(folder.to_path_buf(), 0_usize)];
+    let mut result = Vec::new();
+    let mut visited = 0_usize;
+    while let Some((directory, depth)) = stack.pop() {
+        if depth > 8 { return Err("DICOM: слишком глубокое дерево папок".into()); }
+        for entry in fs::read_dir(directory).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            visited += 1;
+            if visited > MAX_DIRECTORY_ENTRIES { return Err("DICOM: слишком много файлов в папке".into()); }
+            let kind = entry.file_type().map_err(|e| e.to_string())?;
+            if kind.is_symlink() { continue; }
+            let path = entry.path();
+            if kind.is_dir() {
+                stack.push((path, depth + 1));
+            } else if kind.is_file() && is_dicom_image(&path) {
+                result.push(admit(vault, &path)?);
+                if result.len() > MAX_REFERENCES { return Err("DICOM: больше 512 изображений в папке".into()); }
+            }
+        }
+    }
+    result.sort();
+    if result.is_empty() { return Err("DICOM: в папке нет изображений".into()); }
+    Ok(result)
+}
+
+fn is_dicom_image(path: &Path) -> bool {
+    let Ok(mut file) = File::open(path) else { return false; };
+    let mut header = [0u8; 132];
+    file.read_exact(&mut header).is_ok() && &header[128..132] == b"DICM"
+}
+
 #[derive(Clone, Debug)]
 struct FrameRef {
     path: PathBuf,
+    member: Option<String>,
     frame: u32,
     order: i32,
 }
@@ -130,6 +171,7 @@ struct Series {
 
 #[derive(Clone, Debug)]
 pub struct Study {
+    root: PathBuf,
     series: Vec<Series>,
     selected_series: usize,
     selected_frame: usize,
@@ -141,9 +183,13 @@ pub struct RenderedFrame {
     pub rgba: Vec<u8>,
 }
 
-fn read_frames(path: PathBuf) -> Result<(String, Vec<FrameRef>), String> {
-    let obj = OpenFileOptions::new().read_until(PIXEL_DATA)
-        .open_file(&path).map_err(|e| format!("DICOM: не удалось прочесть заголовок: {e}"))?;
+fn read_frames(path: PathBuf, member: Option<String>) -> Result<(String, Vec<FrameRef>), String> {
+    let obj = if let Some(name) = &member {
+        archive::read_metadata(&path, name)?
+    } else {
+        OpenFileOptions::new().read_until(PIXEL_DATA)
+            .open_file(&path).map_err(|e| format!("DICOM: не удалось прочесть заголовок: {e}"))?
+    };
     let read_u16 = |tag: Tag| obj.element(tag).ok().and_then(|e| e.to_int::<u16>().ok());
     let rows = read_u16(ROWS).ok_or("DICOM: отсутствует Rows")?;
     let cols = read_u16(COLUMNS).ok_or("DICOM: отсутствует Columns")?;
@@ -160,24 +206,34 @@ fn read_frames(path: PathBuf) -> Result<(String, Vec<FrameRef>), String> {
         .and_then(|e| e.to_str().ok()).map_or_else(|| "single".to_string(), |v| v.trim().to_string());
     let order = obj.element(INSTANCE_NUMBER).ok()
         .and_then(|e| e.to_str().ok()).and_then(|v| v.trim().parse::<i32>().ok()).unwrap_or(0);
-    let frames = (0..number).map(|frame| FrameRef { path: path.clone(), frame, order }).collect();
+    let frames = (0..number).map(|frame| FrameRef { path: path.clone(), member: member.clone(), frame, order }).collect();
     Ok((series, frames))
 }
 
 impl Study {
     pub fn open(vault: &Path, source: &Path) -> Result<Self, String> {
         let source = admit(vault, source)?;
-        let files = if source.is_dir() {
-            file_set(vault, &source.join("DICOMDIR"))?
+        // User-selected folders, ZIP archives and DICOMDIR trees are accessed
+        // in-place. No extraction, copying or import is performed.
+        let files: Vec<(PathBuf, Option<String>)> = if source.is_dir() {
+            let index = source.join("DICOMDIR");
+            if index.is_file() {
+                file_set(vault, &index)?.into_iter().map(|p| (p, None)).collect()
+            } else {
+                scan_folder(vault, &source)?.into_iter().map(|p| (p, None)).collect()
+            }
         } else if is_dicomdir(&source) {
-            file_set(vault, &source)?
+            file_set(vault, &source)?.into_iter().map(|p| (p, None)).collect()
+        } else if archive::is_zip(&source) {
+            archive::candidates(&source)?.into_iter()
+                .map(|member| (source.clone(), Some(member))).collect()
         } else {
-            vec![source]
+            vec![(source, None)]
         };
         let mut groups: BTreeMap<String, Vec<FrameRef>> = BTreeMap::new();
         let mut total = 0usize;
-        for file in files {
-            let (key, mut frames) = read_frames(file)?;
+        for (file, member) in files {
+            let (key, mut frames) = read_frames(file, member)?;
             total = total.checked_add(frames.len()).ok_or("DICOM: переполнение счётчика кадров")?;
             if total > MAX_TOTAL_FRAMES { return Err("DICOM: исследование превышает лимит кадров".into()); }
             groups.entry(key).or_default().append(&mut frames);
@@ -188,7 +244,7 @@ impl Study {
             series.push(Series { frames });
         }
         if series.is_empty() { return Err("DICOM: исследование пустое".into()); }
-        Ok(Self { series, selected_series: 0, selected_frame: 0 })
+        Ok(Self { root: fs::canonicalize(vault).map_err(|e| e.to_string())?, series, selected_series: 0, selected_frame: 0 })
     }
 
     pub fn advance_frame(&mut self, delta: i32) -> bool {
@@ -219,11 +275,14 @@ impl Study {
         let selected = &self.series[self.selected_series].frames[self.selected_frame];
         // Re-validate every file before opening: a previously admitted path
         // may change between reading the DICOMDIR and decoding the frame.
-        let meta = fs::symlink_metadata(&selected.path).map_err(|e| e.to_string())?;
-        if !meta.file_type().is_file() || meta.len() < 132 || meta.len() > MAX_SOURCE_BYTES {
-            return Err("DICOM: источник изменился или превышает лимит".into());
-        }
-        let obj = open_file(&selected.path).map_err(|e| format!("DICOM: ошибка чтения: {e}"))?;
+        // Recheck scope on every frame, including after removable media changes.
+        admit(&self.root, &selected.path)?;
+        let obj = if let Some(name) = &selected.member {
+            let bytes = archive::read_member(&selected.path, name)?;
+            dicom_object::from_reader(bytes.as_slice()).map_err(|e| format!("ZIP/DICOM: {e}"))?
+        } else {
+            open_file(&selected.path).map_err(|e| format!("DICOM: ошибка чтения: {e}"))?
+        };
         let pixels = obj.decode_pixel_data_frame(selected.frame)
             .map_err(|e| format!("DICOM: декодирование кадра: {e}"))?;
         let (width, height) = (pixels.columns(), pixels.rows());
@@ -275,8 +334,9 @@ mod tests {
 
     #[test]
     fn navigation_is_bounded_and_series_switch_resets_slice() {
-        let empty = FrameRef { path: PathBuf::from("x"), frame: 0, order: 1 };
+        let empty = FrameRef { path: PathBuf::from("x"), member: None, frame: 0, order: 1 };
         let mut study = Study {
+            root: PathBuf::from("/tmp/akula"),
             series: vec![Series { frames: vec![empty.clone(), empty.clone()] },
                          Series { frames: vec![empty] }],
             selected_series: 0, selected_frame: 0
