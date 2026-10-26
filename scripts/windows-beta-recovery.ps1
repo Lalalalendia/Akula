@@ -4,7 +4,7 @@ param([Parameter(Mandatory=$true)][string]$ExePath)
 $ErrorActionPreference = 'Stop'
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows' -or
     [IntPtr]::Size -ne 8 -or $PSVersionTable.PSEdition -ne 'Desktop' -or
-    [Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA) {
+    [System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Threading.ApartmentState]::STA) {
     throw 'DESK-15 real recovery requires GitHub-hosted x64 Windows PowerShell STA'
 }
 $installed = Join-Path $env:LOCALAPPDATA 'Akula\akula-app.exe'
@@ -52,11 +52,11 @@ function Find-RecoveryButton {
     $Process.Refresh()
     if ($Process.HasExited -or $Process.MainWindowHandle -eq [IntPtr]::Zero -or
         $Process.MainWindowTitle -notlike 'First note*') { throw 'Unexpected UIA target' }
-    $rootUi = [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Process.MainWindowHandle)
+    $rootUi = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Process.MainWindowHandle)
     if ($null -eq $rootUi) { throw 'Installed recovery HWND has no UIA tree' }
-    $condition = [Windows.Automation.PropertyCondition]::new(
-        [Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Button)
-    $buttons = $rootUi.FindAll([Windows.Automation.TreeScope]::Descendants,$condition)
+    $condition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Button)
+    $buttons = $rootUi.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)
     $matches = @()
     for ($i=0;$i -lt $buttons.Count;$i++) {
         $item = $buttons.Item($i)
@@ -108,14 +108,14 @@ try {
         Start-Sleep -Milliseconds 200
         Assert-Unchanged
         try { $button=Find-RecoveryButton -Process $app -Label 'Restore draft' }
-        catch [Windows.Automation.ElementNotAvailableException] { $button=$null }
+        catch [System.Windows.Automation.ElementNotAvailableException] { $button=$null }
         if ($null -ne $button) { break }
     }
     if ($null -eq $button) { throw 'Installed app did not offer a real Restore draft UIA button after hard kill' }
-    $pattern=$button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)
+    $pattern=$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
     if ($null -eq $pattern) { throw 'Restore draft lacks the Windows UIA InvokePattern' }
     Assert-Unchanged
-    ([Windows.Automation.InvokePattern]$pattern).Invoke()
+    ([System.Windows.Automation.InvokePattern]$pattern).Invoke()
 
     $saved=$false
     for ($i=0;$i -lt 120;$i++) {
@@ -158,7 +158,7 @@ try {
         Start-Sleep -Milliseconds 200
         try {
             $clip=Get-Clipboard -Raw -ErrorAction Stop
-            if ($clip -cne $poison -and $clip.Contains($marker)) { $readback=$clip; break }
+            if (![string]::IsNullOrEmpty($clip) -and $clip -cne $poison -and $clip.Contains($marker)) { $readback=$clip; break }
         } catch [System.Runtime.InteropServices.ExternalException] { }
     }
     if ($null -eq $readback) { throw 'Reopened installed GUI failed to copy recovered note' }
