@@ -294,7 +294,7 @@ jobs:
             # Code body lies below the title and the fixed fence header.
             # The previous (310,155) position targeted the H1, not the code.
             $targetX = $rect.Left + [Math]::Min(420,[int]($width * 0.42))
-            $targetY = $rect.Top + [Math]::Min(370,[int]($height * 0.57))
+            $targetY = $rect.Top + [Math]::Min(338,[int]($height * 0.52))
             if (![AkulaWin32]::SetCursorPos($targetX,$targetY)) { throw 'Cannot target code panel' }
             [AkulaWin32]::mouse_event(0x1000,0,0,-240,[UIntPtr]::Zero)
             Start-Sleep -Milliseconds 800
@@ -321,10 +321,11 @@ jobs:
                 $b.Dispose()
               }
             }
-            # Deterministic 1000x650 window: code text region and fixed fence header.
-            $codePixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.33 0.55 0.61 0.85
+            # Deterministic 1000x650 window: the first unwrapped code line (y≈330)
+            # and the fixed fence header (y≈300), not the blank area beneath a single line.
+            $codePixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.33 0.495 0.61 0.545
             $headerPixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.30 0.45 0.60 0.49
-            if ($codePixelsChanged -lt 450) {
+            if ($codePixelsChanged -lt 320) {
               throw "Horizontal wheel did not shift code-body pixels: changed=$codePixelsChanged"
             }
             if ($headerPixelsChanged -gt 120) {
