@@ -5,7 +5,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const core=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
 const shared=fs.readFileSync(path.join(__dirname,'../workflows/ci-shared-manifest-labs.yml'),'utf8');
-const routeEntries=[["host-custody","sync-host-custody.yml",["core","native"]],["b0c-ssh-native","core-server-bootstrap-b0c-windows-ssh.yml",["native","owned_b0c_ssh"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core","owned_b1b2b_vm"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core","owned_b1c1_vm"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib","owned_b1b3c_fd"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core","owned_b1b4b1_ipc"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib","owned_b1d0_opt"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock","owned_s3_minio"]],["s3-platform","sync-s3-platform.yml",["core","lock","native"]],["pinned-read","sync-pinned-read.yml",["core","lock","owned_pinned_read"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock","owned_s3_reservation"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock","owned_windows_beta"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock","owned_linux_beta"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]],["device-roster","sty-device-roster-lab.yml",["core"]],["native-positive","sync-native-positive-host.yml",["native"]]];
+const routeEntries=[["host-custody","sync-host-custody.yml",["core","native"]],["b0c-ssh-native","core-server-bootstrap-b0c-windows-ssh.yml",["native","owned_b0c_ssh"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core","owned_b1b2b_vm"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core","owned_b1c1_vm"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib","owned_b1b3c_fd"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core","owned_b1b4b1_ipc"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib","owned_b1c0_node"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib","owned_b1d0_opt"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock","owned_s3_minio"]],["s3-platform","sync-s3-platform.yml",["core","lock","native"]],["pinned-read","sync-pinned-read.yml",["core","lock","owned_pinned_read"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock","owned_s3_reservation"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock","owned_windows_beta"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock","owned_linux_beta"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]],["device-roster","sty-device-roster-lab.yml",["core"]],["native-positive","sync-native-positive-host.yml",["native"]]];
 
 test('29 owned routes preserve direct-only versus required callable owners',()=>{
   assert.equal(routeEntries.length,29);
@@ -19,7 +19,7 @@ test('29 owned routes preserve direct-only versus required callable owners',()=>
       for(const file of ["aquilum-app/core/src/sync/host_install_unix_root.rs","aquilum-app/core/src/sync/host_install_witness.rs","aquilum-app/core/src/sync/mod.rs","aquilum-app/native/Cargo.toml",".github/workflows/sync-installed-os-owner-witness.yml","docs/sync/adr-0038-unix-root-owned-install-receipt.md"]){
         assert.equal(sources.assess({paths:[file]}).installed_owner_owned,true,file);
       }
-    } else if(['host-custody','sync-protection','text-delta','appimage-beta','windows-beta','linux-beta','b1c1-vm','b1b2b-ubuntu','b1d0-opt','b1b3c-fd'].includes(id)){
+    } else if(['host-custody','sync-protection','text-delta','appimage-beta','windows-beta','linux-beta','b1c1-vm','b1b2b-ubuntu','b1d0-opt','b1b3c-fd','b1c0-node'].includes(id)){
       assert.match(body,/^on:\n  workflow_call:/m);
       assert.doesNotMatch(body,/^  pull_request:/m);
     } else assert.match(body,/^on:\n  workflow_call:\n  pull_request:/m);
@@ -29,7 +29,7 @@ test('29 owned routes preserve direct-only versus required callable owners',()=>
     }
     const group=body.match(/^  group: (.*)$/m)?.[1];
     if(group)assert.ok(group.includes('github.workflow'),file+' direct/called concurrency separated');
-    if(!['installed-owner','host-custody','sync-protection','text-delta','appimage-beta','windows-beta','linux-beta','b1c1-vm','b1b2b-ubuntu','b1d0-opt','b1b3c-fd'].includes(id))assert.match(body,new RegExp(file.replace(/\./g,'\\.'),'m'),file+' watches itself');
+    if(!['installed-owner','host-custody','sync-protection','text-delta','appimage-beta','windows-beta','linux-beta','b1c1-vm','b1b2b-ubuntu','b1d0-opt','b1b3c-fd','b1c0-node'].includes(id))assert.match(body,new RegExp(file.replace(/\./g,'\\.'),'m'),file+' watches itself');
     assert.match(shared,new RegExp('  route-'+id+':\\n'),file+' included');
     assert.ok(shared.includes('uses: ./.github/workflows/'+file),file+' callable');
     for(const key of keys)assert.ok(shared.includes('inputs.'+key),'input '+key+' used by router');
@@ -223,6 +223,42 @@ test('B1b4b1 main PRs use one required witness IPC; experiment PR keeps legacy d
   assert.ok(shared.includes("route-b1b4b1-ipc:\n    name: Impacted shared manifest / b1b4b1-ipc\n    if: $"+
     "{{ inputs.core || inputs.owned_b1b4b1_ipc }}"));
   assert.ok(shared.includes('["route-b1b4b1-ipc",["core","owned_b1b4b1_ipc"]]'));
+});
+
+
+test('B1c0 root fixed signed CAS requires all old source paths through Main gate',()=>{
+  const routes=require('./ci-shared-manifest-route.cjs');
+  const {parse}=require('./ci-file-ratchet.cjs');
+  const wf=fs.readFileSync(path.join(__dirname,'../workflows/core-server-bootstrap-b1c0-fixed-node.yml'),'utf8');
+  const formerOwners=[
+    "aquilum-app/core/src/server_installer_pinned_release_lab.rs",
+    "aquilum-app/core/src/server_installer_fixed_node_lab.rs",
+    "aquilum-app/core/tests/server_bootstrap_b1c0.rs",
+    ".github/workflows/core-server-bootstrap-b1c0-fixed-node.yml",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1C0.md"
+];
+  assert.deepEqual(routes.OWNED_SUITES.owned_b1c0_node,formerOwners);
+  assert.equal(parse(wf).t,'none','independent main PR workflow must be gone');
+  assert.match(wf,/^on:\n  workflow_call:\n  workflow_dispatch:\n/m);
+  assert.match(wf,/Real root-only CAS \+ fixed-path signed file commit, negative tests/);
+  assert.match(wf,/B1C0_ROOT_SIGNED_CAS_FIXED_NODE_FILE_PASS/);
+  for(const f of formerOwners){
+    assert.equal(routes.assess({paths:[f]}).owned_b1c0_node,true,'source-only '+f);
+    assert.equal(routes.assess({paths:[f,routes.LOCK]}).owned_b1c0_node,true,'mixed lock '+f);
+  }
+  assert.equal(routes.assess({paths:['README.md']}).owned_b1c0_node,false);
+  const required=core.split('  shared-labs:\n')[1]?.split('  checks:\n')[0]||'';
+  const gate=core.split('  checks:\n')[1]||'';
+  assert.ok(core.includes("owned_b1c0_node: $"+"{{ steps.scope.outputs.owned_b1c0_node }}"));
+  assert.ok(core.includes("owned_b1c0_node: $"+"{{ needs.classify.outputs.owned_b1c0_node == 'true' }}"));
+  assert.ok(required.split('    uses: ./.github/workflows/ci-shared-manifest-labs.yml')[0]
+    .includes("needs.classify.outputs.owned_b1c0_node == 'true'"));
+  assert.match(gate,/SHARED_RISKY: .*owned_b1c0_node/);
+  assert.match(gate,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+  assert.ok(gate.includes('if [ "$ROUTED_SHARED_RESULT" != success ]; then'));
+  assert.ok(shared.includes("route-b1c0-node:\n    name: Impacted shared manifest / b1c0-node\n    if: $"+
+    "{{ inputs.core || inputs.lib || inputs.owned_b1c0_node }}"));
+  assert.ok(shared.includes('["route-b1c0-node",["core","lib","owned_b1c0_node"]]'));
 });
 
 test('one skipped caller on harmless edits, with old Main PR gate failing closed on risky diffs',()=>{
