@@ -49,4 +49,3 @@ jobs:
             (Join-Path $env:GITHUB_WORKSPACE 'scripts/test-windows-signed-next-version-upgrade.ps1'),
             [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count -ne 0) { throw "Signed Windows upgrade script syntax error: $($errors[0])" }
-
