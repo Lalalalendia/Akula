@@ -173,17 +173,22 @@ fn m1de_native_review_only_offers_explicit_nondestructive_intents() {
     }), "forged selection cannot expose even a confirmation action");
 }
 
+#[cfg(not(all(target_os = "windows", feature = "s3-pair-beta")))]
 #[test]
 fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     let ctx = Context::new(1.0);
     let mut config = AppConfig::default();
     i18n::set_language("ru");
     let sections = blocks(Section::Sync, &config, &ctx);
-    assert_eq!(sections.len(), 2);
+    // The installed edition adds a separate read-only Dropbox section;
+    // Yandex's first section and its no-credentials guard remain unchanged.
+    assert_eq!(sections.len(), if cfg!(feature = "dropbox-readonly-preview") { 3 } else { 2 });
     let setup = &sections[0];
     assert_eq!(setup.title, t("settings.yandex.title"));
     let mut links = 0;
     let mut disabled_probe = 0;
+    let mut store_keys = 0;
+    let mut remove_keys = 0;
     let mut writable_fields = 0;
     for row in &setup.rows {
         if row.setter.is_some() {
@@ -194,9 +199,9 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
         if let Control::Buttons(buttons) = &row.control {
             for button in buttons {
                 match &button.action {
-                    Action::OpenUrl(url) if !button.enabled => {
+                    Action::CheckYandexConnection => {
                         disabled_probe += 1;
-                        assert!(url.starts_with("https://yandex.cloud/"));
+                        assert!(!button.enabled, "blank bucket must forbid network check");
                     }
                     Action::OpenUrl(url) => {
                         links += 1;
@@ -204,7 +209,15 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
                             || *url == "https://console.yandex.cloud/",
                             "Only pinned HTTPS Yandex documentation destinations are allowed");
                     }
-                    other => panic!("An S3 setup button must not grant write/sync capability: {other:?}"),
+                    Action::StoreYandexKeys => {
+                        store_keys += 1;
+                        assert!(!button.enabled, "No bucket: cannot open credential UI");
+                    }
+                    Action::RemoveYandexKeys => {
+                        remove_keys += 1;
+                        assert!(!button.enabled, "No verified local credential: cannot remove");
+                    }
+                    other => panic!("S3 setup must not grant remote write/sync capability: {other:?}"),
                 }
             }
         }
@@ -212,6 +225,7 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     assert_eq!(writable_fields, 2);
     assert_eq!(links, 5);
     assert_eq!(disabled_probe, 1);
+    assert_eq!((store_keys, remove_keys), (1, 1));
     assert!(setup.rows.iter().any(|row| row.label == t("settings.yandex.credentialSafety")));
     assert!(setup.rows.iter().any(|row| row.label == t("settings.yandex.explanation")));
 
@@ -229,6 +243,44 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     set_profile(&mut config, &Value::Text("keys=not-safe".into()));
     assert_eq!(config.s3_onboarding.bucket, "private-akula-bucket");
     assert_eq!(config.s3_onboarding.aws_profile_name, "akula_yc");
+    // Only a Windows user with a chosen bucket can invoke the native
+    // OS credential dialog; the button never starts S3 network traffic.
+    let user_controls = blocks(Section::Sync, &config, &ctx);
+    let buttons = user_controls[0].rows.iter().flat_map(|row| match &row.control {
+        Control::Buttons(items) => items.as_slice(),
+        _ => &[],
+    }).collect::<Vec<_>>();
+    let save = buttons.iter().find(|b| b.action == Action::StoreYandexKeys).unwrap();
+    let delete = buttons.iter().find(|b| b.action == Action::RemoveYandexKeys).unwrap();
+    assert_eq!(save.enabled, cfg!(target_os = "windows"));
+    assert!(!delete.enabled);
+    let mut ctx_with_keys = Context::new(1.0);
+    ctx_with_keys.yandex_keys = Some(true);
+    let present = blocks(Section::Sync, &config, &ctx_with_keys);
+    let buttons = present[0].rows.iter().flat_map(|row| match &row.control {
+        Control::Buttons(items) => items.as_slice(),
+        _ => &[],
+    }).collect::<Vec<_>>();
+    assert_eq!(buttons.iter().find(|b| b.action == Action::RemoveYandexKeys)
+        .unwrap().enabled, cfg!(target_os = "windows"));
+    assert!(present[0].rows.iter().any(|r| r.label == t("settings.yandex.keyStatus")));
+    let check = buttons.iter().find(|b| b.action == Action::CheckYandexConnection).unwrap();
+    assert_eq!(check.enabled,
+        cfg!(all(target_os = "windows", feature = "yandex-s3-connection-preview")));
+    ctx_with_keys.yandex_probe_busy = true;
+    let busy = blocks(Section::Sync, &config, &ctx_with_keys);
+    let busy_check = busy[0].rows.iter().flat_map(|row| match &row.control {
+        Control::Buttons(items) => items.as_slice(), _ => &[],
+    }).find(|b| b.action == Action::CheckYandexConnection).unwrap();
+    assert!(!busy_check.enabled, "a single-flight check cannot start twice");
+    ctx_with_keys.yandex_probe_busy = false;
+    ctx_with_keys.yandex_probe = crate::yandex_probe_session::ProbeView::ReadOnlyListVerified;
+    let success = blocks(Section::Sync, &config, &ctx_with_keys);
+    assert!(success[0].rows.iter().any(|r| r.label == t("settings.yandex.probeStatus")),
+        "read-only status should appear after an explicit worker completion");
+    assert!(success[0].rows.iter().any(|r| r.label == t("settings.yandex.explanation")),
+        "successful listing must not remove the explicit inactive Sync status");
+
     i18n::set_language("en");
     let english = blocks(Section::Sync, &config, &ctx);
     assert_eq!(english[0].title, t("settings.yandex.title"));
@@ -236,39 +288,35 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
 }
 
 
+#[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
 #[test]
-fn b1d0_native_server_settings_are_nonsecret_and_never_offer_an_install_grant() {
-    let mut config = AppConfig::default();
-    let ctx = Context::new(1.0);
-    i18n::set_language("ru");
-    let sections = blocks(Section::Server, &config, &ctx);
-    assert_eq!(sections.len(),1);
-    let page = &sections[0];
-    assert_eq!(page.title, t("settings.server.title"));
-    let writable: Vec<_> = page.rows.iter().filter(|r| r.setter.is_some()).collect();
-    assert_eq!(writable.len(), 5);
-    assert!(writable.iter().all(|row| matches!(
-        &row.control, Control::Text { commit:true,.. }|Control::Number(_)
-    )));
-    let mut blocked_actions=0;
-    for row in &page.rows {
-        if let Control::Buttons(buttons)= &row.control {
-            for button in buttons {
-                assert!(!button.enabled, "no SSH verification/install without OS trust");
-                blocked_actions+=1;
-            }
-        }
-    }
-    assert_eq!(blocked_actions,2);
-    // Attempt to paste a secret as an OpenSSH *public* host key.
-    let key_row=writable.iter().find(|r|
-        r.label==t("settings.server.publicKey")).unwrap();
-    let Some(Setter::Config(set))=key_row.setter else { panic!("expected setter") };
-    set(&mut config, &Value::Text("-----BEGIN OPENSSH PRIVATE KEY-----".into()));
-    assert!(config.server_setup.host_public_key.is_empty());
-    i18n::set_language("en");
+fn s3_compact_setup_requires_keys_and_explicit_configure_before_sync() {
+    let config = AppConfig::default();
+    let mut ctx = Context::new(1.0);
+    let sections = blocks(Section::Sync, &config, &ctx);
+    let setup = &sections[0];
+    assert_eq!(setup.title, t("settings.yandex.pairEntry"));
+    let buttons = setup.rows.iter().flat_map(|row| match &row.control {
+        Control::Buttons(items) => items.as_slice(), _ => &[],
+    }).collect::<Vec<_>>();
+    assert!(buttons.iter().find(|b| b.action == Action::StoreYandexKeys)
+        .expect("native system keys button").enabled,
+        "public bucket is captured and validated by the modal before WinCred opens");
+    assert!(!buttons.iter().find(|b| b.action == Action::ConfigureS3Pair)
+        .expect("configure after verified credential").enabled);
+    assert!(!buttons.iter().any(|b| b.action == Action::SyncS3PairOnce),
+        "Sync must not exist for an unregistered cloud profile");
+
+    ctx.yandex_keys = Some(true);
+    let buttons = blocks(Section::Sync, &config, &ctx)[0].rows.iter()
+        .flat_map(|row| match &row.control {
+            Control::Buttons(items) => items.as_slice(), _ => &[],
+        }).map(|b| (b.action.clone(), b.enabled)).collect::<Vec<_>>();
+    assert!(!buttons.iter().any(|(a, enabled)|
+        *a == Action::ConfigureS3Pair && *enabled));
 }
 
+mod server;
 #[test]
 fn system_about_section_links_to_project_telegram_channel() {
     let sections = blocks(Section::System, &AppConfig::default(), &Context::new(1.0));

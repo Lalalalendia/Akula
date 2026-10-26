@@ -24,7 +24,8 @@ test('Windows packager has a distinct, version-pinned Akula identity', () => {
   assert.equal(config.name, 'aquilum-native', 'must avoid cargo-packager 0.11.8 trying to chdir into JSON file');
   assert.equal(config.identifier, 'io.github.lalalendia.akula');
   assert.notEqual(config.identifier, 'com.dmitriy.aquilum-app');
-  assert.deepEqual(config.binaries, [{ path: 'akula-app', main: true }]);
+  assert.deepEqual(config.binaries, [{ path: 'akula-app', main: true }, { path: 'shiva-pdf-preview', main: false }]);
+  assert.match(workflow, /shiva-pdf-preview\.exe/, 'Windows beta must bundle the native PDF companion');
   assert.equal(path.resolve(root, 'aquilum-app/native/packaging', config.binariesDir),
     path.resolve(root, '.artifacts/cargo-native/release'),
     'cargo-packager 0.11.8 takes binariesDir from JSON; CLI flag is ignored');
@@ -34,6 +35,35 @@ test('Windows packager has a distinct, version-pinned Akula identity', () => {
     '../icons/32x32.png', '../icons/128x128.png',
     '../icons/128x128@2x.png', '../icons/icon.ico',
   ]);
+});
+
+test('Pixel shark icon is installed consistently in Windows EXE, NSIS and desktop packages', () => {
+  const resource = fs.readFileSync(path.join(root, 'aquilum-app/native/assets/icon.ico'));
+  const installer = fs.readFileSync(path.join(root, 'aquilum-app/native/icons/icon.ico'));
+  assert.deepEqual(resource, installer, 'native EXE and NSIS must use the same shark artwork');
+  assert.equal(resource.readUInt16LE(0), 0);
+  assert.equal(resource.readUInt16LE(2), 1, 'Windows ICO image type');
+  assert.ok(resource.readUInt16LE(4) >= 6, 'include multiple Windows taskbar resolutions');
+
+  const icons = [
+    ['aquilum-app/native/assets/icon-64.png', 64],
+    ['aquilum-app/native/icons/32x32.png', 32],
+    ['aquilum-app/native/icons/128x128.png', 128],
+    ['aquilum-app/native/icons/128x128@2x.png', 256],
+  ];
+  for (const [filename, size] of icons) {
+    const content = fs.readFileSync(path.join(root, filename));
+    assert.equal(content.subarray(0, 8).toString('hex'), '89504e470d0a1a0a',
+      filename + ' must be a real PNG');
+    assert.equal(content.readUInt32BE(16), size);
+    assert.equal(content.readUInt32BE(20), size);
+  }
+  const icns = fs.readFileSync(path.join(root, 'aquilum-app/native/icons/icon.icns'));
+  assert.equal(icns.toString('ascii', 0, 4), 'icns');
+  assert.equal(icns.readUInt32BE(4), icns.length);
+  const nativeBuild = read('aquilum-app/native/build.rs');
+  assert.match(nativeBuild, /join\("assets\/icon\.ico"\)/,
+    'Windows binary resource should use the new icon.ico');
 });
 
 test('Windows runtime data and global process identities do not alias Aquilum', () => {
@@ -82,12 +112,18 @@ test('installer smoke checks distinct directories and preserves existing Aquilum
 });
 
 test('installed Windows beta GUI edit must use OS-level input into its own foreground editor', () => {
+  const route = require('./ci-shared-manifest-route.cjs');
   for (const value of [
     'scripts/windows-beta-gui-input.ps1',
     'scripts/test-windows-beta.ps1',
   ]) {
-    assert.ok(workflow.includes(value), 'missing Windows CI path: ' + value);
+    assert.ok(route.OWNED_SUITES.owned_windows_beta.includes(value),
+      'missing required Windows CI owner path: ' + value);
+    assert.equal(route.assess({ paths: [value] }).owned_windows_beta, true,
+      'Windows GUI source-only change must enter Main PR gate: ' + value);
   }
+  assert.ok(script.includes('windows-beta-gui-input.ps1'),
+    'installed Windows smoke must still invoke the real OS GUI input helper');
   for (const value of [
     'Start-And-Close -EditNote',
     "if ($EditNote -or $VerifyRestoredContent) { $arguments += ' --focus' }",

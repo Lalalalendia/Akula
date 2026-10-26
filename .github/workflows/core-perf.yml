@@ -9,7 +9,7 @@ on:
         type: string
         default: "1000"
   pull_request:
-    types: [labeled, edited]
+    types: [labeled]
     paths:
       - "aquilum-app/core/**"
       - ".github/workflows/core-perf.yml"
