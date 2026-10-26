@@ -26,12 +26,15 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install fixture generator requirement
-        run: python -m pip install 'Pillow==11.3.0'
+        run: python -m pip install 'Pillow==11.3.0' 'pydicom==3.0.1' 'numpy==2.2.6'
       - name: Generate synthetic DICOM and verify file hashes
         run: |
           set -euo pipefail
           python scripts/dicom-lab/generate.py
           python scripts/dicom-lab/verify.py
+      - name: Independently verify raw lossless pixels using pydicom
+        continue-on-error: true
+        run: python scripts/dicom-lab/reference_check.py
       - name: Fetch pinned DCMfx Rust workspace (separate from Akula)
         shell: bash
         run: |
@@ -98,4 +101,10 @@ jobs:
           assert set(pairs)==expected, f'missing adapters: {expected-set(pairs)}'
           assert all(pairs[x]=='0' for x in expected), f'compilation failed: {pairs}'
           assert Path('scripts/dicom-lab/results/results.csv').exists(), 'results missing'
+          import csv
+          ref=Path('scripts/dicom-lab/results/reference.csv')
+          assert ref.exists(), 'pydicom reference results missing'
+          statuses=[row['status'] for row in csv.DictReader(ref.open())]
+          assert len(statuses)==10, f'expected 10 reference rows, got {len(statuses)}'
+          assert all(x in ('RAW_HASH_MATCH','LOSSY_DECODE_ONLY','EXPECTED_REJECTION') for x in statuses), f'pydicom reference failed: {statuses}'
           PY
