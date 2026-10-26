@@ -1,6 +1,6 @@
 mod read;
+mod recovery;
 mod save;
-
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};
