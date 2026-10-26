@@ -71,6 +71,7 @@ jobs:
             echo "Gradient LUT regression not present on this branch" >> "$GITHUB_STEP_SUMMARY"
           fi
           cargo test --release --locked -p vello_common --lib gaussian_blur_untrusted_sigma_ -- --nocapture
+          cargo test --release --locked -p vello_common --lib unpremultiply_malformed_ -- --nocapture
       - name: Exact real glyph 495 source mask / all atlas slots and crop origins
         working-directory: aquilum-app
         shell: bash
