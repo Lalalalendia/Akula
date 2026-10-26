@@ -72,7 +72,7 @@ fn safe_file_id(root: &Path, values: &[String]) -> Result<PathBuf, String> {
     let mut depth = 0;
     for value in values {
         for part in value.split('\\') {
-            let part = part.trim_matches([' ', '\0']);
+            let part = part.trim_matches(|c: char| c == ' ' || c == '\0');
             if part.is_empty() || part.len() > 8 ||
                 !part.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_') {
                 return Err("DICOMDIR: небезопасный идентификатор файла".into());
@@ -96,8 +96,8 @@ fn file_set(vault: &Path, index: &Path) -> Result<Vec<PathBuf>, String> {
     let mut seen = HashSet::new();
     let mut paths = Vec::new();
     for record in records {
-        let kind = record.element(DIRECTORY_RECORD_TYPE)
-            .and_then(|v| v.to_str()).map_err(|e| format!("DICOMDIR: {e}"))?;
+        let kind = record.element(DIRECTORY_RECORD_TYPE).map_err(|e| format!("DICOMDIR: {e}"))?
+            .to_str().map_err(|e| format!("DICOMDIR: {e}"))?;
         if kind.trim() != "IMAGE" { continue; }
         if paths.len() >= MAX_REFERENCES { return Err("DICOMDIR: слишком много изображений для превью".into()); }
         let ids = record.element(REFERENCED_FILE_ID)
