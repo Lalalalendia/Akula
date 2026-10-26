@@ -285,7 +285,7 @@ test('B1b4b root CAS witness routes once for main; experiment PR retains direct 
     assert.equal(routes.assess({paths:[f,routes.LOCK]}).owned_b1b4b_witness,true,'mixed lock '+f);
   }
   assert.equal(routes.assess({paths:['README.md']}).owned_b1b4b_witness,false);
-  assert.match(wf,/Real root-only/);
+  assert.match(wf,/Real UID0 protected signing key and durable CAS tests/);
   const required=core.split('  shared-labs:\n')[1]?.split('  checks:\n')[0]||'';
   const gate=core.split('  checks:\n')[1]||'';
   assert.ok(core.includes("owned_b1b4b_witness: $"+"{{ steps.scope.outputs.owned_b1b4b_witness }}"));
