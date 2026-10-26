@@ -337,7 +337,7 @@ pub use release_pins::{
     admin_enroll_first_b1a_fixed_root_once, admin_stage_first_b1a_fixed_root_once,
     open_provisioned_first_b1a_release, FirstReleaseError,
 };
-
+pub mod helper_install;
 #[cfg(test)]
 mod bootstrap_sequence_tests;
 #[cfg(test)]
