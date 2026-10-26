@@ -151,6 +151,23 @@ jobs:
           AKULA_REQUESTED_VERSION: ${{ inputs.release_version }}
         run: ./scripts/test-windows-signed-next-version-upgrade.ps1
 
+      - name: Retain signed candidate and Win7 SP1 QA evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-windows-win7-sp1-qa-NOT-RELEASE
+          path: |
+            dist/Akula_*-setup.exe
+            dist/Akula_*-setup.exe.sig
+            dist/latest.json
+            dist/latest.json.sig
+            dist/win7-installer-pe-audit/full-audit.json
+            win7-lab-output/PROVENANCE.txt
+            win7-lab-output/pe-audit/full-audit.json
+            win7-full-results/shiva-audit/full-audit.json
+            scripts/akula-win7-sp1-acceptance.ps1
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Transfer candidate solely for independent verification
         uses: actions/upload-artifact@v7
         with:
@@ -333,6 +350,17 @@ jobs:
           Akula is a separate product from Aquilum; Linux/macOS are not
           authorized by this Windows-only release.
           NOTES
+          if [ "$version" = "0.3.15" ]; then
+            cat >> "$RUNNER_TEMP/akula-release-notes.md" <<'WIN7-NOTES'
+
+          ### Windows 7 SP1 x64 — experimental compatibility
+          The new Win7-target executable and PDF helper passed static PE
+          audits and installer smoke tests on Windows Server 2022.
+          Actual Windows 7 SP1 GUI, rendering, PDF and update tests are not
+          yet confirmed. Test on a disposable Windows 7 SP1 x64 VM before
+          relying on the installation or migrating a production vault.
+          WIN7-NOTES
+          fi
       - name: Publish manually approved signed Windows beta as latest Akula release
         shell: bash
         env:
