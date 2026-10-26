@@ -1,5 +1,4 @@
 use std::hash::Hasher;
-
 use masonry::imaging::record::Glyph;
 use masonry::imaging::{BlurredRoundedRect, ClipRef, FillRef, GeometryRef, GlyphRunRef, GroupRef, PaintSink, StrokeRef};
 use masonry::kurbo::{Affine, Rect, RoundedRect};
@@ -22,11 +21,6 @@ impl PaintSink for Tracker {
     }
 
     fn push_group(&mut self, group: GroupRef<'_>) {
-        // This preflight runs before the Vello dispatch route is chosen. A
-        // visible filtered group must never reach the multi-threaded renderer.
-        // Offscreen groups are conservatively counted; they cost serial work
-        // but cannot cause silently missing filter effects or a panic.
-        self.has_filters |= group.composite.alpha > 0.0 && !group.filters.is_empty();
         let level = self.top();
         let (hash, rect) = group.clip.as_ref().map_or((0, self.frame), |clip| clip_bounds(clip, self.lift(level.region)));
         let mut h = H::new(12);
@@ -37,6 +31,7 @@ impl PaintSink for Tracker {
             return;
         }
         if group.mask.is_some() || !group.filters.is_empty() {
+            self.has_filters |= !group.filters.is_empty();
             let area = level.clip.intersect(rect);
             self.forced = Some(self.forced.map_or(area, |f| f.union(area)));
             if let Some(region) = level.region {

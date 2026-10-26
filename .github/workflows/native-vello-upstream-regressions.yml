@@ -10,10 +10,6 @@ on:
       - 'aquilum-app/native/vendor/vello_cpu/src/fine/**'
       - 'aquilum-app/native/src/render/colr_bounds_tests.rs'
       - 'aquilum-app/native/src/render/paint/mask.rs'
-      - 'aquilum-app/native/src/render/paint/mod.rs'
-      - 'aquilum-app/native/src/render/damage/mod.rs'
-      - 'aquilum-app/native/src/render/damage/sink.rs'
-      - 'aquilum-app/native/src/render/renderer/pass.rs'
       - '.github/workflows/native-vello-upstream-regressions.yml'
   workflow_dispatch:
 

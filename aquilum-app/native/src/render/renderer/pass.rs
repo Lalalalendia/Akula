@@ -155,9 +155,6 @@ impl Renderer {
         }
         let painter = &mut self.painter;
         painter.seconds = seconds;
-        // The damage tracker has already replayed the entire scene. Route
-        // filtered groups to Vello's supported serial dispatcher BEFORE
-        // recording the first dirty rectangle, even if damage is fragmented.
         painter.route_for_scene(&damage.areas, self.tracker.has_filters);
         #[cfg(not(feature = "installed"))]
         let mip_before = stage_on.then(|| painter.mip_diagnostic_counters());

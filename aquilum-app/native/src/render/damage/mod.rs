@@ -14,7 +14,6 @@ use std::time::{Duration, Instant};
 use super::scroll::{self, close};
 use super::sprite::Sprite;
 use region::{Past, Region};
-
 #[derive(Clone, Copy)]
 struct Draw {
     hash: u64,
@@ -82,8 +81,7 @@ pub struct Damage {
     pub moves: Vec<Move>,
 }
 
-/// Test-only breakdown of the non-raster damage detector. Timings exclude
-/// scene recording, vello scene encoding and rasterization.
+/// Test-only timing of damage detection; excludes scene encoding and rasterization.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct DamageStats {
@@ -109,8 +107,6 @@ pub struct Tracker {
     past: Vec<Past>,
     pub live: Vec<(u64, Rect, Affine, RoundedRect)>,
     pub sprites: Vec<Sprite>,
-    /// True if scene preflight found a potentially visible filter group.
-    /// Filter effects cannot run in Vello's multi-threaded dispatcher.
     pub has_filters: bool,
     covered: Vec<Rect>,
     #[cfg(test)]
