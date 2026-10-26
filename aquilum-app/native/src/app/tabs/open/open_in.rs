@@ -12,7 +12,7 @@ impl App {
         }
         // Validate the image before changing tabs or navigation: no paths
         // outside this vault, symlinks, oversized or corrupt sources.
-        if image && self.tree.root().and_then(|vault| super::super::media::local_image_preview(vault, &path)).is_none() {
+        if image && self.tree.root().and_then(|vault| crate::app::media::local_image_preview(vault, &path)).is_none() {
             return false;
         }
         if crate::docx::is_docx_path(&path) && self.tree.root().and_then(|v| crate::docx::admit(v, &path).ok()).is_none() { return false; }

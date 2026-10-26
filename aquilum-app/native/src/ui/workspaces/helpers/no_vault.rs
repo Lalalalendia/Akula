@@ -24,4 +24,3 @@ pub fn no_vault(error: Option<&str>) -> (NewWidget<Flex>, WidgetId, Option<Widge
         icons::FOLDER_OPEN, &t("fileTree.noFolder"), error, Some(controls.erased())
     ), id, folder_id, file_id)
 }
-

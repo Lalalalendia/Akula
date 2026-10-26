@@ -38,4 +38,3 @@ pub struct Chrome {
     pub focus_hidden: Vec<Handle<Visible>>,
     pub focus_shown: Handle<Visible>,
 }
-

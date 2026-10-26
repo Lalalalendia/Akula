@@ -8,7 +8,7 @@ use super::super::tokens::size;
 use super::super::widgets::LinkButton;
 use crate::i18n;
 
-pub(super) fn new_tab_view() -> (NewWidget<Flex>, WidgetId, WidgetId, WidgetId, Option<WidgetId>, Option<WidgetId>) {
+pub(in crate::ui) fn new_tab_view() -> (NewWidget<Flex>, WidgetId, WidgetId, WidgetId, Option<WidgetId>, Option<WidgetId>) {
     let create = LinkButton::new(&i18n::t("editor.createNote"));
     let open = LinkButton::new(&i18n::t("editor.openFile"));
     let close = LinkButton::new(&i18n::t("editor.close"));
