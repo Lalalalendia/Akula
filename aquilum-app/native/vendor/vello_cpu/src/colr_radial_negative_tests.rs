@@ -12,7 +12,7 @@ use alloc::sync::Arc;
 fn colr_radial_negative_radius_raster_matches_spec() {
     let font_bytes = include_bytes!("colr_radial_negative_fixture.ttf");
     let font = FontData::new(Blob::new(Arc::new(font_bytes.to_vec())), 0);
-    let cases: [(u16, [(&str, u16, u16, [u8; 4]); 3]); 3] = [
+    let cases: [(u32, [(&str, u16, u16, [u8; 4]); 3]); 3] = [
         (2, [
             ("center", 500, 500, [170, 0, 85, 255]),
             ("radius 200", 700, 500, [102, 0, 153, 255]),
