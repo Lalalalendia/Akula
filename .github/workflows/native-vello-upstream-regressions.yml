@@ -66,6 +66,13 @@ jobs:
           set -euo pipefail
           cargo test --release --locked -p glifo --lib colr_radial_ -- --nocapture
 
+      - name: COLRv1 synthetic-font pixel parity for negative radial tips
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p vello_cpu --lib colr_radial_negative_radius_raster_matches_spec -- --nocapture --test-threads=1
+
       - name: Measure COLR fractional fallback cost (diagnostic only)
         if: runner.os == 'Linux'
         working-directory: aquilum-app
