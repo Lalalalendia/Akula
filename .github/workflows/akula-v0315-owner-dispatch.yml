@@ -1,0 +1,80 @@
+# One-time owner-requested release enqueue. Does NOT sign or publish;
+# only dispatches the existing protected manually approved Akula pipeline.
+name: Akula v0.3.15 owner-request dispatch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/release/akula-v0.3.15-dispatch-request.json'
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: akula-v0.3.15-owner-request-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch-once:
+    if: github.repository == 'Lalalalendia/Akula' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Verify exact owner-requested Akula release and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const request = JSON.parse(fs.readFileSync('docs/release/akula-v0.3.15-dispatch-request.json', 'utf8'));
+          const keys = Object.keys(request).sort().join(',');
+          if (keys !== 'publish_beta,release_version,request_id,schema' ||
+              request.schema !== 1 || request.release_version !== '0.3.15' ||
+              request.publish_beta !== true || request.request_id !== 'akula-0315-owner-20261026') {
+            throw new Error('Refusing non-exact or reused owner release request');
+          }
+          const native = fs.readFileSync('aquilum-app/native/Cargo.toml', 'utf8');
+          if (!/^\[package\]\s*\nname = "aquilum-native"\s*\nversion = "0\.3\.15"/m.test(native)) {
+            throw new Error('Current protected main source is not Akula 0.3.15');
+          }
+          const workflow = fs.readFileSync('.github/workflows/akula-windows-signed-candidate.yml', 'utf8');
+          if (!workflow.includes('workflow_dispatch:') ||
+              !workflow.includes('environment: akula-release') ||
+              !workflow.includes('needs: independent-verification') ||
+              !workflow.includes('inputs.publish_beta == true')) {
+            throw new Error('Existing protected publisher controls are missing');
+          }
+          NODE
+          node scripts/akula-version.cjs check
+      - name: Enqueue protected signed v0.3.15 release exactly once
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')"
+          if [[ "$latest" == 'v0.3.15' ]]; then
+            echo 'Akula v0.3.15 is already published; no dispatch required.'
+            exit 0
+          fi
+          if [[ "$latest" != 'v0.3.14' ]]; then
+            echo "::error::Unexpected latest Akula release $latest; refusing publish enqueue"
+            exit 1
+          fi
+          active="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?event=workflow_dispatch&per_page=100" --jq '[.workflow_runs[] | select(.name | startswith("Akula Windows v0.3.15")) | select(.status != "completed")] | length')"
+          if [[ "$active" != 0 ]]; then
+            echo "Akula v0.3.15 signed release already in progress ($active runs); not dispatching a duplicate."
+            exit 0
+          fi
+          gh api --silent --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/akula-windows-signed-candidate.yml/dispatches" \
+            -f ref=main \
+            -f 'inputs[release_version]=0.3.15' \
+            -F 'inputs[publish_beta]=true'
+          echo 'PROTECTED_AKULA_0315_WORKFLOW_DISPATCH_ACCEPTED version=0.3.15 publish_opt_in=true; akula-release environment approvals unchanged.'
