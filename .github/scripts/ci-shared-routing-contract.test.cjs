@@ -674,4 +674,3 @@ test('Text Delta lightweight S3 test runs the actual pack parser; full AWS remai
     'aquilum-app/core/src/sync/s3_transport/pack_probe.rs']),true);
   assert.match(app,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
 });
-

@@ -551,4 +551,3 @@ test('only module-only Text Delta source changes can avoid AWS SDK regression',(
     'aquilum-app/core/src/sync/s3_transport/pack_probe.rs'])
     assert.equal(textDeltaPackBoundaryChanged([p]),true,'both modes: '+p);
 });
-
