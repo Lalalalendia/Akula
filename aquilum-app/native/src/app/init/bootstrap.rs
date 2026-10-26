@@ -22,6 +22,8 @@ impl App {
             workspace,
             #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview::new(),
             tree,
+            #[cfg(feature = "dicom-preview")]
+            dicom_external_sources: HashSet::new(),
             chrome: None,
             interface,
             popup: None,

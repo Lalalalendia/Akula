@@ -22,8 +22,22 @@ impl App {
                         self.tree.set_color(root, &folders, index.checked_sub(1).and_then(|at| palette::NAMES.get(at).copied()));
                     }
                     #[cfg(feature = "dicom-preview")]
-                    MenuChoice::Item(MENU_DICOM_OPEN) if tab.is_none() && targets.len() == 1 && clicked.is_dir() && clicked.join("DICOMDIR").is_file() => {
-                        if self.open_in(root, clicked.join("DICOMDIR"), true) {
+                    MenuChoice::Item(MENU_DICOM_OPEN) if tab.is_none() && targets.len() == 1 && clicked.is_dir() => {
+                        if self.open_dicom_external(root, clicked) {
+                            return Outcome { title: true, ..Outcome::default() };
+                        }
+                    }
+                    #[cfg(feature = "dicom-preview")]
+                    MenuChoice::Item(MENU_DICOM_PICK_FOLDER) if tab.is_none() && clicked.is_dir() => {
+                        self.pick_dicom_source(true);
+                    }
+                    #[cfg(feature = "dicom-preview")]
+                    MenuChoice::Item(MENU_DICOM_PICK_FILE) if tab.is_none() && clicked.is_dir() => {
+                        self.pick_dicom_source(false);
+                    }
+                    #[cfg(feature = "dicom-preview")]
+                    MenuChoice::Item(MENU_DICOM_FILE) if tab.is_none() && !clicked.is_dir() && crate::dicom::is_candidate(&clicked) => {
+                        if self.open_dicom_external(root, clicked) {
                             return Outcome { title: true, ..Outcome::default() };
                         }
                     }

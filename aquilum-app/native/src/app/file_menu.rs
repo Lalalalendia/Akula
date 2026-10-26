@@ -8,6 +8,12 @@ const MENU_PDF_PREVIEW: usize = 3;
 const MENU_PDF_PICK: usize = 4;
 #[cfg(feature = "dicom-preview")]
 const MENU_DICOM_OPEN: usize = 5;
+#[cfg(feature = "dicom-preview")]
+const MENU_DICOM_PICK_FOLDER: usize = 6;
+#[cfg(feature = "dicom-preview")]
+const MENU_DICOM_PICK_FILE: usize = 7;
+#[cfg(feature = "dicom-preview")]
+const MENU_DICOM_FILE: usize = 3;
 
 impl App {
     pub(super) fn open_file_menu(
@@ -33,13 +39,19 @@ impl App {
         } else if !folder && targets.len() == 1 && pdf_preview::is_pdf_path(&clicked) {
             labels.push(("Найти текст PDF в Akula".to_owned(), crate::ui::icons::SEARCH));
         }
+        #[cfg(feature = "dicom-preview")]
+        if !folder && tab.is_none() && targets.len() == 1 && crate::dicom::is_candidate(&clicked) {
+            labels.push(("Открыть DICOM без импорта".to_owned(), crate::ui::icons::SEARCH));
+        }
         let colored = folder && tab.is_none();
         if colored {
             labels.push((t("palette.color"), crate::ui::icons::PALETTE));
             labels.push(("Импортировать PDF в Akula".to_owned(), crate::ui::icons::UPLOAD));
             #[cfg(feature = "dicom-preview")]
-            if targets.len() == 1 && clicked.join("DICOMDIR").is_file() {
-                labels.push(("Открыть медицинское исследование".to_owned(), crate::ui::icons::SEARCH));
+            {
+                labels.push(("DICOM: открыть эту папку напрямую".to_owned(), crate::ui::icons::SEARCH));
+                labels.push(("DICOM: выбрать внешнюю папку".to_owned(), crate::ui::icons::FOLDER));
+                labels.push(("DICOM: выбрать ZIP или файл".to_owned(), crate::ui::icons::SEARCH));
             }
         }
         let items: Vec<crate::ui::menu::Entry<'_>> = labels.iter().map(|(label, icon)| crate::ui::menu::Entry { label, icon: Some(*icon), disabled: false }).collect();

@@ -13,6 +13,8 @@ pub(in crate::app) enum Picked {
     Workspace(PathBuf),
     PdfIndexed(Result<PathBuf, String>),
     PdfChosen(PathBuf),
+    #[cfg(feature = "dicom-preview")]
+    DicomExternal(PathBuf),
     PageCover(PathBuf, PathBuf),
     BookCover(PathBuf, PathBuf),
     Book(PathBuf, Option<PathBuf>),

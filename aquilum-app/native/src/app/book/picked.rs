@@ -10,6 +10,8 @@ impl App {
         match picked {
             Picked::Workspace(path) => return self.switch_workspace(root, path).title,
             Picked::PdfChosen(file) => self.prompt_pdf_preview(root, file),
+            #[cfg(feature = "dicom-preview")]
+            Picked::DicomExternal(path) => return self.open_dicom_external(root, path),
             Picked::PdfIndexed(Ok(note)) => {
                 self.tree.paths_changed(root, std::slice::from_ref(&note));
                 return self.open(root, note);

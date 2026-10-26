@@ -29,6 +29,8 @@ mod workspaces;
 #[cfg(test)]
 mod tests;
 use std::collections::HashMap;
+#[cfg(feature = "dicom-preview")]
+use std::collections::HashSet;
 use crate::ui::editor::TextEditor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -102,6 +104,8 @@ pub struct App {
     workspace: Workspace,
     #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview,
     tree: FileTree,
+    #[cfg(feature = "dicom-preview")]
+    dicom_external_sources: HashSet<PathBuf>,
     chrome: Option<Chrome>,
     interface: Interface,
     popup: Option<Popup>,
