@@ -135,4 +135,73 @@ mod tests {
             eligible(&doc, shown, &out_of_bounds),
         );
     }
+    // Diagnostic only: this measures selecting eligible paragraph indices,
+    // not painting pixels, event-to-present latency, or installed UI frame time.
+    #[test]
+    #[ignore = "opt-in paired highlight range selection A/B, not a speed gate"]
+    fn benchmark_editor_highlight_range_abba() {
+        use std::hint::black_box;
+        use std::time::{Duration, Instant};
+
+        fn checksum(doc: &Document, lines: RangeInclusive<usize>, range: &Range<usize>) -> u64 {
+            lines.filter_map(|i| {
+                let p = doc.paragraph(i);
+                (p.start <= range.end && p.end() >= range.start).then_some((i + 1) as u64)
+            }).sum()
+        }
+
+        fn micros(d: Duration) -> f64 { d.as_secs_f64() * 1_000_000.0 }
+
+        fn at(times: &[Duration], pct: usize) -> f64 {
+            let mut sorted = times.to_vec();
+            sorted.sort();
+            let i = (sorted.len() * pct).div_ceil(100).saturating_sub(1);
+            micros(sorted[i])
+        }
+
+        for lines in [30_000usize, 100_000] {
+            let source = (0..lines).map(|i| format!("строка {i}: a test line 中文\n")).collect::<String>();
+            let doc = Document::new(&source);
+            let n = doc.line_count();
+            for width in [128usize, 2_048] {
+                let first = n / 2;
+                let last = (first + width - 1).min(n - 1);
+                let shown = first..=last;
+                let marks = width.min(256);
+                let ranges: Vec<_> = (0..marks).map(|i| {
+                    let line = first + i * (last - first + 1) / marks;
+                    doc.paragraph(line).range()
+                }).collect();
+
+                let reference = || ranges.iter()
+                    .map(|range| checksum(&doc, shown.clone(), range)).sum::<u64>();
+                let candidate = || ranges.iter()
+                    .map(|range| checksum(&doc, paint_range_lines(&doc, shown.clone(), range), range)).sum::<u64>();
+                let expected = black_box(reference());
+                assert_eq!(candidate(), expected);
+
+                let (mut a, mut b) = (Vec::new(), Vec::new());
+                for round in 0..8 {
+                    let mut sample = |new: bool| {
+                        let start = Instant::now();
+                        let result = black_box(if new { candidate() } else { reference() });
+                        assert_eq!(result, expected);
+                        (start.elapsed(), result)
+                    };
+                    if round % 2 == 0 {
+                        a.push(sample(false).0);
+                        b.push(sample(true).0);
+                    } else {
+                        b.push(sample(true).0);
+                        a.push(sample(false).0);
+                    }
+                }
+                println!(
+                    "EDITOR_RANGE_AB lines={lines} visible={} marks={marks} old_p50_us={:.2} new_p50_us={:.2} old_p95_us={:.2} new_p95_us={:.2} checksum={expected}",
+                    last - first + 1, at(&a, 50), at(&b, 50), at(&a, 95), at(&b, 95),
+                );
+            }
+        }
+    }
+
 }

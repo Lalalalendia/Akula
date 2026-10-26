@@ -2,6 +2,8 @@
 //! decision and the actual Staya QueueSelection. Only disposable test files.
 //! This is not proof of trusted long-lived Device enrollment or File Gate.
 
+#[cfg(feature = "sender-arm-lab")]
+use akula_staya_integration::sender_arm_lab::{LabArmError, LabSenderFence};
 use akula_staya_integration::{prepare_staya_batch, verify_staya_invitation};
 use aquilum_core::{
     p2p_offer_lab::{DecisionAction, OfferV1, OfferedFile, PeerBinding, SCHEMA},
@@ -274,6 +276,61 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         "inserting unselected content must fail before GET"
     );
 
+    // The new optional bridge issues one bounded, lab-only parent-pipe arm.
+    // It refuses an altered selected subset and repeat issuance. Neither
+    // generated test DeviceId nor stdout PEER_ID is a production credential.
+    #[cfg(feature = "sender-arm-lab")]
+    let (mut arm, mut fence) = {
+        let mut fence = LabSenderFence::default();
+        let other_decision = offer
+            .receiver_decision(DecisionAction::Accept, vec![0], now, sender, receiver_peer)
+            .unwrap();
+        let other_queue = prepare_staya_batch(
+            offer.clone(),
+            &other_decision,
+            sender,
+            receiver_peer,
+            now + 1,
+        )
+        .unwrap();
+        assert!(matches!(
+            fence.issue(
+                &offer,
+                &decision,
+                &other_queue,
+                &invitation,
+                sender,
+                receiver_peer,
+                now + 1
+            ),
+            Err(LabArmError::ChangedQueue)
+        ));
+        let arm = fence
+            .issue(
+                &offer,
+                &decision,
+                &prepared,
+                &invitation,
+                sender,
+                receiver_peer,
+                now + 1,
+            )
+            .expect("exact Akula consent and live Staya ticket before lab arming");
+        assert!(matches!(
+            fence.issue(
+                &offer,
+                &decision,
+                &prepared,
+                &invitation,
+                sender,
+                receiver_peer,
+                now + 1
+            ),
+            Err(LabArmError::AlreadyIssued)
+        ));
+        (arm, fence)
+    };
+
     // Even the exact approved ephemeral receiver MUST fail before consent
     // is released to the provider, not only in the test controller.
     receiver.send_line(&invitation);
@@ -283,10 +340,42 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         "real authorized Iroh key fetched before Akula approval"
     );
 
-    // This command remains a trusted sender-local test seam: the real Akula
-    // OfferSession decision and actual Staya invitation were verified above.
-    // A production host must replace stdin with authenticated local IPC.
-    provider.send_line(&format!("AUTHORIZE {} {}", fields[2], receiver_id));
+    // The existing pinned Staya process still expects a private parent-pipe
+    // command. In the opt-in lab, derive it ONLY from revalidated consent,
+    // not from raw invitation fields. This remains untrusted for production.
+    #[cfg(feature = "sender-arm-lab")]
+    let arm_line = {
+        assert_eq!(
+            arm.take_operator_line([0x99; 32], now + 1),
+            Err(LabArmError::WrongReceiver)
+        );
+        let line = arm
+            .take_operator_line(*receiver_endpoint.as_bytes(), now + 1)
+            .expect("single exact selected peer gets local lab command");
+        assert_eq!(
+            arm.take_operator_line(*receiver_endpoint.as_bytes(), now + 1),
+            Err(LabArmError::AlreadyConsumed)
+        );
+        assert_eq!(line, format!("AUTHORIZE {} {}", fields[2], receiver_id));
+        // The fence is intentionally process-local; production needs durable
+        // revocation / replay custody in an authenticated host controller.
+        assert!(matches!(
+            fence.issue(
+                &offer,
+                &decision,
+                &prepared,
+                &invitation,
+                sender,
+                receiver_peer,
+                now + 1
+            ),
+            Err(LabArmError::AlreadyIssued)
+        ));
+        line
+    };
+    #[cfg(not(feature = "sender-arm-lab"))]
+    let arm_line = format!("AUTHORIZE {} {}", fields[2], receiver_id);
+    provider.send_line(&arm_line);
     assert_eq!(
         provider.line(),
         "PROVIDER_ARMED",
@@ -345,6 +434,35 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         let manifest = prepared.queue.entries()[slot].manifest;
         assert_eq!(actual.len() as u64, manifest.size);
         assert_eq!(*blake3::hash(&actual).as_bytes(), manifest.id.0);
+
+        // This is the actual bytes delivered over QUIC into Staya's private
+        // stage: ask Akula Core to independently hash them while publishing
+        // exactly one NEW user-chosen file. No File Gate / Vault apply.
+        let inbox_target = sources.0.join(format!("accepted-inbox-{slot:02}.bin"));
+        let mut pinned_stage = fs::File::open(&stage).expect("open Staya's real staged file");
+        let saved = aquilum_core::p2p_inbox_lab::save_verified_stage_as_new(
+            &mut pinned_stage,
+            manifest.size,
+            manifest.id.0,
+            &inbox_target,
+        )
+        .expect("explicit create-new after cold stage authentication");
+        assert_eq!(saved.bytes, manifest.size);
+        assert_eq!(saved.blake3_root, manifest.id.0);
+        let accepted_bytes = fs::read(&inbox_target).expect("read real created inbox file");
+        assert_eq!(accepted_bytes.as_slice(), *expected);
+
+        // Reusing the valid stage is not permission to replace user bytes.
+        assert!(matches!(
+            aquilum_core::p2p_inbox_lab::save_verified_stage_as_new(
+                &mut pinned_stage,
+                manifest.size,
+                manifest.id.0,
+                &inbox_target
+            ),
+            Err(aquilum_core::p2p_inbox_lab::InboxError::AlreadyExists),
+        ));
+        assert_eq!(fs::read(&inbox_target).unwrap().as_slice(), *expected);
         staged_directories.push(parent.to_path_buf());
     }
     assert_eq!(receiver.line(), "STY_G1K_UNLISTED_GET_DENIED=true");

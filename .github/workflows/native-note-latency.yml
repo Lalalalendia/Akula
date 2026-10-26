@@ -59,6 +59,19 @@ jobs:
             echo "::error::Expected three complete tab and editor-page profiles"
             exit 1
           fi
+      - name: Compare old and bounded highlight paragraph scans (opt-in diagnostic)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p aquilum-native --bin aquilum-native --locked benchmark_editor_highlight_range_abba \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/range-paint-ab.log"
+          test "$(grep -c 'EDITOR_RANGE_AB lines=' "$GITHUB_WORKSPACE/range-paint-ab.log")" -eq 4
+          {
+            echo "### Editor highlight candidate scan (debug/test profile)"
+            echo "Same-process A/B; no rendering or event-to-present claim."
+            grep 'EDITOR_RANGE_AB lines=' "$GITHUB_WORKSPACE/range-paint-ab.log"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Summarize comparable measurements
         if: success()
         shell: bash
@@ -172,6 +185,7 @@ jobs:
           name: native-note-latency-${{ github.sha }}
           path: |
             note-latency.log
+            range-paint-ab.log
             note-latency-summary.md
           if-no-files-found: warn
           retention-days: 21

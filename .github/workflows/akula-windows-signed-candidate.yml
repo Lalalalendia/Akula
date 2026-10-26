@@ -25,7 +25,7 @@ jobs:
   windows-build:
     if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
-    timeout-minutes: 85
+    timeout-minutes: 165
     environment: akula-release
     steps:
       - uses: actions/checkout@v7
@@ -54,8 +54,18 @@ jobs:
           }
           node --test .github/scripts/windows-beta-identity.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Windows identity boundary failed' }
+          node scripts/akula-version.cjs check
+          if ($LASTEXITCODE -ne 0) { throw 'Akula Windows version contract failed' }
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v7
+        with:
+          repository: Lalalalendia/shiva
+          ref: 40b72a90b1dac39812c77c7321e57d613a81cb51
+          path: _shiva-preview
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
@@ -63,26 +73,14 @@ jobs:
       - name: Install pinned NSIS packager
         run: cargo install cargo-packager --version 0.11.8 --locked
 
-      - name: Build trusted-source local-only Akula and NSIS package
-        working-directory: aquilum-app
+      - name: Build one Win7/10/11-capable Akula and Shiva pair with strict PE audit
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          cargo build --release --locked -p aquilum-native --features installed
-          if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
-          $bin = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
-          Copy-Item -LiteralPath (Join-Path $bin 'aquilum-native.exe') -Destination (Join-Path $bin 'akula-app.exe') -Force
-          $out = Join-Path $env:GITHUB_WORKSPACE 'dist'
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          cargo packager -p aquilum-native --release --formats nsis --config native/packaging/akula-windows.json --out-dir $out
-          if ($LASTEXITCODE -ne 0) { throw 'Akula NSIS packaging failed' }
-          $list = @(Get-ChildItem -LiteralPath $out -Filter '*-setup.exe' -File)
-          if ($list.Count -ne 1 -or $list[0].Name -notmatch '^(Akula|akula-app)_[0-9]+\.[0-9]+\.[0-9]+_x64-setup\.exe$') {
-            throw 'Unexpected installer identity or package count'
-          }
-          if ($list[0].Name.StartsWith('akula-app_')) {
-            Rename-Item -LiteralPath $list[0].FullName -NewName ($list[0].Name -replace '^akula-app_', 'Akula_')
-          }
+        timeout-minutes: 85
+        run: ./scripts/akula-win7-signed-stage.ps1
+
+      - name: Package the exact audited pair in the normal Akula NSIS installer
+        shell: pwsh
+        run: ./scripts/akula-win7-nsis-candidate.ps1
 
       - name: Execute native installed Windows editor and Aquilum coexistence smoke
         shell: pwsh
@@ -144,6 +142,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Akula signed metadata creation failed' }
           if (!(Test-Path (Join-Path $out 'latest.json.sig'))) { throw 'Signed release metadata missing' }
           Write-Host "AKULA_WINDOWS_SIGNED_CANDIDATE_CREATED version=$version key_id=D7A66B6D4046F6C5 no_release=1"
+
+      - name: Test actual latest published Akula to next signed NSIS upgrade
+        shell: pwsh
+        timeout-minutes: 22
+        env:
+          AKULA_SIGNED_NEXT_CANDIDATE_DISPOSABLE: '1'
+          AKULA_REQUESTED_VERSION: ${{ inputs.release_version }}
+        run: ./scripts/test-windows-signed-next-version-upgrade.ps1
+
+      - name: Retain signed candidate and Win7 SP1 QA evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-windows-win7-sp1-qa-NOT-RELEASE
+          path: |
+            dist/Akula_*-setup.exe
+            dist/Akula_*-setup.exe.sig
+            dist/latest.json
+            dist/latest.json.sig
+            dist/win7-installer-pe-audit/full-audit.json
+            win7-lab-output/PROVENANCE.txt
+            win7-lab-output/pe-audit/full-audit.json
+            win7-full-results/shiva-audit/full-audit.json
+            scripts/akula-win7-sp1-acceptance.ps1
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Transfer candidate solely for independent verification
         uses: actions/upload-artifact@v7
@@ -307,6 +330,37 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_ENV"
           echo "file=$package" >> "$GITHUB_ENV"
+      - name: Prove newer release version and generate exact-tag change notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          previous="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq ".tag_name")"
+          node scripts/akula-version.cjs assert-newer "$previous"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="v${version}" -f target_commitish="$GITHUB_SHA" \
+            -f previous_tag_name="$previous" --jq ".body" > "$RUNNER_TEMP/akula-release-notes.md"
+          test -s "$RUNNER_TEMP/akula-release-notes.md"
+          cat >> "$RUNNER_TEMP/akula-release-notes.md" <<'NOTES'
+
+          ---
+          Signed Akula Windows NSIS update. Automatic NSIS crash rollback is
+          not provided: reinstall the previous signed Akula version if needed.
+          Akula is a separate product from Aquilum; Linux/macOS are not
+          authorized by this Windows-only release.
+          NOTES
+          if [ "$version" = "0.3.15" ]; then
+            cat >> "$RUNNER_TEMP/akula-release-notes.md" <<'WIN7-NOTES'
+
+          ### Windows 7 SP1 x64 — experimental compatibility
+          The new Win7-target executable and PDF helper passed static PE
+          audits and installer smoke tests on Windows Server 2022.
+          Actual Windows 7 SP1 GUI, rendering, PDF and update tests are not
+          yet confirmed. Test on a disposable Windows 7 SP1 x64 VM before
+          relying on the installation or migrating a production vault.
+          WIN7-NOTES
+          fi
       - name: Publish manually approved signed Windows beta as latest Akula release
         shell: bash
         env:
@@ -316,6 +370,6 @@ jobs:
           gh release create "v${version}" \
             "dist/${file}" "dist/${file}.sig" dist/latest.json dist/latest.json.sig \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Akula v${version} (Windows beta)" --latest \
-            --notes "Signed Windows NSIS beta. Contains no automatic rollback: reinstall the previous signed version if NSIS fails. This Akula release is independent of Aquilum."
+            --title "Akula v${version}" --latest \
+            --notes-file "$RUNNER_TEMP/akula-release-notes.md"
           echo "AKULA_SIGNED_WINDOWS_BETA_PUBLISHED version=${version} source=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

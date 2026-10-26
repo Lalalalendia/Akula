@@ -1,17 +1,18 @@
 name: File snapshot hash performance
 
 on:
+  # This is a measurement, not a safety or regression acceptance gate.
   pull_request:
     paths:
-      - "aquilum-app/core/src/files/document.rs"
       - ".github/workflows/file-snapshot-perf.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: snapshot-perf-${{ github.ref }}
-  cancel-in-progress: true
+  group: snapshot-perf-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   snapshot-paired:

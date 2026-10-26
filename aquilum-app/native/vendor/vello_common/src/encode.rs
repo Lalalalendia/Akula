@@ -1046,12 +1046,16 @@ impl<T: GradientLutExt> GradientLut<T> {
         let ramps = {
             let mut ramps = Vec::with_capacity(ranges.len());
             let mut prev_idx = 0;
+            let mut prev_x1 = 0.0;
 
             for range in ranges {
                 let max_idx = (range.x1 * lut_size as f32) as usize;
 
-                ramps.push((prev_idx..max_idx, range));
+                // LUT sample coordinates use lut_size - 1. Keep each entry
+                // within the stop interval actually assigned to this range.
+                ramps.push((prev_idx..max_idx, prev_x1, range));
                 prev_idx = max_idx;
+                prev_x1 = range.x1;
             }
 
             ramps
@@ -1062,13 +1066,16 @@ impl<T: GradientLutExt> GradientLut<T> {
         let inv_lut_scale = f32x4::splat(simd, 1.0 / scale);
         let add_factor = f32x4::from_slice(simd, &[0.0, 1.0, 2.0, 3.0]) * inv_lut_scale;
 
-        for (ramp_range, range) in ramps {
+        for (ramp_range, range_start, range) in ramps {
             let biases = f32x16::block_splat(f32x4::from_slice(simd, &range.bias));
             let scales = f32x16::block_splat(f32x4::from_slice(simd, &range.scale));
 
             ramp_range.clone().step_by(4).for_each(|idx| {
                 let t_vals = f32x4::splat(simd, idx as f32).mul_add(inv_lut_scale, add_factor);
-
+                // Do not extrapolate a near-zero-width hard-stop segment:
+                // even one LUT slot outside its stop interval can produce white.
+                let t_vals = t_vals.max(f32x4::splat(simd, range_start))
+                    .min(f32x4::splat(simd, range.x1));
                 let t_vals = element_wise_splat(simd, t_vals);
 
                 let mut result = scales.mul_add(t_vals, biases);
@@ -1253,6 +1260,52 @@ mod tests {
             panic!("expected two gradient paints");
         };
         assert_ne!(premultiplied.cache_key, unpremultiplied.cache_key);
+    }
+
+
+    #[test]
+    fn gradient_nearly_equal_stops_never_extrapolate_to_white() {
+        use crate::fearless_simd::Fallback;
+
+        // Vello #1998: a gray -> black hard stop near t=0.5 assigned index
+        // 2047 to a very narrow segment, then evaluated it BELOW that range.
+        // The negative extrapolation clamped to opaque white.
+        let mut paints = vec![];
+        let gray = Color::from_rgb8(128, 128, 128);
+        let black = Color::from_rgb8(0, 0, 0);
+        let gradient = Gradient {
+            kind: LinearGradientPosition {
+                start: Point::new(0.0, 0.0),
+                end: Point::new(65.0, 0.0),
+            }
+            .into(),
+            stops: ColorStops(smallvec![
+                ColorStop { offset: 0.49999988, color: gray.into() },
+                ColorStop { offset: 0.5, color: black.into() },
+            ]),
+            ..Default::default()
+        };
+        gradient.encode_into(&mut paints, Affine::IDENTITY, None);
+        let [EncodedPaint::Gradient(gradient)] = paints.as_slice() else {
+            panic!("expected encoded gradient");
+        };
+        let lut = gradient.u8_lut(Fallback::new());
+        let index = (0.5 * lut.scale_factor()) as usize;
+        let at_hard_stop = lut.get(index);
+        assert_eq!(lut.width(), 4096, "a nearly coincident stop needs a dense LUT");
+        assert!(
+            (120..=136).contains(&at_hard_stop[0]),
+            "white/black extrapolation at hard stop: index={index} pixel={at_hard_stop:?}"
+        );
+        assert_eq!(at_hard_stop[1], at_hard_stop[0]);
+        assert_eq!(at_hard_stop[2], at_hard_stop[0]);
+        assert_eq!(at_hard_stop[3], 255);
+
+        let highp = gradient.f32_lut(Fallback::new()).get(index);
+        assert!(
+            (0.45..=0.55).contains(&highp[0]) && highp[3] == 1.0,
+            "f32 LUT must also avoid out-of-range hard stops: {highp:?}"
+        );
     }
 
     #[test]
