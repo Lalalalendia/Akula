@@ -13,7 +13,7 @@ description = "Pure bounded Text Delta wire codec; no File Gate, network or publ
 [dependencies]
 blake3 = "1.8.5"
 uuid = { version = "1.23.5", features = ["v4"] }
-zstd = "=0.13.3"
+zstd = "=0.14.3"
 
 [dev-dependencies]
 # The original Core numeric real-Git A/B test serializes rows for review.
