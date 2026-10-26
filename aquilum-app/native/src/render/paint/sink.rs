@@ -89,9 +89,7 @@ impl PaintSink for Painter {
             }
             None => None,
         };
-        let filter = convert::filters_to_vello(group.filters);
-        self.ctx.push_layer(clip_path.as_ref(), blend, opacity, mask, filter);
-        self.groups.push(!group.filters.is_empty());
+        self.push_filter_chain(clip_path.as_ref(), blend, opacity, mask, group.filters);
     }
 
     fn pop_group(&mut self) {
@@ -101,11 +99,9 @@ impl PaintSink for Painter {
         if self.error.is_some() {
             return;
         }
-        if self.groups.pop().is_none() {
-            self.set_error_once(PaintError::Unbalanced("pop_group без push_group"));
-            return;
+        if let Err(err) = self.pop_filter_chain() {
+            self.set_error_once(err);
         }
-        self.ctx.pop_layer();
     }
 
     fn fill(&mut self, draw: FillRef<'_>) {
