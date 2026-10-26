@@ -59,6 +59,13 @@ jobs:
             echo "COLR synthetic fixture is not yet present on this isolated branch" >> "$GITHUB_STEP_SUMMARY"
           fi
           cargo test --release --locked -p aquilum-native --bin aquilum-native color_glyphs_follow_window_scale -- --nocapture --test-threads=1
+      - name: COLRv1 PAD radial negative-radius tip regression
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p glifo --lib colr_radial_ -- --nocapture
+
       - name: Measure COLR fractional fallback cost (diagnostic only)
         if: runner.os == 'Linux'
         working-directory: aquilum-app
