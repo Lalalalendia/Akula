@@ -13,8 +13,7 @@ impl Document {
         let keep = self.kept();
         let mut line = self.line_height();
         let mut changed = false;
-        // These counters are compiled only into test binaries; the ordinary
-        // editor does not spend time profiling individual paragraph layouts.
+        // Test-only counters; ordinary editor builds do not profile layouts.
         #[cfg(test)]
         let tracing = aq_trace::enabled();
         #[cfg(test)]
@@ -32,7 +31,7 @@ impl Document {
             let range = self.span(i);
             let composing = compose.filter(|(at, _)| range.contains(at) || *at == range.end);
             let moved = self.markdown.is_some() && self.local_caret(i, caret) != self.laid.get(i).map_or(&PLAIN, |laid| &laid.decor).caret;
-            let current = composing.is_none() && !moved;
+            let (current, no_wrap) = (composing.is_none() && !moved, rebreak && self.fenced_code(i));
             match self.laid.get_mut(i).filter(|_| current) {
                 Some(laid) => {
                     #[cfg(test)]
@@ -42,7 +41,8 @@ impl Document {
                     if rebreak {
                         #[cfg(test)]
                         let begun = tracing.then(std::time::Instant::now);
-                        laid.layout.break_all_lines(self.width.map(|w| (w - laid.decor.inset as f32).max(0.0)));
+                        let width = self.width.map(|w| (w - laid.decor.inset as f32).max(0.0));
+                        laid.layout.break_all_lines(if no_wrap { None } else { width });
                         laid.layout.align(Alignment::Start, AlignmentOptions::default());
                         self.heights.set_text(i, laid.height());
                         #[cfg(test)]
