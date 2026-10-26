@@ -20,7 +20,8 @@ mod principal;
 pub use principal::{S3AwsAccountProofError, S3AwsVerifiedAccountScope};
 mod v2_readonly;
 pub use v2_readonly::{S3PinnedV2ReadError, S3PinnedV2ReadPreview};
-mod pack_probe;
+// Use the exact same real pack parser as the AWS-free security test.
+use super::s3_pack_probe as pack_probe;
 // Pure bounded pack encoder for future host-admitted sender; no S3 writer.
 mod coord_pack_encode;
 // SYNC-COORD-01 stays test-only: no production S3 format or file writes.

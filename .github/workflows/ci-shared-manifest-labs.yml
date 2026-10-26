@@ -36,6 +36,12 @@ on:
       text_delta_module_required:
         required: true
         type: boolean
+      text_delta_pack_fast_path:
+        required: true
+        type: boolean
+      text_delta_pack_boundary_changed:
+        required: true
+        type: boolean
       owned_appimage:
         required: true
         type: boolean
@@ -170,6 +176,8 @@ jobs:
     uses: ./.github/workflows/sync-text-delta-rust.yml
     with:
       codec_already_tested: ${{ inputs.text_delta_module_required }}
+      lightweight_pack_probe: ${{ inputs.text_delta_pack_fast_path }}
+      verify_lightweight_boundary: ${{ inputs.text_delta_pack_boundary_changed }}
 
   route-appimage-beta:
     name: Impacted shared manifest / appimage-beta
