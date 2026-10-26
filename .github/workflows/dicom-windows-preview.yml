@@ -1,0 +1,37 @@
+name: DICOM Windows native preview compile
+on:
+  push:
+    branches:
+      - 'feat/dicom-readonly-preview-20261026'
+    paths:
+      - '.github/workflows/dicom-windows-preview.yml'
+permissions:
+  contents: read
+concurrency:
+  group: dicom-windows-preview-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-native:
+    name: Windows installed+preview compile (no release)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: dicom-windows-preview
+          cache-on-failure: true
+      - name: Compile Windows Akula with DICOM feature opt-in
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}\.artifacts\cargo-native
+        run: |
+          cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed,dicom-preview
+          if ($LASTEXITCODE -ne 0) { throw 'Windows DICOM native feature compile failed' }
+      - name: Evidence marker
+        shell: pwsh
+        run: |
+          Write-Output 'AKULA_DICOM_WINDOWS_COMPILE_PASS installed_and_dicom_preview=1'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value 'Windows installed + dicom-preview compilation PASS. No executable was published or installed.'
