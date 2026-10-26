@@ -204,9 +204,13 @@ function Run-Case([int]$count) {
     $closeRequested=$false
     if(!$p.HasExited) { $closeRequested=$p.CloseMainWindow() }
     $exited=$p.WaitForExit(20000)
-    $exitCode=if($exited) { [string]$p.ExitCode } else { 'not-exited' }
+    $exitCode=-1
+    if($exited) {
+      $p.Refresh()
+      $exitCode=[int]($p.ExitCode)
+    }
     $events.Add([pscustomobject]@{name='close_result';time=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();requested=$closeRequested;exited=$exited;exit_code=$exitCode})
-    if(!$closeRequested -or !$exited -or $exitCode -ne '0') {
+    if(!$closeRequested -or !$exited -or $exitCode -ne 0) {
       throw "Non-graceful GUI exit: close_requested=$closeRequested exited=$exited exit_code=$exitCode"
     }
     if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -ne $meta.sha) { throw 'Closing Akula changed source' }
