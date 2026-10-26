@@ -209,99 +209,12 @@ jobs:
           EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
-          # Pull-request GITHUB_SHA is a synthetic merge commit. Checkout
-          # explicitly used the PR head; provenance must name that source.
+          # GITHUB_SHA is a synthetic merge SHA for pull_request events.
+          # Checkout uses the exact PR head, and provenance must record it.
           $actualSourceSha = (git rev-parse HEAD).Trim().ToLowerInvariant()
-          if ($LASTEXITCODE -ne 0 -or $actualSourceSha -cne $env:EXPECTED_SOURCE_SHA.ToLowerInvariant() -or
-              $actualSourceSha -notmatch '^[a-f0-9]{40}
-
-      - name: Exercise the exact packaged Windows 7 PDF smoke command on runner
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $batch = Join-Path $env:GITHUB_WORKSPACE 'win7-lab-output/SMOKE-PDF-WIN7.cmd'
-          if (!(Test-Path -LiteralPath $batch -PathType Leaf)) { throw 'Portable PDF smoke command missing' }
-          & cmd.exe /d /c $batch
-          $code = $LASTEXITCODE
-          if ($code -ne 0) { throw "Packaged PDF smoke failed: $code" }
-          $pdf = Join-Path $env:GITHUB_WORKSPACE 'win7-lab-output/pdf-smoke-output.pdf'
-          if (!(Test-Path -LiteralPath $pdf -PathType Leaf)) { throw 'Portable PDF smoke produced no PDF' }
-          $bytes = [IO.File]::ReadAllBytes($pdf)
-          if ($bytes.Length -lt 64 -or [Text.Encoding]::ASCII.GetString($bytes, 0, 5) -cne '%PDF-') {
-            throw 'Portable PDF smoke output is not a PDF'
-          }
-          Write-Host 'WIN7_PACKAGED_PDF_SMOKE_PASSED runner=windows2022 test_os_win7=false'
-
-      - name: Verify patched portable EXE imports before distribution
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $exe = 'win7-lab-output/akula-app.exe'
-          $out = 'win7-lab-output/pe-audit'
-          New-Item -ItemType Directory -Force $out | Out-Null
-          $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $vsroot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
-          if (!$vsroot) { throw 'VS build tools missing for second PE audit' }
-          $toolsets = @(Get-ChildItem (Join-Path $vsroot 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending)
-          $dumpbin = Join-Path $toolsets[0].FullName 'bin/Hostx64/x64/dumpbin.exe'
-          & $dumpbin /imports $exe | Set-Content "$out/imports.txt" -Encoding utf8
-          if ($LASTEXITCODE -ne 0) { throw 'Patched PE dump failed' }
-          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
-          $bytes = (Get-Item $exe).Length
-          python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin "$out/imports.txt" --out $out --sha256 $hash --bytes $bytes
-          if ($LASTEXITCODE -ne 0) { throw 'Patched PE audit failed' }
-          $audit = Get-Content "$out/full-audit.json" -Raw | ConvertFrom-Json
-          if (@($audit.known_post_win7_imports).Count -ne 0) { throw 'Known newer Windows APIs remain' }
-          if (@($audit.potentially_risky_imported_dlls) -contains 'combase.dll') { throw 'COMBASE static dependency still present' }
-          $imports = @($audit.imports.'ole32.dll')
-          if ($imports -notcontains 'CoCreateFreeThreadedMarshaler' -or $imports -notcontains 'CoTaskMemFree') { throw 'Win7 COM fallbacks missing from OLE32 imports' }
-          Get-Content "$out/full-audit.md" | Add-Content $env:GITHUB_STEP_SUMMARY
-
-      - name: Install pinned packager for normal Windows installer candidate
-        shell: pwsh
-        run: |
-          cargo install cargo-packager --version 0.11.8 --locked
-          if ($LASTEXITCODE -ne 0) { throw 'Pinned cargo-packager installation failed' }
-
-      - name: Stage PE-audited Win7 binaries in one ordinary Akula NSIS (not published)
-        shell: pwsh
-        run: ./scripts/akula-win7-nsis-candidate.ps1
-
-      - name: Install and exercise Win7-target NSIS on hosted Windows Server 2022
-        shell: pwsh
-        timeout-minutes: 35
-        run: |
-          # A real installed NSIS+GUI+PDF test, NOT a Windows 7 OS test.
-          ./scripts/test-windows-beta.ps1
-          Write-Host 'AKULA_WIN7_NSIS_INSTALLED_GUI_SMOKE_PASS tested_os=windows2022 win7_runtime_tested=false'
-
-      - name: Upload actual Win7 test archive (NOT production release)
-        uses: actions/upload-artifact@v4
-        with:
-          name: akula-win7-lab-test-${{ github.run_id }}
-          path: |
-            win7-lab-output/Akula-Win7-LAB-portable.zip
-            win7-lab-output/PROVENANCE.txt
-            scripts/akula-win7-sp1-acceptance.ps1
-            win7-lab-output/pe-audit/full-audit.md
-            win7-lab-output/pe-audit/full-audit.json
-            dist/Akula_*-setup.exe
-            dist/win7-installer-pe-audit/full-audit.json
-            dist/win7-installer-pe-audit/full-audit.md
-            win7-full-results/shiva-audit/full-audit.md
-            win7-full-results/shiva-audit/full-audit.json
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload compile evidence on failure or success
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: akula-win7-full-compile-evidence
-          path: win7-full-results/
-          retention-days: 7
-) {
-            throw "Win7 source commit does not match exact checked-out PR HEAD"
+          if ($LASTEXITCODE -ne 0 -or $actualSourceSha -notmatch '^[a-f0-9]{40}$' -or
+              $actualSourceSha -cne $env:EXPECTED_SOURCE_SHA.ToLowerInvariant()) {
+            throw 'The Win7 source checkout SHA differs from the requested PR head'
           }
           $source = '.artifacts/cargo-native/x86_64-win7-windows-msvc/release/aquilum-native.exe'
           python .github/scripts/akula-win7-portable-package.py --exe $source --audit win7-full-results/full-audit.json --sidecar .artifacts/shiva-win7/x86_64-win7-windows-msvc/release/shiva.exe --sidecar-audit win7-full-results/shiva-audit/full-audit.json --out win7-lab-output --revision $actualSourceSha
@@ -309,7 +222,7 @@ jobs:
           if (!(Test-Path 'win7-lab-output/Akula-Win7-LAB-portable.zip')) { throw 'Test ZIP was not created' }
           $provenance = Get-Content -LiteralPath win7-lab-output/PROVENANCE.txt -Raw
           if (!$provenance.Contains("source_sha=$actualSourceSha")) {
-            throw 'Win7 package provenance did not preserve exact checkout SHA'
+            throw 'Win7 package provenance did not preserve the checked-out source SHA'
           }
 
       - name: Exercise the exact packaged Windows 7 PDF smoke command on runner
