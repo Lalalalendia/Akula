@@ -7,8 +7,12 @@ on:
     paths:
       - '.github/workflows/release.yml'
       - '.github/workflows/release-isolation-policy.yml'
+      - '.github/workflows/akula-v0315-owner-dispatch.yml'
+      - 'docs/release/akula-v0.3.15-dispatch-request.json'
       - '.github/workflows/akula-publisher-key-proof.yml'
       - '.github/workflows/akula-windows-signed-candidate.yml'
+      - '.github/workflows/akula-v0315-owner-dispatch.yml'
+      - 'docs/release/akula-v0.3.15-dispatch-request.json'
       - '.github/scripts/release-isolation-policy.test.cjs'
       - 'scripts/test-windows-signed-next-version-upgrade.ps1'
       - 'docs/release/legacy-aquilum-release.yml'
