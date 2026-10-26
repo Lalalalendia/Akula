@@ -1,11 +1,12 @@
 name: Index watcher quiet flush experiment
 
 on:
+  # Quiet-window performance comparisons are diagnostic, never a release gate.
+  # Non-ignored quiet-window invariants remain in the required Core workspace tests.
   pull_request:
     paths:
-      - "aquilum-app/core/src/search/worker.rs"
-      - "aquilum-app/core/src/search/worker_idle_tests.rs"
       - ".github/workflows/index-worker-idle-perf.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,7 +14,7 @@ permissions:
 # New commits on one PR supersede its older experimental/diagnostic checks.
 # Explicit workflow_dispatch runs are never preempted automatically.
 concurrency:
-  group: akula-index-worker-idle-perf-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

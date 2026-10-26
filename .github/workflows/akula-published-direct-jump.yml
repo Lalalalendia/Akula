@@ -1,0 +1,60 @@
+# AKULA-PUBLISHED-DIRECT-JUMP-01: single Windows job, no publishing/signing.
+# Public SHA-pinned installers and only on a disposable GitHub-hosted runner.
+name: Akula published 0.3.9 to 0.3.12 one-hop NSIS acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/akula-published-direct-jump.yml'
+      - 'scripts/test-windows-published-direct-jump.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  one-hop-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AKULA_DISPOSABLE_DIRECT_JUMP: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Reject malformed Windows script before execution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/test-windows-published-direct-jump.ps1'),
+            [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -ne 0) {
+            throw "Direct-jump script parse failed: $($parseErrors[0])"
+          }
+          Write-Host 'AKULA_PUBLISHED_DIRECT_JUMP_PARSE_PASS'
+
+      - name: Verify intended Latest publication
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $latest = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $latest.tag_name -cne 'v0.3.12' -or
+              $latest.target_commitish -cne 'fa6ec577e55c4ace245c38130cb5ddb07d0c61a3') {
+            throw 'Latest release is not pinned Akula 0.3.12; stop without installing'
+          }
+          Write-Host 'AKULA_PUBLISHED_LATEST_MATCH_PASS version=0.3.12'
+
+      - name: Install published 0.3.9 and jump directly to signed 0.3.12
+        shell: pwsh
+        timeout-minutes: 24
+        run: ./scripts/test-windows-published-direct-jump.ps1

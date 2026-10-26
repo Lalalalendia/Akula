@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # Cancel outdated checks for the same PR after a new commit. Other PRs stay independent.
 concurrency:
@@ -29,10 +30,95 @@ jobs:
     timeout-minutes: 10
     outputs:
       mode: ${{ steps.scope.outputs.mode }}
+      perf_core_changed: ${{ steps.scope.outputs.perf_core_changed }}
+      b1_shared_compat: ${{ steps.scope.outputs.b1_shared_compat }}
+      node_shared_compat: ${{ steps.scope.outputs.node_shared_compat }}
+      shared_core_cargo_risky: ${{ steps.scope.outputs.shared_core_cargo_risky }}
+      shared_core_lib_risky: ${{ steps.scope.outputs.shared_core_lib_risky }}
+      shared_lock_risky: ${{ steps.scope.outputs.shared_lock_risky }}
+      shared_root_cargo_risky: ${{ steps.scope.outputs.shared_root_cargo_risky }}
+      shared_any_risky: ${{ steps.scope.outputs.shared_any_risky }}
+      installed_owner_owned: ${{ steps.scope.outputs.installed_owner_owned }}
+      native_manifest_risky: ${{ steps.scope.outputs.native_manifest_risky }}
+      owned_host_custody: ${{ steps.scope.outputs.owned_host_custody }}
+      owned_b0c_ssh: ${{ steps.scope.outputs.owned_b0c_ssh }}
+      owned_sync_protection: ${{ steps.scope.outputs.owned_sync_protection }}
+      owned_text_delta: ${{ steps.scope.outputs.owned_text_delta }}
+      owned_appimage: ${{ steps.scope.outputs.owned_appimage }}
+      owned_windows_beta: ${{ steps.scope.outputs.owned_windows_beta }}
+      owned_linux_beta: ${{ steps.scope.outputs.owned_linux_beta }}
+      owned_pinned_read: ${{ steps.scope.outputs.owned_pinned_read }}
+      owned_s3_reservation: ${{ steps.scope.outputs.owned_s3_reservation }}
+      owned_s3_minio: ${{ steps.scope.outputs.owned_s3_minio }}
+      text_delta_module_required: ${{ steps.scope.outputs.text_delta_module_required }}
+      text_delta_pack_fast_path: ${{ steps.scope.outputs.text_delta_pack_fast_path }}
+      text_delta_pack_boundary_changed: ${{ steps.scope.outputs.text_delta_pack_boundary_changed }}
+      updater_security_required: ${{ steps.scope.outputs.updater_security_required }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # Enforced by the existing ruleset-required "Main PR gate" via classify.
+      # Fail BEFORE expensive Rust compilation when the periodic scan is bad/stale.
+      - name: Require fresh RustSec result and check dependency changes
+        id: dependency_security
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/dependency-security-gate.test.cjs
+          node .github/scripts/dependency-security-gate.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+      - name: Install fast prebuilt cargo-audit for dependency changes
+        if: steps.dependency_security.outputs.scan_required == 'true'
+        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        with:
+          tool: cargo-audit@0.22.2
+      - name: RustSec audit of changed dependencies (blocking)
+        if: steps.dependency_security.outputs.scan_required == 'true' && steps.dependency_security.outputs.bootstrap_mode != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo audit --no-yanked --file aquilum-app/Cargo.lock
+          cargo audit --no-yanked --no-fetch --file aquilum-app/host-broker-lab/Cargo.lock
+
+      # Precisely once: when installing this workflow into a base WITHOUT
+      # the security watchdog. Existing findings remain visible and unwaived;
+      # future PRs immediately HOLD until RustSec passes.
+      - name: Bootstrap security watchdog - verify and record existing findings
+        if: steps.dependency_security.outputs.bootstrap_mode == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s aquilum-app/Cargo.lock
+          test -s aquilum-app/host-broker-lab/Cargo.lock
+          for pair in main:aquilum-app/Cargo.lock host-broker:aquilum-app/host-broker-lab/Cargo.lock; do
+            label="${pair%%:*}"
+            lockfile="${pair#*:}"
+            log="$RUNNER_TEMP/rustsec-bootstrap-$label.log"
+            set +e
+            if [ "$label" = main ]; then
+              cargo audit --no-yanked --file "$lockfile" > "$log" 2>&1
+            else
+              cargo audit --no-yanked --no-fetch --file "$lockfile" > "$log" 2>&1
+            fi
+            result=$?
+            set -e
+            cat "$log"
+            if [ "$result" -eq 0 ]; then
+              echo "$label lockfile: clean RustSec scan" >> "$GITHUB_STEP_SUMMARY"
+            elif [ "$result" -eq 1 ] && grep -Eq '^error: [0-9]+ vulnerabilities found!' "$log"; then
+              count="$(grep -Eo '^error: [0-9]+ vulnerabilities found!' "$log" | tail -1)"
+              echo "::warning title=Security bootstrap existing vulnerabilities::$label lockfile: $count"
+              echo "$label lockfile: **HOLD** ($count). Existing issue not waived; future PRs are blocked." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error title=Unverified RustSec bootstrap::$label scan exited $result without validated vulnerability report"
+              exit 1
+            fi
+          done
+          echo 'Security bootstrap allows ONLY the policy-only installation PR; no runtime dependency vulnerabilities are declared safe.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Classify Rust test scope (fail closed)
         id: scope
         shell: bash
@@ -40,8 +126,41 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          # Guard newly added PR workflows BEFORE any expensive Rust or OS jobs
+          # can be scheduled; this uses the existing classifier runner.
+          node --test .github/scripts/ci-pr-concurrency.test.cjs
+          node .github/scripts/ci-pr-concurrency.cjs --base="$BASE_SHA" --head=HEAD
           node --test .github/scripts/ci-rust-scope.test.cjs
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+          node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
+          node .github/scripts/ci-shared-manifest-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+          # Respect the former perf path filter; ordinary CI-only / docs changes never launch benchmarks.
+          if git diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/core/ \
+            .github/workflows/core-perf.yml .github/workflows/core-perf-compare.yml; then
+            echo 'perf_core_changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'perf_core_changed=true' >> "$GITHUB_OUTPUT"
+          fi
+          # A shared Cargo or Core boundary still gets both opt-in B1 tests
+          # in the mandatory gate, without scheduling two duplicate workflows.
+          if git diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/Cargo.toml aquilum-app/Cargo.lock \
+            aquilum-app/core/Cargo.toml aquilum-app/core/src/lib.rs \
+            aquilum-app/core/src/server_release_lab.rs; then
+            echo 'b1_shared_compat=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'b1_shared_compat=true' >> "$GITHUB_OUTPUT"
+          fi
+          # Read-only Node D1/D1.5/D2 contracts move into this mandatory lane
+          # when shared workspace/Core boundaries change.
+          if git diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/Cargo.toml aquilum-app/Cargo.lock \
+            aquilum-app/core/Cargo.toml aquilum-app/core/src/lib.rs; then
+            echo 'node_shared_compat=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'node_shared_compat=true' >> "$GITHUB_OUTPUT"
+          fi
 
   required-tests:
     if: github.event_name == 'pull_request'
@@ -72,6 +191,15 @@ jobs:
           node --test .github/scripts/architecture-budget.test.cjs
           node .github/scripts/architecture-budget.cjs --base="$BASE_SHA" --head=HEAD --summary="$GITHUB_STEP_SUMMARY"
 
+      - name: Enforce no-growth source and workflow fanout ratchet
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/ci-file-ratchet.test.cjs
+          node .github/scripts/ci-file-ratchet.cjs --base="$BASE_SHA" --head=HEAD
+
       # PLUGIN-00: documentation/source-boundary inventory only; no runtime or new status check.
       - name: Plugin architecture contract
         shell: bash
@@ -94,6 +222,8 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/release-source-contract.test.cjs
           node .github/scripts/release-source-contract.cjs
+          node --test .github/scripts/akula-version.test.cjs
+          node scripts/akula-version.cjs check
 
       - name: macOS updater TAR and signed-DMG content parity (read-only)
         shell: bash
@@ -102,10 +232,23 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
 
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.classify.outputs.mode != 'none'
+        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true' || needs.classify.outputs.text_delta_module_required == 'true'
+
+
+      # Text Delta is outside the Cargo workspace. Tests execute in the existing
+      # mandatory runner and therefore block Main PR gate without another workflow.
+      - name: Require standalone Text Delta wire and hostile-input tests
+        if: needs.classify.outputs.text_delta_module_required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path modules/text-delta-codec/Cargo.toml -- --nocapture
+          grep -Fx '[workspace]' modules/text-delta-codec/Cargo.toml
+          ! grep -q 'aquilum-core' modules/text-delta-codec/Cargo.toml
+          test -f aquilum-app/core/src/sync/text_delta_codec.rs
 
       - name: Security-test macOS updater TAR parser on Linux too
-        if: needs.classify.outputs.mode != 'none'
+        if: needs.classify.outputs.updater_security_required == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -114,14 +257,36 @@ jobs:
           "$RUNNER_TEMP/akula_tar_security_tests" --nocapture
 
       - name: Test macOS updater transaction with shared installer lock and crash recovery
-        if: needs.classify.outputs.mode != 'none'
+        if: needs.classify.outputs.updater_security_required == 'true'
         shell: bash
         run: |
           set -euo pipefail
           printf '#[path = "%s"] mod txn;\n' "$GITHUB_WORKSPACE/aquilum-app/native/src/updater/macos_transaction.rs" > "$RUNNER_TEMP/akula_updater_txn_harness.rs"
           rustc --edition=2024 --test -D warnings "$RUNNER_TEMP/akula_updater_txn_harness.rs" -o "$RUNNER_TEMP/akula_updater_txn_tests"
-          "$RUNNER_TEMP/akula_updater_txn_tests" --nocapture
+          # This suite exercises shared filesystem custody and subprocess crash recovery.
+          # Serialize fixtures without weakening the independent-fd contention assertion.
+          "$RUNNER_TEMP/akula_updater_txn_tests" --nocapture --test-threads=1
+          for attempt in 1 2 3 4 5; do
+            "$RUNNER_TEMP/akula_updater_txn_tests" --exact txn::tests::fresh_user_install_has_one_shared_lock --test-threads=1 --quiet
+          done
 
+
+      # The heavyweight AppImage candidate no longer launches on every Native edit.
+      # Preserve its five real-process Linux ACK trust checks in the required fast lane.
+      - name: Verify Linux updater first-GUI ACK IPC without AppImage build
+        if: needs.classify.outputs.updater_security_required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --edition=2024 --test -D warnings \
+            aquilum-app/native/src/updater/linux_first_gui_ack.rs \
+            -o "$RUNNER_TEMP/akula-linux-first-gui-ack-tests"
+          "$RUNNER_TEMP/akula-linux-first-gui-ack-tests" --nocapture --test-threads=2 \
+            2>&1 | tee "$RUNNER_TEMP/akula-linux-first-gui-ack.log"
+          grep -Fq 'test tests::real_inherited_stream_ack_has_child_pid_nonce_and_generation_digest ... ok' "$RUNNER_TEMP/akula-linux-first-gui-ack.log"
+          grep -Fq 'test tests::wrong_parent_cannot_emit_even_with_provided_nonce_and_fd ... ok' "$RUNNER_TEMP/akula-linux-first-gui-ack.log"
+          grep -Fq 'test result: ok. 5 passed; 0 failed;' "$RUNNER_TEMP/akula-linux-first-gui-ack.log"
+          echo 'AKULA_LINUX_FIRST_GUI_ACK_IPC_PASS peer_credentials=1 exact_child=1 negative_parent=1'
 
       - name: Restore shared main Rust cache (read-only on PRs)
         uses: swatinem/rust-cache@v2
@@ -134,7 +299,7 @@ jobs:
           save-if: false
 
       - name: Install Linux dependencies
-        if: needs.classify.outputs.mode == 'workspace'
+        if: needs.classify.outputs.mode == 'workspace' || needs.classify.outputs.mode == 'native'
         shell: bash
         run: |
           sudo apt-get update
@@ -159,11 +324,64 @@ jobs:
           cargo test --workspace --locked -- --skip app::tests::perf::frames::
           cargo test -p aquilum-core --features sync-engine --locked
 
+      - name: Run Native package tests for native-source changes
+        if: needs.classify.outputs.mode == 'native'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          # aquilum-native builds and exercises aquilum-core as its dependency.
+          # Skip only independent Core unit tests on unmodified Core sources.
+          cargo test -p aquilum-native --locked -- --skip app::tests::perf::frames::
+
+      # A verified opt-in local package without existing dependency changes
+      # cannot alter the default Native graph. Exercise Core in both feature
+      # modes, plus the existing B1 and Node compatibility acceptance below.
+      - name: Run Core tests in both modes (safe manifest additions)
+        if: needs.classify.outputs.mode == 'manifest'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core
+          cargo test --locked -p aquilum-core --features sync-engine
+
+      # Shared Cargo/lock/Core boundary changes retain exact B1a and B1b0
+      # security tests under the existing required main gate. Direct source
+      # and module changes still run their original specialist workflows.
+      - name: B1a/B1b0/B1b1 release and approval compatibility
+        if: needs.classify.outputs.b1_shared_compat == 'true'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A Core re-export must not become an independent verifier implementation.
+          grep -Fx 'pub use akula_server_release_b1a::*;' core/src/server_release_lab.rs
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b-custody-lab \
+            --test server_bootstrap_b1a --test server_bootstrap_b1b0 -- --nocapture
+          # B1b1c includes the B1b1b/B1b1a feature ancestry. All three
+          # unprivileged, inert ledger/security suites remain covered.
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b1c-witness-lab \
+            --test server_bootstrap_b1b1a --test server_bootstrap_b1b1b \
+            --test server_bootstrap_b1b1c -- --nocapture
+
+      # Shared Cargo/lock/Core boundary is checked in-place: separate Node
+      # workflow runs are needed only for changes to their owned source/tests.
+      - name: Node D1/D1.5/D2 scoped read and loopback compatibility
+        if: needs.classify.outputs.node_shared_compat == 'true'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
+          cargo test --locked -p aquilum-core --features node-lab \
+            --test headless_node_d1 --test headless_node_d2 --test node_catalog_lab -- --nocapture
+
       # RELEASE-SIGNED-CANDIDATE-01: real CLI Minisign -> native Rust interop.
       # Reuse the existing required Rust runner rather than queuing another job.
       # The test-only publisher key is ephemeral and never leaves RUNNER_TEMP.
       - name: Real ephemeral Minisign signature admitted by native Rust
-        if: needs.classify.outputs.mode == 'workspace' && (startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-CANDIDATE-') || startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-STAGING-'))
+        if: needs.classify.outputs.mode == 'workspace' && (startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-CANDIDATE-') || startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-STAGING-') || startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-') || github.head_ref == 'feature/windows-signed-manifest-v1-matrix-20261021')
         working-directory: aquilum-app
         shell: bash
         run: |
@@ -192,10 +410,28 @@ jobs:
           };
           fs.writeFileSync(path.join(root,'payload.AppImage'),payload);
           fs.writeFileSync(path.join(root,'manifest.json'),JSON.stringify(manifest));
+          // The protected Windows-only publisher must never sign
+          // fabricated Linux artifact hashes just to fill a matrix.
+          const windowsBytes=Buffer.from('MZ-AKULA-CI-ONLY-WINDOWS-NSIS-PAYLOAD-v1');
+          const windowsHash=crypto.createHash('sha256').update(windowsBytes).digest('hex');
+          const winManifest={
+            schema:1, product:'Akula', version:'0.3.10',
+            source_commit:'a'.repeat(40), cargo_lock_sha256:'b'.repeat(64),
+            artifacts:{
+              'windows-x86_64':{
+                filename:'Akula_0.3.10_x64-setup.exe',
+                sha256:windowsHash,
+                size:windowsBytes.length
+              }
+            }
+          };
+          fs.writeFileSync(path.join(root,'payload.NSIS'),windowsBytes);
+          fs.writeFileSync(path.join(root,'manifest-windows.json'),JSON.stringify(winManifest));
           NODE
           minisign -G -W -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.key" -p "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.pub"
           minisign -G -W -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/other.key" -p "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/other.pub"
           minisign -S -q -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.key" -m "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/manifest.json" -x "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/manifest.minisig"
+          minisign -S -q -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.key" -m "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/manifest-windows.json" -x "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/manifest-windows.minisig"
           cargo test --locked -p aquilum-native --bin aquilum-native updater::release::signed_candidate::tests::ephemeral_minisign_fixture_accepts_exact_bytes -- --exact --ignored --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-native-minisign.log"
           grep -Fq 'test updater::release::signed_candidate::tests::ephemeral_minisign_fixture_accepts_exact_bytes ... ok' "$RUNNER_TEMP/akula-native-minisign.log"
           grep -Fq 'test result: ok. 1 passed; 0 failed;' "$RUNNER_TEMP/akula-native-minisign.log"
@@ -203,6 +439,12 @@ jobs:
           grep -Fq 'AKULA_SIGNED_LINUX_ROLLBACK_PASS signed_candidate=1 v1_restored=1 v2_preserved_as_failed=1' "$RUNNER_TEMP/akula-native-minisign.log"
           echo 'AKULA_SIGNED_CANDIDATE_RUST_MINISIGN_PASS real_sign=1 wrong_key_refused=1' >> "$GITHUB_STEP_SUMMARY"
           echo 'AKULA_SIGNED_LINUX_STAGE_PASS signed_to_disk=1 native_inode_rehash=1' >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && ( "$GITHUB_HEAD_REF" == release/windows-nsis-self-update-01 || "$GITHUB_HEAD_REF" == feature/windows-signed-manifest-v1-matrix-20261021 || "$GITHUB_HEAD_REF" == release/akula-signed-metadata-discovery-01-20261021 ) ]]; then
+            cargo test --locked -p aquilum-native --bin aquilum-native updater::release::signed_candidate::tests::ephemeral_minisign_windows_fixture_accepts_signed_exact_bytes -- --exact --ignored --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-native-windows-minisign.log"
+            grep -Fq 'AKULA_WINDOWS_REAL_MINISIGN_ADMISSION_PASS correct_key=1 exact_nsis=1 wrong_key=0 downgrade=0' "$RUNNER_TEMP/akula-native-windows-minisign.log"
+            grep -Fq 'test result: ok. 1 passed; 0 failed;' "$RUNNER_TEMP/akula-native-windows-minisign.log"
+            echo 'AKULA_WINDOWS_SIGNED_NSIS_RUST_PASS real_minisign=1 exact_bytes=1 wrong_key_denied=1' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # AGENT-PERF: reuse the already compiled Core tests and the current
       # required-tests runner rather than introducing another queued job.
@@ -310,7 +552,7 @@ jobs:
   native-frames:
     name: Native frame fidelity
     needs: classify
-    if: github.event_name == 'pull_request' && needs.classify.outputs.mode == 'workspace'
+    if: github.event_name == 'pull_request' && (needs.classify.outputs.mode == 'workspace' || needs.classify.outputs.mode == 'native')
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -342,12 +584,50 @@ jobs:
           cargo test --locked -p aquilum-native --bin aquilum-native -- app::tests::perf::frames::
           printf 'Required frame-fidelity lane: %s seconds\n' "$((SECONDS - start))" >> "$GITHUB_STEP_SUMMARY"
 
+  perf-opt-in:
+    name: Optional Core performance measurements
+    needs: classify
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.classify.outputs.perf_core_changed == 'true' &&
+      (startsWith(github.head_ref, 'perf/') ||
+       startsWith(github.event.pull_request.title, 'perf(') ||
+       startsWith(github.event.pull_request.title, 'perf:') ||
+       contains(github.event.pull_request.labels.*.name, 'perf-ci'))
+    uses: ./.github/workflows/core-perf.yml
+
+  shared-labs:
+    name: Required shared-manifest OS/security route
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_b0c_ssh == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
+    uses: ./.github/workflows/ci-shared-manifest-labs.yml
+    with:
+      core: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
+      owner: ${{ needs.classify.outputs.installed_owner_owned == 'true' }}
+      lib: ${{ needs.classify.outputs.shared_core_lib_risky == 'true' }}
+      lock: ${{ needs.classify.outputs.shared_lock_risky == 'true' }}
+      root: ${{ needs.classify.outputs.shared_root_cargo_risky == 'true' }}
+      native: ${{ needs.classify.outputs.native_manifest_risky == 'true' }}
+      owned_host_custody: ${{ needs.classify.outputs.owned_host_custody == 'true' }}
+      owned_b0c_ssh: ${{ needs.classify.outputs.owned_b0c_ssh == 'true' }}
+      owned_sync_protection: ${{ needs.classify.outputs.owned_sync_protection == 'true' }}
+      owned_text_delta: ${{ needs.classify.outputs.owned_text_delta == 'true' }}
+      text_delta_module_required: ${{ needs.classify.outputs.text_delta_module_required == 'true' }}
+      text_delta_pack_fast_path: ${{ needs.classify.outputs.text_delta_pack_fast_path == 'true' }}
+      text_delta_pack_boundary_changed: ${{ needs.classify.outputs.text_delta_pack_boundary_changed == 'true' }}
+      owned_appimage: ${{ needs.classify.outputs.owned_appimage == 'true' }}
+      owned_windows_beta: ${{ needs.classify.outputs.owned_windows_beta == 'true' }}
+      owned_linux_beta: ${{ needs.classify.outputs.owned_linux_beta == 'true' }}
+      owned_pinned_read: ${{ needs.classify.outputs.owned_pinned_read == 'true' }}
+      owned_s3_reservation: ${{ needs.classify.outputs.owned_s3_reservation == 'true' }}
+      owned_s3_minio: ${{ needs.classify.outputs.owned_s3_minio == 'true' }}
+
   checks:
     # The ONLY status required by Protect main. GitHub cannot report success
     # until every mandatory lane is green. Always run even on upstream failure.
     name: Main PR gate
     if: ${{ always() && github.event_name == 'pull_request' }}
-    needs: [classify, required-tests, native-frames]
+    needs: [classify, required-tests, native-frames, shared-labs]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -358,6 +638,8 @@ jobs:
           REQUIRED_RESULT: ${{ needs.required-tests.result }}
           FRAMES_RESULT: ${{ needs.native-frames.result }}
           TEST_SCOPE: ${{ needs.classify.outputs.mode }}
+          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_b0c_ssh == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
+          ROUTED_SHARED_RESULT: ${{ needs.shared-labs.result }}
         run: |
           set -euo pipefail
           echo "Classification: $CLASSIFY_RESULT / $TEST_SCOPE"
@@ -367,13 +649,13 @@ jobs:
             exit 1
           fi
           case "$TEST_SCOPE" in
-            workspace)
+            workspace|native)
               if [ "$FRAMES_RESULT" != success ]; then
                 echo "::error::Native fidelity lane did not pass"
                 exit 1
               fi
               ;;
-            sync|none)
+            sync|none|manifest)
               if [ "$FRAMES_RESULT" != skipped ]; then
                 echo "::error::Unexpected native fidelity state for non-workspace PR"
                 exit 1
@@ -384,6 +666,17 @@ jobs:
               exit 1
               ;;
           esac
+          if [ "$SHARED_RISKY" = true ]; then
+            if [ "$ROUTED_SHARED_RESULT" != success ]; then
+              echo '::error::Required shared-manifest security/OS regressions did not pass'
+              exit 1
+            fi
+          else
+            if [ "$ROUTED_SHARED_RESULT" != skipped ]; then
+              echo '::error::Unexpected shared-manifest routing state'
+              exit 1
+            fi
+          fi
           echo "Required checks passed for $TEST_SCOPE scope" >> "$GITHUB_STEP_SUMMARY"
 
   seed-rust-cache:
@@ -428,3 +721,38 @@ jobs:
         run: |
           echo "Shared Rust cache exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
           echo "Only the main branch can save the shared cache; PRs restore but never upload." >> "$GITHUB_STEP_SUMMARY"
+
+      # Source archives only: no compiled target. Written exclusively in the
+      # existing main/push seed job. PRs only restore for measurement.
+      - name: Probe trusted registry-only cache
+        id: registry-cache-probe
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git
+          key: akula-registry-source-v1-${{ runner.os }}-${{ hashFiles('aquilum-app/Cargo.lock') }}
+          lookup-only: true
+      - name: Fetch locked source dependencies when registry cache is absent
+        if: steps.registry-cache-probe.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fetch --locked --manifest-path aquilum-app/Cargo.toml
+      - name: Save trusted registry-only cache for measurements
+        if: steps.registry-cache-probe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git
+          key: akula-registry-source-v1-${{ runner.os }}-${{ hashFiles('aquilum-app/Cargo.lock') }}
+      - name: Registry-only cache observation
+        shell: bash
+        env:
+          REGISTRY_HIT: ${{ steps.registry-cache-probe.outputs.cache-hit }}
+        run: |
+          echo "Trusted registry-only source cache exact hit: ${REGISTRY_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Registry-only archive is seeded only from default-branch push; source dependencies are locked." >> "$GITHUB_STEP_SUMMARY"

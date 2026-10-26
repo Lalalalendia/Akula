@@ -1,0 +1,49 @@
+name: Akula explicit local Iroh identity UI
+on:
+  pull_request:
+    branches:
+      - main
+      - feature/ak-p2p-os-device-identity-20261022
+    paths:
+      - 'aquilum-app/native/src/ui/transfer/identity.rs'
+      - 'aquilum-app/native/src/ui/transfer/layout.rs'
+      - 'aquilum-app/native/src/ui/transfer/queue_view.rs'
+      - 'aquilum-app/native/src/app/transfer/local_identity.rs'
+      - 'aquilum-app/native/src/app/transfer/tests.rs'
+      - '.github/workflows/p2p-local-id-ui.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ak-p2p-local-id-ui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  opt-in-native-ui:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-p2p-ui-v1
+      - name: Format only newly added UI files
+        shell: bash
+        run: |
+          rustfmt --edition 2024 --check \
+            aquilum-app/native/src/ui/transfer/identity.rs \
+            aquilum-app/native/src/ui/transfer/layout.rs \
+            aquilum-app/native/src/ui/transfer/queue_view.rs \
+            aquilum-app/native/src/app/transfer/local_identity.rs \
+            aquilum-app/native/src/app/transfer/tests.rs
+      - name: Compile actual native File transfers with opt-in identity
+        shell: bash
+        run: cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui
+      - name: Test real transfer panel identity controls and stale results
+        shell: bash
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui ui::transfer::identity::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui app::transfer::local_identity::tests -- --nocapture

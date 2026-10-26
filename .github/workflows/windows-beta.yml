@@ -2,19 +2,8 @@
 # Isolation is mandatory: no migration from upstream Freaction/Aquilum.
 name: Akula Windows beta candidate
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/windows-beta.yml'
-      - '.github/scripts/windows-beta-identity.test.cjs'
-      - 'scripts/test-windows-beta.ps1'
-      - 'scripts/windows-beta-gui-input.ps1'
-      - 'scripts/windows-beta-candidate-manifest.ps1'
-      - 'scripts/windows-accesskit-uia.ps1'
-      - 'aquilum-app/native/packaging/akula-windows.json'
-      - 'aquilum-app/native/src/**'
-      - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
+  workflow_call:
+  # Source ownership is enforced by the required Main PR gate.
   workflow_dispatch:
     inputs:
       ref:
@@ -26,13 +15,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: akula-windows-beta-${{ github.event.pull_request.number || github.ref }}
+  group: akula-windows-beta-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
   windows-beta:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,17 +29,60 @@ jobs:
       - name: Verify standalone packaging policy
         shell: pwsh
         run: node --test .github/scripts/windows-beta-identity.test.cjs
+      - uses: actions/checkout@v7
+        with:
+          repository: Lalalalendia/shiva
+          ref: 40b72a90b1dac39812c77c7321e57d613a81cb51
+          path: _shiva-preview
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           key: standalone-windows-beta
           cache-on-failure: true
+      - name: Parse both real Windows update acceptance scripts
+        if: startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-')
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in @('build-windows-update-fixture.ps1', 'test-windows-beta-upgrade.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $env:GITHUB_WORKSPACE "scripts/$file"),
+              [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) { throw "Windows update fixture parse failure $file : $($errors[0])" }
+          }
+          Write-Host 'AKULA_WINDOWS_UPGRADE_SCRIPTS_PARSE_PASS'
+
       - name: Install pinned NSIS packager
         run: cargo install cargo-packager --version 0.11.8 --locked
       - name: Build local-only native application
         working-directory: aquilum-app
         run: cargo build --release --locked -p aquilum-native --features installed
+      - name: Verify Windows Credential Manager with synthetic isolated credentials
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          # Native Windows API test; never uses Yandex credentials, network, or Akula vault data.
+          cargo test --release --locked -p aquilum-native --features installed --bin aquilum-native yandex_credentials::tests::windows_credential_manager_isolated_roundtrip -- --exact --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw "Synthetic Windows Credential Manager round-trip failed" }
+      - name: Compile pinned Shiva CLI as Akula's PDF sidecar
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git -C _shiva-preview rev-parse HEAD).Trim()
+          if ($actual -cne '40b72a90b1dac39812c77c7321e57d613a81cb51') { throw 'Shiva PDF source commit drifted' }
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE '.artifacts/shiva-preview'
+          cargo build --release --manifest-path _shiva-preview/Cargo.toml -p cli
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Shiva PDF companion compilation failed' }
+          $built = Join-Path $env:CARGO_TARGET_DIR 'release/shiva.exe'
+          $release = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
+          if (!(Test-Path -LiteralPath $built -PathType Leaf)) { throw 'Shiva executable absent' }
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          Copy-Item -LiteralPath $built -Destination (Join-Path $release 'shiva-pdf-preview.exe') -Force
+          Write-Host "AKULA_PDF_SHIVA_BUNDLED pin=$actual"
       - name: Package independent Akula identity
         shell: pwsh
         working-directory: aquilum-app
@@ -79,6 +111,47 @@ jobs:
       - name: Verify candidate provenance and write manifest
         shell: pwsh
         run: ./scripts/windows-beta-candidate-manifest.ps1
+      # RELEASE-WINDOWS-NSIS-UPGRADE-01: based on Freaction/Aquilum's
+      # proven NSIS self-upgrade flags, but builds TWO independent Akula
+      # versions and touches no upstream Aquilum application.
+      - name: Build real second Akula NSIS 0.3.10 (CI-only, no release)
+        if: startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-')
+        shell: pwsh
+        timeout-minutes: 42
+        env:
+          AKULA_WINDOWS_DISPOSABLE_UPGRADE_LAB: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Internal cargo/git return codes are checked in the PowerShell
+          # script itself; the script throws if any build/package step fails.
+          ./scripts/build-windows-update-fixture.ps1
+
+      - name: Install v1, upgrade NSIS to v2, recover v1 and reopen real GUI
+        if: startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-')
+        shell: pwsh
+        timeout-minutes: 20
+        env:
+          AKULA_WINDOWS_DISPOSABLE_UPGRADE_LAB: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # PowerShell scripts throw terminating errors on failure. Unlike
+          # native .exe tools, running a .ps1 does NOT reliably set
+          # LASTEXITCODE. Treating $null -ne 0 as failure rejected a fully
+          # passing real NSIS v1->v2->v1 run at 39596723084.
+          ./scripts/test-windows-beta-upgrade.ps1
+
+      - name: Retain unsigned v2 upgrade proof (not a public release)
+        if: startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-')
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-windows-0.3.10-CI-ONLY-NOT-RELEASE
+          path: |
+            dist/e2e-v2/Akula_0.3.10_*-setup.exe
+            dist/e2e-v2/executable-sha256.txt
+            dist/e2e-v2/PROVENANCE-NOT-RELEASE.txt
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Upload candidate (not a release)
         uses: actions/upload-artifact@v7
         with:

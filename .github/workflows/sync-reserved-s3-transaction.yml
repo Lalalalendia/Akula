@@ -1,7 +1,10 @@
 name: Sync reserved S3 preparation
 
 on:
+  workflow_call:
   pull_request:
+    # Main uses required routed acceptance; all other PR targets remain direct.
+    branches-ignore: [main]
     paths:
       - 'aquilum-app/core/src/sync/s3_reserved_replace*.rs'
       - 'aquilum-app/core/src/sync/guarded_note_write.rs'
@@ -14,8 +17,7 @@ on:
       - 'aquilum-app/core/src/documents/hub.rs'
       - 'aquilum-app/core/src/files/gate/write.rs'
       - 'aquilum-app/core/src/files/gate/mod.rs'
-      - 'aquilum-app/core/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
+
       - '.github/workflows/sync-reserved-s3-transaction.yml'
       - 'docs/sync/p0g2-held-s3-editor-reservation.md'
       - 'docs/sync/p0g3a-single-filegate-prewrite.md'
@@ -25,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: reserved-s3-${{ github.event.pull_request.number || github.ref }}
+  group: reserved-s3-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:

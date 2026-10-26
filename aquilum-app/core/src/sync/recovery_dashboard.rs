@@ -12,8 +12,8 @@ use std::fs;
 use std::path::Path;
 
 pub const RECOVERY_JOURNAL_FILENAME: &str = "sync-operations.sqlite3";
-const MAX_DISPLAYED_PATHS: usize = 5;
-const MAX_JOURNAL_TICKETS_FOR_UI: usize = 1000;
+pub(super) const MAX_DISPLAYED_PATHS: usize = 5;
+pub(super) const MAX_JOURNAL_TICKETS_FOR_UI: usize = 1000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NativeRecoveryOverview {
@@ -257,7 +257,7 @@ pub fn native_record_recovery_decision(
 /// This is not a cross-process hostile-app-data path lock. Caller supplies
 /// host-controlled app-data, never remote or plugin-selected paths; UI review
 /// is a local non-destructive event, not release authorization.
-fn guarded_recovery_journal<'a>(
+pub(super) fn guarded_recovery_journal<'a>(
     core: &'a Core,
     app_data_dir: &Path,
     registered_vault_root: &Path,

@@ -6,6 +6,20 @@ use super::Inner;
 use crate::ui::editor::resolve::{Fetch, Media};
 
 const RECENT: usize = 24;
+// Resource limits for untrusted remote and data: image inputs.
+// These bound *compressed input bytes*, not decoder memory.
+const MAX_REMOTE_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_INLINE_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+
+fn copy_with_byte_budget(mut reader: impl std::io::Read, mut writer: impl std::io::Write, limit: u64) -> std::io::Result<Option<u64>> {
+    use std::io::Read;
+    let count = std::io::copy(&mut reader.by_ref().take(limit.saturating_add(1)), &mut writer)?;
+    Ok((count > 0 && count <= limit).then_some(count))
+}
+
+fn inline_base64_length_ok(encoded_len: usize) -> bool {
+    encoded_len <= MAX_INLINE_IMAGE_BYTES.div_ceil(3).saturating_mul(4)
+}
 
 static LOADED: Mutex<VecDeque<(String, PathBuf, bool)>> = Mutex::new(VecDeque::new());
 
@@ -67,22 +81,47 @@ fn download(inner: &Inner, url: &str) -> Option<PathBuf> {
     url.hash(&mut hasher);
     let ext = crate::images::extension(url).map(str::to_ascii_lowercase).unwrap_or_default();
     let name = if ext.is_empty() { format!("{:016x}", hasher.finish()) } else { format!("{:016x}.{ext}", hasher.finish()) };
-    let target = inner.cache.join(name);
-    if target.is_file() {
+    let target = inner.cache.join(&name);
+    // A cached image cannot bypass the same input-byte bound. Do not follow
+    // a cache symlink into an unrelated file.
+    if let Ok(meta) = std::fs::symlink_metadata(&target) {
+        if !meta.file_type().is_file() || meta.len() == 0 || meta.len() > MAX_REMOTE_IMAGE_BYTES {
+            return None;
+        }
         let _ = std::fs::File::options().append(true).open(&target).and_then(|f| f.set_modified(std::time::SystemTime::now()));
         return Some(target);
     }
     std::fs::create_dir_all(&inner.cache).ok()?;
-    let partial = target.with_extension("part");
+    // Avoid shared .part paths when requests for the same URL overlap.
+    let partial = inner.cache.join(format!("{name}.{}.part", uuid::Uuid::new_v4()));
     let response = aquilum_core::web_agent::web_agent("images").get(url).call().ok()?;
-    let copied = std::fs::File::create(&partial).and_then(|mut file| std::io::copy(&mut response.into_reader(), &mut file));
-    (copied.is_ok() && std::fs::rename(&partial, &target).is_ok()).then_some(target)
+    let staged = (|| -> Option<()> {
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&partial).ok()?;
+        copy_with_byte_budget(response.into_reader(), &mut file, MAX_REMOTE_IMAGE_BYTES).ok()??;
+        file.sync_all().ok()?;
+        Some(())
+    })();
+    if staged.is_some() && std::fs::rename(&partial, &target).is_ok() {
+        Some(target)
+    } else {
+        let _ = std::fs::remove_file(&partial);
+        None
+    }
 }
 
 fn inline_image(source: &str) -> Option<Fetch<Media>> {
     use base64::Engine;
     let (header, data) = source.strip_prefix("data:image/")?.split_once(',')?;
-    let picture = header.ends_with(";base64").then(|| base64::engine::general_purpose::STANDARD.decode(data.trim()).ok()).flatten().and_then(|bytes| crate::images::decode_shown(&bytes));
+    // Reject huge base64 data *before* allocating a decoded Vec.
+    let data = data.trim();
+    let picture = header.ends_with(";base64")
+        .then(|| {
+            if !inline_base64_length_ok(data.len()) { return None; }
+            let bytes = base64::engine::general_purpose::STANDARD.decode(data).ok()?;
+            (bytes.len() <= MAX_INLINE_IMAGE_BYTES).then_some(bytes)
+        })
+        .flatten()
+        .and_then(|bytes| crate::images::decode_shown(&bytes));
     Some(match picture {
         Some(picture) => Fetch::Ready(Media { image: Some(picture.image), natural: picture.natural, video: false, path: None }),
         None => Fetch::Missing(source.to_owned()),
@@ -133,7 +172,7 @@ pub(super) fn load(inner: &Inner, source: &str, wiki: bool) -> Fetch<Media> {
 mod tests {
     use base64::Engine;
 
-    use super::{Fetch, inline_image};
+    use super::{Fetch, copy_with_byte_budget, inline_base64_length_ok, inline_image, MAX_INLINE_IMAGE_BYTES};
 
     #[test]
     fn data_uri_images_are_decoded() {
@@ -143,5 +182,25 @@ mod tests {
         assert!(matches!(inline_image(&source), Some(Fetch::Ready(media)) if media.image.is_some()));
         assert!(matches!(inline_image("data:image/png;base64,!!!"), Some(Fetch::Missing(_))));
         assert!(inline_image("pic.png").is_none());
+    }
+
+    #[test]
+    fn remote_copy_stops_after_the_first_excess_byte() {
+        let mut out = Vec::new();
+        assert_eq!(copy_with_byte_budget(&b"abcde"[..], &mut out, 5).unwrap(), Some(5));
+        assert_eq!(out.as_slice(), b"abcde");
+        out.clear();
+        assert_eq!(copy_with_byte_budget(&b"abcdefg"[..], &mut out, 5).unwrap(), None);
+        assert_eq!(out.as_slice(), b"abcdef", "stream must stop after limit + 1 bytes");
+        out.clear();
+        assert_eq!(copy_with_byte_budget(&b""[..], &mut out, 5).unwrap(), None);
+    }
+
+    #[test]
+    fn inline_base64_budget_rejects_encoded_bombs_before_decode() {
+        let max_encoded = MAX_INLINE_IMAGE_BYTES.div_ceil(3) * 4;
+        assert!(inline_base64_length_ok(max_encoded));
+        assert!(!inline_base64_length_ok(max_encoded + 1));
+        assert!(!inline_base64_length_ok(usize::MAX));
     }
 }

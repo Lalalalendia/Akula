@@ -1,13 +1,13 @@
 name: Akula Bootstrap B1b4a root FD owner and external CAS fence
 
 on:
+  workflow_call:
   pull_request:
     branches:
       - main
       - experiment/akula-server-bootstrap-b1b3c-root-pinned-package-lab
     paths:
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/core/src/lib.rs"
+
       - "aquilum-app/core/src/server_installer_cas_fence_lab.rs"
       - "aquilum-app/core/tests/server_bootstrap_b1b4a.rs"
       - ".github/workflows/core-server-bootstrap-b1b4a-cas-fence.yml"
@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   # Only PR revisions supersede earlier PR revisions; manual labs stay independent.
-  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: b1b4a-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:

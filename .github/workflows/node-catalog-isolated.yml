@@ -1,0 +1,41 @@
+name: Node Catalog D1.5 standalone parity
+
+on:
+  pull_request:
+    paths:
+      - 'modules/node-catalog/**'
+      - '.github/workflows/node-catalog-isolated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-catalog-isolated-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  node-catalog-standalone:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify source parity or the narrow Core catalog adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Fq 'pub use akula_node_catalog::' aquilum-app/core/src/node_catalog_lab.rs; then
+            echo "Core delegates read-only catalog types to the shared package"
+          else
+            cmp -s aquilum-app/core/src/node_catalog_lab.rs modules/node-catalog/src/catalog.rs
+          fi
+      - name: Run original D1.5 filesystem and security tests
+        run: cargo test --manifest-path modules/node-catalog/Cargo.toml -- --nocapture
+      - name: Check Core Node D1/D1.5/D2 compatibility on catalog changes
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features node-lab \
+            --test headless_node_d1 --test headless_node_d2 --test node_catalog_lab -- --nocapture
