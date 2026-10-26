@@ -16,10 +16,14 @@ impl App {
         self.embeds = None;
         self.open_error = None;
         self.open_error_ids = None;
+        // Do admission on the caller, but keep expensive DICOMDIR scans and
+        // frame decoding in a bounded worker instead of blocking Masonry.
         let result = self.tree.root()
             .ok_or_else(|| "Не открыта база Akula".to_owned())
-            .and_then(|vault| crate::dicom::Study::open(vault, path))
-            .and_then(crate::ui::dicom::DicomPage::new);
+            .and_then(|vault| {
+                crate::dicom::admit(vault, path)
+                    .map(|source| crate::ui::dicom::DicomPage::new(vault.to_path_buf(), source))
+            });
         match result {
             Ok(page) => {
                 let id = page.id();

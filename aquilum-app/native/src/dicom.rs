@@ -9,6 +9,9 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+mod worker;
+pub use worker::{DicomWorker, FrameUpdate, Navigation};
+
 const PIXEL_DATA: Tag = Tag(0x7fe0, 0x0010);
 const DIRECTORY_RECORD_SEQUENCE: Tag = Tag(0x0004, 0x1220);
 const DIRECTORY_RECORD_TYPE: Tag = Tag(0x0004, 0x1430);
