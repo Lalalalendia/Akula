@@ -32,6 +32,10 @@ jobs:
           set -euo pipefail
           python scripts/dicom-lab/generate.py
           python scripts/dicom-lab/verify.py
+      - name: Prepare 100 MiB 200-frame synthetic volume
+        run: python scripts/dicom-lab/stress_generate.py
+      - name: Create and verify DICOMDIR medical media structure
+        run: python scripts/dicom-lab/media_probe.py
       - name: Independently verify raw lossless pixels using pydicom
         continue-on-error: true
         run: python scripts/dicom-lab/reference_check.py
@@ -71,6 +75,8 @@ jobs:
           done
       - name: Attempt decoding identical cases with every compiled probe
         run: python scripts/dicom-lab/compare.py
+      - name: Repeated 100 MiB volume tests with max RSS and hash parity
+        run: python scripts/dicom-lab/stress_compare.py
       - name: Summarize results and limitations
         if: always()
         shell: bash
@@ -98,6 +104,8 @@ jobs:
             scripts/dicom-lab/results/*.txt
             scripts/dicom-lab/results/*.log
             scripts/dicom-lab/manifest.json
+            scripts/dicom-lab/stress_manifest.json
+            scripts/dicom-lab/results/*.json
           if-no-files-found: warn
           retention-days: 30
       - name: Enforce independent compilation evidence
@@ -125,4 +133,10 @@ jobs:
           statuses=[row['status'] for row in csv.DictReader(ref.open())]
           assert len(statuses)==10, f'expected 10 reference rows, got {len(statuses)}'
           assert all(x in ('RAW_HASH_MATCH','LOSSY_DECODE_ONLY','EXPECTED_REJECTION') for x in statuses), f'pydicom reference failed: {statuses}'
+          import json
+          media=json.loads(Path('scripts/dicom-lab/results/media_results.json').read_text())
+          assert len(media['images'])==3 and media['copied_media_readable'] and media['missing_file_detected'], media
+          stress=list(csv.DictReader(Path('scripts/dicom-lab/results/stress_results.csv').open()))
+          assert len(stress)==12, f'expected 12 warmup/repeat rows, got {len(stress)}'
+          assert all(row['status']=='PIXEL_MATCH' for row in stress), [r for r in stress if r['status']!='PIXEL_MATCH']
           PY

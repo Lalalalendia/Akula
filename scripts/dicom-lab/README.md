@@ -33,3 +33,18 @@ Release/CI caveats:
 - No peak RSS, 100 MB/200-frame stress, DICOMDIR, optical drive, clinical
   qualification, or installed Akula integration.
 - No PR or change to main.
+
+## Stage 2: large-file and DICOMDIR evidence
+
+stress_generate.py creates a 100 MiB, 200-frame, 16-bit signed synthetic DICOM.
+stress_compare.py runs each of the three readers four times (warmup + 3
+repeats), captures process wall time, max resident set size via GNU time,
+frame count and raw SHA-256 parity. Results are in stress_results.csv.
+This measures eager full-volume decode, **not** random slice access/streaming.
+Microbenchmark times are not portable between runner types.
+
+media_probe.py generates a genuine DICOMDIR with pydicom FileSet, verifies
+three extensionless image filenames and their relationships, opens a copy
+from a different directory, and detects an intentionally deleted reference.
+This is a Python-produced synthetic File-set, not a test of Akula Rust
+DICOMDIR parsing. No patient data or real optical media involved.
