@@ -5,7 +5,7 @@
 use masonry::imaging::{ClipRef, GeometryRef};
 use masonry::kurbo::{Affine, BezPath, PathEl, Point, Stroke};
 
-use super::{Painter, error::PaintError};
+use super::{Painter, PaintError};
 
 const MAX_DEVICE_COORD: f64 = 10_000_000.0;
 const MAX_PATH_ELEMENTS: usize = 262_144;

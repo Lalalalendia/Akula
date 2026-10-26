@@ -11,7 +11,7 @@ use super::{Painter, TOLERANCE};
 use super::convert;
 use super::error::PaintError;
 use super::mask;
-
+mod path_guard;
 impl PaintSink for Painter {
     fn push_clip(&mut self, clip: ClipRef<'_>) {
         if self.error.is_some() { return; }
