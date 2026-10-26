@@ -2,7 +2,7 @@ name: DICOM no-vault Windows GUI smoke (non-release)
 on:
   push:
     branches:
-      - 'feat/dicom-readonly-preview-20261026'
+      - main
     paths:
       - '.github/workflows/dicom-no-vault-gui.yml'
       - 'aquilum-app/native/src/dicom.rs'
