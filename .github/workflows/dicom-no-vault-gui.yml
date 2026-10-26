@@ -20,6 +20,18 @@ on:
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
       - 'scripts/dicom-native-smoke/**'
+      - 'aquilum-app/native/src/app/actions/dispatch.rs'
+      - 'aquilum-app/native/src/app/file_menu/**'
+      - 'aquilum-app/native/src/app/root_ui.rs'
+      - 'aquilum-app/native/src/app/root_ui/**'
+      - 'aquilum-app/native/src/app/tabs/open/**'
+      - 'aquilum-app/native/src/args/**'
+      - 'aquilum-app/native/src/host/create/**'
+      - 'aquilum-app/native/src/ui/file_tree/actions/**'
+      - 'aquilum-app/native/src/ui/file_tree/model/load/**'
+      - 'aquilum-app/native/src/ui/new_tab/**'
+      - 'aquilum-app/native/src/ui/shell/**'
+      - 'aquilum-app/native/src/ui/workspaces/helpers/**'
   workflow_dispatch:
 permissions:
   contents: read
