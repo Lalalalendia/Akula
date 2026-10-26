@@ -86,6 +86,8 @@ jobs:
         run: python scripts/dicom-lab/compare.py
       - name: Repeated 100 MiB volume tests with max RSS and hash parity
         run: python scripts/dicom-lab/stress_compare.py
+      - name: Benchmark selected frame access at 0, 99 and 199
+        run: python scripts/dicom-lab/slice_compare.py
       - name: Summarize results and limitations
         if: always()
         shell: bash
@@ -148,4 +150,8 @@ jobs:
           stress=list(csv.DictReader(Path('scripts/dicom-lab/results/stress_results.csv').open()))
           assert len(stress)==12, f'expected 12 warmup/repeat rows, got {len(stress)}'
           assert all(row['status']=='PIXEL_MATCH' for row in stress), [r for r in stress if r['status']!='PIXEL_MATCH']
+          slices=list(csv.DictReader(Path('scripts/dicom-lab/results/slice_results.csv').open()))
+          assert len(slices)==30, f'expected 30 slice measurements, got {len(slices)}'
+          assert all(row['status']=='PIXEL_MATCH' for row in slices), [r for r in slices if r['status']!='PIXEL_MATCH']
+          assert {int(row['frame']) for row in slices if row['warmup']=='False'}=={0,99,199}
           PY

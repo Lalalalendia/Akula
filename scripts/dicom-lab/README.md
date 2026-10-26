@@ -61,3 +61,16 @@ series tree; that remains an integration requirement.
 
 stress_reference.py validates the 100 MiB uncompressed signed multi-frame
 pixel array with an independent pydicom decoder before the Rust timing tests.
+
+## Stage 4: selected frame access
+
+Each decoder now has a standalone slice_probe CLI for uncompressed 100 MiB
+multi-frame volumes. It attempts frame 0, 99 and 199, three times each plus
+a warmup, and checks raw SHA-256 of exactly one 512x512 signed 16-bit frame
+against the independent generator manifest. Record process wall time and
+peak RSS in slice_results.csv.
+
+This isolates frame-level decode/copy workload from viewport rendering.
+It is still **not** streaming from optical media: the APIs may load the
+complete DICOM object before selecting a frame. Timing is on Linux runners
+with warm filesystem cache, not Win7/10/11 GUI input latency.
