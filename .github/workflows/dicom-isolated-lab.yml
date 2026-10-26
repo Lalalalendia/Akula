@@ -1,0 +1,53 @@
+name: DICOM isolated Rust comparative lab
+on:
+  push:
+    branches:
+      - 'lab/dicom-rust-compare-20261026'
+    paths:
+      - 'scripts/dicom-lab/**'
+      - '.github/workflows/dicom-isolated-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install generator requirement
+        run: python -m pip install 'Pillow==11.3.0'
+      - name: Generate and verify
+        run: |
+          python scripts/dicom-lab/generate.py
+          python scripts/dicom-lab/verify.py
+      - name: Compile independent probes
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p scripts/dicom-lab/results
+          for name in dicom-rs dcmfx toolkit; do
+            (cd "scripts/dicom-lab/$name" && cargo build --release) > "scripts/dicom-lab/results/build-$name.log" 2>&1
+            code=$?
+            echo "$name:$code" | tee -a scripts/dicom-lab/results/build-exits.txt
+            tail -n 15 "scripts/dicom-lab/results/build-$name.log"
+          done
+      - name: Compare decode attempts
+        run: python scripts/dicom-lab/compare.py
+      - name: Archive results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dicom-rust-compare-${{ github.run_id }}
+          path: |
+            scripts/dicom-lab/results/*.csv
+            scripts/dicom-lab/results/*.txt
+            scripts/dicom-lab/results/*.log
+            scripts/dicom-lab/manifest.json
+          if-no-files-found: warn
+          retention-days: 30
