@@ -201,9 +201,16 @@ mod tests {
     }
 
     #[test]
-    fn package_without_valid_toc_still_opens_without_navigation_entries() {
-        let (_temp, path) = synthetic_epub();
-        let epub = crate::reader::Book::open(&path).expect("valid book");
-        assert_eq!(epub.sections.len(), 3);
+    fn nav_parser_skips_foreign_targets_and_missing_spine_files() {
+        let source = r#"<html><body><nav role="doc-toc"><ol>
+            <li><a href="https://external.example/page">External</a></li>
+            <li><a href="chapter.xhtml#intro">Local</a></li>
+            <li><a href="../missing.xhtml">Missing</a></li>
+        </ol></nav></body></html>"#;
+        let dom = super::document(source.as_bytes()).unwrap();
+        let entries = super::from_nav(&dom, "OPS", &[("OPS/chapter.xhtml".to_owned(), String::new())]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "Local");
+        assert_eq!(entries[0].fragment.as_deref(), Some("intro"));
     }
 }
