@@ -72,7 +72,7 @@ impl FileTree {
         let colors = root.as_deref().map(|r| store.colors(r)).unwrap_or_default();
         let mut model = TreeModel::new(root, expanded);
         model.set_sort(sort);
-        model.set_colors(colors);
+        if !colors.is_empty() { model.set_colors(colors); }
         let mut tree = FileTree {
             model,
             drag: None,
