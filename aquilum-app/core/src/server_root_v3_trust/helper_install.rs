@@ -121,8 +121,7 @@ fn hash_elf(file: &File, size: u64) -> Result<[u8; 32], HelperInstallError> {
         }
         if offset < header.len() as u64 {
             let copied = n.min(header.len() - offset as usize);
-            header[offset as usize..offset as usize + copied]
-                .copy_from_slice(&block[..copied]);
+            header[offset as usize..offset as usize + copied].copy_from_slice(&block[..copied]);
         }
         context.update(&block[..n]);
         offset += n as u64;
@@ -134,7 +133,11 @@ fn hash_elf(file: &File, size: u64) -> Result<[u8; 32], HelperInstallError> {
     {
         return Err(HelperInstallError::UnsafeInode);
     }
-    Ok(context.finish().as_ref().try_into().expect("SHA-256 is 32 bytes"))
+    Ok(context
+        .finish()
+        .as_ref()
+        .try_into()
+        .expect("SHA-256 is 32 bytes"))
 }
 
 /// Filesystem-only primitive for disposable root-owned fixtures. The
@@ -148,9 +151,7 @@ fn publish_signed_hold(
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(HelperInstallError::NotRoot);
     }
-    if !root_dir_ok(&stage.metadata()?, 0o700)
-        || !root_dir_ok(&destination.metadata()?, 0o700)
-    {
+    if !root_dir_ok(&stage.metadata()?, 0o700) || !root_dir_ok(&destination.metadata()?, 0o700) {
         return Err(HelperInstallError::UnsafeDirectory);
     }
     if !verified.remains_hold

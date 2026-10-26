@@ -157,7 +157,9 @@ fn root_signed_stage_publishes_exact_0500_copy_and_never_executes() {
     assert_eq!(meta.permissions().mode() & 0o7777, 0o500);
     assert_ne!(
         meta.ino(),
-        fs::metadata(f.stage_path().join(STAGED_LEAF)).unwrap().ino()
+        fs::metadata(f.stage_path().join(STAGED_LEAF))
+            .unwrap()
+            .ino()
     );
     assert_eq!(fs::read_dir(f.dest_path()).unwrap().count(), 1);
     assert!(!f.dest_path().join(PENDING_LEAF).exists());
