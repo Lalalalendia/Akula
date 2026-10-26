@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crop::Rope;
 use uuid::Uuid;
 
-use super::{checked_relative, inspect, invalid, stage};
+use super::{checked_relative, clear_after_verified_save, inspect, invalid, stage};
 
 struct Context {
     data: PathBuf,
@@ -85,6 +85,26 @@ impl SnapshotQueue {
             crate::disk::run(move || drain(context, state));
         }
         Ok(revision)
+    }
+
+    /// Never clear a shadow on enqueue or a guessed save: a successful File
+    /// Gate response only schedules an exact disk-byte comparison in the same
+    /// serial worker used for shadow creation and normal note saves.
+    pub(in crate::note) fn after_save_ack(&self) {
+        let context = Arc::clone(&self.context);
+        let state = Arc::clone(&self.state);
+        crate::disk::run(move || {
+            let revision = state.lock().unwrap_or_else(PoisonError::into_inner).durable;
+            if let Some(revision) = revision {
+                let result = clear_after_verified_save(
+                    &context.data, &context.vault, context.workspace, &context.document, revision,
+                );
+                if let Err(error) = result {
+                    state.lock().unwrap_or_else(PoisonError::into_inner).failure =
+                        Some(format!("recovery cleanup needs review: {error}"));
+                }
+            }
+        });
     }
 
     pub(in crate::note) fn status(&self) -> CaptureStatus {

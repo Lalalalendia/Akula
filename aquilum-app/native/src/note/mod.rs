@@ -116,7 +116,7 @@ impl Note {
                 continue;
             }
             match outcome {
-                Outcome::Saved => self.save_error = None,
+                Outcome::Saved => { self.save_error = None; self.saved_ack(); },
                 Outcome::Copied { copy, disk } => {
                     self.replaced = disk;
                     self.save_error = Some(t_with("editor.conflictCopy", &[("name", &copy)]));

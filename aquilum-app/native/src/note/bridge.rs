@@ -25,6 +25,12 @@ impl Note {
         self.shadow.as_ref().map(|shadow| shadow.request(source.clone())).transpose()
     }
 
+    pub(crate) fn saved_ack(&self) {
+        if let Some(shadow) = &self.shadow {
+            shadow.after_save_ack();
+        }
+    }
+
     pub(crate) fn shadow_status(&self) -> Option<CaptureStatus> {
         self.shadow.as_ref().map(SnapshotQueue::status)
     }
