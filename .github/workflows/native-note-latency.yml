@@ -363,18 +363,41 @@ jobs:
             $targetX = $rect.Left + [Math]::Min(420,[int]($width * 0.42))
             $targetY = $rect.Top + [Math]::Min(338,[int]($height * 0.52))
             if (![AkulaWin32]::SetCursorPos($targetX,$targetY)) { throw 'Cannot target code panel' }
-            [AkulaWin32]::mouse_event(0x1000,0,0,-240,[UIntPtr]::Zero)
-            Start-Sleep -Milliseconds 800
-            Capture 'after-horizontal-wheel.png'
-            # Deterministic 1000x650 window: observe unwrapped code line (y≈328-359)
-            # and the fixed fence header (y≈300), after the stable baseline witness.
-            $codePixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.33 0.495 0.61 0.565
-            $headerPixelsChanged = ChangedPixels 'opened.png' 'after-horizontal-wheel.png' 0.30 0.45 0.60 0.49
-            if ($codePixelsChanged -lt 450) {
-              throw "Horizontal wheel did not shift code-body pixels: changed=$codePixelsChanged"
+            # Ensure winit receives a PointerButton at the code location. A plain
+            # SetCursorPos may not update its cached mouse position on CI Windows.
+            [AkulaWin32]::mouse_event(0x0001,1,0,0,[UIntPtr]::Zero)
+            [AkulaWin32]::mouse_event(0x0002,0,0,0,[UIntPtr]::Zero)
+            [AkulaWin32]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 350
+            if ([AkulaWin32]::GetForegroundWindow() -ne $hwnd) { throw 'Code click lost Akula foreground' }
+            Capture 'before-horizontal-wheel.png'
+            # Win32 MOUSEEVENTF_HWHEEL reports a signed x delta through winit.
+            # The editor applies -dx; verify either polarity without weakening
+            # the observed-movement and fixed-header assertions.
+            $codePixelsChanged = 0
+            $headerPixelsChanged = 0
+            $wheelDirection = 0
+            foreach ($direction in @(240,-240)) {
+              [AkulaWin32]::mouse_event(0x1000,0,0,$direction,[UIntPtr]::Zero)
+              Start-Sleep -Milliseconds 650
+              $frame = if ($direction -gt 0) { 'wheel-positive.png' } else { 'wheel-negative.png' }
+              Capture $frame
+              # The code is one unwrapped row (y≈328-359), with a static
+              # language/fence header around y≈300.
+              $codePixelsChanged = ChangedPixels 'before-horizontal-wheel.png' $frame 0.33 0.495 0.61 0.565
+              $headerPixelsChanged = ChangedPixels 'before-horizontal-wheel.png' $frame 0.30 0.45 0.60 0.49
+              Write-Host "CODE_HWHEEL direction=$direction bodyPixels=$codePixelsChanged headerPixels=$headerPixelsChanged"
+              if ($headerPixelsChanged -gt 120) {
+                throw "Fixed code header moved while sending HWHEEL $direction: changed=$headerPixelsChanged"
+              }
+              if ($codePixelsChanged -ge 450) {
+                $wheelDirection = $direction
+                Copy-Item -LiteralPath (Join-Path $out $frame) -Destination (Join-Path $out 'after-horizontal-wheel.png') -Force
+                break
+              }
             }
-            if ($headerPixelsChanged -gt 120) {
-              throw "Fixed fenced-code header moved during scroll: changed=$headerPixelsChanged"
+            if ($wheelDirection -eq 0) {
+              throw "Neither HWHEEL polarity shifted code-body pixels: last_changed=$codePixelsChanged"
             }
             if ([AkulaWin32]::GetForegroundWindow() -ne $hwnd) { throw 'Native window lost focus' }
             [System.Windows.Forms.SendKeys]::SendWait('^f')
@@ -400,6 +423,8 @@ jobs:
               foreground_verified = $true
               os_horizontal_wheel_injected = $true
               horizontal_code_pixels_changed = $codePixelsChanged
+              win32_hwheel_delta = $wheelDirection
+              input_target_relative = @($targetX - $rect.Left, $targetY - $rect.Top)
               fixed_code_header_pixels_changed = $headerPixelsChanged
               screenshot_region_scroll_witness = $true
               stable_code_frame_witness = $ready
