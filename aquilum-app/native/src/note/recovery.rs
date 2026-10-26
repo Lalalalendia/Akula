@@ -76,28 +76,39 @@ fn checked_relative(vault: &Path, document: &Path) -> io::Result<String> {
     relative.to_str().map(str::to_owned).ok_or_else(|| denied("non-UTF8 document path requires review"))
 }
 
+fn checked_directory(path: &Path, create: bool) -> io::Result<bool> {
+    if create {
+        match fs::create_dir(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() && !reparse(&meta) => Ok(true),
+        Ok(_) => Err(denied("recovery directory is a link or non-directory")),
+        Err(error) if !create && error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 fn folder(data: &Path, workspace: Uuid, create: bool) -> io::Result<Option<PathBuf>> {
-    if reparse(&fs::symlink_metadata(data)?) {
+    let data_meta = fs::symlink_metadata(data)?;
+    if !data_meta.is_dir() || reparse(&data_meta) {
         return Err(denied("application data is a link/reparse point"));
     }
     let base = data.join("akula-note-recovery-v1");
     let bucket = base.join(workspace.to_string());
-    if create {
-        fs::create_dir_all(&bucket)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&base, fs::Permissions::from_mode(0o700))?;
-            fs::set_permissions(&bucket, fs::Permissions::from_mode(0o700))?;
-        }
-    } else if !bucket.exists() {
+    // Verify each segment BEFORE traversing or chmod: never follow a
+    // pre-existing symlink/junction into an attacker-selected location.
+    if !checked_directory(&base, create)? || !checked_directory(&bucket, create)? {
         return Ok(None);
     }
-    for path in [&base, &bucket] {
-        let meta = fs::symlink_metadata(path)?;
-        if !meta.is_dir() || reparse(&meta) {
-            return Err(denied("recovery directory is not a private directory"));
-        }
+    #[cfg(unix)]
+    if create {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&base, fs::Permissions::from_mode(0o700))?;
+        fs::set_permissions(&bucket, fs::Permissions::from_mode(0o700))?;
     }
     Ok(Some(bucket))
 }
@@ -333,6 +344,20 @@ mod tests {
         assert!(!clear_after_verified_save(data.path(), vault.path(), id, &doc, 8).unwrap());
         assert!(clear_after_verified_save(data.path(), vault.path(), id, &doc, 9).unwrap());
         assert!(inspect(data.path(), vault.path(), id, &doc).unwrap().is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn symlinked_recovery_bucket_is_refused_without_writing_outside_appdata() {
+        use std::os::unix::fs::symlink;
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("note.md");
+        fs::write(&doc, "base").unwrap();
+        symlink(outside.path(), data.path().join("akula-note-recovery-v1")).unwrap();
+        assert!(stage(data.path(), vault.path(), Uuid::new_v4(), &doc, &digest(&doc), 1, "draft").is_err());
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
     }
 
     #[test]
