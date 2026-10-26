@@ -61,7 +61,6 @@ mod tests {
                 let want = expected(before[channel], before[3]);
                 assert!(actual[channel].abs_diff(want) <= 1,
                     "SIMD/scalar mismatch channel={channel}, before={before:?}, got={actual:?}, expected={want}");
-                assert!(actual[channel] <= 255);
             }
             assert_eq!(actual[3], before[3]);
         }
