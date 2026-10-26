@@ -1,4 +1,4 @@
-mod bridge;
+pub(crate) mod bridge;
 mod read;
 mod recovery;
 mod save;

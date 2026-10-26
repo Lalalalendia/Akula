@@ -9,6 +9,31 @@ use uuid::Uuid;
 use super::Note;
 use super::recovery::{CaptureStatus, SnapshotQueue};
 
+/// Read-only candidate. No automatic write to user documents is possible here.
+pub(crate) struct RecoveryCandidate {
+    pub(crate) revision: u64,
+    pub(crate) body: Rope,
+    pub(crate) baseline: String,
+    pub(crate) source_changed: bool,
+    pub(crate) already_saved: bool,
+    pub(crate) backup_path: std::path::PathBuf,
+}
+
+pub(crate) fn inspect_for_recovery(
+    data: &Path, vault: &Path, workspace: Uuid, document: &Path,
+) -> io::Result<Option<RecoveryCandidate>> {
+    super::recovery::inspect(data, vault, workspace, document).map(|candidate| {
+        candidate.map(|record| RecoveryCandidate {
+            revision: record.revision,
+            body: Rope::from(record.body),
+            baseline: record.baseline,
+            source_changed: record.source_changed,
+            already_saved: record.already_saved,
+            backup_path: record.file,
+        })
+    })
+}
+
 impl Note {
     /// Only arm the sink after a verified source read and a real workspace ID.
     pub(crate) fn arm_shadow(&mut self, data: &Path, vault: &Path, workspace: Uuid) -> io::Result<()> {
@@ -29,6 +54,10 @@ impl Note {
         if let Some(shadow) = &self.shadow {
             shadow.after_save_ack();
         }
+    }
+
+    pub(crate) fn shadow_error(&self) -> Option<String> {
+        self.shadow_status().and_then(|status| status.error)
     }
 
     pub(crate) fn shadow_status(&self) -> Option<CaptureStatus> {

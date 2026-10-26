@@ -31,9 +31,10 @@ struct Shadow {
 pub(super) struct Candidate {
     pub(super) revision: u64,
     pub(super) body: String,
+    pub(super) baseline: String,
     pub(super) source_changed: bool,
     pub(super) already_saved: bool,
-    file: PathBuf,
+    pub(super) file: PathBuf,
 }
 
 fn invalid(message: &'static str) -> io::Error {
@@ -279,6 +280,7 @@ pub(super) fn inspect(
     Ok(Some(Candidate {
         revision: record.revision,
         body: record.body,
+        baseline: record.baseline.clone(),
         source_changed: disk != record.baseline,
         already_saved: disk == record.body_hash,
         file: path,
