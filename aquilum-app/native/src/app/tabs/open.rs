@@ -1,19 +1,17 @@
+mod readonly;
+mod docx;
 use std::path::{Path, PathBuf};
-
 use aquilum_core::search::paths::{is_markdown, is_plain_text};
 use masonry::app::RenderRoot;
 use masonry::widgets::IndexedStack;
-
 use super::super::{App, Outcome};
 use crate::note::Note;
 use crate::ui::editor::TextEditor;
 use crate::ui::widgets::Slot;
-
 fn is_structured_file(path: &Path) -> bool {
     path.extension().and_then(|value| value.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas") || ext.eq_ignore_ascii_case("base"))
 }
-
 const MAX_INACTIVE_NOTES: usize = 2;
 const MAX_INACTIVE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -120,6 +118,15 @@ impl App {
             self.show_page(root, if self.tree.root().is_some() { 1 } else { 3 });
             return;
         };
+        if crate::images::kind(&path.to_string_lossy()) == Some(crate::images::MediaKind::Image) {
+            self.leave_note();
+            self.drop_note_page(root);
+            self.show_image_readonly(root, &path);
+            self.tree.set_active(root, Some(path));
+            self.show_page(root, 0);
+            return;
+        }
+        if crate::docx::is_docx_path(&path) { return self.show_docx_tab(root, path); }
         if is_structured_file(&path) {
             self.leave_note();
             self.show_structured_readonly(root, &path);
@@ -191,47 +198,6 @@ impl App {
         record_stage(|s| s.tree = started.elapsed());
     }
 
-    /// First-stage format view: no TextEditor and no save path for structured files.
-    /// Reopening always reparses from disk rather than reusing a stale tab cache.
-    fn show_structured_readonly(&mut self, root: &mut RenderRoot, path: &Path) {
-        use aquilum_core::files::structured::{Format, StructuredDocument};
-        use masonry::core::NewWidget;
-        use masonry::widgets::Flex;
-        self.note = None;
-        self.note_ids = None;
-        self.embeds = None;
-        self.open_error = None;
-        self.open_error_ids = None;
-        let result = StructuredDocument::open(path).and_then(|doc| {
-            let header = match doc.format() {
-                Format::Canvas => {
-                    let canvas = doc.canvas()?;
-                    let nodes = canvas["nodes"].as_array().map_or(0, Vec::len);
-                    let edges = canvas["edges"].as_array().map_or(0, Vec::len);
-                    format!("JSON Canvas — {nodes} objects, {edges} connections")
-                }
-                Format::Base => "Obsidian Bases — YAML source".to_owned(),
-            };
-            Ok((header, doc.text().chars().take(2048).collect::<String>()))
-        });
-        match result {
-            Ok((heading, preview)) => {
-                let page = NewWidget::new(
-                    Flex::column()
-                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(
-                            "Read-only preview — editing is not available yet",
-                        )))
-                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(&heading)))
-                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(&preview))),
-                );
-                if let Some(chrome) = &self.chrome {
-                    chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
-                }
-            }
-            Err(error) => self.show_open_error(root, path, &error.to_string()),
-        }
-    }
-
     pub(in crate::app) fn show_open_error(&mut self, root: &mut RenderRoot, path: &Path, error: &str) {
         self.note = None;
         self.note_ids = None;
@@ -245,9 +211,9 @@ impl App {
 
     fn drop_note_page(&mut self, root: &mut RenderRoot) {
         self.embeds = None;
-        if self.note_ids.take().is_none() {
-            return;
-        }
+        // Read-only image/structured pages have no NoteIds, but their decoded
+        // content must still be released when the tab is closed or switched.
+        self.note_ids = None;
         self.text = crop::Rope::new();
         if let Some(chrome) = &self.chrome {
             chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, masonry::core::NewWidget::new(masonry::widgets::SizedBox::empty()).erased()));
@@ -348,9 +314,16 @@ impl App {
     }
 
     pub(crate) fn open_in_with_offset(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool, offset: Option<usize>) -> bool {
-        if !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) {
+        let image = crate::images::kind(&path.to_string_lossy()) == Some(crate::images::MediaKind::Image);
+        if !image && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) && !crate::docx::is_docx_path(&path) {
             return false;
         }
+        // Validate the image before changing tabs or navigation: no paths
+        // outside this vault, symlinks, oversized or corrupt sources.
+        if image && self.tree.root().and_then(|vault| super::super::media::local_image_preview(vault, &path)).is_none() {
+            return false;
+        }
+        if crate::docx::is_docx_path(&path) && self.tree.root().and_then(|v| crate::docx::admit(v, &path).ok()).is_none() { return false; }
         if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {
             self.navigation.push(&current);
         }

@@ -1,0 +1,20 @@
+[package]
+name = "akula-dropbox-connect-lab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "Read-only Dropbox connection admission, pinned head and OS secret verification"
+
+[workspace]
+
+[dependencies]
+akula-dropbox-t0 = { path = "../dropbox-t0" }
+akula-dropbox-auth-lab = { path = "../dropbox-auth-lab" }
+akula-dropbox-secret-store = { path = "../dropbox-secret-store", features = ["system-store"] }
+blake3 = "1.8.5"
+zeroize = "1.9"
+url = "2.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "=2.12.1"

@@ -102,8 +102,9 @@ pub fn relative_target(root: &Path, path: &Path, path_style: bool) -> String {
 }
 
 pub fn select_candidate(root: &Path, source: &Path, paths: &[String]) -> Option<PathBuf> {
-    let borrowed = paths.iter().map(String::as_str).collect::<Vec<_>>();
-    pick_candidate(root, source, &borrowed).map(PathBuf::from)
+    paths.iter().map(String::as_str)
+        .min_by_key(|&path| (candidate_rank(root, source.parent(), path), path))
+        .map(PathBuf::from)
 }
 
 pub fn pick_candidate<'a>(
@@ -111,12 +112,8 @@ pub fn pick_candidate<'a>(
     source: &Path,
     paths: &[&'a str],
 ) -> Option<&'a str> {
-    let parent = source.parent();
-    paths.iter().copied().min_by(|left, right| {
-        candidate_rank(root, parent, left)
-            .cmp(&candidate_rank(root, parent, right))
-            .then_with(|| left.cmp(right))
-    })
+    paths.iter().copied()
+        .min_by_key(|&path| (candidate_rank(root, source.parent(), path), path))
 }
 
 fn candidate_rank(root: &Path, parent: Option<&Path>, value: &str) -> (bool, usize) {

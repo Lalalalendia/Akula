@@ -29,7 +29,7 @@ fn check_ci_root(active: &Path) -> Result<PathBuf, String> {
     }
     if !active.is_absolute()
         || active.file_name().and_then(|n| n.to_str())
-            != Some("akula-app_0.3.9_x86_64.AppImage")
+            != Some("akula-app_0.3.13_x86_64.AppImage")
     {
         return Err(hold("only explicit disposable v1 AppImage path is accepted"));
     }
@@ -59,7 +59,7 @@ fn run() -> Result<(), String> {
         "publish" if argv.len() == 4 => {
             let candidate = PathBuf::from(argv[3].clone());
             if !candidate.is_absolute() || candidate.file_name()
-                .and_then(|n| n.to_str()) != Some("akula-app_0.3.10_x86_64.AppImage")
+                .and_then(|n| n.to_str()) != Some("akula-app_0.3.14_x86_64.AppImage")
             {
                 return Err(hold("wrong candidate filename/version"));
             }

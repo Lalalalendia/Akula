@@ -1,4 +1,4 @@
-use crate::search::paths::is_markdown;
+use crate::search::paths::{is_hidden_name, is_markdown};
 use super::attachments::MEDIA_EXTENSIONS;
 use super::error::FileCommandError;
 use super::models::{FileItem, FileItemType};
@@ -7,7 +7,7 @@ use std::path::Path;
 
 // Structured formats are listed like attachments until native dedicated views exist.
 // Never treat them as Markdown notes or send their content to the text editor.
-const DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "epub", "mobi", "azw3", "fb2", "txt", "canvas", "base"];
+const DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "epub", "mobi", "azw3", "fb2", "txt", "canvas", "base", "docx"];
 
 fn is_attachment(extension: &str) -> bool {
     MEDIA_EXTENSIONS.contains(&extension) || DOCUMENT_EXTENSIONS.contains(&extension)
@@ -28,7 +28,7 @@ pub fn read_directory_impl(path: &Path) -> Result<Vec<FileItem>, FileCommandErro
             Err(_) => continue,
         };
 
-        if name.starts_with('.') || file_type.is_symlink() {
+        if is_hidden_name(&entry.file_name()) || file_type.is_symlink() {
             continue;
         }
 
