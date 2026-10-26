@@ -3,7 +3,6 @@ name: Akula B1-E2E-09 signed owner to B1d0 CAS inputs HOLD
 on:
   pull_request:
     paths:
-      - 'aquilum-app/core/src/server_root_v3_trust/owner_ipc/commit_intent.rs'
       - 'aquilum-app/core/src/server_root_v3_trust/owner_ipc/commit_intent/**'
       - '.github/workflows/akula-b1-e2e09-owner-cas-bindings.yml'
   workflow_dispatch:
