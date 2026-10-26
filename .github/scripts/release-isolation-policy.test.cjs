@@ -146,6 +146,29 @@ test('every next signed Windows release verifies actual published Akula NSIS upg
   assert.match(script, /AKULA_SIGNED_NEXT_UPGRADE_PASS/);
 });
 
+
+test('one-shot owner-requested Akula 0.3.15 dispatch keeps publisher environment isolated', () => {
+  const dispatcher = file('.github/workflows/akula-v0315-owner-dispatch.yml');
+  const request = JSON.parse(file('docs/release/akula-v0.3.15-dispatch-request.json'));
+  assert.deepEqual(request, {
+    schema: 1,
+    request_id: 'akula-0315-owner-20261026',
+    release_version: '0.3.15',
+    publish_beta: true,
+  });
+  assert.match(dispatcher, /^on:\n  push:\n    branches: \[main\]\n    paths:/m);
+  assert.match(dispatcher, /docs\/release\/akula-v0\.3\.15-dispatch-request\.json/);
+  assert.match(dispatcher, /actions: write/);
+  assert.match(dispatcher, /github\.repository == 'Lalalalendia\/Akula'/);
+  assert.match(dispatcher, /'akula-0315-owner-20261026'/);
+  assert.match(dispatcher, /latest.*v0\.3\.14|latest.*v0\.3\.15/s);
+  assert.match(dispatcher, /actions\/workflows\/akula-windows-signed-candidate\.yml\/dispatches/);
+  assert.match(dispatcher, /'inputs\[release_version\]=0\.3\.15'/);
+  assert.match(dispatcher, /'inputs\[publish_beta\]=true'/);
+  assert.match(dispatcher, /environment: akula-release/); // check protected publisher in source verification step
+  assert.doesNotMatch(dispatcher, /gh release create|cargo packager signer|secrets\./);
+});
+
 // One signed Akula update is installed over the previous version. S3 is a
 // user-invoked feature of that same executable, not a second release channel.
 test('single published Akula installer includes opt-in S3 feature', () => {
