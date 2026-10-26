@@ -109,6 +109,9 @@ pub struct Tracker {
     past: Vec<Past>,
     pub live: Vec<(u64, Rect, Affine, RoundedRect)>,
     pub sprites: Vec<Sprite>,
+    /// True if scene preflight found a potentially visible filter group.
+    /// Filter effects cannot run in Vello's multi-threaded dispatcher.
+    pub has_filters: bool,
     covered: Vec<Rect>,
     #[cfg(test)]
     pub(crate) last_stats: DamageStats,
@@ -118,7 +121,7 @@ pub struct Tracker {
 
 impl Tracker {
     pub fn new() -> Self {
-        Tracker { frame: Rect::ZERO, stack: Vec::new(), draws: Vec::new(), previous: Vec::new(), forced: None, regions: Vec::new(), past: Vec::new(), live: Vec::new(), sprites: Vec::new(), covered: Vec::new(), #[cfg(test)] last_stats: DamageStats::default(), #[cfg(test)] causes: Vec::new() }
+        Tracker { frame: Rect::ZERO, stack: Vec::new(), draws: Vec::new(), previous: Vec::new(), forced: None, regions: Vec::new(), past: Vec::new(), live: Vec::new(), sprites: Vec::new(), has_filters: false, covered: Vec::new(), #[cfg(test)] last_stats: DamageStats::default(), #[cfg(test)] causes: Vec::new() }
     }
 
     pub fn forget(&mut self) {
@@ -133,6 +136,7 @@ impl Tracker {
         self.draws.clear();
         self.live.clear();
         self.sprites.clear();
+        self.has_filters = false;
         self.forced = None;
         self.regions = scroll::snapshot()
             .into_iter()
