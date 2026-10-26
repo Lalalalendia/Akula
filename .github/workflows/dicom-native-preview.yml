@@ -47,6 +47,11 @@ jobs:
           cargo run --manifest-path scripts/dicom-native-smoke/Cargo.toml --release -- \
             scripts/dicom-native-smoke/fixture \
             scripts/dicom-native-smoke/fixture/DICOMDIR
+      - name: Verify signed 16-bit multi-frame DICOM with window and rescale
+        run: |
+          cargo run --manifest-path scripts/dicom-native-smoke/Cargo.toml --release -- \
+            scripts/dicom-native-smoke/fixture \
+            scripts/dicom-native-smoke/fixture/SIGNED16.dcm
       - name: Save independent verification log
         if: always()
         uses: actions/upload-artifact@v4

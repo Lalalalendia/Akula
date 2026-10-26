@@ -1,6 +1,7 @@
 #[path = "../../../aquilum-app/native/src/dicom.rs"]
 mod dicom;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
 fn next_event(worker: &dicom::DicomWorker) -> dicom::FrameUpdate {
     for _ in 0..200 {
         match worker.poll() {
@@ -12,35 +13,66 @@ fn next_event(worker: &dicom::DicomWorker) -> dicom::FrameUpdate {
     panic!("DICOM worker timeout");
 }
 
+fn verify_inversion(root: &Path) {
+    let mono1 = dicom::Study::open(root, &root.join("MONO1.dcm")).expect("read MONOCHROME1")
+        .render().expect("render MONOCHROME1");
+    let mono2 = dicom::Study::open(root, &root.join("MONO2.dcm")).expect("read MONOCHROME2")
+        .render().expect("render MONOCHROME2");
+    assert_eq!((mono1.width, mono1.height), (8, 8));
+    assert_eq!((mono2.width, mono2.height), (8, 8));
+    for (first, second) in mono1.rgba.chunks_exact(4).zip(mono2.rgba.chunks_exact(4)) {
+        for channel in 0..3 {
+            assert_eq!(u16::from(first[channel]) + u16::from(second[channel]), 255,
+                "MONOCHROME1 must invert MONOCHROME2 brightness");
+        }
+        assert_eq!(first[3], 255);
+        assert_eq!(second[3], 255);
+    }
+    println!("DICOM_MONOCHROME1_INVERSION_OK pixels=64");
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
-    let vault = args.next().expect("vault");
-    let study_path = args.next().expect("DICOMDIR or image");
-    let mut study = dicom::Study::open(Path::new(&vault), Path::new(&study_path))
-        .expect("open study");
+    let vault = PathBuf::from(args.next().expect("vault"));
+    let source = PathBuf::from(args.next().expect("DICOMDIR or image"));
+    let filename = source.file_name().unwrap().to_string_lossy();
+    let signed = filename == "SIGNED16.dcm";
+    let dimensions = if signed { (16, 16) } else { (8, 8) };
+    let expected_bytes = dimensions.0 as usize * dimensions.1 as usize * 4;
+
+    let mut study = dicom::Study::open(&vault, &source).expect("open study");
     let first = study.render().expect("render first");
-    assert_eq!((first.width, first.height), (8,8));
-    assert_eq!(first.rgba.len(), 8*8*4);
-    let mut n = 1;
+    assert_eq!((first.width, first.height), dimensions);
+    assert_eq!(first.rgba.len(), expected_bytes);
+    let mut frames = vec![first.rgba];
     while study.advance_frame(1) {
         let frame = study.render().expect("render next");
-        assert_eq!((frame.width, frame.height), (8,8));
-        n+=1;
+        assert_eq!((frame.width, frame.height), dimensions);
+        assert_eq!(frame.rgba.len(), expected_bytes);
+        frames.push(frame.rgba);
     }
-    println!("DICOM_NATIVE_CORE_OK frames={n} label={}", study.label());
-    // Exercise the exact model used by the UI: off-thread open+decode and
-    // sequential page navigation, without launching Masonry on the CI runner.
-    let async_worker = dicom::DicomWorker::start(
-        std::path::PathBuf::from(&vault),
-        std::path::PathBuf::from(&study_path)
-    );
-    let first = next_event(&async_worker);
-    assert!(first.error.is_none(), "{:?}", first.error);
-    assert_eq!(first.frame.as_ref().unwrap().rgba.len(), 8 * 8 * 4);
-    assert!(async_worker.request(dicom::Navigation::Frame(1)));
-    let second = next_event(&async_worker);
-    assert!(second.error.is_none(), "{:?}", second.error);
-    assert!(second.label.contains("срез 2/3"));
-    println!("DICOM_NATIVE_ASYNC_OK initial=1 navigated=2 rgba_bytes=256");
+    let count = frames.len();
+    if signed {
+        assert_eq!(count, 3);
+        assert_ne!(frames[0], frames[1], "signed frame 0 and 1 must not collapse");
+        assert_ne!(frames[1], frames[2], "signed frame 1 and 2 must not collapse");
+        println!("DICOM_SIGNED16_VOI_OK frames={count} shape=16x16");
+    } else if filename == "DICOMDIR" {
+        assert_eq!(count, 3);
+        verify_inversion(&vault);
+    }
+    println!("DICOM_NATIVE_CORE_OK frames={count} label={}", study.label());
 
+    let worker = dicom::DicomWorker::start(vault, source);
+    let first = next_event(&worker);
+    assert!(first.error.is_none(), "{:?}", first.error);
+    assert_eq!(first.frame.as_ref().unwrap().rgba.len(), expected_bytes);
+    if count > 1 {
+        assert!(worker.request(dicom::Navigation::Frame(1)));
+        let second = next_event(&worker);
+        assert!(second.error.is_none(), "{:?}", second.error);
+        assert!(second.label.contains(&format!("срез 2/{count}")));
+        assert_eq!(second.frame.unwrap().rgba.len(), expected_bytes);
+    }
+    println!("DICOM_NATIVE_ASYNC_OK frames={count} rgba_bytes={expected_bytes}");
 }

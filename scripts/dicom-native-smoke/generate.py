@@ -42,6 +42,40 @@ def sample(i: int) -> pydicom.FileDataset:
     ds.is_implicit_VR = False
     return ds
 
+
+def generate_medical_contrasts(directory: Path) -> None:
+    """Generate 16-bit signed multi-frame + grayscale-inversion controls."""
+    signed = sample(0)
+    signed.file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid(prefix="2.25.")
+    signed.SOPInstanceUID = signed.file_meta.MediaStorageSOPInstanceUID
+    signed.SeriesInstanceUID = "2.25.456789000000099"
+    signed.Rows = 16
+    signed.Columns = 16
+    signed.NumberOfFrames = "3"
+    signed.BitsAllocated = 16
+    signed.BitsStored = 16
+    signed.HighBit = 15
+    signed.PixelRepresentation = 1
+    signed.RescaleSlope = "1"
+    signed.RescaleIntercept = "-100"
+    signed.WindowCenter = "-30"
+    signed.WindowWidth = "300"
+    base = np.arange(256, dtype=np.int16).reshape(16, 16) - 160
+    pixels = np.stack([base + 80 * frame for frame in range(3)])
+    signed.PixelData = pixels.astype("<i2").tobytes(order="C")
+    signed.save_as(directory / "SIGNED16.dcm", enforce_file_format=True)
+    check = pydicom.dcmread(directory / "SIGNED16.dcm").pixel_array
+    assert check.shape == (3, 16, 16) and check.dtype.kind == "i"
+    assert np.array_equal(check, pixels)
+
+    # Keep the pixels and all rendering metadata identical except inversion.
+    for photometric, filename in [("MONOCHROME1", "MONO1.dcm"),
+                                  ("MONOCHROME2", "MONO2.dcm")]:
+        image = sample(0)
+        image.PhotometricInterpretation = photometric
+        image.save_as(directory / filename, enforce_file_format=True)
+    print("SYNTHETIC_CONTRAST_OK signed16_frames=3 invert_controls=2")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=Path)
@@ -58,5 +92,6 @@ def main():
     assert len(restored) == 3
     assert all(Path(i.path).suffix == "" for i in restored)
     print("SYNTHETIC_FILESET_OK images=3, extensionless=3, root=", a.directory)
+    generate_medical_contrasts(a.directory)
 if __name__ == "__main__":
     main()
