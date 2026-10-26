@@ -140,6 +140,9 @@ fn decode(bytes: &[u8]) -> io::Result<Shadow> {
     }
     let offset = MAGIC.len();
     let count = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+    if count > MAX_WIRE - offset - 4 - 32 {
+        return Err(invalid("oversized recovery payload length"));
+    }
     let end = offset + 4 + count;
     if end.checked_add(32) != Some(bytes.len()) {
         return Err(invalid("truncated or trailing recovery bytes"));
@@ -323,6 +326,73 @@ mod tests {
 
     fn digest(path: &Path) -> String {
         blake3::hash(&fs::read(path).unwrap()).to_hex().to_string()
+    }
+
+    #[test]
+    fn corrupt_record_with_u32_max_payload_length_is_rejected() {
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&[0; 32]);
+        assert!(decode(&bytes).is_err());
+    }
+
+    fn hundred_thousand_unicode_lines() -> String {
+        use std::fmt::Write as _;
+        let mut body = String::with_capacity(8_000_000);
+        for index in 0..100_000 {
+            writeln!(body, "row-{index:06} — восстановить Unicode 🐱漢字 — abcdefghijklmnopqrstuvwxyz").unwrap();
+        }
+        body
+    }
+
+    #[test]
+    fn abrupt_child_exit_with_large_unicode_shadow() {
+        let Ok(data) = std::env::var("AKULA_DESK15_LARGE_CHILD_DATA") else { return };
+        let vault = PathBuf::from(std::env::var("AKULA_DESK15_LARGE_CHILD_VAULT").unwrap());
+        let workspace = Uuid::parse_str(&std::env::var("AKULA_DESK15_LARGE_CHILD_ID").unwrap()).unwrap();
+        let doc = vault.join("huge.md");
+        stage(Path::new(&data), &vault, workspace, &doc, &digest(&doc), 88,
+            &hundred_thousand_unicode_lines()).unwrap();
+        std::process::exit(49);
+    }
+
+    #[test]
+    fn hundred_thousand_unicode_lines_survive_crash_without_original_overwrite() {
+        use std::process::Command;
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("huge.md");
+        fs::write(&doc, "original source").unwrap();
+        let workspace = Uuid::new_v4();
+        let child = Command::new(std::env::current_exe().unwrap())
+            .arg("abrupt_child_exit_with_large_unicode_shadow")
+            .arg("--nocapture")
+            .env("AKULA_DESK15_LARGE_CHILD_DATA", data.path())
+            .env("AKULA_DESK15_LARGE_CHILD_VAULT", vault.path())
+            .env("AKULA_DESK15_LARGE_CHILD_ID", workspace.to_string())
+            .status().unwrap();
+        assert_eq!(child.code(), Some(49));
+        assert_eq!(fs::read_to_string(&doc).unwrap(), "original source");
+        let candidate = inspect(data.path(), vault.path(), workspace, &doc).unwrap().unwrap();
+        let expected = hundred_thousand_unicode_lines();
+        assert_eq!(candidate.body.len(), expected.len());
+        assert_eq!(blake3::hash(candidate.body.as_bytes()), blake3::hash(expected.as_bytes()));
+        assert_eq!(candidate.body, expected);
+        assert!(!candidate.already_saved);
+        assert!(!candidate.source_changed);
+    }
+
+    #[test]
+    fn oversized_unicode_body_is_rejected_without_publishing_shadow() {
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("oversized.md");
+        fs::write(&doc, "original source").unwrap();
+        let id = Uuid::new_v4();
+        let oversized = "x".repeat(MAX_TEXT + 1);
+        assert!(stage(data.path(), vault.path(), id, &doc, &digest(&doc), 1, &oversized).is_err());
+        assert_eq!(fs::read_to_string(doc).unwrap(), "original source");
+        assert!(fs::read_dir(data.path()).unwrap().next().is_none());
     }
 
     #[test]
