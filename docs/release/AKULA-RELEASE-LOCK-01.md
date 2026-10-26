@@ -1,5 +1,14 @@
 # AKULA-RELEASE-LOCK-01 — isolate the inherited Aquilum release
 
+> **Historical scope / Windows status (2026-10-22):** This document
+> describes a pre-release research stage and is NOT the current Windows
+> updater gate. Akula v0.3.9 and v0.3.10 are already independently signed
+> and published; the installed Windows release channel now uses the pinned
+> Akula key and protected manual NSIS workflow. See
+> [AKULA-VERSIONING-01](./AKULA-VERSIONING-01.md) for the active contract.
+> The inherited Aquilum release workflow remains HOLD; Linux/macOS
+> publisher approval and automatic NSIS crash rollback remain out of scope.
+
 **Status: HOLD / testing only.** Canonical product and release requirements:
 [AKULA-MASTER-INDEX-01](https://app.notion.com/p/3fc32a84beec813e869fdf83a61e626b).
 

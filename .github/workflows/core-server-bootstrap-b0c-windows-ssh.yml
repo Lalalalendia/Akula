@@ -1,0 +1,142 @@
+name: Akula B0c Windows real pinned OpenSSH KEX
+
+on:
+  workflow_call:
+  pull_request:
+    branches-ignore: [main]
+    paths:
+      - "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs"
+      - "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs"
+      - "aquilum-app/core/src/server_bootstrap_modules.rs"
+      - "aquilum-app/core/tests/server_bootstrap_b0c_windows.rs"
+      - "scripts/ci/akula-b0c-windows-loopback-sshd.py"
+      - ".github/workflows/core-server-bootstrap-b0c-windows-ssh.yml"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0C.md"
+      - "aquilum-app/native/src/app/settings/server.rs"
+      - "aquilum-app/native/src/app/settings/server_state.rs"
+      - "aquilum-app/native/src/ui/settings/schema/server/server_status.rs"
+      - "aquilum-app/native/src/ui/settings/schema/server/identity.rs"
+      - "aquilum-app/native/assets/locales/ru.json"
+      - "aquilum-app/native/assets/locales/en.json"
+      - "aquilum-app/native/src/ui/settings/schema/tests.rs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-b0c-ssh-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  real-windows-signed-kex:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-b0c-win-openssh-2025
+          cache-workspace-crates: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Validate OS OpenSSH, Rust and test server syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path $env:WINDIR "System32\OpenSSH\ssh.exe"
+          $keygen = Join-Path $env:WINDIR "System32\OpenSSH\ssh-keygen.exe"
+          if (!(Test-Path -LiteralPath $exe -PathType Leaf) -or !(Test-Path -LiteralPath $keygen -PathType Leaf)) { throw "Windows system OpenSSH required" }
+          & $exe -V
+          rustfmt --edition 2024 aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs aquilum-app/core/tests/server_bootstrap_b0c_windows.rs
+          python -m py_compile scripts/ci/akula-b0c-windows-loopback-sshd.py
+      - name: Real Windows OpenSSH signed KEX, forged pin rejection and B0 preview
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --disable-pip-version-check --no-input "paramiko==3.5.1"
+          if ($LASTEXITCODE -ne 0) { throw "Missing test-only SSH server dependency" }
+          $work = Join-Path $env:RUNNER_TEMP ("akula-b0c-" + $env:GITHUB_RUN_ID)
+          $script = Join-Path $PWD "scripts\ci\akula-b0c-windows-loopback-sshd.py"
+          $stdout = Join-Path $env:RUNNER_TEMP "b0c-stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "b0c-stderr.log"
+          $args = @("-u", ('"' + $script + '"'), ('"' + $work + '"'))
+          $server = Start-Process -FilePath (Get-Command python).Source -ArgumentList $args -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $fixturePath = Join-Path $work "fixture.json"
+            for ($i = 0; $i -lt 100; $i++) {
+              if (Test-Path -LiteralPath $fixturePath) { break }
+              if ($server.HasExited) { throw "Loopback SSH fixture exited" }
+              Start-Sleep -Milliseconds 200
+            }
+            if (!(Test-Path -LiteralPath $fixturePath)) { throw "SSH server not ready" }
+            $f = Get-Content -LiteralPath $fixturePath -Raw | ConvertFrom-Json
+            $env:AKULA_B0C_PORT = [string]$f.port
+            $env:AKULA_B0C_PUBLIC_A = [string]$f.public_a
+            $env:AKULA_B0C_PUBLIC_B = [string]$f.public_b
+            $env:AKULA_B0C_CI_DIAG = "LOOPBACK_ONLY"
+            # Native Windows OpenSSH is intentionally agent/publickey ONLY.
+            # Generate a disposable CI client identity separately from the
+            # server A/B host keys; never weaken the Rust client to none auth.
+            $svc = Get-Service -Name "ssh-agent" -ErrorAction Stop
+            if ($svc.StartType -eq "Disabled") {
+              Set-Service -Name "ssh-agent" -StartupType Manual
+            }
+            if ((Get-Service -Name "ssh-agent").Status -ne "Running") {
+              Start-Service -Name "ssh-agent"
+            }
+            $sshAdd = Join-Path $env:WINDIR "System32\OpenSSH\ssh-add.exe"
+            if (!(Test-Path -LiteralPath $sshAdd -PathType Leaf)) {
+              throw "Windows system OpenSSH ssh-add.exe required"
+            }
+            & $sshAdd (Join-Path $work "client")
+            if ($LASTEXITCODE -ne 0) { throw "Cannot enroll disposable CI client into Windows ssh-agent" }
+            Push-Location "aquilum-app"
+            try {
+              cargo test --locked -p aquilum-core --features server-bootstrap-b0-openssh-lab --test server_bootstrap_b0c_windows -- --nocapture --test-threads=1
+              if ($LASTEXITCODE -ne 0) { throw "Actual Windows signed KEX failed" }
+            } finally {
+              Pop-Location
+            }
+          } finally {
+            if (!$server.HasExited) { Stop-Process -Id $server.Id -Force }
+            # The runner is disposable, and its SSH agent must not retain the
+            # ephemeral client identity after the test.
+            $sshAdd = Join-Path $env:WINDIR "System32\OpenSSH\ssh-add.exe"
+            if (Test-Path -LiteralPath $sshAdd) { & $sshAdd -D 2>$null }
+            if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr | Select-Object -Last 25 }
+          }
+      - name: Default Core keeps SSH feature disabled
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          cargo check --locked -p aquilum-core --no-default-features
+          if ($LASTEXITCODE -ne 0) { throw "Default Core changed" }
+
+  native-readonly-preflight-button:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-b0c-win-readonly-ui-v1
+          cache-workspace-crates: true
+      - name: Compile native Windows application and verify the read-only action boundary
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --locked -p aquilum-native --features server-readonly-preflight b1_e2e_01_native_verify_button_never_grants_install -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "Read-only native Verify SSH button boundary failed" }
+          cargo check --locked -p aquilum-native --features server-readonly-preflight
+          if ($LASTEXITCODE -ne 0) { throw "Windows native SSH worker compilation failed" }

@@ -39,6 +39,7 @@ overrides:
       - libc6
       - libgcc-s1
       - libglib2.0-0 | libglib2.0-0t64
+      - libdbus-1-3
       - libfontconfig1
       - libfreetype6
       - libgstreamer1.0-0
@@ -59,6 +60,7 @@ overrides:
       - libglib-2.0.so.0()(64bit)
       - libgobject-2.0.so.0()(64bit)
       - libgio-2.0.so.0()(64bit)
+      - libdbus-1.so.3()(64bit)
       - libfontconfig.so.1()(64bit)
       - libfreetype.so.6()(64bit)
       - libgstreamer-1.0.so.0()(64bit)

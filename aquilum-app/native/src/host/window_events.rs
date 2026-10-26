@@ -1,5 +1,5 @@
+mod restore;
 use super::*;
-
 fn masonry_ime(ime: Ime) -> Option<MasonryIme> {
     match ime {
         Ime::Enabled => Some(MasonryIme::Enabled),
@@ -42,7 +42,7 @@ impl Host {
                 self.close(event_loop);
                 return;
             }
-            WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::RedrawRequested => self.expose_redraw(),
             WindowEvent::DragEntered { id, .. } => {
                 use winit::data_transfer::TypeHint;
                 use winit::event_loop::DndAction;
@@ -74,7 +74,7 @@ impl Host {
                     ui::rescale(root, scale);
                 }
             }
-            WindowEvent::Focused(focused) => self.text_event(TextEvent::WindowFocusChange(focused)),
+            WindowEvent::Focused(focused) => self.expose_focus(focused),
             WindowEvent::ModifiersChanged(m) => self.modifiers = masonry_modifiers(m.state()),
             WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => self.keyboard(event),
             WindowEvent::Ime(ime) => {

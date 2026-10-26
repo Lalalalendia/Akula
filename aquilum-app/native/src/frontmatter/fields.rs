@@ -1,15 +1,20 @@
 use std::collections::HashMap;
 
-use super::{BOOK_TYPE, COVER, TYPE, block, is_key, names};
+mod updates;
+pub use updates::set_fields;
+#[cfg(test)]
+use updates::set_field;
 
-fn split_line(line: &str) -> (String, Option<String>) {
+use super::{BOOK_TYPE, COVER, TYPE, block, names};
+
+fn split_line(line: &str) -> (&str, Option<&str>) {
     if let Some((key, value)) = line.split_once(':') {
-        return (key.trim().to_owned(), Some(value.trim().to_owned()));
+        return (key.trim(), Some(value.trim()));
     }
     let trimmed = line.trim();
     match trimmed.split_once(' ') {
-        Some((key, value)) => (key.trim().to_owned(), Some(value.trim().to_owned())),
-        None => (trimmed.to_owned(), None),
+        Some((key, value)) => (key.trim(), Some(value.trim())),
+        None => (trimmed, None),
     }
 }
 
@@ -52,38 +57,11 @@ pub fn parse(text: &str) -> Option<Fields> {
             Value::List(value[1..value.len() - 1].split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect())
         } else {
             let quoted = value.len() >= 2 && ((value.starts_with('"') && value.ends_with('"')) || (value.starts_with('\'') && value.ends_with('\'')));
-            Value::Text(if quoted { value[1..value.len() - 1].to_owned() } else { value })
+            Value::Text(if quoted { value[1..value.len() - 1].to_owned() } else { value.to_owned() })
         };
         fields.insert(key.to_lowercase(), value);
     }
     Some(Fields(fields))
-}
-
-fn set_field(text: &str, key: &str, value: &str) -> Option<String> {
-    let block = block(text)?;
-    let body = &text[block.body];
-    let mut found = false;
-    let mut lines: Vec<String> = Vec::new();
-    if !body.is_empty() {
-        for line in body.split('\n') {
-            if !is_key(&split_line(line).0, key) {
-                lines.push(line.to_owned());
-                continue;
-            }
-            found = true;
-            if !value.is_empty() {
-                lines.push(format!("{key}: {value}"));
-            }
-        }
-    }
-    if !found && !value.is_empty() {
-        lines.push(format!("{key}: {value}"));
-    }
-    Some(format!("---\n{}\n---{}", lines.join("\n"), &text[block.end..]))
-}
-
-pub fn set_fields(text: &str, updates: &[(&str, String)]) -> Option<String> {
-    updates.iter().try_fold(text.to_owned(), |text, (key, value)| set_field(&text, key, value))
 }
 
 #[cfg(test)]

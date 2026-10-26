@@ -10,6 +10,9 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
+mod integrity;
+use integrity::parse_version;
+
 pub const AQUILUM_FOLDER: &str = ".aquilum";
 const QUANTUM_FOLDER: &str = ".quantum";
 const HISTORY_FOLDER: &str = "history";
@@ -242,7 +245,7 @@ pub(super) fn write_version(
 ) -> Result<PathBuf, FileCommandError> {
     #[cfg(feature = "save-stage-probe")]
     let profile_start = std::time::Instant::now();
-    let label = snapshot.source.file_label();
+    let label = integrity::version_label(snapshot);
     // Distinct source labels can otherwise share a millisecond, causing history
     // ordering to disagree with the order in which versions were written.
     let taken = versions(dir)
@@ -301,13 +304,13 @@ pub fn versions(dir: &Path) -> Vec<VersionFile> {
 }
 
 pub fn read_version(dir: &Path, version: &VersionFile) -> Option<String> {
-    read_text(&dir.join(&version.id)).ok()
+    integrity::read_version(dir, version)
 }
 
 pub fn has_text(dir: &Path, version: &VersionFile, text: &str) -> bool {
-    let path = dir.join(&version.id);
-    fs::metadata(&path).is_ok_and(|metadata| metadata.len() == text.len() as u64)
-        && read_text(&path).is_ok_and(|stored| stored == text)
+    let range = text.len() as u64..=text.len().saturating_add(text.matches('\n').count()) as u64;
+    fs::metadata(dir.join(&version.id)).is_ok_and(|m| range.contains(&m.len()))
+        && read_version(dir, version).is_some_and(|stored| stored == text)
 }
 
 #[cfg(test)]
@@ -324,6 +327,11 @@ pub(super) fn update_version_text(
     version_id: &str,
     text: &str,
 ) -> Result<(), FileCommandError> {
+    if integrity::is_sealed_name(version_id) {
+        return Err(FileCommandError::Io {
+            message: "sealed history version may not be overwritten".to_owned(),
+        });
+    }
     write_history_snapshot_atomic_impl(&dir.join(version_id), text)
 }
 
@@ -457,24 +465,6 @@ fn files(dir: &Path) -> impl Iterator<Item = (String, PathBuf)> {
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
         .map(|entry| (entry.file_name().to_string_lossy().into_owned(), entry.path()))
-}
-
-fn parse_version(name: String) -> Option<VersionFile> {
-    let (at_ms, device, source) = {
-        let mut parts = name.strip_suffix(VERSION_EXTENSION)?.splitn(3, '_');
-        let at_ms = parts.next()?.parse().ok()?;
-        let device = parts.next()?.to_owned();
-        (at_ms, device, Source::from_label(parts.next()?)?)
-    };
-    Some(VersionFile {
-        id: name,
-        at_ms,
-        device,
-        from_ms: source.origin_ms(),
-        source,
-        name: None,
-        is_current: false,
-    })
 }
 
 fn millis(at: SystemTime) -> u64 {
@@ -717,7 +707,11 @@ mod tests {
 
         let found = versions(&dir);
 
-        assert!(written.to_string_lossy().ends_with("_aaaa_restore-0000000010000.md"));
+        let digest = blake3::hash("старое".as_bytes()).to_hex();
+        assert_eq!(
+            written.file_name().unwrap().to_str().unwrap(),
+            format!("{:013}_aaaa_restore-0000000010000~b3-{digest}.md", 20_000)
+        );
         assert_eq!((found[0].source, found[0].from_ms), (Source::Restore(10_000), Some(10_000)));
     }
 

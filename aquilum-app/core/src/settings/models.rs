@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Bm25fParams {
@@ -21,7 +20,6 @@ impl Default for Bm25fParams {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AnalysisSettings {
@@ -41,7 +39,6 @@ impl Default for AnalysisSettings {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SearchIndexSettings {
@@ -57,7 +54,6 @@ impl Default for SearchIndexSettings {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct FontSettings {
@@ -249,6 +245,9 @@ impl YandexS3Onboarding {
     }
 }
 
+mod dropbox;
+pub use dropbox::{DropboxReadOnlyDraft, AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT};
+
 /// Public-only preparation for *the user's own server*. No SSH private
 /// key, password, token, sudo credential or remote installation authority is
 /// accepted or serialized. Enter the public host key AND its SHA256 value
@@ -412,6 +411,7 @@ pub struct AppConfig {
     pub files: FilesSettings,
     pub updates: UpdateSettings,
     pub s3_onboarding: YandexS3Onboarding,
+    pub dropbox_readonly: DropboxReadOnlyDraft,
     pub server_setup: ServerBootstrapDraft,
 }
 
