@@ -28,22 +28,22 @@ struct State {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct CaptureStatus {
-    pub(super) durable_revision: Option<u64>,
-    pub(super) error: Option<String>,
-    pub(super) pending: bool,
+pub(in crate::note) struct CaptureStatus {
+    pub(in crate::note) durable_revision: Option<u64>,
+    pub(in crate::note) error: Option<String>,
+    pub(in crate::note) pending: bool,
 }
 
 /// Intended to be armed once for a note after its File Gate source baseline
 /// is verified, then driven by full Rope snapshots after each editor change.
 /// The production App does not wire this in until recovery UX is available.
-pub(super) struct SnapshotQueue {
+pub(in crate::note) struct SnapshotQueue {
     context: Arc<Context>,
     state: Arc<Mutex<State>>,
 }
 
 impl SnapshotQueue {
-    pub(super) fn new(data: &Path, vault: &Path, workspace: Uuid, document: &Path, baseline: &str) -> io::Result<Self> {
+    pub(in crate::note) fn new(data: &Path, vault: &Path, workspace: Uuid, document: &Path, baseline: &str) -> io::Result<Self> {
         if baseline.len() != 64 || !baseline.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(invalid("invalid File Gate baseline digest"));
         }
@@ -70,7 +70,7 @@ impl SnapshotQueue {
     /// Enqueue a persistent Rope copy without serializing on the GUI thread.
     /// High-frequency edits coalesce while one worker is pending or writing.
     /// The returned revision is NOT an fsync acknowledgment.
-    pub(super) fn request(&self, body: Rope) -> io::Result<u64> {
+    pub(in crate::note) fn request(&self, body: Rope) -> io::Result<u64> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let revision = state.next_revision.checked_add(1)
             .ok_or_else(|| invalid("recovery revision counter exhausted"))?;
@@ -87,7 +87,7 @@ impl SnapshotQueue {
         Ok(revision)
     }
 
-    pub(super) fn status(&self) -> CaptureStatus {
+    pub(in crate::note) fn status(&self) -> CaptureStatus {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         CaptureStatus {
             durable_revision: state.durable,
