@@ -6,3 +6,4 @@ edition = "2024"
 dicom-object = { path = "../_upstream/dicom-rs/object" }
 dicom-pixeldata = { path = "../_upstream/dicom-rs/pixeldata" }
 sha2 = "0.10"
+dicom-core = { path = "../_upstream/dicom-rs/core" }

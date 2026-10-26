@@ -34,6 +34,8 @@ jobs:
           python scripts/dicom-lab/verify.py
       - name: Prepare 100 MiB 200-frame synthetic volume
         run: python scripts/dicom-lab/stress_generate.py
+      - name: Verify 100 MiB DICOM with independent pydicom reference
+        run: python scripts/dicom-lab/stress_reference.py
       - name: Create and verify DICOMDIR medical media structure
         run: python scripts/dicom-lab/media_probe.py
       - name: Independently verify raw lossless pixels using pydicom
@@ -73,6 +75,13 @@ jobs:
             echo "$name:$code" | tee -a scripts/dicom-lab/results/build-exits.txt
             tail -n 24 "scripts/dicom-lab/results/build-$name.log"
           done
+      - name: Build and test Rust read-only DICOMDIR file references
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --manifest-path scripts/dicom-lab/dicom-rs/Cargo.toml --bin dicomdir_probe
+          ./scripts/dicom-lab/dicom-rs/target/release/dicomdir_probe scripts/dicom-lab/fixtures/medical_media/DICOMDIR 0 | tee scripts/dicom-lab/results/dicomdir_rust_valid.txt
+          ./scripts/dicom-lab/dicom-rs/target/release/dicomdir_probe scripts/dicom-lab/fixtures/medical_media_copied/DICOMDIR 1 | tee scripts/dicom-lab/results/dicomdir_rust_missing.txt
       - name: Attempt decoding identical cases with every compiled probe
         run: python scripts/dicom-lab/compare.py
       - name: Repeated 100 MiB volume tests with max RSS and hash parity

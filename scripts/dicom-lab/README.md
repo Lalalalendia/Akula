@@ -48,3 +48,16 @@ three extensionless image filenames and their relationships, opens a copy
 from a different directory, and detects an intentionally deleted reference.
 This is a Python-produced synthetic File-set, not a test of Akula Rust
 DICOMDIR parsing. No patient data or real optical media involved.
+
+## Stage 3: Rust DICOMDIR reference scanner
+
+The Rust dicomdir_probe target reads the directory dataset using the pinned
+DICOM-rs parser, inspects IMAGE records, validates each relative File ID
+component, guards against directory traversal / external symlinks, and checks
+that three referenced files exist. It also confirms that removing one image
+from a copied media directory is detectable. It does **not** yet follow
+the directory record pointer offsets to reconstruct the full patient/study/
+series tree; that remains an integration requirement.
+
+stress_reference.py validates the 100 MiB uncompressed signed multi-frame
+pixel array with an independent pydicom decoder before the Rust timing tests.
