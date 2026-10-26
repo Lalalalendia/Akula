@@ -296,6 +296,11 @@ jobs:
               # a console/desktop screenshot even if HWND appeared already.
               $img = [System.Drawing.Bitmap]::FromFile((Join-Path $out $name))
               try {
+                # Two light-background anchors reject the earlier dark GitHub console
+                # false-positive; the syntax token provides an independent code witness.
+                $top = $img.GetPixel([int]($img.Width*0.45), [int]($img.Height*0.15))
+                $paper = $img.GetPixel([int]($img.Width*0.60), [int]($img.Height*0.30))
+                if ($top.R -lt 235 -or $top.G -lt 235 -or $top.B -lt 235 -or $paper.R -lt 235 -or $paper.G -lt 235 -or $paper.B -lt 235) { return 0 }
                 $green = 0
                 for ($y=[int]($img.Height*0.495); $y -lt [int]($img.Height*0.565); $y+=2) {
                   for ($x=[int]($img.Width*0.32); $x -lt [int]($img.Width*0.61); $x+=2) {
@@ -337,10 +342,10 @@ jobs:
               }
               Start-Sleep -Milliseconds 400
               Capture 'opened.png'
-              if ((GreenCodePixels 'opened.png') -lt 150) { continue }
+              if ((GreenCodePixels 'opened.png') -lt 60) { continue }
               Start-Sleep -Milliseconds 650
               Capture 'opened-stable.png'
-              if ((GreenCodePixels 'opened-stable.png') -lt 150) { continue }
+              if ((GreenCodePixels 'opened-stable.png') -lt 60) { continue }
               $codeSettled = ChangedPixels 'opened.png' 'opened-stable.png' 0.33 0.495 0.61 0.565
               if ($codeSettled -le 45) {
                 Copy-Item -LiteralPath (Join-Path $out 'opened-stable.png') -Destination (Join-Path $out 'opened.png') -Force
@@ -398,6 +403,7 @@ jobs:
               fixed_code_header_pixels_changed = $headerPixelsChanged
               screenshot_region_scroll_witness = $true
               stable_code_frame_witness = $ready
+              code_green_pixels = (GreenCodePixels 'opened.png')
               os_find_keys_injected = $true
               screenshot_sha256 = $hashes
               pixel_change_does_not_prove_highlight_correctness = $true
