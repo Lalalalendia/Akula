@@ -328,6 +328,40 @@ test('B1b3c protected signed-FD PR-trigger removal is byte-exact and fail-closed
   assert.equal(allowedB1b3cMigration(before,after,()=>{throw Error('missing route');}),false);
 });
 
+
+test('B1c0 protected PR trigger requires exact root-CAS route without bypass',()=>{
+  const {allowedB1c0Migration}=require('./ci-pr-concurrency.cjs');
+  const wf='.github/workflows/core-server-bootstrap-b1c0-fixed-node.yml';
+  const read=p=>fs.readFileSync(path.join(__dirname,'../..',p),'utf8');
+  const after=read(wf);
+  const oldHeader="on:\n  workflow_call:\n  pull_request:\n    branches: [main]\n    paths:\n\n      - \"aquilum-app/core/src/server_installer_pinned_release_lab.rs\"\n      - \"aquilum-app/core/src/server_installer_fixed_node_lab.rs\"\n      - \"aquilum-app/core/tests/server_bootstrap_b1c0.rs\"\n      - \".github/workflows/core-server-bootstrap-b1c0-fixed-node.yml\"\n      - \"docs/platforms/AKULA-SERVER-BOOTSTRAP-B1C0.md\"\n  workflow_dispatch:\n";
+  const newHeader="on:\n  workflow_call:\n  workflow_dispatch:\n";
+  assert.equal(after.split(newHeader).length,2);
+  const before=after.replace(newHeader,oldHeader);
+  assert.equal(allowedB1c0Migration(before,after,read),true,'strict mandatory B1c0 owner route');
+  assert.equal(allowedB1c0Migration(before,after.replace('workflow_dispatch:','push:'),read),false);
+  assert.equal(allowedB1c0Migration(before,after.replace('cargo test --locked','cargo test --offline'),read),false);
+  assert.equal(allowedB1c0Migration(before.replace('branches: [main]','branches: [other]'),after,read),false);
+  assert.equal(allowedB1c0Migration(before.replace('docs/platforms/AKULA-SERVER-BOOTSTRAP-B1C0.md','docs/platforms/WRONG.md'),after,read),false);
+  const route='.github/scripts/ci-shared-manifest-route.cjs';
+  const app='.github/workflows/app-checks.yml';
+  const shared='.github/workflows/ci-shared-manifest-labs.yml';
+  const corrupted=[
+    [route,read(route).replace('    "aquilum-app/core/src/server_installer_pinned_release_lab.rs",\n','')],
+    [app,read(app).replace("needs.classify.outputs.owned_b1c0_node == 'true'","false")],
+    [app,read(app).replace('needs: [classify, required-tests, native-frames, shared-labs]','needs: [classify, required-tests, native-frames]')],
+    [app,read(app).replace('if [ "$ROUTED_SHARED_RESULT" != success ]; then','echo bypass')],
+    [shared,read(shared).replace('inputs.core || inputs.lib || inputs.owned_b1c0_node','inputs.core || inputs.lib')],
+    [shared,read(shared).replace('["core","lib","owned_b1c0_node"]','["core","lib"]')],
+    [shared,read(shared).replace('route-b1c0-node, route-b1d0-opt','route-b1d0-opt')],
+  ];
+  for(const [source,mutated] of corrupted){
+    assert.notEqual(read(source),mutated,'negative mutation must modify '+source);
+    assert.equal(allowedB1c0Migration(before,after,p=>p===source?mutated:read(p)),false,source);
+  }
+  assert.equal(allowedB1c0Migration(before,after,()=>{throw Error('missing route');}),false);
+});
+
 test('Text Delta PR owner may migrate only to a proven required Main gate',()=>{
   const name='.github/workflows/text-delta-codec-isolated.yml';
   const read=p=>fs.readFileSync(path.join(__dirname,'../..',p),'utf8');
