@@ -274,7 +274,7 @@ test('B1b4b root CAS witness routes once for main; experiment PR retains direct 
 ];
   assert.deepEqual(routes.OWNED_SUITES.owned_b1b4b_witness,formerOwners);
   const header=wf.split('permissions:\n')[0];
-  assert.match(header,/^on:\n  workflow_call:\n/);
+  assert.match(header,/^on:\n  workflow_call:\n/m);
   assert.ok(header.includes('  pull_request:\n'));
   assert.ok(header.includes('    branches:\n      - experiment/akula-server-bootstrap-b1b4a-cas-fence\n'));
   assert.doesNotMatch(header,/^      - main$/m);
