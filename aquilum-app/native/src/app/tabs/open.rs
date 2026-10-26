@@ -1,21 +1,17 @@
 mod readonly;
-
+mod docx;
 use std::path::{Path, PathBuf};
-
 use aquilum_core::search::paths::{is_markdown, is_plain_text};
 use masonry::app::RenderRoot;
 use masonry::widgets::IndexedStack;
-
 use super::super::{App, Outcome};
 use crate::note::Note;
 use crate::ui::editor::TextEditor;
 use crate::ui::widgets::Slot;
-
 fn is_structured_file(path: &Path) -> bool {
     path.extension().and_then(|value| value.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas") || ext.eq_ignore_ascii_case("base"))
 }
-
 const MAX_INACTIVE_NOTES: usize = 2;
 const MAX_INACTIVE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -130,6 +126,7 @@ impl App {
             self.show_page(root, 0);
             return;
         }
+        if crate::docx::is_docx_path(&path) { return self.show_docx_tab(root, path); }
         if is_structured_file(&path) {
             self.leave_note();
             self.show_structured_readonly(root, &path);
@@ -318,7 +315,7 @@ impl App {
 
     pub(crate) fn open_in_with_offset(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool, offset: Option<usize>) -> bool {
         let image = crate::images::kind(&path.to_string_lossy()) == Some(crate::images::MediaKind::Image);
-        if !image && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) {
+        if !image && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) && !crate::docx::is_docx_path(&path) {
             return false;
         }
         // Validate the image before changing tabs or navigation: no paths
@@ -326,6 +323,7 @@ impl App {
         if image && self.tree.root().and_then(|vault| super::super::media::local_image_preview(vault, &path)).is_none() {
             return false;
         }
+        if crate::docx::is_docx_path(&path) && self.tree.root().and_then(|v| crate::docx::admit(v, &path).ok()).is_none() { return false; }
         if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {
             self.navigation.push(&current);
         }

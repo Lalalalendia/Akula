@@ -1,4 +1,4 @@
-# AKULA-INSTALLED-UPDATER-UIA-01
+# AKULA-INSTALLED-UPDATER-UIA-02
 # Exercises the *installed application* "Check for updates" and "Install"
 # buttons via genuine Windows UI Automation; no direct NSIS upgrade command.
 $ErrorActionPreference = 'Stop'
@@ -15,17 +15,17 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes -ErrorAction Stop
 
 $repo = $env:GITHUB_REPOSITORY
-$oldVersion = '0.3.11'
-$newVersion = '0.3.12'
-$oldSource = '5cde5d531e5a20744dd2243e954617d216b20911'
-$newSource = 'fa6ec577e55c4ace245c38130cb5ddb07d0c61a3'
-$oldSha = '37414336ae05dc8ce2df46e42ae871787dce5a8cb37a1da0fddedc4989bd4793'
-$newSha = '7bae191d8a9046bee0f10700e3274489ec9da2964d7517fc01dd0adddf335577'
+$oldVersion = '0.3.13'
+$newVersion = '0.3.14'
+$oldSource = '23383c52a6a63fb2e2f6b71d567e41e9018cda22'
+$newSource = '39c159f1724d76b5b5f9453b0404ac7a6f0f248f'
+$oldSha = '1526b83305707204e57e2937d9db8499e539c37fa6a3117854514454349c1fc8'
+$newSha = 'e91f97eff69717b442fa6288036a1a9ea8b129ebfdd056b5290fbb2eb9b85c11' # Immutable public installer digest.
 $install = Join-Path $env:LOCALAPPDATA 'Akula'
 $exe = Join-Path $install 'akula-app.exe'
 $dataDir = Join-Path $env:APPDATA 'io.github.lalalendia.akula'
 $reg = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Akula'
-$base = Join-Path $env:RUNNER_TEMP 'akula-manual-update-uia-0311-0312'
+$base = Join-Path $env:RUNNER_TEMP 'akula-manual-update-uia-0313-0314'
 foreach ($p in @($install, $dataDir, $reg, $base)) {
   if (Test-Path -LiteralPath $p) { throw "Not a clean runner: $p" }
 }
@@ -40,36 +40,86 @@ function Read-PublicRelease([string]$version, [string]$expectedSource, [string]$
   }
   $filename = 'Akula_' + $version + '_x64-setup.exe'
   $assets = @($release.assets | Where-Object { $_.name -ceq $filename })
-  if ($assets.Count -ne 1 -or $assets[0].digest -cne "sha256:$expectedSha") {
-    throw "Pinned GitHub installer mismatch: $tag"
+  if ($assets.Count -ne 1) { throw "Expected one public installer: $tag" }
+  $digest = [string]$assets[0].digest
+  if ($digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or
+      ($expectedSha.Length -gt 0 -and $digest -cne ('sha256:' + $expectedSha))) {
+    throw "Pinned GitHub installer digest invalid: $tag"
   }
   return $assets[0]
 }
 $oldAsset = Read-PublicRelease $oldVersion $oldSource $oldSha
 $newAsset = Read-PublicRelease $newVersion $newSource $newSha
 $latest = gh api "repos/$repo/releases/latest" | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0 -or $latest.tag_name -cne 'v0.3.12' -or
+if ($LASTEXITCODE -ne 0 -or $latest.tag_name -cne 'v0.3.14' -or
     $latest.target_commitish -cne $newSource) {
-  throw 'Manual updater must be exercised against published Latest 0.3.12'
+  throw 'Manual updater must be exercised against published Latest 0.3.14'
 }
+
+# Verify the actual publicly published target; never fabricate a future
+# release digest. The INSTALLED updater must independently verify Minisign.
+if (([string]$newAsset.digest).Substring(7) -cne $newSha) {
+  throw 'Published v0.3.14 installer digest changed since approval'
+}
+$targetName = 'Akula_' + $newVersion + '_x64-setup.exe'
+$proofDir = Join-Path $base 'published-0314-metadata'
+New-Item -ItemType Directory -Force -Path $proofDir | Out-Null
+gh release download ('v' + $newVersion) --repo $repo --dir $proofDir --pattern 'latest.json' --pattern 'latest.json.sig' --pattern ($targetName + '.sig')
+if ($LASTEXITCODE -ne 0) { throw 'Published v0.3.14 signatures or manifest unavailable' }
+$manifestFile = Join-Path $proofDir 'latest.json'
+if ((Get-FileHash -LiteralPath $manifestFile -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+    '2b0e066ff8e17d221e7e78bc3c342696c7e02852909e80bce216df13593cf7f9') {
+  throw 'Public v0.3.14 manifest differs from approved published SHA-256'
+}
+$manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
+$win = $manifest.artifacts.'windows-x86_64'
+if ($manifest.schema -ne 1 -or $manifest.product -cne 'Akula' -or
+    $manifest.version -cne $newVersion -or $manifest.source_commit -cne $newSource -or
+    @($manifest.artifacts.PSObject.Properties).Count -ne 1 -or
+    $win.filename -cne $targetName -or $win.sha256 -cne $newSha -or
+    $win.size -ne $newAsset.size -or $manifest.cargo_lock_sha256 -cnotmatch '^[0-9a-f]{64}$') {
+  throw 'Public v0.3.14 manifest does not match signed source and installer'
+}
+$published = gh api "repos/$repo/releases/tags/v$newVersion" | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Published release unavailable' }
+$expectedSignatureDigests = @{}
+$expectedSignatureDigests['latest.json.sig'] = '97db502596de701258398d0299620742b8a8445c1764bbb1458ec2123a7485c7'
+$expectedSignatureDigests[$targetName + '.sig'] = 'b7181ee7808467af396362bf898c633411fdfa118ed86998b25755b136de3212'
+foreach ($name in @('latest.json.sig', ($targetName + '.sig'))) {
+  $assets = @($published.assets | Where-Object { $_.name -ceq $name })
+  $file = Join-Path $proofDir $name
+  $expectedHash = $expectedSignatureDigests[$name]
+  if ($assets.Count -ne 1 -or !(Test-Path -LiteralPath $file -PathType Leaf) -or
+      ([string]$assets[0].digest) -cne ('sha256:' + $expectedHash) -or
+      (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedHash -or
+      (Get-Item $file).Length -ne $assets[0].size) {
+    throw "Public release signature asset mismatch: $name"
+  }
+  $encoded = (Get-Content -LiteralPath $file -Raw).Trim()
+  if ($encoded -cnotmatch '^[A-Za-z0-9+/]+={0,2}$') { throw "Bad signature wrapper: $name" }
+  try { $bytes = [Convert]::FromBase64String($encoded) } catch { throw "Invalid base64 signature: $name" }
+  if ($bytes.Length -lt 64) { throw "Truncated signature: $name" }
+}
+Write-Host "AKULA_UIA_0314_PUBLISHED_METADATA_PASS source=$newSource signatures=2"
+
 $oldSetup = Join-Path $base $oldAsset.name
-gh release download 'v0.3.11' --repo $repo --dir $base --pattern $oldAsset.name
+gh release download 'v0.3.13' --repo $repo --dir $base --pattern $oldAsset.name
 if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $oldSetup -PathType Leaf)) {
-  throw 'Published 0.3.11 installer download failed'
+  throw 'Published 0.3.13 installer download failed'
 }
 if ((Get-FileHash -LiteralPath $oldSetup -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSha -or
     (Get-Item -LiteralPath $oldSetup).Length -ne $oldAsset.size) {
-  throw 'Downloaded 0.3.11 installer bytes differ from pinned digest'
+  throw 'Downloaded 0.3.13 installer bytes differ from pinned digest'
 }
 $installed = Start-Process -FilePath $oldSetup -ArgumentList '/S' -Wait -PassThru
 if ($installed.ExitCode -ne 0 -or !(Test-Path -LiteralPath $exe -PathType Leaf)) {
-  throw 'Published 0.3.11 NSIS installation failed'
+  throw 'Published 0.3.13 NSIS installation failed'
 }
 if ((Get-ItemProperty -Path $reg -Name DisplayVersion).DisplayVersion -cne $oldVersion) {
-  throw 'Windows did not register installed Akula 0.3.11'
+  throw 'Windows did not register installed Akula 0.3.13'
 }
 $oldBinaryHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
-Write-Host 'AKULA_UIA_SIGNED_0311_INSTALLED_PASS'
+Write-Host 'AKULA_UIA_SIGNED_0313_INSTALLED_PASS'
 
 # Explicitly disable startup auto-update. Updating must be initiated by actual
 # UIA button invocation, not by App::new() calling updater.install().
@@ -89,10 +139,28 @@ New-Item -ItemType Directory -Force -Path $legacy | Out-Null
 $legacyNote = Join-Path $legacy 'must-not-touch.txt'
 [System.IO.File]::WriteAllText($legacyNote, 'AQUILUM-UNCHANGED')
 $legacyHash = (Get-FileHash -LiteralPath $legacyNote -Algorithm SHA256).Hash
+
+# An independently installed Aquilum product must not be overwritten.
+$legacyInstall = Join-Path $env:LOCALAPPDATA 'Aquilum'
+$legacyReg = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Aquilum'
+$legacyRun = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+if ((Test-Path $legacyInstall) -or (Test-Path $legacyReg)) { throw 'Not a clean Aquilum install state' }
+New-Item -ItemType Directory -Force -Path $legacyInstall | Out-Null
+$legacyExeMarker = Join-Path $legacyInstall 'do-not-touch.txt'
+[IO.File]::WriteAllText($legacyExeMarker, 'AQUILUM-PRESERVE')
+$legacyExeHash = (Get-FileHash $legacyExeMarker -Algorithm SHA256).Hash
+New-Item -Path $legacyReg -Force | Out-Null
+Set-ItemProperty -Path $legacyReg -Name DisplayName -Value 'Aquilum'
+New-Item -Path $legacyRun -Force | Out-Null
+Set-ItemProperty -Path $legacyRun -Name Aquilum -Value 'AQUILUM-PRESERVE'
+
 function Assert-Data {
   if ((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -ne $noteHash -or
-      (Get-FileHash -LiteralPath $legacyNote -Algorithm SHA256).Hash -ne $legacyHash) {
-    throw 'GUI updater altered user Markdown or legacy Aquilum'
+      (Get-FileHash -LiteralPath $legacyNote -Algorithm SHA256).Hash -ne $legacyHash -or
+      (Get-FileHash $legacyExeMarker -Algorithm SHA256).Hash -ne $legacyExeHash -or
+      (Get-ItemProperty -Path $legacyReg -Name DisplayName).DisplayName -cne 'Aquilum' -or
+      (Get-ItemProperty -Path $legacyRun -Name Aquilum).Aquilum -cne 'AQUILUM-PRESERVE') {
+    throw 'GUI updater altered user Markdown or a separate Aquilum installation'
   }
 }
 $localePath = Join-Path $env:GITHUB_WORKSPACE 'aquilum-app\native\assets\locales\en.json'
@@ -112,10 +180,10 @@ $oldProcess = Start-Process -FilePath $exe -ArgumentList $argsForApp -PassThru
 for ($i = 0; $i -lt 80; $i++) {
   Start-Sleep -Milliseconds 300
   $oldProcess.Refresh()
-  if ($oldProcess.HasExited) { throw '0.3.11 exited before user chose any update button' }
+  if ($oldProcess.HasExited) { throw '0.3.13 exited before user chose any update button' }
   if ($oldProcess.MainWindowHandle -ne [IntPtr]::Zero) { break }
 }
-if ($oldProcess.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Installed 0.3.11 GUI did not appear' }
+if ($oldProcess.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Installed 0.3.13 GUI did not appear' }
 $window = [IntPtr]$oldProcess.MainWindowHandle
 $buttonCondition = [System.Windows.Automation.PropertyCondition]::new(
   [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -157,9 +225,9 @@ Write-Host 'AKULA_UIA_MANUAL_CHECK_INVOKED_PASS'
 Invoke-Button $labels.install 150
 Write-Host 'AKULA_UIA_MANUAL_INSTALL_INVOKED_PASS'
 # Signed metadata discovery, payload signature verification, staging and
-# ShellExecuteW all happen inside installed Akula; the test never runs v0.3.12 NSIS.
+# ShellExecuteW all happen inside installed Akula; the test never runs v0.3.14 NSIS.
 if (!$oldProcess.WaitForExit(180000)) {
-  throw 'Installed Akula 0.3.11 did not exit after user clicked Install'
+  throw 'Installed Akula 0.3.13 did not exit after user clicked Install'
 }
 Write-Host 'AKULA_UIA_INSTALLED_APP_APPLY_EXIT_PASS'
 
@@ -175,24 +243,27 @@ for ($i = 0; $i -lt 180; $i++) {
   }
 }
 if ($null -eq $newProcess) {
-  throw 'Signed GUI update did not install and launch a visible 0.3.12 process'
+  throw 'Signed GUI update did not install and launch a visible 0.3.14 process'
 }
 $newBinaryHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
 if ($newBinaryHash -ceq $oldBinaryHash) {
-  throw 'Manual GUI update left installed 0.3.11 binary unchanged'
+  throw 'Manual GUI update left installed 0.3.13 binary unchanged'
 }
 Assert-Data
 if (!(Test-Path -LiteralPath $settingsPath -PathType Leaf) -or
     (Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash -ne $originalSettingsHash) {
   throw 'Signed GUI updater changed manual update preference'
 }
-Write-Host 'AKULA_UIA_SIGNED_IN_APP_UPDATE_PASS from=0.3.11 to=0.3.12 manual_check=1 manual_install=1 signed_apply=1 gui=1 notes=1'
+$akulaEntries = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
+  Where-Object { (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).DisplayName -ceq 'Akula' })
+if ($akulaEntries.Count -ne 1) { throw 'Multiple or missing Akula uninstall identities' }
+Write-Host 'AKULA_UIA_SIGNED_IN_APP_UPDATE_PASS from=0.3.13 to=0.3.14 manual_check=1 manual_install=1 signed_apply=1 gui=1 notes=1 single_install=1 aquilum=1'
 
 # The update itself is accepted before cleanup. Enforce a clean close and
 # uninstall as a second independent acceptance marker.
 $newProcess.Refresh()
 if (!$newProcess.CloseMainWindow() -or !$newProcess.WaitForExit(25000)) {
-  throw 'Installed 0.3.12 failed graceful GUI shutdown after automatic relaunch'
+  throw 'Installed 0.3.14 failed graceful GUI shutdown after automatic relaunch'
 }
 if (@(Get-Process -Name 'akula-app' -ErrorAction SilentlyContinue).Count -ne 0) {
   throw 'Akula left unexpected processes after manual GUI update'

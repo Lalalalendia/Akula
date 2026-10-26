@@ -1,18 +1,18 @@
 name: Search hit single-handle performance
 
 on:
+  # Ignore benchmarks by default; preserve deliberate performance measurements.
   pull_request:
     paths:
-      - "aquilum-app/core/src/search/hits/**"
-      - "aquilum-app/core/src/search/index_tests.rs"
       - ".github/workflows/search-hits-perf.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: search-hit-perf-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   paired-search-hits:

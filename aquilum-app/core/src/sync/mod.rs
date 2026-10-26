@@ -78,8 +78,8 @@ mod pinned_windows;
 mod protocol;
 mod provider;
 mod s3;
-mod s3_manifest;
-mod s3_pack_index;
+#[cfg(any(feature = "sync-s3", feature = "sync-s3-pack-lab"))] #[path = "s3_transport/pack_probe.rs"] mod s3_pack_probe;
+mod s3_manifest; mod s3_pack_index;
 mod s3_manifest_delta;
 mod s3_coord_v2;
 #[cfg(feature = "sync-s3")]

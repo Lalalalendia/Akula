@@ -1,0 +1,35 @@
+name: AKCB-02 Native Planner Trace
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/tests/akcb_02_planner_trace.rs'
+      - 'docs/research/akcb_02_trace_check.py'
+      - 'docs/research/akcb-02-native-trace-contract.md'
+      - '.github/workflows/akcb-02-planner-trace.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akcb-02-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync-planner-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> target
+      - name: Actual Rust Sync Planner generates evidence (no network or disk mutation)
+        working-directory: aquilum-app
+        env:
+          AKCB_02_TRACE_OUT: ${{ runner.temp }}/akcb-02-native-trace.json
+        run: cargo test -p aquilum-core --locked --test akcb_02_planner_trace -- --nocapture
+      - name: Independent Python oracle verifies Rust evidence and mutation controls
+        run: python3 docs/research/akcb_02_trace_check.py "${{ runner.temp }}/akcb-02-native-trace.json" --self-test
