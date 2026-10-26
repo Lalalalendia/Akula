@@ -6,6 +6,8 @@ use crate::ui::palette;
 
 const MENU_PDF_PREVIEW: usize = 3;
 const MENU_PDF_PICK: usize = 4;
+#[cfg(feature = "dicom-preview")]
+const MENU_DICOM_OPEN: usize = 5;
 
 impl App {
     pub(super) fn open_file_menu(
@@ -35,6 +37,10 @@ impl App {
         if colored {
             labels.push((t("palette.color"), crate::ui::icons::PALETTE));
             labels.push(("Импортировать PDF в Akula".to_owned(), crate::ui::icons::UPLOAD));
+            #[cfg(feature = "dicom-preview")]
+            if targets.len() == 1 && clicked.join("DICOMDIR").is_file() {
+                labels.push(("Открыть медицинское исследование".to_owned(), crate::ui::icons::SEARCH));
+            }
         }
         let items: Vec<crate::ui::menu::Entry<'_>> = labels.iter().map(|(label, icon)| crate::ui::menu::Entry { label, icon: Some(*icon), disabled: false }).collect();
         let names: Vec<String> = std::iter::once(t("palette.none")).chain(palette::NAMES.iter().map(|name| palette::label(name))).collect();

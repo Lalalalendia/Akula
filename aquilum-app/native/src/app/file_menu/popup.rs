@@ -21,6 +21,12 @@ impl App {
                         let folders: Vec<PathBuf> = targets.into_iter().filter(|path| path.is_dir()).collect();
                         self.tree.set_color(root, &folders, index.checked_sub(1).and_then(|at| palette::NAMES.get(at).copied()));
                     }
+                    #[cfg(feature = "dicom-preview")]
+                    MenuChoice::Item(MENU_DICOM_OPEN) if tab.is_none() && targets.len() == 1 && clicked.is_dir() && clicked.join("DICOMDIR").is_file() => {
+                        if self.open_in(root, clicked.join("DICOMDIR"), true) {
+                            return Outcome { title: true, ..Outcome::default() };
+                        }
+                    }
                     MenuChoice::Item(MENU_PDF_PICK) if tab.is_none() && clicked.is_dir() => {
                         self.pick_pdf_file();
                     }
