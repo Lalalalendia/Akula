@@ -40,6 +40,11 @@ impl AccessToken {
         }
         Ok(Self(raw))
     }
+    /// Consume the validated token into zeroizing memory for another
+    /// explicitly authenticated Dropbox API call (never log or persist).
+    pub fn into_sensitive_string(mut self) -> zeroize::Zeroizing<String> {
+        zeroize::Zeroizing::new(std::mem::take(&mut self.0))
+    }
     fn bearer(&self) -> String { format!("Bearer {}", self.0) }
 }
 
@@ -132,6 +137,73 @@ impl DropboxReadOnly {
         Ok(file)
     }
 
+    /// Fetch an existing Vault listing or cursor delta without creating
+    /// remote folders or applying changes to local files.
+    pub fn list_delta(&self, cursor: Option<&str>) -> Result<crate::DropboxDeltaPage, ReadError> {
+        let (route, body) = match cursor {
+            Some(value) => {
+                if value.is_empty() || value.len() > 4096
+                    || value.chars().any(char::is_control)
+                { return Err(ReadError::Protocol(crate::Error::InvalidCursor)); }
+                (crate::CONTINUE_ROUTE, json!({"cursor":value}).to_string())
+            }
+            None => (crate::LIST_ROUTE, crate::prepare_list(&self.scope)
+                .map_err(ReadError::Protocol)?),
+        };
+        let url = format!("{}{}", self.endpoints.api, route);
+        let response = self.agent.post(&url)
+            .set("Authorization", &self.token.bearer())
+            .set("Content-Type", "application/json")
+            .send_string(&body).map_err(|error| {
+                match error {
+                    ureq::Error::Status(409, response) if cursor.is_some() => {
+                        let bytes = bounded(response, 4096).unwrap_or_default();
+                        let err = classify_http(Operation::Continue, 409, &bytes, None)
+                            .err().unwrap_or(crate::Error::UnexpectedResponse);
+                        ReadError::Protocol(err)
+                    }
+                    other => Self::from_ureq(other),
+                }
+            })?;
+        let bytes = bounded(response, 8 * 1024 * 1024)?;
+        crate::parse_delta_page(&self.scope, &bytes).map_err(ReadError::Metadata)
+    }
+
+    /// Collect a bounded, read-only remote snapshot. Never expose a partial
+    /// listing as complete or persist a cursor before all pages validate.
+    pub fn snapshot(&self) -> Result<crate::DropboxDeltaPage, ReadError> {
+        const MAX_PAGES: usize = 128;
+        const MAX_ENTRIES: usize = 50_000;
+        let mut cursor: Option<String> = None;
+        let mut seen_cursors = std::collections::HashSet::new();
+        let mut by_key = std::collections::BTreeMap::new();
+        for _ in 0..MAX_PAGES {
+            let page = self.list_delta(cursor.as_deref())?;
+            if !seen_cursors.insert(page.cursor.clone()) {
+                return Err(ReadError::Protocol(crate::Error::InvalidCursor));
+            }
+            for entry in page.entries {
+                let key = match &entry {
+                    crate::DropboxDeltaEntry::File(file) => file.logical_key.as_str(),
+                    crate::DropboxDeltaEntry::Deleted(key) => key.as_str(),
+                };
+                by_key.insert(key.to_owned(), entry);
+                if by_key.len() > MAX_ENTRIES {
+                    return Err(ReadError::ResponseTooLarge);
+                }
+            }
+            if !page.has_more {
+                return Ok(crate::DropboxDeltaPage {
+                    entries: by_key.into_values().collect(),
+                    cursor: page.cursor,
+                    has_more: false,
+                });
+            }
+            cursor = Some(page.cursor);
+        }
+        Err(ReadError::ResponseTooLarge)
+    }
+
     /// Lookup happens inside the verified account and vault scope. Caller
     /// cannot supply an unrelated Dropbox file reference or revision.
     pub fn read_key_verified(
@@ -196,145 +268,4 @@ fn bounded(response: ureq::Response, max: usize) -> Result<Vec<u8>, ReadError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{DropboxContentHash, DropboxRevision};
-    use crate::read_verify::dropbox_content_hash;
-    use std::{
-        io::{Read, Write}, net::TcpListener,
-        thread,
-    };
-
-    fn scope() -> Scope {
-        Scope::new("dbid:alice", "12345",
-            "12345678-1234-1234-1234-123456789abc", "home").unwrap()
-    }
-
-    // Fake Dropbox replies on loopback. Production cannot select this endpoint.
-    fn server(contents: Vec<u8>, wrong_bytes: bool, redirect: bool)
-        -> (Endpoints, thread::JoinHandle<()>)
-    {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let handle = thread::spawn(move || {
-            for i in 0..3 {
-                let (mut stream, _) = listener.accept().unwrap();
-                stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-                let mut request = Vec::new();
-                let mut buf = [0_u8; 4096];
-                let header_end;
-                loop {
-                    let n = stream.read(&mut buf).unwrap();
-                    assert!(n > 0);
-                    request.extend_from_slice(&buf[..n]);
-                    if let Some(p) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-                        header_end = p + 4;
-                        break;
-                    }
-                }
-                let header = std::str::from_utf8(&request[..header_end]).unwrap().to_owned();
-                assert!(header.starts_with("POST /2/"));
-                assert!(header.to_ascii_lowercase().contains("authorization: bearer fake-token"));
-                let size: usize = header.lines()
-                    .find_map(|row| row.to_ascii_lowercase().strip_prefix("content-length:")
-                        .and_then(|v| v.trim().parse().ok())).unwrap_or(0);
-                while request.len() - header_end < size {
-                    let n = stream.read(&mut buf).unwrap();
-                    assert!(n > 0);
-                    request.extend_from_slice(&buf[..n]);
-                }
-
-                let hash = dropbox_content_hash(&contents);
-                let record = json!({
-                    ".tag":"file", "id":"id:abc", "rev":"a1c10ce0dd78",
-                    "size":contents.len(), "is_downloadable":true,
-                    "content_hash":hash,
-                }).to_string();
-                let (body, extra) = match i {
-                    0 => {
-                        assert!(header.contains("/2/users/get_current_account"));
-                        (br#"{"account_id":"dbid:alice","root_info":{"root_namespace_id":"12345"}}"#.to_vec(), String::new())
-                    },
-                    1 => {
-                        assert!(header.contains("/2/files/get_metadata"));
-                        (record.clone().into_bytes(), String::new())
-                    },
-                    _ => {
-                        assert!(header.contains("/2/files/download"));
-                        assert!(header.contains("rev:a1c10ce0dd78"));
-                        let bytes = if wrong_bytes { b"invalid".to_vec() } else { contents.clone() };
-                        (bytes, format!("Dropbox-API-Result: {}\r\n", record))
-                    },
-                };
-                if redirect && i == 2 {
-                    let msg = "HTTP/1.1 302 Found\r\nLocation: https://example.org/steal\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-                    stream.write_all(msg.as_bytes()).unwrap();
-                } else {
-                    write!(stream,
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n",
-                        body.len(), extra).unwrap();
-                    stream.write_all(&body).unwrap();
-                }
-            }
-        });
-        let base = format!("http://{addr}");
-        (Endpoints { api: base.clone(), content: base }, handle)
-    }
-
-    fn connect_test(endpoints: Endpoints) -> DropboxReadOnly {
-        DropboxReadOnly::connect_at(scope(),
-            AccessToken::new("fake-token".to_owned()).unwrap(), endpoints).unwrap()
-    }
-
-    #[test]
-    fn read_exact_revision_with_two_hashes_and_account_proof() {
-        let bytes = b"hello akula".to_vec();
-        let (endpoints, thread) = server(bytes.clone(), false, false);
-        let client = connect_test(endpoints);
-        let file = client.metadata(&ObjectKey::head()).unwrap();
-        assert_eq!(file.revision, DropboxRevision::parse("a1c10ce0dd78").unwrap());
-        assert_eq!(file.dropbox_hash, Some(DropboxContentHash::parse(
-            &dropbox_content_hash(&bytes)).unwrap()));
-        let trusted = TrustedBlake3::parse(
-            &blake3::hash(&bytes).to_hex().to_string()).unwrap();
-        let downloaded = client.download_verified(&file, &trusted).unwrap();
-        assert_eq!(downloaded.bytes, bytes);
-        thread.join().unwrap();
-    }
-
-    #[test]
-    fn same_length_changed_payload_does_not_verify() {
-        let (endpoints, thread) = server(b"invalid".to_vec(), true, false);
-        let client = connect_test(endpoints);
-        let file = client.metadata(&ObjectKey::head()).unwrap();
-        let trusted = TrustedBlake3::parse(
-            &blake3::hash(b"original").to_hex().to_string()).unwrap();
-        let result = client.download_verified(&file, &trusted);
-        assert_eq!(result, Err(ReadError::Verify(VerifyError::TrustedHashMismatch)));
-        thread.join().unwrap();
-    }
-
-    #[test]
-    fn public_read_key_cannot_bypass_scoped_metadata_lookup() {
-        let payload = b"protected-by-trusted-anchor".to_vec();
-        let (endpoints, server) = server(payload.clone(), false, false);
-        let client = connect_test(endpoints);
-        let trusted = TrustedBlake3::parse(
-            &blake3::hash(&payload).to_hex().to_string()).unwrap();
-        let verified = client.read_key_verified(&ObjectKey::head(), &trusted).unwrap();
-        assert_eq!(verified.bytes, payload);
-        server.join().unwrap();
-    }
-
-    #[test]
-    fn redirects_are_rejected_without_leaking_token() {
-        let (endpoints, thread) = server(b"original".to_vec(), false, true);
-        let client = connect_test(endpoints);
-        let file = client.metadata(&ObjectKey::head()).unwrap();
-        let trusted = TrustedBlake3::parse(
-            &blake3::hash(b"original").to_hex().to_string()).unwrap();
-        assert!(client.download_verified(&file, &trusted).is_err());
-        assert_eq!(format!("{:?}", client.token), "AccessToken(REDACTED)");
-        thread.join().unwrap();
-    }
-}
+mod tests;

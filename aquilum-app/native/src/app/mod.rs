@@ -1,7 +1,7 @@
 mod actions;
 mod commands;
 mod book;
-mod core_events;
+mod core_events; #[cfg(feature = "dropbox-readonly-preview")] mod dropbox_preview;
 mod embeds;
 mod file_menu;
 mod find;
@@ -55,8 +55,7 @@ use crate::interface::{Interface, SCALE_STEP};
 use crate::links::Listing;
 use crate::ui::backlinks::{Body, HistoryBody, VersionView};
 use crate::ui::titlebar::WindowButton;
-use crate::note::Note;
-use crate::session::Session;
+use crate::{note::Note, session::Session};
 use crate::tabs::Tabs;
 use crate::workspace::Workspace;
 use uuid::Uuid;
@@ -92,7 +91,6 @@ pub enum WindowCommand {
     Minimize,
     Close,
 }
-
 const MENU_RENAME: usize = 0;
 const MENU_DUPLICATE: usize = 1;
 const MENU_DELETE: usize = 2;
@@ -102,11 +100,13 @@ const MENU_MARGIN: f64 = 8.0;
 const HOLD: std::time::Duration = std::time::Duration::from_millis(500);
 pub struct App {
     workspace: Workspace,
+    #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview,
     tree: FileTree,
     chrome: Option<Chrome>,
     interface: Interface,
     popup: Option<Popup>,
     typing: Option<(crate::ui::settings::schema::Setter, String, usize)>,
+    server_probe: settings::server_state::ServerProbeState,
     graph: graph_page::GraphState,
     transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,

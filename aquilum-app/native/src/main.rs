@@ -15,8 +15,8 @@ macro_rules! report {
 include!("native_modules.rs");
 
 pub use args::Args;
-
 fn main() {
+    args::run_w4_pilot_if_requested();
     #[cfg(target_os = "windows")]
     unsafe {
         #[link(name = "winmm")]

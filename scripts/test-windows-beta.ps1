@@ -221,7 +221,14 @@ if ($LASTEXITCODE -ne 0) {
   throw "Installed Akula Windows UIA acceptance failed: PowerShell exit $LASTEXITCODE"
 }
 
-Start-And-Close -EditNote
+# Installed real Windows PDF pointer path; separate from native Rust harness.
+$pdfPointerScript = Join-Path $PSScriptRoot 'windows-pdf-os-pointer.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula PDF OS-pointer acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-dot-folder-uia.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData; if ($LASTEXITCODE -ne 0) { throw "Installed Akula dot-folder UIA failed: PowerShell exit $LASTEXITCODE" }; Start-And-Close -EditNote
 $state = Join-Path $akulaData 'window-state.json'
 if (!(Test-Path $state)) { throw 'Akula window state not persisted to its own AppData' }
 $savedText = [System.IO.File]::ReadAllText($note)

@@ -163,3 +163,62 @@ fn selecting_the_current_workspace_does_not_discard_or_flush_the_editor() {
     assert_eq!(h.body_text(), "несохранённый текст");
     assert_eq!(std::fs::read_to_string(note).unwrap(), "текст");
 }
+
+#[test]
+fn switching_workspace_waits_for_an_already_queued_failed_save() {
+    let mut h = Harness::new();
+    let vault = h.vault.path().to_path_buf();
+    let note = vault.join("a.md");
+    let backup = vault.join("original.txt");
+    let next = crate::test_dir::tempdir();
+    assert!(h.app.open(&mut h.root, note.clone()));
+    h.replace_body("текст фонового сохранения");
+    std::fs::rename(&note, &backup).unwrap();
+    std::fs::create_dir(&note).unwrap();
+    // Enqueue the real disk write without collecting its result in App::tick.
+    h.app.note.as_mut().unwrap().tick(
+        &h.app.workspace.core, &h.app.text,
+        std::time::Instant::now() + std::time::Duration::from_secs(3600),
+    );
+
+    assert!(!h.app.switch_workspace(&mut h.root, next.path().to_path_buf()).title);
+    assert_eq!(h.app.tree.root(), Some(vault.as_path()));
+    assert_eq!(h.body_text(), "текст фонового сохранения");
+    assert!(h.app.note.as_ref().unwrap().save_error.is_some());
+    assert_eq!(std::fs::read_to_string(backup).unwrap(), "текст");
+}
+
+#[test]
+fn workspace_row_action_keeps_failed_editor_and_can_dismiss_warning() {
+    let mut h = Harness::new();
+    let vault = h.vault.path().to_path_buf();
+    let note = vault.join("a.md");
+    let next = crate::test_dir::tempdir();
+    h.app.workspace.core.ui_state.resolve_workspace(&next.path().to_string_lossy(), 0).unwrap();
+    assert!(h.app.open(&mut h.root, note.clone()));
+    h.replace_body("правка из диалога выбора базы");
+    std::fs::rename(&note, vault.join("original.txt")).unwrap();
+    std::fs::create_dir(&note).unwrap();
+    let editor = h.app.editor_id();
+    h.app.open_workspaces(&mut h.root);
+    let row = match &h.app.popup {
+        Some(Popup::Workspaces(state)) => state.dialog().rows.iter()
+            .find(|(_, path, _)| crate::ui::workspaces::same_path(path, next.path()))
+            .map(|(id, _, _)| *id).expect("target workspace row"),
+        _ => panic!("expected workspace picker"),
+    };
+
+    assert!(!h.send(row, RowAction::Open).title);
+    let close = match &h.app.popup {
+        Some(Popup::Workspaces(state)) => state.dialog().close,
+        _ => panic!("expected warning in workspace picker"),
+    };
+    h.send(close, Pressed);
+    assert!(h.app.popup.is_none());
+    assert_eq!(h.app.tree.root(), Some(vault.as_path()));
+    assert_eq!(h.app.editor_id(), editor);
+    assert_eq!(h.body_text(), "правка из диалога выбора базы");
+    assert!(h.app.save_error_ids.is_some());
+    let known = h.app.workspace.core.ui_state.list_workspaces().unwrap();
+    assert!(crate::ui::workspaces::same_path(std::path::Path::new(&known[0].path), &vault));
+}

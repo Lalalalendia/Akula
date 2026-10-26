@@ -26,6 +26,7 @@ impl App {
         dialog.sync_selected = None;
         dialog.sync_notice = None;
         dialog.yandex_notice = None;
+        dialog.server_advanced = false;
         self.interface.set_settings_section(section.key());
         let config = self.workspace.core.settings.get_config();
         let ctx = self.settings_context(section, None, 0);
@@ -36,5 +37,4 @@ impl App {
             ScrollArea::set_offset(&mut area, 0.0);
         });
     }
-
 }
