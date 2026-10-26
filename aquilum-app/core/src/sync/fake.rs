@@ -189,6 +189,108 @@ impl RemoteStore for FakeRemoteStore {
     }
 }
 
+
+/// Counts successful mock RemoteStore payload bytes, not on-wire IP/QUIC bytes.
+/// Kept test-only: these numbers must never be presented as real network traffic.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct PayloadIoCounts {
+    pub head_calls: u64,
+    pub get_calls: u64,
+    pub get_bytes: u64,
+    pub put_calls: u64,
+    pub put_bytes: u64,
+}
+
+/// An independent, test-only byte meter around the existing fake provider.
+/// A failed precondition does not count as transferred payload. An uncertain
+/// write ACK does, since the fake provider has already accepted the bytes.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct MeteredFakeRemoteStore {
+    inner: FakeRemoteStore,
+    counts: std::cell::Cell<PayloadIoCounts>,
+}
+
+#[cfg(test)]
+impl MeteredFakeRemoteStore {
+    pub fn counts(&self) -> PayloadIoCounts {
+        self.counts.get()
+    }
+
+    pub fn reset_counts(&self) {
+        self.counts.set(PayloadIoCounts::default());
+    }
+}
+
+#[cfg(test)]
+impl RemoteStore for MeteredFakeRemoteStore {
+    fn capabilities(&self) -> ProviderCapabilities {
+        self.inner.capabilities()
+    }
+
+    fn list_page(
+        &self,
+        continuation: Option<&str>,
+        page_limit: usize,
+    ) -> Result<RemotePage, RemoteStoreError> {
+        self.inner.list_page(continuation, page_limit)
+    }
+
+    fn read(&self, object_id: &str) -> Result<Vec<u8>, RemoteStoreError> {
+        let bytes = self.inner.read(object_id)?;
+        let mut counts = self.counts.get();
+        counts.get_calls += 1;
+        counts.get_bytes += bytes.len() as u64;
+        self.counts.set(counts);
+        Ok(bytes)
+    }
+
+    fn read_bounded(
+        &self,
+        object_id: &str,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, RemoteStoreError> {
+        let bytes = self.inner.read_bounded(object_id, max_bytes)?;
+        let mut counts = self.counts.get();
+        counts.get_calls += 1;
+        counts.get_bytes += bytes.len() as u64;
+        self.counts.set(counts);
+        Ok(bytes)
+    }
+
+    fn head(&self, object_id: &str) -> Result<RemoteObject, RemoteStoreError> {
+        let mut counts = self.counts.get();
+        counts.head_calls += 1;
+        self.counts.set(counts);
+        self.inner.head(object_id)
+    }
+
+    fn put(
+        &mut self,
+        object_id: &str,
+        bytes: &[u8],
+        precondition: &RemotePrecondition,
+    ) -> Result<RemoteWriteReceipt, RemoteStoreError> {
+        let result = self.inner.put(object_id, bytes, precondition);
+        if matches!(&result, Ok(_) | Err(RemoteStoreError::CommitUncertain)) {
+            let mut counts = self.counts.get();
+            counts.put_calls += 1;
+            counts.put_bytes += bytes.len() as u64;
+            self.counts.set(counts);
+        }
+        result
+    }
+
+    fn delete(
+        &mut self,
+        object_id: &str,
+        precondition: &RemotePrecondition,
+    ) -> Result<(), RemoteStoreError> {
+        self.inner.delete(object_id, precondition)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
