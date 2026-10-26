@@ -5,7 +5,7 @@ const cp=require('node:child_process');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const {classify,changed,safeManifestOnly,textDeltaModuleRequired,updaterSecurityAffected}=require('./ci-rust-scope.cjs');
+const {classify,changed,safeManifestOnly,textDeltaModuleRequired,textDeltaPackFastPath,textDeltaPackBoundaryChanged,updaterSecurityAffected}=require('./ci-rust-scope.cjs');
 
 test('pure documentation and CI telemetry do not compile Rust',()=>{
   assert.equal(classify(['README.md','docs/engineering-budgets.md',
@@ -530,4 +530,24 @@ test('Text Delta parity lab never duplicates Core source PR workflow runs',()=>{
     assert.equal(textDeltaModuleRequired([other]),false,'no unrelated module route: '+other);
   assert.equal(textDeltaModuleRequired(null),true,'missing change detection fails closed');
   assert.equal(textDeltaModuleRequired(['']),true,'bad path fails closed');
+});
+
+test('only module-only Text Delta source changes can avoid AWS SDK regression',()=>{
+  const moduleFiles=['modules/text-delta-codec/src/codec.rs',
+    'modules/text-delta-codec/tests/full_envelope_safety.rs'];
+  assert.equal(textDeltaPackFastPath(moduleFiles),true);
+  assert.equal(textDeltaModuleRequired(moduleFiles),true);
+  assert.equal(textDeltaPackBoundaryChanged(moduleFiles),false);
+  for(const mixed of ['aquilum-app/core/Cargo.toml','aquilum-app/Cargo.lock',
+    'aquilum-app/core/src/sync/s3_transport/pack_probe.rs',
+    '.github/workflows/sync-text-delta-rust.yml','README.md']){
+    assert.equal(textDeltaPackFastPath([...moduleFiles,mixed]),false,'AWS regression remains: '+mixed);
+  }
+  for(const invalid of [null,[],[''],['modules/text-delta-codec/'],['docs/a.md']])
+    assert.equal(textDeltaPackFastPath(invalid),false,'fail closed');
+  assert.equal(textDeltaPackBoundaryChanged(null),true);
+  for(const p of ['aquilum-app/core/Cargo.toml',
+    'aquilum-app/core/src/sync/mod.rs',
+    'aquilum-app/core/src/sync/s3_transport/pack_probe.rs'])
+    assert.equal(textDeltaPackBoundaryChanged([p]),true,'both modes: '+p);
 });

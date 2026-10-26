@@ -81,6 +81,8 @@ p2p-device-identity = ["dep:windows"]
 device-roster-lab = []
 # Pure, bounded and explicitly opt-in text delta representation. Not a sync sender.
 sync-text-delta = ["dep:akula-text-delta-codec"]
+# Run the actual S3 pack parser without AWS SDK; no File Gate or network.
+sync-s3-pack-lab = ["sync-text-delta"]
 # Separately selected packaged build: force every default Core::open through
 # the compiler-pinned local host registry. No AWS SDK or S3 engine implied.
 sync-installed-host = ["host-custody"]

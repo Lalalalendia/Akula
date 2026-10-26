@@ -643,3 +643,34 @@ test('Text Delta standalone suite has a single required owner and all leafs reta
   assert.match(shared,/route-text-delta:\n    name: Impacted shared manifest \/ text-delta/);
   assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/,'Main PR gate is fail closed');
 });
+
+test('Text Delta lightweight S3 test runs the actual pack parser; full AWS remains fail-closed',()=>{
+  const {textDeltaPackFastPath,textDeltaPackBoundaryChanged}=require('./ci-rust-scope.cjs');
+  const read=p=>fs.readFileSync(path.join(__dirname,'../../',p),'utf8');
+  const manifest=read('aquilum-app/core/Cargo.toml');
+  const mod=read('aquilum-app/core/src/sync/mod.rs');
+  const transport=read('aquilum-app/core/src/sync/s3_transport.rs');
+  const parser=read('aquilum-app/core/src/sync/s3_transport/pack_probe.rs');
+  const app=read('.github/workflows/app-checks.yml');
+  const shared=read('.github/workflows/ci-shared-manifest-labs.yml');
+  const lab=read('.github/workflows/sync-text-delta-rust.yml');
+  assert.match(manifest,/^sync-s3-pack-lab = \["sync-text-delta"\]$/m);
+  assert.match(mod,/#\[cfg\(any\(feature = "sync-s3", feature = "sync-s3-pack-lab"\)\)\]\s*#\[path = "s3_transport\/pack_probe\.rs"\]\s*mod s3_pack_probe;/);
+  assert.match(transport,/use super::s3_pack_probe as pack_probe;/);
+  assert.doesNotMatch(transport,/^mod pack_probe;/m);
+  assert.match(parser,/fn ingest_verified_pack\(/);
+  assert.match(parser,/fn new_text_delta_is_not_a_legacy_pack\(/);
+  assert.match(app,/text_delta_pack_fast_path: \$\{\{ steps\.scope\.outputs\.text_delta_pack_fast_path \}\}/);
+  assert.match(app,/text_delta_pack_boundary_changed: \$\{\{ steps\.scope\.outputs\.text_delta_pack_boundary_changed \}\}/);
+  assert.match(shared,/lightweight_pack_probe: \$\{\{ inputs\.text_delta_pack_fast_path \}\}/);
+  assert.match(shared,/verify_lightweight_boundary: \$\{\{ inputs\.text_delta_pack_boundary_changed \}\}/);
+  assert.match(lab,/if: \$\{\{ inputs\.lightweight_pack_probe \|\| inputs\.verify_lightweight_boundary \}\}/);
+  assert.match(lab,/if: \$\{\{ !inputs\.lightweight_pack_probe \}\}/);
+  assert.match(lab,/--features sync-s3-pack-lab new_text_delta_is_not_a_legacy_pack/);
+  assert.match(lab,/--features sync-s3,sync-text-delta new_text_delta_is_not_a_legacy_pack/);
+  assert.equal(textDeltaPackFastPath(['modules/text-delta-codec/src/codec.rs',
+    'aquilum-app/core/src/sync/s3_transport/pack_probe.rs']),false);
+  assert.equal(textDeltaPackBoundaryChanged([
+    'aquilum-app/core/src/sync/s3_transport/pack_probe.rs']),true);
+  assert.match(app,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+});

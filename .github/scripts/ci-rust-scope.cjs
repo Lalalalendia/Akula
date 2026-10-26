@@ -36,6 +36,28 @@ function textDeltaModuleRequired(changedPaths) {
     p === '.github/workflows/text-delta-codec-isolated.yml');
 }
 
+// Pure module-only Text Delta diffs may use the same real S3 parser without
+// the unrelated AWS SDK compile. Mixed, Core, S3 and lock changes retain AWS.
+function textDeltaPackFastPath(paths) {
+  const root='modules/text-delta-codec/';
+  return Array.isArray(paths) && paths.length>0 && paths.every(
+    p=>typeof p==='string' && p.startsWith(root) && p.length>root.length);
+}
+// Changes to parser, cfg wiring or route definition run BOTH feature modes.
+function textDeltaPackBoundaryChanged(paths) {
+  if(!Array.isArray(paths))return true;
+  const owners=new Set([
+    'aquilum-app/core/Cargo.toml',
+    'aquilum-app/core/src/sync/mod.rs',
+    'aquilum-app/core/src/sync/s3_transport.rs',
+    'aquilum-app/core/src/sync/s3_transport/pack_probe.rs',
+    '.github/workflows/sync-text-delta-rust.yml',
+    '.github/workflows/ci-shared-manifest-labs.yml',
+    '.github/scripts/ci-rust-scope.cjs',
+  ]);
+  return paths.some(p=>typeof p!=='string'||!p||owners.has(p));
+}
+
 const CORE_MANIFEST='aquilum-app/core/Cargo.toml';
 const WORKSPACE_LOCK='aquilum-app/Cargo.lock';
 // Strict fast path: only opt-in local manifest/linkage without changing any
@@ -86,10 +108,10 @@ function main(argv) {
   if(!args.base) throw Error('--base is required');
   const paths=changed(args.base,args.head||'HEAD');
   const mode=requiredMode(paths,args.base,args.head||'HEAD');
-  process.stdout.write('mode='+mode+'\ntext_delta_module_required='+textDeltaModuleRequired(paths)+'\nupdater_security_required='+updaterSecurityAffected(paths)+'\n');
+  process.stdout.write('mode='+mode+'\ntext_delta_module_required='+textDeltaModuleRequired(paths)+'\ntext_delta_pack_fast_path='+textDeltaPackFastPath(paths)+'\ntext_delta_pack_boundary_changed='+textDeltaPackBoundaryChanged(paths)+'\nupdater_security_required='+updaterSecurityAffected(paths)+'\n');
 }
 if(require.main===module) {
   try {main(process.argv.slice(2));}
   catch(err){console.error(err.message);process.exitCode=1;}
 }
-module.exports={classify,changed,safeManifestOnly,requiredMode,textDeltaModuleRequired,updaterSecurityAffected,main};
+module.exports={classify,changed,safeManifestOnly,requiredMode,textDeltaModuleRequired,textDeltaPackFastPath,textDeltaPackBoundaryChanged,updaterSecurityAffected,main};
