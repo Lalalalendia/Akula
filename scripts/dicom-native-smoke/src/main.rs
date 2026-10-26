@@ -1,4 +1,4 @@
-#[path = "../../../../aquilum-app/native/src/dicom.rs"]
+#[path = "../../../aquilum-app/native/src/dicom.rs"]
 mod dicom;
 use std::path::Path;
 fn main() {
