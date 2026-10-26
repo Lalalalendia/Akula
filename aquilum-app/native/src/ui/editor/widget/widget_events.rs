@@ -158,8 +158,8 @@ impl TextEditor {
             self.include_caret();
         }
         match event {
-            TextEvent::Keyboard(key) if self.laid_out() => {
-                if !self.media_key(ctx, key) && !self.table_key(ctx, key) {
+            TextEvent::Keyboard(key) if self.laid_out() || self.source_shortcut(key) => {
+                if !self.laid_out() || (!self.media_key(ctx, key) && !self.table_key(ctx, key)) {
                     self.keyboard(ctx, key);
                 }
             }
