@@ -1,7 +1,5 @@
 //! GNET-01: a deterministic, transport-independent Connect Four game session.
-//!
-//! The caller MUST pass the identity authenticated by its transport to apply.
-//! Neither a claimed identity in a packet nor a room ID is authentication.
+//! Peer identity must come from authenticated transport; packets and room IDs are not credentials.
 //! Room IDs and epochs must be issued and persisted by the future room owner.
 //! This crate performs no I/O, opens no sockets, and has no file or Akula access.
 
