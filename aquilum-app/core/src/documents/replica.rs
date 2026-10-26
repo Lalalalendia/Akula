@@ -1,9 +1,8 @@
 use super::merge::TextEdit;
 use std::fmt;
-use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{
-    Doc, GetString, IndexedSequence, OffsetKind, Options, ReadTxn, StateVector, Text, TextRef, Transact, Update,
+    Doc, GetString, IndexedSequence, OffsetKind, Options, ReadTxn, StateVector, Text, TextRef, Transact,
 };
 
 const TEXT_NAME: &str = "codemirror";
@@ -23,6 +22,10 @@ fn failure(error: impl fmt::Display) -> ReplicaError {
 
 #[path = "replica_utf16.rs"]
 mod utf16_boundary;
+#[path = "replica_update_guard.rs"]
+mod update_guard;
+#[path = "replica_update_decoder.rs"]
+mod update_decoder;
 
 pub struct Replica {
     doc: Doc,
@@ -53,7 +56,7 @@ impl Replica {
     }
 
     pub fn apply_update(&self, update: &[u8], origin: &str) -> Result<(), ReplicaError> {
-        let update = Update::decode_v1(update).map_err(failure)?;
+        let update = update_guard::decode(update)?;
         self.doc.transact_mut_with(origin).apply_update(update).map_err(failure)
     }
 
@@ -71,13 +74,10 @@ impl Replica {
     }
 
     /// Calculate an atomic Yrs delta without mutating the live editor replica.
-    ///
-    /// The temporary document uses the same client ID, but never edits in
-    /// parallel with the live document. This prevents a new CRDT client
-    /// identity from being introduced on every keystroke. The caller must
-    /// persist the resulting delta before invoking apply_update on the live doc.
-    /// This snapshot-based staging is correctness-first: benchmark/optimize
-    /// large documents before the cloud sync executor is enabled.
+    /// The temporary document reuses its client ID without concurrent edits,
+    /// avoiding a new CRDT identity per keystroke. Persist the delta durably
+    /// before applying it to the live document. Correctness-first: benchmark
+    /// large documents before enabling cloud sync.
     pub fn stage_edits(&self, batches: &[Vec<TextEdit>]) -> Result<Vec<u8>, ReplicaError> {
         let baseline = self.doc.transact().state_vector();
         let options = Options {
