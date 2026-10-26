@@ -46,12 +46,21 @@ fn full_frame_refuses_forged_base_metadata_even_with_external_base_bytes() {
     // Base revision UUID [12..28], base digest [44..76], and old length
     // [108..112] are strictly zero in a full frame. Never silently ignore a
     // forged base identity or hash in a supposedly independent envelope.
-    for offset in [12usize, 27, 44, 75, 108, 111] {
+    // Oversized old_len is refused at the budget gate, before the semantic
+    // FullZstd zero-base check. Both error paths must remain fail-closed.
+    for (offset, expected) in [
+        (12usize, TextDeltaError::InvalidEnvelope),
+        (27, TextDeltaError::InvalidEnvelope),
+        (44, TextDeltaError::InvalidEnvelope),
+        (75, TextDeltaError::InvalidEnvelope),
+        (108, TextDeltaError::InvalidEnvelope),
+        (111, TextDeltaError::OverBudget),
+    ] {
         let mut forged = frame.clone();
         forged[offset] ^= 1;
         assert_eq!(
             decode(&forged, revision, untrusted),
-            Err(TextDeltaError::InvalidEnvelope),
+            Err(expected),
             "forged FullZstd base field at offset {offset}",
         );
     }
