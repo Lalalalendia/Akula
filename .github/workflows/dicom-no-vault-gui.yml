@@ -108,28 +108,39 @@ jobs:
           Add-Type -AssemblyName UIAutomationClient
           Add-Type -AssemblyName UIAutomationTypes
           $exe = (Resolve-Path '.artifacts\cargo-native\release\aquilum-native.exe').Path
-          # Send a native Windows key message to the actual winit window.
-          # Tests the GUI navigation path rather than calling Rust model methods.
+          # UI Automation focus plus SendInput-backed SendKeys exercises the
+          # actual window input route. Posting WM_KEYDOWN alone did not move
+          # the slice in a real Windows GUI run.
+          Add-Type -AssemblyName System.Windows.Forms
           Add-Type -TypeDefinition @'
           using System;
           using System.Runtime.InteropServices;
           public static class DicomGuiKey {
               [DllImport("user32.dll", SetLastError=true)]
-              public static extern bool PostMessage(IntPtr hwnd, uint msg, UIntPtr key, IntPtr info);
+              public static extern bool SetForegroundWindow(IntPtr hwnd);
               [DllImport("user32.dll")]
-              public static extern uint MapVirtualKey(uint code, uint mapType);
+              public static extern IntPtr GetForegroundWindow();
           }
           '@
           function Send-DicomKey([IntPtr]$hwnd, [uint32]$vk) {
-            $scan = [DicomGuiKey]::MapVirtualKey($vk, 0)
-            $base = [long]1 -bor ([long]$scan -shl 16) -bor 0x01000000
-            if (![DicomGuiKey]::PostMessage($hwnd, 0x0100, [UIntPtr]::new([uint64]$vk), [IntPtr]::new($base))) {
-              throw "Failed to post DICOM keydown for VK=$vk"
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+            $nodes = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+            $pages = @($nodes | Where-Object { $_.Current.Name -like '*DICOM*серия*срез*' })
+            if ($pages.Count -ne 1) { throw "Expected one DICOM image page, found $($pages.Count)" }
+            if (!$pages[0].Current.IsKeyboardFocusable) { throw 'DICOM image page is not keyboard focusable' }
+            $pages[0].SetFocus()
+            $null = [DicomGuiKey]::SetForegroundWindow($hwnd)
+            Start-Sleep -Milliseconds 200
+            if ([DicomGuiKey]::GetForegroundWindow() -ne $hwnd) {
+              throw "DICOM test cannot focus app window for VK=$vk"
             }
-            $released = $base -bor 0xC0000000
-            if (![DicomGuiKey]::PostMessage($hwnd, 0x0101, [UIntPtr]::new([uint64]$vk), [IntPtr]::new($released))) {
-              throw "Failed to post DICOM keyup for VK=$vk"
+            $key = switch ($vk) {
+              0x27 { '{RIGHT}' }
+              0x25 { '{LEFT}' }
+              default { throw "Unexpected DICOM test virtual key $vk" }
             }
+            [System.Windows.Forms.SendKeys]::SendWait($key)
+            Write-Host "AKULA_DICOM_GUI_KEY_SENT vk=$vk focused=1"
           }
           function Wait-DicomSlice([IntPtr]$hwnd, [string]$slice, [bool]$readError = $false) {
             $last = @()
