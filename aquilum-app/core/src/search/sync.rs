@@ -1,8 +1,9 @@
+mod unchanged;
 use super::error::SearchError;
 use super::fields;
 use super::tasks;
 use super::index::SearchIndex;
-use super::index_document::{apply_path, apply_prepared, prepare_file, probe, untracked_missing_path, PreparedFile, Probe};
+use super::index_document::{apply_path, apply_prepared, prepare_file, probe, PreparedFile, Probe};
 use super::metadata::{self, FileState, PathKey};
 use super::paths::{is_hidden, is_markdown, is_visible_entry};
 use super::progress::IndexProgress;
@@ -152,10 +153,7 @@ impl IndexSynchronizer {
             {
                 continue;
             }
-            if untracked_missing_path(&self.index, &transaction, &path)? {
-                // A temporary/deleted note that was never indexed cannot
-                // change search results: avoid allocating a writer or doing
-                // a redundant 10+ ms durable Tantivy commit.
+            if unchanged::skip(&self.index, &transaction, &path)? {
                 continue;
             }
             let writer = ensure_writer(&mut self.writer, &self.index)?;

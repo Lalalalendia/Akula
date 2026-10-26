@@ -50,19 +50,8 @@ fn kind_for(path: &Path) -> Result<Format, StructuredError> {
     }
 }
 
-fn validate_canvas(text: &str) -> Result<Value, StructuredError> {
-    let value: Value = serde_json::from_str(text)
-        .map_err(|e| StructuredError::InvalidFormat(format!("invalid JSON Canvas: {e}")))?;
-    let Some(obj) = value.as_object() else {
-        return Err(StructuredError::InvalidFormat("JSON Canvas root must be an object".into()));
-    };
-    for key in ["nodes", "edges"] {
-        if !obj.get(key).is_some_and(Value::is_array) {
-            return Err(StructuredError::InvalidFormat(format!("JSON Canvas {key} must be an array")));
-        }
-    }
-    Ok(value)
-}
+mod schema;
+use schema::validate_canvas;
 
 impl StructuredDocument {
     /// Opening never changes the input file, including whitespace and unknown keys.
@@ -98,6 +87,15 @@ impl StructuredDocument {
         let text = serde_json::to_string_pretty(value)
             .map_err(|e| StructuredError::InvalidFormat(e.to_string()))?;
         validate_canvas(&text)?;
+        // Older Canvas files may contain fractional geometry. Reading is safe,
+        // but rewriting with Value could silently change numeric precision.
+        if schema::has_legacy_geometry(&validate_canvas(self.text())?)
+            || schema::has_legacy_geometry(value)
+        {
+            return Err(StructuredError::InvalidFormat(
+                "legacy fractional Canvas geometry is read-only to prevent rounding".into(),
+            ));
+        }
         self.edited_text = (text != self.original_text).then_some(text);
         Ok(())
     }

@@ -1,0 +1,48 @@
+name: Matcher ASCII ABBA temporary verification
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/text/matcher/**'
+      - '.github/workflows/matcher-ascii-abba.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  matcher-abba:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: matcher-ascii-abba-20261026
+      - name: Run exact match parity in release mode
+        working-directory: aquilum-app
+        run: cargo test --locked --release -p aquilum-core ascii_fast_path_matches_reference_scanner -- --nocapture --test-threads=1
+      - name: Paired ASCII matcher 1,8,64 MiB ABBA
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --release -p aquilum-core benchmark_ascii_memchr_candidate_search -- --ignored --nocapture --test-threads=1 2>&1 | tee ../matcher-ascii-abba.txt
+          grep 'MATCHER_ASCII ' ../matcher-ascii-abba.txt | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: matcher-ascii-abba
+          path: matcher-ascii-abba.txt
+          retention-days: 14

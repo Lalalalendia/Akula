@@ -1,0 +1,55 @@
+# AKULA-INSTALLED-UPDATER-UIA-02: fail-closed Windows installed updater proof.
+# Does not build or publish. Runs installed GUI UIA against exact publicly released signed v0.3.14.
+name: Akula installed manual signed GUI updater 0.3.13 to 0.3.14
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/akula-published-updater-uia.yml'
+      - 'scripts/test-windows-published-updater-uia.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  signed-update-from-gui:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AKULA_DISPOSABLE_UPDATER_UIA: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Refuse malformed PowerShell before signed GUI update
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/test-windows-published-updater-uia.ps1'),
+            [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) {
+            throw "Installed manual updater script failed to parse: $($errors[0])"
+          }
+          Write-Host 'AKULA_UIA_SIGNED_UPDATER_PARSE_PASS'
+
+      - name: Click real installed Akula Check for updates and Install buttons
+        shell: pwsh
+        timeout-minutes: 27
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/test-windows-published-updater-uia.ps1')
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installed GUI updater acceptance failed (exit $LASTEXITCODE)"
+          }

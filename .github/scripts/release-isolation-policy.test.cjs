@@ -95,6 +95,7 @@ test('signed Windows beta may publish only after manually approved independent v
   assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY/);
   assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD/);
   assert.match(yaml, /test-windows-beta\.ps1/);
+  assert.match(yaml, /node scripts\/akula-version\.cjs check/);
   assert.match(yaml, /schema = 1/);
   assert.match(yaml, /artifacts = \[ordered\]@\{/);
   assert.match(yaml, /filename = \$package\[0\]\.Name/);
@@ -116,6 +117,75 @@ test('signed Windows beta may publish only after manually approved independent v
   assert.match(publish, /m\.source_commit!==process\.env\.GITHUB_SHA/);
   assert.match(publish, /if gh release view/);
   assert.match(publish, /git ls-remote --exit-code --tags/);
+  assert.match(publish, /gh api .*releases\/latest/);
+  assert.match(publish, /node scripts\/akula-version\.cjs assert-newer/);
+  assert.match(publish, /releases\/generate-notes/);
+  assert.match(publish, /--notes-file/);
   assert.match(publish, /gh release create/);
   assert.match(publish, /--latest/);
+});
+
+test('every next signed Windows release verifies actual published Akula NSIS upgrade', () => {
+  const wf = file('.github/workflows/akula-windows-signed-candidate.yml');
+  const script = file('scripts/test-windows-signed-next-version-upgrade.ps1');
+  const build = wf.split('\n  independent-verification:\n')[0];
+  assert.match(build, /Test actual latest published Akula to next signed NSIS upgrade/);
+  assert.match(build, /run: \.\/scripts\/test-windows-signed-next-version-upgrade\.ps1/);
+  assert.match(build, /AKULA_SIGNED_NEXT_CANDIDATE_DISPOSABLE: '1'/);
+  assert.doesNotMatch(build, /inputs\.release_version == '0\.3\.14'/);
+  assert.match(script, /RUNNER_ENVIRONMENT -cne 'github-hosted'/);
+  assert.match(script, /GITHUB_REF -cne 'refs\/heads\/main'/);
+  assert.match(script, /AKULA_SIGNED_NEXT_CANDIDATE_DISPOSABLE -cne '1'/);
+  assert.match(script, /releases\/latest/);
+  assert.match(script, /scripts\/akula-version\.cjs assert-newer/);
+  assert.match(script, /browser_download_url/);
+  assert.match(script, /Get-FileHash/);
+  assert.match(script, /'\/S','\/R','\/UPDATE','\/ARGS'/);
+  assert.match(script, /Assert-Preserved/);
+  assert.match(script, /shiva-pdf-preview\.exe/);
+  assert.match(script, /AKULA_SIGNED_NEXT_UPGRADE_PASS/);
+});
+
+
+test('one-shot owner-requested Akula 0.3.15 dispatch keeps publisher environment isolated', () => {
+  const dispatcher = file('.github/workflows/akula-v0315-owner-dispatch.yml');
+  const request = JSON.parse(file('docs/release/akula-v0.3.15-dispatch-request.json'));
+  assert.deepEqual(request, {
+    schema: 1,
+    request_id: 'akula-0315-owner-20261026',
+    release_version: '0.3.15',
+    publish_beta: true,
+  });
+  assert.match(dispatcher, /^on:\n  push:\n    branches: \[main\]\n    paths:/m);
+  assert.match(dispatcher, /docs\/release\/akula-v0\.3\.15-dispatch-request\.json/);
+  assert.match(dispatcher, /actions: write/);
+  assert.match(dispatcher, /github\.repository == 'Lalalalendia\/Akula'/);
+  assert.match(dispatcher, /'akula-0315-owner-20261026'/);
+  assert.match(dispatcher, /latest.*v0\.3\.14|latest.*v0\.3\.15/s);
+  assert.match(dispatcher, /actions\/workflows\/akula-windows-signed-candidate\.yml\/dispatches/);
+  assert.match(dispatcher, /'inputs\[release_version\]=0\.3\.15'/);
+  assert.match(dispatcher, /'inputs\[publish_beta\]=true'/);
+  assert.match(dispatcher, /environment: akula-release/); // check protected publisher in source verification step
+  assert.doesNotMatch(dispatcher, /gh release create|cargo packager signer|secrets\./);
+});
+
+// One signed Akula update is installed over the previous version. S3 is a
+// user-invoked feature of that same executable, not a second release channel.
+test('single published Akula installer includes opt-in S3 feature', () => {
+  const signed = file('.github/workflows/akula-windows-signed-candidate.yml');
+  const active = signed.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+  assert.match(active, /scripts\/akula-win7-signed-stage\.ps1/);
+  assert.match(file('scripts/akula-win7-signed-stage.ps1'),
+    /cargo \+nightly build[^\n]*--features installed,s3-pair-beta[^\n]*--target \$target[^\n]*-Z build-std=std,panic_abort/,
+    'the one signed EXE must include opt-in S3 and use the audited Windows 7 target');
+  assert.match(file('scripts/akula-win7-signed-stage.ps1'),
+    /\$env:RUSTFLAGS = '--cfg windows_slim_errors -C target-feature=\+crt-static'/,
+    'the protected Win7 signed candidate must not require a separately installed UCRT/VC runtime');
+  assert.match(file('scripts/akula-win7-signed-stage.ps1'),
+    /external_crt_imported_dlls/,
+    'the signed candidate must reject dynamic UCRT/VC runtime imports');
+
+  assert.match(active, /scripts\/test-windows-beta\.ps1/);
+  assert.match(active, /--title "Akula v\$\{version\}" --latest/);
+  assert.doesNotMatch(active, /--features installed,s3-pair-beta\s+--bin\s+different-app/);
 });

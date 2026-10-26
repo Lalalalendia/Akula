@@ -3,6 +3,8 @@ mod lines;
 mod scan;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_ascii;
 
 pub use fold::{fold, Fold, Folded};
 pub use lines::Lines;
