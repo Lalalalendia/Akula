@@ -24,6 +24,9 @@ on:
       owned_host_custody:
         required: true
         type: boolean
+      owned_b1b3c_fd:
+        required: true
+        type: boolean
       owned_b1d0_opt:
         required: true
         type: boolean
@@ -106,7 +109,7 @@ jobs:
 
   route-b1b3c-fd:
     name: Impacted shared manifest / b1b3c-fd
-    if: ${{ inputs.core || inputs.lib }}
+    if: ${{ inputs.core || inputs.lib || inputs.owned_b1b3c_fd }}
     uses: ./.github/workflows/core-server-bootstrap-b1b3c-signed-fd.yml
 
   route-b1b4a-cas:
@@ -239,7 +242,7 @@ jobs:
           node <<'JS'
           const needs=JSON.parse(process.env.NEEDS_JSON);
           const flags=JSON.parse(process.env.INPUTS_JSON);
-          const cases=[["route-host-custody",["owned_host_custody","core","native"]],["route-b0c-ssh-native",["native","owned_b0c_ssh"]],["route-b1b2b-ubuntu",["core","owned_b1b2b_vm"]],["route-b1c1-vm",["core","owned_b1c1_vm"]],["route-b1b2a-systemd",["core"]],["route-b1b3b-helper",["core"]],["route-b1b3c-fd",["core","lib"]],["route-b1b4a-cas",["core","lib"]],["route-b1b4b-witness",["core","lib"]],["route-b1b4b1-ipc",["core"]],["route-b1c0-node",["core","lib"]],["route-b1d0-opt",["core","lib","owned_b1d0_opt"]],["route-b0b-ssh",["core","lib"]]];
+          const cases=[["route-host-custody",["owned_host_custody","core","native"]],["route-b0c-ssh-native",["native","owned_b0c_ssh"]],["route-b1b2b-ubuntu",["core","owned_b1b2b_vm"]],["route-b1c1-vm",["core","owned_b1c1_vm"]],["route-b1b2a-systemd",["core"]],["route-b1b3b-helper",["core"]],["route-b1b3c-fd",["core","lib","owned_b1b3c_fd"]],["route-b1b4a-cas",["core","lib"]],["route-b1b4b-witness",["core","lib"]],["route-b1b4b1-ipc",["core"]],["route-b1c0-node",["core","lib"]],["route-b1d0-opt",["core","lib","owned_b1d0_opt"]],["route-b0b-ssh",["core","lib"]]];
           const errors=[];
           for(const [job,keys] of cases){
             const expected=keys.some(k=>flags[k]===true);

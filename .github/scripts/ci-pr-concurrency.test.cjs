@@ -294,6 +294,40 @@ test('B1b2b protected PR trigger migration requires exact old owners and fail-cl
   assert.equal(allowedB1b2bMigration(before,after,()=>{throw Error('no evidence');}),false);
 });
 
+
+test('B1b3c protected signed-FD PR-trigger removal is byte-exact and fail-closed',()=>{
+  const {allowedB1b3cMigration}=require('./ci-pr-concurrency.cjs');
+  const filename='.github/workflows/core-server-bootstrap-b1b3c-signed-fd.yml';
+  const read=p=>fs.readFileSync(path.join(__dirname,'../..',p),'utf8');
+  const after=read(filename);
+  const oldHeader="on:\n  workflow_call:\n  pull_request:\n    branches: [main]\n    paths:\n\n      - \"aquilum-app/core/src/server_installer_pinned_release_lab.rs\"\n      - \"aquilum-app/core/tests/server_bootstrap_b1b3c.rs\"\n      - \"aquilum-app/core/src/bin/akula_helper_b1b3b_lab.rs\"\n      - \"aquilum-app/core/examples/akula_b1b3c_fixture.rs\"\n      - \"scripts/ci/akula-b1b3c-root-helper-lab.sh\"\n      - \".github/workflows/core-server-bootstrap-b1b3c-signed-fd.yml\"\n      - \"docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B3C.md\"\n  workflow_dispatch:\n";
+  const newHeader="on:\n  workflow_call:\n  workflow_dispatch:\n";
+  assert.equal(after.split(newHeader).length,2);
+  const before=after.replace(newHeader,oldHeader);
+  assert.equal(allowedB1b3cMigration(before,after,read),true,'exact owner route');
+  assert.equal(allowedB1b3cMigration(before,after.replace('workflow_dispatch:','push:'),read),false,'manual remains');
+  assert.equal(allowedB1b3cMigration(before,after.replace('cargo build --locked','cargo build --offline'),read),false,'signed FD build unchanged');
+  assert.equal(allowedB1b3cMigration(before.replace('branches: [main]','branches: [develop]'),after,read),false,'main only');
+  assert.equal(allowedB1b3cMigration(before.replace('scripts/ci/akula-b1b3c-root-helper-lab.sh','scripts/ci/other.sh'),after,read),false,'old paths immutable');
+  const route='.github/scripts/ci-shared-manifest-route.cjs';
+  const app='.github/workflows/app-checks.yml';
+  const shared='.github/workflows/ci-shared-manifest-labs.yml';
+  const mutants=[
+    [route,read(route).replace('    "scripts/ci/akula-b1b3c-root-helper-lab.sh",\n','')],
+    [app,read(app).replace("needs.classify.outputs.owned_b1b3c_fd == 'true'","false")],
+    [app,read(app).replace('needs: [classify, required-tests, native-frames, shared-labs]','needs: [classify, required-tests, native-frames]')],
+    [app,read(app).replace('if [ "$ROUTED_SHARED_RESULT" != success ]; then','echo bypass')],
+    [shared,read(shared).replace('inputs.core || inputs.lib || inputs.owned_b1b3c_fd','inputs.core || inputs.lib')],
+    [shared,read(shared).replace('["core","lib","owned_b1b3c_fd"]','["core","lib"]')],
+    [shared,read(shared).replace('route-b1b3c-fd, route-b1b4a-cas','route-b1b4a-cas')],
+  ];
+  for(const [file,changed] of mutants){
+    assert.notEqual(read(file),changed,'mutation must modify fixture');
+    assert.equal(allowedB1b3cMigration(before,after,p=>p===file?changed:read(p)),false,file);
+  }
+  assert.equal(allowedB1b3cMigration(before,after,()=>{throw Error('missing route');}),false);
+});
+
 test('Text Delta PR owner may migrate only to a proven required Main gate',()=>{
   const name='.github/workflows/text-delta-codec-isolated.yml';
   const read=p=>fs.readFileSync(path.join(__dirname,'../..',p),'utf8');
