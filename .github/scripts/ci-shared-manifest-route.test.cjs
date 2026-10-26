@@ -126,7 +126,7 @@ test('Native package metadata is routed without duplicate direct OS workflows',(
 });
 
 const owned=require('./ci-shared-manifest-route.cjs');
-test('owned tests run once via gate on source-only and mixed manifest diffs',()=>{for(const [k,items] of Object.entries(owned.OWNED_SUITES)){for(const p of items){assert.equal(owned.ownedRoutes([p])[k],true);assert.equal(owned.ownedRoutes([p,LOCK,NATIVE])[k],true);}assert.equal(owned.ownedRoutes(['README.md'])[k],false);}const p=owned.assess({paths:[LOCK,NATIVE,'aquilum-app/core/src/sync/mod.rs']});for(const k of Object.keys(owned.OWNED_SUITES))assert.equal(p[k],k==='owned_b0c_ssh'?false:true);});
+test('owned tests run once via gate on source-only and mixed manifest diffs',()=>{for(const [k,items] of Object.entries(owned.OWNED_SUITES)){for(const p of items){assert.equal(owned.ownedRoutes([p])[k],true);assert.equal(owned.ownedRoutes([p,LOCK,NATIVE])[k],true);}assert.equal(owned.ownedRoutes(['README.md'])[k],false);}const p=owned.assess({paths:[LOCK,NATIVE,'aquilum-app/core/src/sync/mod.rs']});for(const k of Object.keys(owned.OWNED_SUITES))assert.equal(p[k],['owned_b0c_ssh','owned_b1c1_vm'].includes(k)?false:true);});
 
 test('B0c Windows owner route is fail-closed for source-only and mixed Cargo without broad version-only routing',()=>{
   const owners=owned.OWNED_SUITES.owned_b0c_ssh;
