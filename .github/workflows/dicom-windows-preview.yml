@@ -40,6 +40,22 @@ jobs:
         run: |
           cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed,dicom-preview
           if ($LASTEXITCODE -ne 0) { throw 'Windows DICOM native feature compile failed' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate synthetic DICOM folder and ZIP on Windows
+        shell: pwsh
+        run: |
+          python -m pip install 'pydicom==3.0.1' 'numpy==2.2.6'
+          python scripts/dicom-native-smoke/generate.py scripts/dicom-native-smoke/fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Windows fixture creation failed' }
+      - name: Decode ZIP and folder in place on Windows
+        shell: pwsh
+        run: |
+          cargo run --manifest-path scripts/dicom-native-smoke/Cargo.toml --release -- scripts/dicom-native-smoke/fixture scripts/dicom-native-smoke/fixture/study.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Windows direct ZIP reader failed' }
+          cargo run --manifest-path scripts/dicom-native-smoke/Cargo.toml --release -- scripts/dicom-native-smoke/fixture scripts/dicom-native-smoke/fixture/loose_folder
+          if ($LASTEXITCODE -ne 0) { throw 'Windows direct folder reader failed' }
       - name: Evidence marker
         shell: pwsh
         run: |
