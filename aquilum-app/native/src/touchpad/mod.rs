@@ -1,3 +1,4 @@
+mod compat;
 mod handler;
 
 use std::cell::RefCell;
@@ -12,9 +13,8 @@ use windows::Win32::Graphics::DirectManipulation::{
     IDirectManipulationViewportEventHandler,
 };
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx};
-use windows::Win32::UI::Input::Pointer::GetPointerType;
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
-use windows::Win32::UI::WindowsAndMessaging::{DM_POINTERHITTEST, POINTER_INPUT_TYPE, PT_TOUCHPAD};
+use windows::Win32::UI::WindowsAndMessaging::DM_POINTERHITTEST;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
@@ -55,8 +55,7 @@ pub struct Touchpad {
 unsafe extern "system" fn hit_test(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, data: usize) -> LRESULT {
     if message == DM_POINTERHITTEST {
         let pointer = (wparam.0 & 0xffff) as u32;
-        let mut kind = POINTER_INPUT_TYPE::default();
-        if unsafe { GetPointerType(pointer, &mut kind) }.is_ok() && kind == PT_TOUCHPAD {
+        if compat::is_touchpad(pointer) {
             let shared = unsafe { &*(data as *const Shared) };
             let _ = unsafe { shared.viewport.SetContact(pointer) };
         }

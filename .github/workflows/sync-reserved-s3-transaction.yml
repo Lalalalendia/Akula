@@ -3,6 +3,8 @@ name: Sync reserved S3 preparation
 on:
   workflow_call:
   pull_request:
+    # Main uses required routed acceptance; all other PR targets remain direct.
+    branches-ignore: [main]
     paths:
       - 'aquilum-app/core/src/sync/s3_reserved_replace*.rs'
       - 'aquilum-app/core/src/sync/guarded_note_write.rs'

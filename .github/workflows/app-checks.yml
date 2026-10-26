@@ -39,6 +39,20 @@ jobs:
       shared_root_cargo_risky: ${{ steps.scope.outputs.shared_root_cargo_risky }}
       shared_any_risky: ${{ steps.scope.outputs.shared_any_risky }}
       installed_owner_owned: ${{ steps.scope.outputs.installed_owner_owned }}
+      native_manifest_risky: ${{ steps.scope.outputs.native_manifest_risky }}
+      owned_host_custody: ${{ steps.scope.outputs.owned_host_custody }}
+      owned_b0c_ssh: ${{ steps.scope.outputs.owned_b0c_ssh }}
+      owned_sync_protection: ${{ steps.scope.outputs.owned_sync_protection }}
+      owned_text_delta: ${{ steps.scope.outputs.owned_text_delta }}
+      owned_appimage: ${{ steps.scope.outputs.owned_appimage }}
+      owned_windows_beta: ${{ steps.scope.outputs.owned_windows_beta }}
+      owned_linux_beta: ${{ steps.scope.outputs.owned_linux_beta }}
+      owned_pinned_read: ${{ steps.scope.outputs.owned_pinned_read }}
+      owned_s3_reservation: ${{ steps.scope.outputs.owned_s3_reservation }}
+      owned_s3_minio: ${{ steps.scope.outputs.owned_s3_minio }}
+      text_delta_module_required: ${{ steps.scope.outputs.text_delta_module_required }}
+      text_delta_pack_fast_path: ${{ steps.scope.outputs.text_delta_pack_fast_path }}
+      text_delta_pack_boundary_changed: ${{ steps.scope.outputs.text_delta_pack_boundary_changed }}
       updater_security_required: ${{ steps.scope.outputs.updater_security_required }}
     steps:
       - uses: actions/checkout@v7
@@ -112,6 +126,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          # Guard newly added PR workflows BEFORE any expensive Rust or OS jobs
+          # can be scheduled; this uses the existing classifier runner.
+          node --test .github/scripts/ci-pr-concurrency.test.cjs
+          node .github/scripts/ci-pr-concurrency.cjs --base="$BASE_SHA" --head=HEAD
           node --test .github/scripts/ci-rust-scope.test.cjs
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
           node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
@@ -204,6 +222,8 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/release-source-contract.test.cjs
           node .github/scripts/release-source-contract.cjs
+          node --test .github/scripts/akula-version.test.cjs
+          node scripts/akula-version.cjs check
 
       - name: macOS updater TAR and signed-DMG content parity (read-only)
         shell: bash
@@ -212,7 +232,20 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
 
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true'
+        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true' || needs.classify.outputs.text_delta_module_required == 'true'
+
+
+      # Text Delta is outside the Cargo workspace. Tests execute in the existing
+      # mandatory runner and therefore block Main PR gate without another workflow.
+      - name: Require standalone Text Delta wire and hostile-input tests
+        if: needs.classify.outputs.text_delta_module_required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path modules/text-delta-codec/Cargo.toml -- --nocapture
+          grep -Fx '[workspace]' modules/text-delta-codec/Cargo.toml
+          ! grep -q 'aquilum-core' modules/text-delta-codec/Cargo.toml
+          test -f aquilum-app/core/src/sync/text_delta_codec.rs
 
       - name: Security-test macOS updater TAR parser on Linux too
         if: needs.classify.outputs.updater_security_required == 'true'
@@ -566,7 +599,7 @@ jobs:
   shared-labs:
     name: Required shared-manifest OS/security route
     needs: classify
-    if: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' }}
+    if: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_b0c_ssh == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
     uses: ./.github/workflows/ci-shared-manifest-labs.yml
     with:
       core: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
@@ -574,6 +607,20 @@ jobs:
       lib: ${{ needs.classify.outputs.shared_core_lib_risky == 'true' }}
       lock: ${{ needs.classify.outputs.shared_lock_risky == 'true' }}
       root: ${{ needs.classify.outputs.shared_root_cargo_risky == 'true' }}
+      native: ${{ needs.classify.outputs.native_manifest_risky == 'true' }}
+      owned_host_custody: ${{ needs.classify.outputs.owned_host_custody == 'true' }}
+      owned_b0c_ssh: ${{ needs.classify.outputs.owned_b0c_ssh == 'true' }}
+      owned_sync_protection: ${{ needs.classify.outputs.owned_sync_protection == 'true' }}
+      owned_text_delta: ${{ needs.classify.outputs.owned_text_delta == 'true' }}
+      text_delta_module_required: ${{ needs.classify.outputs.text_delta_module_required == 'true' }}
+      text_delta_pack_fast_path: ${{ needs.classify.outputs.text_delta_pack_fast_path == 'true' }}
+      text_delta_pack_boundary_changed: ${{ needs.classify.outputs.text_delta_pack_boundary_changed == 'true' }}
+      owned_appimage: ${{ needs.classify.outputs.owned_appimage == 'true' }}
+      owned_windows_beta: ${{ needs.classify.outputs.owned_windows_beta == 'true' }}
+      owned_linux_beta: ${{ needs.classify.outputs.owned_linux_beta == 'true' }}
+      owned_pinned_read: ${{ needs.classify.outputs.owned_pinned_read == 'true' }}
+      owned_s3_reservation: ${{ needs.classify.outputs.owned_s3_reservation == 'true' }}
+      owned_s3_minio: ${{ needs.classify.outputs.owned_s3_minio == 'true' }}
 
   checks:
     # The ONLY status required by Protect main. GitHub cannot report success
@@ -591,7 +638,7 @@ jobs:
           REQUIRED_RESULT: ${{ needs.required-tests.result }}
           FRAMES_RESULT: ${{ needs.native-frames.result }}
           TEST_SCOPE: ${{ needs.classify.outputs.mode }}
-          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' }}
+          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_b0c_ssh == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
           ROUTED_SHARED_RESULT: ${{ needs.shared-labs.result }}
         run: |
           set -euo pipefail

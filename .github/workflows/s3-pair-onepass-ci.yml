@@ -1,0 +1,76 @@
+# Opt-in S3 integration validation for the ONE installed Akula product.
+# The owner-signed Windows release workflow builds and updates the single app.
+# This job never creates a second user-installable channel or installer.
+name: Akula S3 pairing smoke
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/s3-pair-onepass-ci.yml'
+      - 'aquilum-app/core/src/sync/s3_pair_*.rs'
+      - 'aquilum-app/core/src/sync/s3_pair_host/**'
+      - 'aquilum-app/native/src/s3_pair_*.rs'
+      - 'aquilum-app/native/src/s3_pair_session/**'
+      - 'aquilum-app/native/src/yandex_credentials/imported.rs'
+      - 'scripts/windows-cloud-provider-uia.ps1'
+      - 'scripts/windows-beta-gui-input.ps1'
+      - 'aquilum-app/native/src/app/settings/cloud_action.rs'
+      - 'aquilum-app/native/src/ui/settings/cloud.rs'
+      - 'aquilum-app/native/src/ui/settings/binding.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/sync/yandex/pairing.rs'
+      - '.github/scripts/s3-pair-routing.test.cjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+
+# Coalesce superseded PR commits without cancelling manual or push runs.
+# A unique run_id suffix for non-PR events preserves every manual run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  linux-core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify S3 smoke monitors real Windows UI and owned provider code
+        run: node --test .github/scripts/s3-pair-routing.test.cjs
+      - name: Core pairing compile
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --features sync-s3
+      - name: Encrypted pairing invitation tests
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-s3 s3_pair_invite::tests -- --test-threads=1
+  windows-native:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: s3-pair-beta-windows
+          cache-on-failure: true
+      - name: Compile the same S3 feature set used by signed Akula updates
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-native --features installed,s3-pair-beta
+      - name: Verify isolated Windows Credential Manager profile binding
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-native --bin aquilum-native --features installed,s3-pair-beta real_windows_profile_credential_roundtrip_and_collision_refusal -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Profile-scoped WinCred test failed' }
+      - name: Build S3-enabled Akula executable for real Windows UIA smoke
+        working-directory: aquilum-app
+        run: cargo build --locked -p aquilum-native --features installed,s3-pair-beta
+      - name: Click provider catalog, save bucket and discard draft via Windows UI Automation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/debug/aquilum-native.exe'
+          & "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File './scripts/windows-cloud-provider-uia.ps1' -ExePath $exe
+          if ($LASTEXITCODE -ne 0) { throw 'Real S3-enabled cloud provider Windows GUI acceptance failed' }
