@@ -29,7 +29,16 @@ use crate::ui::widgets::{IconButton, Leading, Press, Pressed, Rule, TextButton, 
 use crate::ui::{icons, theme};
 
 use schema::{Action, CloudProvider, Context, Control, Section, Setter};
+mod health;
+use health::{health, Health};
+#[cfg(feature = "notion-offline-preview")]
+mod notion;
 
+#[cfg(feature = "notion-offline-preview")]
+const NOTION_ICON: icons::Icon = icons::Icon::lucide(&[
+    icons::Shape::Path("M4 4h16v16H4z"),
+    icons::Shape::Path("M7 17V7l10 10V7"),
+]);
 const TILE_WIDTH: f64 = 196.0;
 const TILE_HEIGHT: f64 = 148.0;
 const CLOUD_ICON: icons::Icon = icons::Icon::lucide(&[
@@ -64,78 +73,6 @@ const DROPBOX_ICON: icons::Icon = icons::Icon::lucide(&[
     icons::Shape::Path("m6 20 6 3 6-3"),
 ]);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Health {
-    NotConnected,
-    Saved,
-    Checking,
-    Verified,
-    Review,
-    Unavailable,
-}
-
-impl Health {
-    fn label(self) -> String {
-        t(match self {
-            Self::NotConnected => "settings.cloud.disconnected",
-            Self::Saved => "settings.cloud.saved",
-            Self::Checking => "settings.cloud.checking",
-            Self::Verified => "settings.cloud.verified",
-            Self::Review => "settings.cloud.review",
-            Self::Unavailable => "settings.cloud.unavailable",
-        })
-    }
-
-    fn color(self) -> Color {
-        match self {
-            Self::Verified => Color::new([0.17, 0.74, 0.36, 1.0]),
-            Self::Saved => Color::new([0.87, 0.60, 0.17, 1.0]),
-            Self::Checking => Color::new([0.20, 0.52, 0.91, 1.0]),
-            Self::Review => Color::new([0.84, 0.27, 0.23, 1.0]),
-            Self::NotConnected | Self::Unavailable => Color::new([0.53, 0.56, 0.60, 1.0]),
-        }
-    }
-}
-
-fn health(provider: CloudProvider, config: &AppConfig, ctx: &Context) -> Health {
-    #[cfg(not(feature = "dropbox-readonly-preview"))]
-    let _ = config;
-    #[cfg(feature = "dropbox-readonly-preview")]
-    if provider == CloudProvider::Dropbox {
-        if ctx.dropbox_preview_busy { return Health::Checking; }
-        let status = ctx.dropbox_preview_status.as_str();
-        if ["FAILED", "REJECTED", "DENIED", "MISMATCH", "REVOKED",
-            "INVALID", "UNAVAILABLE", "NO_SAVED", "PUBLISHER_NOT_APPROVED"]
-            .iter().any(|marker| status.contains(marker)) { return Health::Review; }
-        // OAuth-only is not verified Vault Sync: never show a green indicator.
-        return if config.dropbox_readonly.account_id.is_empty() {
-            Health::NotConnected
-        } else { Health::Saved };
-    }
-    if provider != CloudProvider::Yandex {
-        return Health::Unavailable;
-    }
-    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
-    {
-        use crate::s3_pair_session::PairStatus;
-        if ctx.s3_pair.busy { return Health::Checking; }
-        if matches!(ctx.s3_pair.status,
-            PairStatus::Failed
-            | PairStatus::Transferred { needs_review: 1.., .. }
-            | PairStatus::Transferred { received_unconfirmed: 1.., .. }
-        ) {
-            return Health::Review;
-        }
-        if ctx.s3_pair.configured && ctx.s3_pair.verified {
-            return Health::Verified;
-        }
-        if ctx.s3_pair.configured || ctx.yandex_keys == Some(true) {
-            return Health::Saved;
-        }
-    }
-    Health::NotConnected
-}
-
 struct ProviderTile {
     provider: CloudProvider,
     health: Health,
@@ -167,6 +104,8 @@ impl ProviderTile {
             CloudProvider::GoogleDrive => DRIVE_ICON,
             CloudProvider::Dropbox => DROPBOX_ICON,
             CloudProvider::WebDav => icons::NETWORK,
+            #[cfg(feature = "notion-offline-preview")]
+            CloudProvider::Notion => NOTION_ICON,
         }
     }
 }
@@ -230,6 +169,8 @@ impl Widget for ProviderTile {
             CloudProvider::GoogleDrive => Color::new([0.20, 0.59, 0.33, 1.0]),
             CloudProvider::Dropbox => Color::new([0.11, 0.39, 0.87, 1.0]),
             CloudProvider::S3Compatible | CloudProvider::WebDav => colors.text_secondary,
+            #[cfg(feature = "notion-offline-preview")]
+            CloudProvider::Notion => colors.text_secondary,
         };
         self.icon().draw(painter, Point::new(bounds.center().x - 23.0, bounds.y0 + 23.0), 46.0, 1.6, icon_color);
 
@@ -313,32 +254,44 @@ fn card(config: &AppConfig, ctx: &Context, provider: CloudProvider, staged: &[(S
     let close_id = close.id();
     let mut bindings = HashMap::new();
     let title = provider.label();
-    let supports_form = provider == CloudProvider::Yandex
-        || (cfg!(feature = "dropbox-readonly-preview") && provider == CloudProvider::Dropbox);
-    let inner = if supports_form {
-        let mut blocks = schema::blocks(Section::Sync, config, ctx);
-        let mut block = if provider == CloudProvider::Dropbox {
-            blocks.pop().expect("Dropbox setup block")
-        } else {
-            blocks.remove(0)
-        };
-        for row in &mut block.rows {
-            if let (Some(setter), Control::Text { value, .. }) = (row.setter, &mut row.control)
-                && let Some((_, draft)) = staged.iter().find(|(key, _)| same_setter(*key, setter))
-            {
-                value.clone_from(draft);
+    let inner = match provider {
+        CloudProvider::Yandex => {
+            let mut block = schema::blocks(Section::Sync, config, ctx)
+                .into_iter().next().expect("Yandex setup block");
+            for row in &mut block.rows {
+                if let (Some(setter), Control::Text { value, .. }) = (row.setter, &mut row.control)
+                    && let Some((_, draft)) = staged.iter().find(|(key, _)| same_setter(*key, setter))
+                {
+                    value.clone_from(draft);
+                }
             }
+            super::layout::block_widget(block, &mut bindings)
         }
-        super::layout::block_widget(block, &mut bindings)
-    } else {
-        NewWidget::new(Flex::column()
+        #[cfg(feature = "dropbox-readonly-preview")]
+        CloudProvider::Dropbox => {
+            let mut blocks = schema::blocks(Section::Sync, config, ctx);
+            let mut block = blocks.pop().expect("Dropbox setup block");
+            for row in &mut block.rows {
+                if let (Some(setter), Control::Text { value, .. }) = (row.setter, &mut row.control)
+                    && let Some((_, draft)) = staged.iter().find(|(key, _)| same_setter(*key, setter))
+                {
+                    value.clone_from(draft);
+                }
+            }
+            super::layout::block_widget(block, &mut bindings)
+        }
+        #[cfg(feature = "notion-offline-preview")]
+        CloudProvider::Notion => notion::body(ctx, &mut bindings),
+        _ => NewWidget::new(Flex::column()
             .cross_axis_alignment(CrossAxisAlignment::Stretch)
             .with_fixed(selectable(&t("settings.cloud.unavailableHint"), |t| t.text_secondary, None, Leading::Times(1.4))))
-            .with_props(PropertySet::new().with(Padding::all(Length::px(size::GAP_XL))))
+            .with_props(PropertySet::new().with(Padding::all(Length::px(size::GAP_XL)))),
     };
     let cancel = NewWidget::new(TextButton::new(t("settings.cloud.close"), Variant::Ghost));
     let cancel_id = cancel.id();
     let mut footer = Flex::row().main_axis_alignment(MainAxisAlignment::End).with_fixed(cancel);
+    let supports_form = provider == CloudProvider::Yandex
+        || (cfg!(feature = "dropbox-readonly-preview") && provider == CloudProvider::Dropbox);
     let save = if supports_form {
         let button = NewWidget::new(TextButton::new(t("settings.cloud.save"), Variant::Primary));
         let id = button.id();
@@ -401,10 +354,10 @@ impl CloudPopup {
         if self.dropbox_identity.0 != current.account_id
             || self.dropbox_identity.1 != current.root_namespace_id
         {
-            // Never reapply an old account's unsaved Vault/pin after OAuth switch.
             self.staged_texts.clear();
             self.dropbox_identity = (
-                current.account_id.clone(), current.root_namespace_id.clone(),
+                current.account_id.clone(),
+                current.root_namespace_id.clone(),
             );
         }
     }

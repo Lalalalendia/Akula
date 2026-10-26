@@ -11,8 +11,7 @@ impl App {
                 known.into_iter().find(|w| w.path == path).map(|w| w.home_page)
             })
             .unwrap_or_default();
-        // SQLite is opened only for this page, and strictly read-only.
-        // Missing/unsupported journals are NOT described as "synchronized".
+        // SQLite is read-only here; unsupported journals are not synchronized.
         let sync_recovery = if section == Section::Sync {
             workspace.as_deref().map(|vault| {
                 aquilum_core::sync::native_recovery_overview(
@@ -40,11 +39,12 @@ impl App {
         };
         let bucket = self.workspace.core.settings.get_config().s3_onboarding.bucket;
         Context {
-            workspace: workspace.clone(),
+            workspace: workspace.clone(), #[cfg(feature = "notion-offline-preview")] notion_bases: self.notion_bases.view(),
             sync_recovery,
             #[cfg(feature = "s3-e2e01-review-preview")]
             s3_bound_publications,
             yandex_keys,
+            #[cfg(feature = "notion-offline-preview")] notion_offline: if section == Section::Sync { crate::notion_offline::NotionOfflineView::read(&self.workspace.data_dir) } else { Default::default() }, #[cfg(feature = "notion-offline-preview")] notion_selection: self.notion_session.view(), #[cfg(feature = "notion-offline-preview")] notion_sync: self.notion_sync.view(), #[cfg(feature = "notion-offline-preview")] notion_import: self.notion_import.view(),
             yandex_probe: self.yandex_probe.view_for(&bucket),
             yandex_probe_busy: self.yandex_probe.busy(),
             #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]

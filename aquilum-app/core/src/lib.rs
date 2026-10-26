@@ -1,6 +1,4 @@
-//! The Aquilum core: notes on disk, documents, search, history, settings and UI state, with no
-//! knowledge of the UI that hosts it.
-
+//! Aquilum Core: notes, documents, search, history, settings, UI state; UI-independent.
 pub mod app_core;
 pub mod documents;
 pub mod files;
@@ -12,6 +10,8 @@ pub mod messaging;
 pub mod mcp;
 pub mod plugins;
 pub mod migration;
+#[cfg(feature = "notion-api-probe")]
+pub mod notion_api_probe;
 pub mod search;
 pub mod settings;
 pub mod sync;

@@ -1,0 +1,115 @@
+name: Notion API snapshot lab
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/notion-api-probe.yml'
+      - 'aquilum-app/core/src/notion_api_probe.rs'
+      - 'aquilum-app/core/src/notion_api_probe/**'
+      - 'aquilum-app/core/src/bin/akula_notion_api_probe.rs'
+      - 'aquilum-app/core/src/bin/akula_notion_import_lab.rs'
+      - 'aquilum-app/core/src/ui_state/migrations/notion_cache.rs'
+  push:
+    branches: ['lab/notion-local-source-mainline-20261024']
+    paths:
+      - '.github/workflows/notion-api-probe.yml'
+      - 'aquilum-app/core/src/notion_api_probe.rs'
+      - 'aquilum-app/core/src/notion_api_probe/**'
+      - 'aquilum-app/core/src/bin/akula_notion_api_probe.rs'
+      - 'aquilum-app/core/src/bin/akula_notion_import_lab.rs'
+      - 'aquilum-app/core/src/ui_state/migrations/notion_cache.rs'
+  workflow_dispatch:
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  read-only-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile and test API protocol
+        working-directory: aquilum-app
+        run: cargo test -p aquilum-core --locked --features notion-api-probe notion_api_probe -- --nocapture
+      - name: Compile read-only Notion CLI
+        working-directory: aquilum-app
+        run: cargo build -p aquilum-core --locked --features notion-api-probe --bin akula-notion-api-probe
+      - name: Compile opt-in Notion cache and import CLI
+        working-directory: aquilum-app
+        run: cargo build -p aquilum-core --locked --features notion-api-probe --bin akula-notion-import-lab
+      - name: Prove versioned UI-state migration and offline cache miss
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p aquilum-core --locked --features notion-api-probe ui_state::migration_tests
+          app="$(mktemp -d)"
+          output="$(mktemp)"
+          errors="$(mktemp)"
+          trap 'rm -rf "$app" "$output" "$errors"' EXIT
+          unset AKULA_NOTION_READ_TOKEN
+          if cargo run -q -p aquilum-core --locked --features notion-api-probe \
+              --bin akula-notion-import-lab -- --offline \
+              aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa "$app" >"$output" 2>"$errors"; then
+            echo "No-source offline lookup should not claim a complete cached root" >&2
+            exit 1
+          fi
+          test ! -s "$output"
+          grep -q "not cached" "$errors"
+          test ! -e "$app/ui-state.sqlite3"
+
+      - name: Deny cached import when snapshot is missing or approval is absent
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$(mktemp -d)"
+          vault="$(mktemp -d)"
+          output="$(mktemp)"
+          errors="$(mktemp)"
+          trap 'rm -rf "$app" "$vault" "$output" "$errors"' EXIT
+          unset AKULA_NOTION_READ_TOKEN
+          root="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+          digest="$(printf '0%.0s' {1..64})"
+          if cargo run -q -p aquilum-core --locked --features notion-api-probe \
+              --bin akula-notion-import-lab -- --cached-preview \
+              "$root" "$app" >"$output" 2>"$errors"; then
+            echo "Missing cache unexpectedly passed" >&2
+            exit 1
+          fi
+          test ! -s "$output"
+          test ! -e "$app/ui-state.sqlite3"
+          if cargo run -q -p aquilum-core --locked --features notion-api-probe \
+              --bin akula-notion-import-lab -- --publish-cached \
+              "$root" "$app" "$vault" "$digest" --approve-create-only >"$output" 2>"$errors"; then
+            echo "Missing cached source unexpectedly published" >&2
+            exit 1
+          fi
+          test ! -e "$vault/Notion-import"
+          if cargo run -q -p aquilum-core --locked --features notion-api-probe \
+              --bin akula-notion-import-lab -- --publish-cached \
+              "$root" "$app" "$vault" "$digest" >"$output" 2>"$errors"; then
+            echo "Missing explicit approval unexpectedly published" >&2
+            exit 1
+          fi
+          test ! -e "$vault/Notion-import"
+
+      - name: Refuse unconfigured CLI without network or output files
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$(mktemp)"
+          error="$(mktemp)"
+          trap 'rm -f "$output" "$error"' EXIT
+          if cargo run -q -p aquilum-core --locked --features notion-api-probe --bin akula-notion-api-probe -- >"$output" 2>"$error"; then
+            echo "CLI unexpectedly accepted missing root" >&2
+            exit 1
+          fi
+          test ! -s "$output"
+          grep -q "explicit-authorized-root-uuid" "$error"
