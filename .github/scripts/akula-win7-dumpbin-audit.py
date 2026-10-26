@@ -54,6 +54,27 @@ def parse_dumpbin(text: str) -> dict[str, list[str]]:
     return {dll: sorted(symbols, key=str.casefold) for dll, symbols in sorted(imports.items())}
 
 
+def externally_deployed_crt_dlls(imports: dict[str, list[str]]) -> list[str]:
+    """List MSVC/UCRT dynamic imports not guaranteed on clean Win7 SP1.
+
+    MSVCRT.DLL is a Windows system component; API-MS-WIN-CRT forwarders and
+    VCRUNTIME/MSVCP are separately deployed and must be rejected in this lab.
+    This is a finite static audit, not a runtime compatibility proof.
+    """
+    prefixes = ("api-ms-win-crt-",)
+    direct = ("ucrtbase.dll",)
+    result = []
+    for dll in imports:
+        lower = dll.lower()
+        if lower.startswith(prefixes) or lower in direct or (
+            re.fullmatch(r"(?:vcruntime|msvcp)\d+(?:_\d+)?\.dll", lower)
+        ):
+            result.append(lower)
+    return sorted(set(result))
+
+
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--dumpbin", type=Path, required=True)
@@ -72,6 +93,7 @@ def main() -> None:
         if symbol in POST_WIN7
     ]
     risky = sorted(set(imports) & RISK_DLLS)
+    external_crt = externally_deployed_crt_dlls(imports)
     report = {
         "scope": "static PE imports only; Win7 not executed",
         "binary_sha256": args.sha256,
@@ -80,6 +102,7 @@ def main() -> None:
         "imported_function_count": num_symbols,
         "known_post_win7_imports": bad,
         "potentially_risky_imported_dlls": risky,
+        "external_crt_imported_dlls": external_crt,
         "imports": imports,
         "runtime_tested": False,
     }
@@ -99,6 +122,8 @@ def main() -> None:
         lines += ["- " + x["dll"] + "!" + x["symbol"] + " (" + x["introduced"] + ")" for x in bad]
     else:
         lines.append("- None from finite screening list. This is NOT proof of compatibility.")
+    lines += ["", "## Dynamic UCRT/VC++ redistributable prerequisites"]
+    lines += ["- " + name for name in external_crt] if external_crt else ["- None in static PE imports (not a runtime guarantee)."]
     lines += ["", "## DLLs requiring closer inspection"]
     lines += ["- " + x for x in risky] if risky else ["- None from short list; inspect full JSON."]
     (args.out / "full-audit.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
