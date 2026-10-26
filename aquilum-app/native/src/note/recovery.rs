@@ -2,6 +2,7 @@
 //! NOT wired to note edits or startup yet. The record is not an authenticated
 //! signature and cannot prove zero data loss before its durable-write ACK.
 #![allow(dead_code)]
+mod queue;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
