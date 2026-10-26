@@ -3,6 +3,10 @@ use crate::text::utf16::utf16_len;
 use serde_json::{json, Value};
 use std::fmt;
 
+#[path = "changes_bounds.rs"]
+mod bounds;
+use bounds::{checked_end, invalid, section_len};
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct ChangeError(String);
 
@@ -10,14 +14,6 @@ impl fmt::Display for ChangeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
-}
-
-fn invalid(message: &str) -> ChangeError {
-    ChangeError(message.to_owned())
-}
-
-fn section_len(value: &Value) -> Result<usize, ChangeError> {
-    value.as_u64().map(|length| length as usize).ok_or_else(|| invalid("section length is not a number"))
 }
 
 pub fn edits_from_json(changes: &Value, doc_length: usize) -> Result<Vec<TextEdit>, ChangeError> {
@@ -28,15 +24,16 @@ pub fn edits_from_json(changes: &Value, doc_length: usize) -> Result<Vec<TextEdi
         if let Some(parts) = section.as_array() {
             let (removed, lines) = parts.split_first().ok_or_else(|| invalid("empty replacement"))?;
             let removed = section_len(removed)?;
+            let to = checked_end(position, removed, doc_length)?;
             let insert = lines
                 .iter()
                 .map(|line| line.as_str().ok_or_else(|| invalid("inserted line is not a string")))
                 .collect::<Result<Vec<_>, _>>()?
                 .join("\n");
-            edits.push(TextEdit { from: position, to: position + removed, insert });
-            position += removed;
+            edits.push(TextEdit { from: position, to, insert });
+            position = to;
         } else {
-            position += section_len(section)?;
+            position = checked_end(position, section_len(section)?, doc_length)?;
         }
     }
     if position != doc_length {

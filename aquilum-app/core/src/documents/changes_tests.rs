@@ -44,3 +44,21 @@ fn computes_the_length_after_the_edits_in_utf16_units() {
     let edits = vec![TextEdit { from: 0, to: 2, insert: "🎉🎉".into() }];
     assert_eq!(length_after(&edits, 13), 15);
 }
+
+#[test]
+fn rejects_section_lengths_that_overflow_before_covering_the_document() {
+    for changes in [
+        json!([u64::MAX, 1, 3]),
+        json!([1, [u64::MAX], 3]),
+        json!([[u64::MAX], 1, 3]),
+    ] {
+        assert!(edits_from_json(&changes, 3).is_err(), "{changes}");
+    }
+}
+
+#[test]
+fn accepts_maximum_positions_without_overflow_when_coverage_is_valid() {
+    assert!(edits_from_json(&json!([usize::MAX]), usize::MAX).unwrap().is_empty());
+    let edits = edits_from_json(&json!([[usize::MAX]]), usize::MAX).unwrap();
+    assert_eq!((edits[0].from, edits[0].to), (0, usize::MAX));
+}
