@@ -7,12 +7,20 @@
 //! before it can provide read-only host facts. This module alone is NOT SSH.
 
 use ring::{constant_time, digest};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use uuid::Uuid;
 
+mod node_plan;
+use node_plan::{preview_with_scope, NODE_V2_ACTIONS, NODE_V3_ACTIONS};
+pub use node_plan::{preview_node_v2, preview_node_v3};
 const MIN_RAM_MIB: u64 = 512;
 const MIN_FREE_DISK_MIB: u64 = 1024;
+
+/// Fixed root-owned helper path shown to the user in B0 v3 and independently
+/// enforced on Linux. This is a PLAN DISCLOSURE, not install permission.
+pub const ROOT_HELPER_EXECUTABLE_PATH: &str =
+    "/usr/libexec/akula/akula-root-b1d0-helper";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum B0Error {
@@ -29,7 +37,8 @@ pub enum B0Error {
     InsufficientResources,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ServerTarget {
     pub host: String,
     pub ssh_port: u16,
@@ -74,21 +83,22 @@ fn valid_dns_name(host: &str) -> bool {
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SupportedOs {
     Debian,
     Ubuntu,
     Other,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MachineArch {
     X86_64,
     Aarch64,
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReadOnlyHostFacts {
     pub os: SupportedOs,
     pub arch: MachineArch,
@@ -99,7 +109,8 @@ pub struct ReadOnlyHostFacts {
     pub free_disk_mib: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackagePin {
     /// Version and trusted signing-key label must be supplied from the
     /// separately authenticated release manifest, NOT from the SSH server.
@@ -133,14 +144,25 @@ pub struct B0Input {
     pub package: PackagePin,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProposedChange {
     VerifySignedPinnedPackage,
     CreateDedicatedServiceAccount,
     CreateOwnedRuntimeAndStateDirectories,
     WriteRestrictedSystemdUnit,
-    EnableLocalLoopbackOnly,
+    EnableLocalLoopbackOnly, // Legacy B0 v1 preview; NOT a Node-V1 install scope.
     VerifyRestartAndSyntheticReadback,
+    // B1-E2E-07 V2: explicitly disclose actual service privileges and endpoint.
+    RequireIndependentlyPinnedRootBootstrap,
+    VerifySignedBootstrapHelperBeforeRootExecution,
+    InstallRootOwnedBootstrapHelperAtFixedPath,
+    VerifySeparateOwnerSignatureAndDurableCas,
+    CommitSignedNodeIntoRootOwnedOpt,
+    EnrollPersistentNodeAndReceiptIdentities,
+    PinRootOwnedOwnerPolicyV3,
+    BindPublicUdp43871WithoutChangingFirewall,
+    StartNonRootSystemdService,
+    VerifyRebootAndSignedReceipt,
 }
 
 const FIXED_ACTIONS: [ProposedChange; 6] = [
@@ -151,50 +173,25 @@ const FIXED_ACTIONS: [ProposedChange; 6] = [
     ProposedChange::EnableLocalLoopbackOnly,
     ProposedChange::VerifyRestartAndSyntheticReadback,
 ];
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DryRunPlan {
     pub schema_version: u16,
     pub install_id: Uuid,
     pub target: ServerTarget,
     pub package: PackagePin,
+    /// Exact independently B1a-verified privileged helper package, distinct
+    /// from the Node daemon. V1/V2 MUST leave this absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_helper_sha256: Option<[u8; 32]>,
+    /// The EXACT future UID0 0500 helper install destination. V1/V2 omit.
+    /// V3 has no variable root path and no root execution permission.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_helper_install_path: Option<String>,
     pub inspected_host: ReadOnlyHostFacts,
     pub proposed_changes: Vec<ProposedChange>,
     /// Hash of this exact typed plan; NOT a signature and NOT permission to execute.
     pub plan_blake3: String,
-}
-
-impl DryRunPlan {
-    fn canonical_bytes(&self) -> Vec<u8> {
-        #[derive(Serialize)]
-        struct Canonical<'a> {
-            schema_version: u16,
-            install_id: Uuid,
-            target: &'a ServerTarget,
-            package: &'a PackagePin,
-            inspected_host: &'a ReadOnlyHostFacts,
-            proposed_changes: &'a [ProposedChange],
-        }
-        serde_json::to_vec(&Canonical {
-            schema_version: self.schema_version,
-            install_id: self.install_id,
-            target: &self.target,
-            package: &self.package,
-            inspected_host: &self.inspected_host,
-            proposed_changes: &self.proposed_changes,
-        }).expect("typed canonical preview must serialize")
-    }
-
-    pub fn computed_digest(&self) -> String {
-        let mut hash = blake3::Hasher::new_derive_key("Akula Bootstrap B0 readonly plan v1");
-        hash.update(&self.canonical_bytes());
-        hash.finalize().to_hex().to_string()
-    }
-
-    pub fn verify_unchanged(&self) -> bool {
-        self.schema_version == 1 && self.proposed_changes == FIXED_ACTIONS
-            && self.computed_digest() == self.plan_blake3
-    }
 }
 
 /// This B0 probe has no method for authentication, arbitrary commands,
@@ -211,58 +208,15 @@ pub trait PreviewTransport {
     fn inspect_host(&mut self) -> Result<ReadOnlyHostFacts, B0Error>;
 }
 
+/// Historical B0 v1 remains a read-only inventory with its original sudo
+/// listing precondition. The v1 plan is never valid for public Node install.
 pub fn preview<T: PreviewTransport>(
     input: &B0Input,
     transport: &mut T,
     cancelled: impl Fn() -> bool,
 ) -> Result<DryRunPlan, B0Error> {
-    input.target.validate()?;
-    input.package.validate()?;
-    if input.install_id.is_nil() { return Err(B0Error::InvalidTarget); }
-    if cancelled() { return Err(B0Error::Cancelled); }
-
-    let key = transport.handshake_public_key(&input.target)?;
-    // A huge peer-supplied blob must not be retained/hashed without bounds.
-    if key.len() < 16 || key.len() > 16 * 1024 {
-        return Err(B0Error::KeyUnavailable);
-    }
-    let observed = digest::digest(&digest::SHA256, &key);
-    if constant_time::verify_slices_are_equal(
-        observed.as_ref(), &input.target.trusted_key_sha256
-    ).is_err() {
-        return Err(B0Error::HostKeyMismatch);
-    }
-    if cancelled() { return Err(B0Error::Cancelled); }
-
-    let facts = transport.inspect_host()?;
-    if cancelled() { return Err(B0Error::Cancelled); }
-
-    match facts.os {
-        SupportedOs::Debian | SupportedOs::Ubuntu => {}
-        SupportedOs::Other => return Err(B0Error::UnsupportedOs),
-    }
-    if facts.arch != MachineArch::X86_64 {
-        return Err(B0Error::UnsupportedArchitecture);
-    }
-    if !facts.has_systemd { return Err(B0Error::MissingSystemd); }
-    if !facts.has_sudo_rights { return Err(B0Error::MissingPrivilege); }
-    if facts.cpu_count == 0 || facts.ram_mib < MIN_RAM_MIB
-        || facts.free_disk_mib < MIN_FREE_DISK_MIB
-    {
-        return Err(B0Error::InsufficientResources);
-    }
-
-    // Returning a plan has NO side effects, even after all checks succeeded.
-    // B1 must use a separate, explicitly user-approved transaction type.
-    let mut plan = DryRunPlan {
-        schema_version: 1,
-        install_id: input.install_id,
-        target: input.target.clone(),
-        package: input.package.clone(),
-        inspected_host: facts,
-        proposed_changes: FIXED_ACTIONS.to_vec(),
-        plan_blake3: String::new(),
-    };
-    plan.plan_blake3 = plan.computed_digest();
-    Ok(plan)
+    preview_with_scope(input, transport, cancelled, false)
 }
+
+#[cfg(test)]
+mod node_plan_v2_tests;

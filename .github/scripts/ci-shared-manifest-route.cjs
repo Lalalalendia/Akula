@@ -52,6 +52,56 @@ const INSTALLED_OWNER_PATHS=new Set(["aquilum-app/core/src/sync/host_install_uni
 // Preserve the exact former pull_request.path owners. These source-owned labs
 // run through the required Main PR gate, including mixed source/manifest diffs.
 const OWNED_SUITES=Object.freeze({
+  "owned_b1b4b1_ipc": [
+    "aquilum-app/core/src/server_installer_ipc_lab.rs",
+    "aquilum-app/core/src/server_installer_os_witness_lab.rs",
+    "aquilum-app/core/tests/server_bootstrap_b1b4b.rs",
+    "aquilum-app/core/src/bin/akula_witness_b1b4b1_lab.rs",
+    "aquilum-app/core/examples/akula_b1b4b1_witness_fixture.rs",
+    "scripts/ci/akula-b1b4b1-witness-ipc-lab.sh",
+    ".github/workflows/core-server-bootstrap-b1b4b1-witness-ipc.yml",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B4B1.md"
+  ],
+  "owned_b1b3c_fd": [
+    "aquilum-app/core/src/server_installer_pinned_release_lab.rs",
+    "aquilum-app/core/tests/server_bootstrap_b1b3c.rs",
+    "aquilum-app/core/src/bin/akula_helper_b1b3b_lab.rs",
+    "aquilum-app/core/examples/akula_b1b3c_fixture.rs",
+    "scripts/ci/akula-b1b3c-root-helper-lab.sh",
+    ".github/workflows/core-server-bootstrap-b1b3c-signed-fd.yml",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B3C.md"
+  ],
+  "owned_b1d0_opt": [
+    "aquilum-app/core/src/server_installer_fixed_node_lab.rs",
+    "aquilum-app/core/src/server_installer_os_witness_lab.rs",
+    "aquilum-app/core/src/server_installer_durable_node.rs",
+    "aquilum-app/core/tests/server_bootstrap_b1d0.rs",
+    ".github/workflows/core-server-bootstrap-b1d0-opt.yml",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1D0.md"
+  ],
+  "owned_b1b2b_vm": [
+    "aquilum-app/core/examples/akula_b1b2b_release_fixture.rs",
+    "scripts/ci/akula-b1b2b-ubuntu-vm.sh",
+    "scripts/ci/akula-b1b2b-guest-lab.sh",
+    "scripts/ci/akula-b1b2b-node-wrapper.sh",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B.md",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B1.md",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B2.md",
+    ".github/workflows/core-server-bootstrap-b1b2b-ubuntu.yml",
+    "aquilum-app/core/src/server_release_lab.rs",
+    "aquilum-app/core/src/bin/akula_node_lab.rs"
+  ],
+  "owned_b1c1_vm": [
+    ".github/workflows/core-server-bootstrap-b1c1-real-elf-vm.yml",
+    "aquilum-app/core/tests/server_bootstrap_b1c0.rs",
+    "aquilum-app/core/src/server_installer_fixed_node_lab.rs",
+    "aquilum-app/core/src/server_installer_pinned_release_lab.rs",
+    "aquilum-app/core/src/server_installer_os_witness_lab.rs",
+    "scripts/ci/akula-b1b2b-ubuntu-vm.sh",
+    "scripts/ci/akula-b1c1-vm-hook.sh",
+    "scripts/ci/akula-b1c1-guest-lab.sh",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1C1.md",
+  ],
   "owned_b0c_ssh": [
     "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs",
     "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs",
@@ -92,6 +142,8 @@ const OWNED_SUITES=Object.freeze({
     ".github/workflows/sync-protection.yml"
   ],
   "owned_text_delta": [
+    "modules/text-delta-codec/**",
+    ".github/workflows/text-delta-codec-isolated.yml",
     "aquilum-app/core/src/sync/text_delta_codec.rs",
     "aquilum-app/core/src/sync/mod.rs",
     "aquilum-app/core/src/sync/s3_transport/pack_probe.rs",
@@ -144,6 +196,11 @@ const OWNED_SUITES=Object.freeze({
     "aquilum-app/core/src/sync/sealed_archive.rs",
     "aquilum-app/core/src/sync/local_create_tests.rs",
     "aquilum-app/core/src/sync/journal.rs",
+    "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+    "aquilum-app/core/src/sync/journal/publication_recovery.rs",
+    "aquilum-app/core/src/sync/journal/phase_transitions.rs",
+    "aquilum-app/core/src/sync/journal/tests/mod.rs",
+    "aquilum-app/core/src/sync/journal/tests/recovery.rs",
     "aquilum-app/core/src/sync/core_scan.rs",
     "aquilum-app/core/src/sync/path.rs",
     "aquilum-app/core/src/search/paths.rs",
@@ -201,6 +258,11 @@ const OWNED_SUITES=Object.freeze({
     "aquilum-app/core/src/sync/s3_preimage_capture.rs",
     "aquilum-app/core/src/sync/host_custody_registry.rs",
     "aquilum-app/core/src/sync/journal.rs",
+    "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs",
+    "aquilum-app/core/src/sync/journal/publication_recovery.rs",
+    "aquilum-app/core/src/sync/journal/phase_transitions.rs",
+    "aquilum-app/core/src/sync/journal/tests/mod.rs",
+    "aquilum-app/core/src/sync/journal/tests/recovery.rs",
     "aquilum-app/core/src/sync/local_create_tests.rs",
     "aquilum-app/core/src/sync/local_create.rs",
     "aquilum-app/core/src/sync/s3_transport/**",
