@@ -1,18 +1,27 @@
 name: History unused BLAKE3 A/B
 
 on:
+  # A/B runtime measurements are opt-in, not required correctness gates.
   pull_request:
     paths:
-      - "aquilum-app/core/src/files/document.rs"
-      - "aquilum-app/core/src/history/store.rs"
       - ".github/workflows/history-unused-hash-ab.yml"
+  workflow_dispatch:
+    inputs:
+      baseline_sha:
+        description: 'Exact 40-character baseline commit SHA'
+        required: true
+        type: string
+      candidate_sha:
+        description: 'Exact 40-character candidate commit SHA'
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: history-unused-hash-ab-${{ github.ref }}
-  cancel-in-progress: true
+  group: history-unused-hash-ab-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   compare:
@@ -20,15 +29,25 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     steps:
+      - name: Validate immutable A/B commit identities
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.baseline_sha }}
+          CANDIDATE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid baseline SHA'; exit 1; }
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid candidate SHA'; exit 1; }
+          [[ "$BASE_SHA" != "$CANDIDATE_SHA" ]] || { echo 'A/B requires distinct commits'; exit 1; }
       - uses: actions/checkout@v4
         with:
           path: candidate
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.candidate_sha }}
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: Lalalalendia/Akula
-          ref: 1e17e59168b1a79aa2d559c70c488faf60da1d2d
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.baseline_sha }}
           path: baseline
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -36,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C baseline rev-parse HEAD)" = "1e17e59168b1a79aa2d559c70c488faf60da1d2d"
+          echo "Baseline exact SHA: $(git -C baseline rev-parse HEAD)"
           cmp baseline/aquilum-app/Cargo.lock candidate/aquilum-app/Cargo.lock
           mkdir -p baseline/.github/bench
           cp -R candidate/.github/bench/rope-gate-history-e2e baseline/.github/bench/
@@ -100,7 +119,7 @@ jobs:
           report = [
               "## History snapshot unused digest: same-runner real-save A/B",
               "",
-              "Exact baseline 1e17e591, same release fixture and resolved Cargo.lock.",
+              "Resolved base-branch SHA recorded, same release fixture and resolved Cargo.lock.",
               "Every sample verifies primary BLAKE3+bytes, both history revisions",
               "and stale-CAS refusal without overwriting foreign changes.",
               "",

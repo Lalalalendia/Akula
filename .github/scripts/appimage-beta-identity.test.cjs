@@ -14,7 +14,7 @@ const file = (name) => readFileSync(path.join(root, name), 'utf8');
 test('AppImage has an independent explicit Akula packager identity', () => {
   const cfg = JSON.parse(file('aquilum-app/native/packaging/akula-linux.json'));
   assert.equal(cfg.productName, 'Akula');
-  assert.equal(cfg.version, '0.3.9');
+  assert.equal(cfg.version, '0.3.13');
   assert.equal(cfg.identifier, 'io.github.lalalendia.akula');
   assert.equal(cfg.homepage, 'https://github.com/Lalalalendia/Akula');
   assert.deepEqual(cfg.binaries, [{ path: 'akula-app', main: true }]);
@@ -26,11 +26,18 @@ test('AppImage has an independent explicit Akula packager identity', () => {
   assert.doesNotMatch(JSON.stringify(cfg), /com\.dmitriy|Freaction|Aquilum\.desktop|aquilum-app/);
 });
 
-test('AppImage workflow is a pull-request-only disposable unsigned candidate', () => {
+test('AppImage remains unsigned and runs only through the required PR route', () => {
   const w = file('.github/workflows/appimage-beta.yml');
+  const core = file('.github/workflows/app-checks.yml');
+  const shared = file('.github/workflows/ci-shared-manifest-labs.yml');
+  const route = require('./ci-shared-manifest-route.cjs');
   assert.match(w, /^name: Akula AppImage beta candidate$/m);
-  assert.match(w, /^  pull_request:$/m);
-  assert.doesNotMatch(w, /^  (push|release|workflow_dispatch|schedule):$/m);
+  assert.match(w, /^  workflow_call:$/m);
+  assert.doesNotMatch(w, /^  (push|pull_request|release|workflow_dispatch|schedule):$/m);
+  for (const owned of ['.github/workflows/appimage-beta.yml', '.github/scripts/appimage-beta-identity.test.cjs', 'aquilum-app/native/packaging/akula-linux.json'])
+    assert.equal(route.ownedRoutes([owned]).owned_appimage, true, owned + ' must activate the required suite');
+  assert.match(core, /owned_appimage: \$\{\{ needs\.classify\.outputs\.owned_appimage == 'true' \}\}/);
+  assert.match(shared, /route-appimage-beta:\n    name: Impacted shared manifest \/ appimage-beta\n    if: \$\{\{ inputs\.lock \|\| inputs\.owned_appimage \}\}/);
   assert.match(w, /cargo build --release --locked -p aquilum-native --features installed/);
   assert.match(w, /cargo install cargo-packager --version 0\.11\.8 --locked/);
   assert.match(w, /--config native\/packaging\/akula-linux\.json/);

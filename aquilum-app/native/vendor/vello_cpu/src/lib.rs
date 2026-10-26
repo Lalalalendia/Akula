@@ -143,6 +143,8 @@ extern crate core;
 extern crate std;
 
 mod render;
+#[cfg(all(test, feature = "text"))]
+mod colr_radial_negative_tests;
 
 mod coarse;
 mod dispatch;

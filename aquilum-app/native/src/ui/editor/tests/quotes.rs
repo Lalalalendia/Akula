@@ -37,6 +37,7 @@ fn a_nested_quote_gets_a_bar_for_every_level() {
 
 #[test]
 fn typed_callout_tones_are_visible_on_the_existing_quote_bar() {
+    let _theme = crate::ui::theme::test_lock();
     let tm = crate::ui::theme::current();
     let rgb = |c: masonry::peniko::Color| {
         let c = c.to_rgba8();

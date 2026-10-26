@@ -1,0 +1,20 @@
+[package]
+name = "akula-text-delta-codec"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "Pure bounded Text Delta wire codec; no File Gate, network or publisher"
+
+# This module is intentionally outside the primary Cargo workspace.
+# Core imports this crate only through its explicit sync-text-delta feature.
+[workspace]
+
+[dependencies]
+blake3 = "1.8.5"
+uuid = { version = "1.23.5", features = ["v4"] }
+zstd = "=0.14.3"
+
+[dev-dependencies]
+# The original Core numeric real-Git A/B test serializes rows for review.
+serde_json = "1"

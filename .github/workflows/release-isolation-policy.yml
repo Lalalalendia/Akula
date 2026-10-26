@@ -10,6 +10,7 @@ on:
       - '.github/workflows/akula-publisher-key-proof.yml'
       - '.github/workflows/akula-windows-signed-candidate.yml'
       - '.github/scripts/release-isolation-policy.test.cjs'
+      - 'scripts/test-windows-signed-next-version-upgrade.ps1'
       - 'docs/release/legacy-aquilum-release.yml'
       - 'docs/release/AKULA-RELEASE-LOCK-01.md'
   push:
@@ -18,10 +19,17 @@ on:
       - '.github/workflows/release.yml'
       - '.github/workflows/release-isolation-policy.yml'
       - '.github/scripts/release-isolation-policy.test.cjs'
+      - 'scripts/test-windows-signed-next-version-upgrade.ps1'
       - 'docs/release/legacy-aquilum-release.yml'
 
 permissions:
   contents: read
+
+# Coalesce superseded PR commits without cancelling manual or push runs.
+# A unique run_id suffix for non-PR events preserves every manual run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   release-isolation:
@@ -31,3 +39,13 @@ jobs:
       - uses: actions/checkout@v7
       - name: Verify old publisher/installer release cannot execute
         run: node --test .github/scripts/release-isolation-policy.test.cjs
+      - name: Parse protected next-version Windows upgrade test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/test-windows-signed-next-version-upgrade.ps1'),
+            [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) { throw "Signed Windows upgrade script syntax error: $($errors[0])" }

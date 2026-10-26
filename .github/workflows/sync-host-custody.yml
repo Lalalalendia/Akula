@@ -2,26 +2,7 @@ name: Local host custody without AWS
 
 on:
   workflow_call:
-  pull_request:
-    paths:
-
-      - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/core/src/app_core.rs'
-      - 'aquilum-app/core/src/app_core_installed_host_tests.rs'
-      - 'aquilum-app/core/src/files/gate/write.rs'
-      - 'aquilum-app/core/src/history/service.rs'
-      - 'aquilum-app/core/src/sync/mod.rs'
-      - 'aquilum-app/core/src/sync/host_custody_registry.rs'
-      - 'aquilum-app/core/src/sync/host_admission.rs'
-      - 'aquilum-app/core/src/sync/local_create_tests.rs'
-      - 'aquilum-app/core/src/sync/host_ledger_identity.rs'
-      - 'aquilum-app/core/src/sync/host_cold_identity_tests.rs'
-      - 'aquilum-app/core/src/sync/host_install_witness.rs'
-      - 'aquilum-app/core/src/app_core_witness_tests.rs'
-      - 'aquilum-app/core/src/sync/host_core_epoch_tests.rs'
-      - 'aquilum-app/native/src/workspace.rs'
-      - 'aquilum-app/native/src/workspace_installed_witness_tests.rs'
-      - '.github/workflows/sync-host-custody.yml'
+  # PR path owners are enforced in required central route.
   workflow_dispatch:
 
 permissions:

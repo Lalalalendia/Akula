@@ -17,6 +17,12 @@ on:
 permissions:
   contents: read
 
+# Cancel outdated PR revisions to avoid repeating expensive Windows cargo tests.
+# Manual probes are isolated by github.run_id and remain independent.
+concurrency:
+  group: akula-b1d0-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   windows-public-host-pin-and-disabled-install-ui:
     runs-on: windows-2025
@@ -50,4 +56,9 @@ jobs:
         working-directory: aquilum-app
         run: |
           $ErrorActionPreference='Stop'
-          cargo test --locked -p aquilum-native b1d0_native_server_settings_are_nonsecret_and_never_offer_an_install_grant -- --nocapture
+          $test = 'ui::settings::schema::tests::server::b1d0_native_server_settings_have_three_fields_and_never_grant_install'
+          $list = @(cargo test --locked -p aquilum-native --bin aquilum-native -- --list)
+          if ($LASTEXITCODE -ne 0) { throw 'Native B1d0 test discovery failed' }
+          if ($list -notcontains "${test}: test") { throw "Missing exact B1d0 safety test: $test" }
+          cargo test --locked -p aquilum-native --bin aquilum-native -- $test --exact --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Native B1d0 safety test failed' }

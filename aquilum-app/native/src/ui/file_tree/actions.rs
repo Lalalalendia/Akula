@@ -105,7 +105,7 @@ impl FileTree {
     fn context_menu(&mut self, root: &mut RenderRoot, index: usize, at: Point) -> Option<TreeAction> {
         let row = self.model.rows()[index].clone();
         let note = aquilum_core::search::paths::is_markdown(&row.path) || aquilum_core::search::paths::is_plain_text(&row.path);
-        if !row.folder && !note {
+        if !row.folder && !note && !row.path.to_string_lossy().to_ascii_lowercase().ends_with(".pdf") {
             return None;
         }
         let targets = self.model.focus(index);

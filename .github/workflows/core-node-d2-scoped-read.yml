@@ -5,6 +5,11 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/core/src/node_catalog_lab.rs'
+      - 'aquilum-app/core/src/node_replica_lab.rs'
+      - 'aquilum-app/core/src/node_replica_auth_lab.rs'
+      - 'aquilum-app/core/tests/headless_node_replica_auth.rs'
+      - 'aquilum-app/core/tests/headless_node_replica.rs'
+      - 'docs/platforms/AKULA-NODE-E2E-01A.md'
       - 'aquilum-app/core/src/bin/akula_node_lab.rs'
       - 'aquilum-app/core/tests/headless_node_d1.rs'
       - 'aquilum-app/core/tests/headless_node_d2.rs'
@@ -56,6 +61,18 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features node-lab --test headless_node_d2 -- --nocapture
+      - name: NODE-E2E-01a independent-process durable replica, crash and refusal gates
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features node-replica-lab --test headless_node_replica -- --nocapture
+      - name: NODE-E2E-01b owner-signed grant and independent device proof
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features node-replica-auth-lab --test headless_node_replica_auth -- --nocapture
       - name: Verify ordinary GUI-free Core without experimental features
         working-directory: aquilum-app
         shell: bash

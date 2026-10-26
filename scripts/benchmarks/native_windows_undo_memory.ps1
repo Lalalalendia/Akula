@@ -199,7 +199,16 @@ function Run-Case([int]$count) {
     $readback=Readback-Exact $p $note
     $events.Add([pscustomobject]@{name='readback_pass';time=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()})
     $p.Refresh()
-    if(!$p.CloseMainWindow() -or !$p.WaitForExit(20000) -or $p.ExitCode -ne 0) { throw 'Non-graceful GUI exit' }
+    # Distinguish a rejected WM_CLOSE, stuck process and nonzero termination.
+    # Fail closed in all three cases; archive sanitized metadata only.
+    $closeRequested=$false
+    if(!$p.HasExited) { $closeRequested=$p.CloseMainWindow() }
+    $exited=$p.WaitForExit(20000)
+    $exitCode=if($exited) { [string]$p.ExitCode } else { 'not-exited' }
+    $events.Add([pscustomobject]@{name='close_result';time=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();requested=$closeRequested;exited=$exited;exit_code=$exitCode})
+    if(!$closeRequested -or !$exited -or $exitCode -ne '0') {
+      throw "Non-graceful GUI exit: close_requested=$closeRequested exited=$exited exit_code=$exitCode"
+    }
     if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -ne $meta.sha) { throw 'Closing Akula changed source' }
     $pass=$true
   } finally {
