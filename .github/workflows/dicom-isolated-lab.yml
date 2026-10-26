@@ -101,6 +101,13 @@ jobs:
           assert set(pairs)==expected, f'missing adapters: {expected-set(pairs)}'
           assert all(pairs[x]=='0' for x in expected), f'compilation failed: {pairs}'
           assert Path('scripts/dicom-lab/results/results.csv').exists(), 'results missing'
+          from collections import Counter
+          import csv
+          pixel_rows=list(csv.DictReader(Path('scripts/dicom-lab/results/results.csv').open()))
+          assert len(pixel_rows)==30, f'expected 30 Rust decode results, got {len(pixel_rows)}'
+          for name in ('dicom-rs','dcmfx','toolkit'):
+              counts=Counter(row['status'] for row in pixel_rows if row['library']==name)
+              assert counts=={'PIXEL_MATCH': 8,'LOSSY_DECODE_ONLY': 1,'EXPECTED_REJECTION': 1}, f'{name}: {counts}'
           import csv
           ref=Path('scripts/dicom-lab/results/reference.csv')
           assert ref.exists(), 'pydicom reference results missing'

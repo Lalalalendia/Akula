@@ -5,3 +5,4 @@ edition = "2024"
 [dependencies]
 dicom-object = "0.10.0"
 dicom-pixeldata = "0.10.0"
+sha2 = "0.10"

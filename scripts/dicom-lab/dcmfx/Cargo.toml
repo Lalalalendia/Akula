@@ -7,3 +7,4 @@ edition = "2024"
 # DCMfx is a nested Rust workspace in its upstream repository; it is not on crates.io.
 # The isolated workflow checks out its v0.52.1 source at the pinned commit.
 dcmfx = { path = "../_upstream/dcmfx/src/rust/dcmfx" }
+sha2 = "0.10"
