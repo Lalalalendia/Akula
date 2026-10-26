@@ -109,10 +109,7 @@ impl McpServer {
     }
 
     pub fn status(&self) -> McpStatus {
-        self.state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .status()
+        self.state.lock().unwrap_or_else(|error| error.into_inner()).status()
     }
 
     pub fn shutdown(&self) {
