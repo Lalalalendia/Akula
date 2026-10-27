@@ -81,19 +81,19 @@ $log = Join-Path $base 'evidence.txt'
 function Record([string]$line) { [IO.File]::AppendAllText($log, $line + [Environment]::NewLine) }
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-namespace AkulaWin7QA {
-  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
-  public static class Native {
-    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-    [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h,int x,int y,int w,int hgt,bool repaint);
-  }
-}
-'@
+Add-Type -TypeDefinition ([string]::Join([Environment]::NewLine, @(
+  'using System;',
+  'using System.Runtime.InteropServices;',
+  'namespace AkulaWin7QA {',
+  '  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }',
+  '  public static class Native {',
+  '    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);',
+  '    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);',
+  '    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);',
+  '    [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h,int x,int y,int w,int hgt,bool repaint);',
+  '  }',
+  '}'
+)))
 function Snapshot([string]$file) {
     $screen = [Windows.Forms.Screen]::PrimaryScreen.Bounds
     $bmp = New-Object -TypeName System.Drawing.Bitmap -ArgumentList @($screen.Width, $screen.Height)
