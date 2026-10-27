@@ -1,5 +1,9 @@
 mod apply;
+#[cfg(any(target_os = "windows", test))]
+mod attempts;
 mod claim;
+#[cfg(target_os = "windows")]
+mod handoff;
 mod download_guard;
 mod release;
 #[cfg(target_os = "linux")]
@@ -33,7 +37,6 @@ mod tests;
 use std::sync::{Arc, Mutex};
 
 use release::{PUBLIC_KEY, Release, find, verify};
-
 pub(crate) use apply::apply;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -155,20 +158,8 @@ impl Updater {
         self.set(Status::Failed(error));
     }
 
-    // A single GUI call-site retains the same name on each target, but the
-    // Windows type is non-forgeable outside signed manifest admission.
-    #[cfg(target_os = "windows")]
-    pub(crate) fn take_ready(&self) -> Option<release::SignedCandidate> {
-        if !matches!(self.status(), Status::Ready(_)) {
-            return None;
-        }
-        let candidate = self.payload.lock().unwrap_or_else(|e| e.into_inner()).take()?;
-        self.set(Status::Installing);
-        Some(candidate)
-    }
-
     #[cfg(not(target_os = "windows"))]
-    pub(crate) fn take_ready(&self) -> Option<Vec<u8>> {
+    pub(crate) fn take_ready(&self, _data_dir: &std::path::Path) -> Option<Vec<u8>> {
         if !matches!(self.status(), Status::Ready(_)) {
             return None;
         }
