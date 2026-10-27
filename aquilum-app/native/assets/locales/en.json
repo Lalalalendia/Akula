@@ -786,6 +786,7 @@
     "title": "Reader",
     "book": "Book",
     "settings": "Reading settings",
+    "contents": "Table of contents",
     "closeSettings": "Close the reading settings",
     "close": "Close",
     "back": "Back",
