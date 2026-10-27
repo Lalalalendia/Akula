@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory = $true)][string]$VaultPath,
     [Parameter(Mandatory = $true)][string]$DataDir,
     [switch]$Editable,
-    [switch]$IncludeDelete
+    [switch]$IncludeDelete,
+    [switch]$IncludeResize
 )
 $ErrorActionPreference = 'Stop'
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
@@ -21,6 +22,7 @@ if ([System.IO.Path]::GetFullPath($ExePath) -ne [System.IO.Path]::GetFullPath($i
     throw 'Refusing to test non-installed Akula'
 }
 if ($IncludeDelete -and !$Editable) { throw 'Canvas Delete acceptance requires Editable mode' }
+if ($IncludeResize -and !$Editable) { throw 'Canvas Resize acceptance requires Editable mode' }
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes -ErrorAction Stop
 
 . (Join-Path $PSScriptRoot 'windows-beta-gui-input.ps1')
@@ -61,6 +63,37 @@ public static class AkulaCanvasInstalledPointer {
         var sequence = new Input[] { new Input { Type=0, Flags=0x0002 }, new Input { Type=0, Flags=0x0004 } };
         if (SendInput(2, sequence, Marshal.SizeOf(typeof(Input))) != 2)
             throw new InvalidOperationException("Incomplete physical Canvas pointer input");
+    }
+    public static void Drag(IntPtr hwnd, int expectedPid, int x0, int y0, int x1, int y1) {
+        if (IntPtr.Size != 8 || Marshal.SizeOf(typeof(Input)) != 40 || hwnd == IntPtr.Zero)
+            throw new InvalidOperationException("Invalid Canvas OS drag layout/window");
+        uint owner;
+        if (GetWindowThreadProcessId(hwnd, out owner) == 0 || owner != (uint)expectedPid ||
+            GetForegroundWindow() != hwnd)
+            throw new InvalidOperationException("Refusing Canvas drag outside foreground installed Akula PID");
+        foreach (var point in new[] { new Point { X=x0, Y=y0 }, new Point { X=x1, Y=y1 } }) {
+            IntPtr hit = WindowFromPoint(point);
+            if (hit == IntPtr.Zero || GetAncestor(hit, 2) != hwnd)
+                throw new InvalidOperationException("Canvas drag endpoint falls outside target HWND");
+        }
+        if (!SetCursorPos(x0, y0)) throw new InvalidOperationException("Canvas pointer could not reach resize grip");
+        Thread.Sleep(85);
+        bool pressed = false;
+        try {
+            if (SendInput(1, new Input[] { new Input { Type=0, Flags=0x0002 } }, Marshal.SizeOf(typeof(Input))) != 1)
+                throw new InvalidOperationException("Canvas OS resize mouse down failed");
+            pressed = true;
+            for (int i = 1; i <= 10; i++) {
+                int x = x0 + (int)Math.Round((x1-x0) * (double)i / 10);
+                int y = y0 + (int)Math.Round((y1-y0) * (double)i / 10);
+                if (!SetCursorPos(x, y)) throw new InvalidOperationException("Canvas OS resize mouse move failed");
+                Thread.Sleep(40);
+            }
+        } finally {
+            if (pressed &&
+                SendInput(1, new Input[] { new Input { Type=0, Flags=0x0004 } }, Marshal.SizeOf(typeof(Input))) != 1)
+                throw new InvalidOperationException("Canvas OS resize mouse up failed");
+        }
     }
 }
 '@
@@ -124,6 +157,44 @@ function Invoke-CanvasToolbar {
     [AkulaCanvasInstalledPointer]::Click($hwnd, $Process.Id, $x, $y)
 }
 
+
+function Invoke-CanvasResize {
+    param([System.Diagnostics.Process]$Process, $CanvasBounds, $WindowBounds)
+    $hwnd = [IntPtr]$Process.MainWindowHandle
+    [AkulaBetaGuiInput]::ShowWindow($hwnd, 9) | Out-Null
+    $foreground = $false
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+        [AkulaBetaGuiInput]::SetForegroundWindow($hwnd) | Out-Null
+        Start-Sleep -Milliseconds 120
+        if ([AkulaBetaGuiInput]::GetForegroundWindow() -eq $hwnd) { $foreground = $true; break }
+    }
+    if (!$foreground) { throw 'Canvas window is not foreground for OS resize' }
+    $dpi = [AkulaCanvasInstalledPointer]::GetDpiForWindow($hwnd)
+    if ($dpi -lt 96 -or $dpi -gt 480) { throw "Unexpected Canvas Resize DPI $dpi" }
+    $scale = [double]$dpi / 96.0
+    $w = $CanvasBounds.Width / $scale
+    $h = $CanvasBounds.Height / $scale
+    # The original synthetic board bounds are 0..420 by 0..260.
+    # Text node "first" occupies 24..204 by 32..132. Its selected grip is
+    # the inner 12x12 screen-pixel corner; the fitted camera stays fixed
+    # across the preceding Add/Undo/Redo actions.
+    $zoom = [Math]::Min([Math]::Max(1.0, $w - 96.0) / 420.0,
+                        [Math]::Max(1.0, $h - 96.0) / 260.0)
+    $zoom = [Math]::Min(8.0, [Math]::Max(0.05, $zoom))
+    $x0 = [int][Math]::Round($CanvasBounds.Left + ($w / 2.0 - 6.0 * $zoom - 6.0) * $scale)
+    $y0 = [int][Math]::Round($CanvasBounds.Top + ($h / 2.0 + 2.0 * $zoom - 6.0) * $scale)
+    $x1 = $x0 + [int][Math]::Round(65.0 * $scale)
+    $y1 = $y0 + [int][Math]::Round(45.0 * $scale)
+    foreach ($p in @(@($x0,$y0),@($x1,$y1))) {
+        if ($p[0] -lt $CanvasBounds.Left + 5 -or $p[0] -ge $CanvasBounds.Right - 5 -or
+            $p[1] -lt $CanvasBounds.Top + 5 -or $p[1] -ge $CanvasBounds.Bottom - 5 -or
+            $p[0] -lt $WindowBounds.Left + 5 -or $p[0] -ge $WindowBounds.Right - 5 -or
+            $p[1] -lt $WindowBounds.Top + 5 -or $p[1] -ge $WindowBounds.Bottom - 5) {
+            throw "Canvas Resize drag endpoint outside visible UIA widget: $($p[0]),$($p[1])"
+        }
+    }
+    [AkulaCanvasInstalledPointer]::Drag($hwnd, $Process.Id, $x0, $y0, $x1, $y1)
+}
 
 $populatedPath = Join-Path $VaultPath 'canvas-installed-populated.canvas'
 $emptyPath = Join-Path $VaultPath 'canvas-installed-empty.canvas'
@@ -246,6 +317,59 @@ foreach ($test in $checks) {
             $expectedHash = (Get-FileHash -LiteralPath $test.Path -Algorithm SHA256).Hash
             if ($expectedHash -eq $originalHash) { throw 'Installed Canvas mouse edits did not change source bytes' }
             Write-Host 'AKULA_WINDOWS_CANVAS_EDIT_PASS add=1 undo=1 redo=1 file_gate=1 vendor_preserved=1'
+            if ($IncludeResize) {
+                # Click real text card first, then drag only its selected
+                # bottom-right grip. No direct mutation of fixture JSON.
+                Invoke-CanvasToolbar -Index 5 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                Invoke-CanvasResize -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $resized = $null
+                for ($attempt = 0; $attempt -lt 80; $attempt++) {
+                    Start-Sleep -Milliseconds 150
+                    $proc.Refresh()
+                    if ($proc.HasExited) { throw 'Installed Akula exited during Canvas resize' }
+                    try {
+                        $candidate = [System.IO.File]::ReadAllText($test.Path) | ConvertFrom-Json
+                        $first = @($candidate.nodes | Where-Object { $_.id -eq 'first' })
+                        if ($first.Count -eq 1 -and $first[0].width -gt 180 -and $first[0].height -gt 100) {
+                            $resized = $candidate
+                            break
+                        }
+                    } catch [System.IO.IOException] { }
+                }
+                if ($null -eq $resized -or $resized.vendor.opaque -ne 'preserve' -or
+                    $resized.edges[0].id -ne 'edge') {
+                    throw 'Installed Canvas pointer Resize failed to save bounded size without data loss'
+                }
+                $width = [int](@($resized.nodes | Where-Object { $_.id -eq 'first' })[0].width)
+                $height = [int](@($resized.nodes | Where-Object { $_.id -eq 'first' })[0].height)
+                Invoke-CanvasToolbar -Index 1 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $undoneSize = [System.IO.File]::ReadAllText($test.Path) | ConvertFrom-Json
+                for ($attempt = 0; $attempt -lt 60 -and
+                    (@($undoneSize.nodes | Where-Object { $_.id -eq 'first' })[0].width -ne 180); $attempt++) {
+                    Start-Sleep -Milliseconds 150
+                    $undoneSize = [System.IO.File]::ReadAllText($test.Path) | ConvertFrom-Json
+                }
+                if (@($undoneSize.nodes | Where-Object { $_.id -eq 'first' })[0].height -ne 100 -or
+                    @($undoneSize.nodes | Where-Object { $_.id -eq 'first' })[0].width -ne 180) {
+                    throw 'Canvas resize Undo did not restore both dimensions'
+                }
+                Invoke-CanvasToolbar -Index 2 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $redoneSize = $null
+                for ($attempt = 0; $attempt -lt 60; $attempt++) {
+                    Start-Sleep -Milliseconds 150
+                    $candidate = [System.IO.File]::ReadAllText($test.Path) | ConvertFrom-Json
+                    $first = @($candidate.nodes | Where-Object { $_.id -eq 'first' })
+                    if ($first.Count -eq 1 -and $first[0].width -eq $width -and $first[0].height -eq $height) {
+                        $redoneSize = $candidate
+                        break
+                    }
+                }
+                if ($null -eq $redoneSize -or $redoneSize.vendor.opaque -ne 'preserve') {
+                    throw 'Canvas resize Redo did not restore saved width/height and vendor data'
+                }
+                $expectedHash = (Get-FileHash -LiteralPath $test.Path -Algorithm SHA256).Hash
+                Write-Host 'AKULA_WINDOWS_CANVAS_RESIZE_PASS select=1 pointer_drag=1 undo=1 redo=1 file_gate=1'
+            }
             if ($IncludeDelete) {
                 Invoke-CanvasToolbar -Index 5 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
                 # Selection is in-memory: it must not alter the 4-card file.
