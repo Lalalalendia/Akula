@@ -1,10 +1,20 @@
-name: Rust imperative vs functional style (manual research)
+name: Rust imperative vs functional style (isolated research)
 
 on:
+  push:
+    branches:
+      - research/rust-functional-style-20261027
+    paths:
+      - 'scripts/benchmarks/rust-functional-style/**'
+      - '.github/workflows/rust-functional-style-manual.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: rust-functional-style-isolated
+  cancel-in-progress: true
 
 jobs:
   compare:
