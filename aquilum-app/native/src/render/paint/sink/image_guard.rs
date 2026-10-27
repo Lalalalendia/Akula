@@ -25,10 +25,17 @@ pub(super) fn validate(brush: &BrushRef<'_>) -> Result<(), PaintError> {
         return Err(invalid());
     }
     let expected = u64::from(data.width) * u64::from(data.height) * 4;
-    if expected != data.data.data().len() as u64 {
-        return Err(invalid());
-    }
-    Ok(())
+    if expected == data.data.data().len() as u64 { return Ok(()); }
+    // Published frames intentionally use an empty Blob as an opaque handle:
+    // actual pixels live in Akula's registered surface/pixmap cache.
+    // Accept such an ID only when live registered pixels match its metadata.
+    let id = data.data.id();
+    let registered = crate::render::surface::find(id).map(|(pixmap, _)| pixmap)
+        .or_else(|| crate::render::pixels::lookup(id));
+    if registered.is_some_and(|pixmap| {
+        u32::from(pixmap.width()) == data.width && u32::from(pixmap.height()) == data.height
+    }) { return Ok(()); }
+    Err(invalid())
 }
 
 #[cfg(test)]
@@ -80,6 +87,18 @@ mod tests {
         assert!(valid_dimensions(8192, 8192), "64 Mi-pixel bound is inclusive");
         assert!(!valid_dimensions(8193, 8192));
         assert!(valid_dimensions(1, 1));
+    }
+
+    #[test]
+    fn invalid_image_ingress_registered_surface_handle_remains_renderable() {
+        let mut surfaces = crate::render::surface::Surfaces::default();
+        let frame = surfaces.frame(8, 8, [200, 30, 30], |_| {});
+        assert_eq!(frame.image.data.data().len(), 0, "published frame uses an opaque Blob");
+        assert!(validate(&BrushRef::Image(frame.as_ref())).is_ok());
+        assert!(real_sink(frame).is_ok());
+        // An unregistered nonempty image with an empty Blob is still invalid.
+        let missing = brush(8, 8, vec![], ImageFormat::Rgba8);
+        assert!(matches!(real_sink(missing), Err(PaintError::GeometryBudget(_))));
     }
 
     #[test]
