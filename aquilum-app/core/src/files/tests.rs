@@ -257,3 +257,29 @@ fn user_dot_folders_are_listed_but_application_folders_remain_hidden() {
     let names: Vec<_> = items.iter().map(|item| item.name.as_str()).collect();
     assert_eq!(names, vec![".заметки", ".hidden"]);
 }
+
+#[test]
+fn workspace_preflight_preserves_case_unicode_ids_and_supported_formats() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    for folder in [".архив", "Documents", ".GIT", ".AKULA-backup"] {
+        fs::create_dir(root.join(folder)).unwrap();
+    }
+    for file in [
+        ".draft.txt", "Book.EPUB", "Image.PNG", "Notes.MD", "Paper.PDF",
+        "text.TXT", "external.bin", "unrecognized.custom", "._staging.md",
+    ] {
+        fs::write(root.join(file), b"file").unwrap();
+    }
+    let items = read_directory_impl(root).unwrap();
+    let names: Vec<_> = items.iter().map(|item| item.name.as_str()).collect();
+    assert_eq!(names, vec![
+        ".архив", "Documents", ".draft.txt", "Book.EPUB",
+        "Image.PNG", "Notes", "Paper.PDF", "text.TXT",
+    ]);
+    for item in &items {
+        let actual = root.join(if item.name == "Notes" { "Notes.MD" } else { &item.name });
+        assert_eq!(item.id, actual.to_string_lossy(), "ID must be the unchanged filesystem path");
+    }
+    assert_eq!(items.iter().filter(|item| item.item_type == FileItemType::Folder).count(), 2);
+}
