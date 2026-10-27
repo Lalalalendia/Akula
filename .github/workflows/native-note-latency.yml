@@ -412,6 +412,8 @@ jobs:
             $screens = @('opened.png','after-horizontal-wheel.png','after-search.png')
             $hashes = @($screens | ForEach-Object { (Get-FileHash -LiteralPath (Join-Path $out $_) -Algorithm SHA256).Hash })
             if ($hashes[0] -eq $hashes[2]) { throw 'No pixel change after native OS search interaction' }
+            $relativeX = [int]$targetX - [int]$rect.Left
+            $relativeY = [int]$targetY - [int]$rect.Top
             [ordered]@{
               repo_head = (git rev-parse HEAD).Trim()
               binary_sha256 = $binaryHash
@@ -424,7 +426,7 @@ jobs:
               os_horizontal_wheel_injected = $true
               horizontal_code_pixels_changed = $codePixelsChanged
               win32_hwheel_delta = $wheelDirection
-              input_target_relative = @($targetX - $rect.Left, $targetY - $rect.Top)
+              input_target_relative = @($relativeX, $relativeY)
               fixed_code_header_pixels_changed = $headerPixelsChanged
               screenshot_region_scroll_witness = $true
               stable_code_frame_witness = $ready
