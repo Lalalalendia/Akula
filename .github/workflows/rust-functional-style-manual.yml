@@ -1,0 +1,33 @@
+name: Rust imperative vs functional style (manual research)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - name: Verify functionality
+        run: rustc --edition=2021 --test -O scripts/benchmarks/rust-functional-style/compare.rs -o /tmp/compare-tests && /tmp/compare-tests
+      - name: Build optimized benchmark
+        run: rustc --edition=2021 -C opt-level=3 -C target-cpu=x86-64 scripts/benchmarks/rust-functional-style/compare.rs -o /tmp/compare-styles
+      - name: Run A/B measurement
+        run: /tmp/compare-styles
+      - name: Capture environment
+        run: |
+          rustc -Vv | tee rust-functional-results/rustc.txt
+          lscpu | tee rust-functional-results/cpu.txt
+          sha256sum scripts/benchmarks/rust-functional-style/compare.rs | tee rust-functional-results/sha256.txt
+      - name: Upload logs and measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-functional-style
+          path: rust-functional-results/**
+          retention-days: 30
