@@ -5,15 +5,19 @@ use super::Symbol;
 
 pub(super) fn read_text(rest: &str) -> Result<(String, usize), String> {
     let inside = &rest[1..];
-    if let Some(end) = inside.find(['"', '\\']) {
-        if inside.as_bytes()[end] == b'"' {
-            // No escapes precede the quote: preserve the source byte offset.
-            return Ok((inside[..end].to_owned(), end + 2));
-        }
+    let Some(end) = inside.find(['"', '\\']) else {
+        return Err("Строка не закрыта кавычкой".to_owned());
+    };
+    if inside.as_bytes()[end] == b'"' {
+        // No escape before this quote: return the original UTF-8 byte length.
+        return Ok((inside[..end].to_owned(), end + 2));
     }
-    let mut value = String::new();
-    let mut length = 1;
-    let mut characters = inside.chars();
+
+    // Keep the prefix already scanned by find(): starting again at inside[0]
+    // regresses escaped strings by making two passes through that prefix.
+    let mut value = inside[..end].to_owned();
+    let mut length = end + 1;
+    let mut characters = inside[end..].chars();
     while let Some(symbol) = characters.next() {
         length += symbol.len_utf8();
         match symbol {
