@@ -221,7 +221,7 @@ fn benchmark_path_exact_identity() {
     let strip_normalized: Vec<_> = (0..256)
         .map(|i| std::path::PathBuf::from(format!("vault/Мои\u{306} план/{i:04}/Глава.md")))
         .collect();
-    let measure = |name: &str, mut test: Box<dyn FnMut() -> bool>| {
+    fn measure(name: &str, mut test: impl FnMut() -> bool) {
         let mut samples = Vec::new();
         for _ in 0..3 {
             black_box(test());
@@ -241,11 +241,11 @@ fn benchmark_path_exact_identity() {
         let p50 = (samples[7] + samples[8]) / 2.0;
         let p95 = samples[14];
         eprintln!("PATHS_ABBA case={name} samples=16 p50_ns_per_256={p50:.2} p95_ns_per_256={p95:.2}");
-    };
-    // Each sample is one batch of 256 comparisons; divide by that count.
-    measure("same_exact", Box::new(|| exact.iter().filter(|(a,b)| same_path(black_box(a), black_box(b))).count() == 256));
-    measure("same_nfc", Box::new(|| normalized.iter().filter(|(a,b)| same_path(black_box(a), black_box(b))).count() == 256));
-    measure("same_different", Box::new(|| different.iter().all(|(a,b)| !same_path(black_box(a), black_box(b)))));
-    measure("strip_exact", Box::new(|| strip_exact.iter().filter(|p| strip_root(black_box(root), black_box(p)).is_some()).count() == 256));
-    measure("strip_nfc", Box::new(|| strip_normalized.iter().filter(|p| strip_root(black_box(normalized_root), black_box(p)).is_some()).count() == 256));
+    }
+    // Each sample is one batch of 256 comparisons.
+    measure("same_exact", || exact.iter().filter(|(a,b)| same_path(black_box(a), black_box(b))).count() == 256)});
+    measure("same_nfc", || normalized.iter().filter(|(a,b)| same_path(black_box(a), black_box(b))).count() == 256)});
+    measure("same_different", || different.iter().all(|(a,b)| !same_path(black_box(a), black_box(b))))});
+    measure("strip_exact", || strip_exact.iter().filter(|p| strip_root(black_box(root), black_box(p)).is_some()).count() == 256)});
+    measure("strip_nfc", || strip_normalized.iter().filter(|p| strip_root(black_box(normalized_root), black_box(p)).is_some()).count() == 256)});
 }
