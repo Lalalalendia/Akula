@@ -12,7 +12,7 @@ use aquilum_core::files::structured::{StructuredDocument, StructuredError};
 use aquilum_core::files::structured::session::{CanvasSession, CanvasSessionError};
 use serde_json::{Value, json};
 
-const SPEC_CANVAS: &str = r#"{
+const SPEC_CANVAS: &str = r###"{
   "nodes": [
     {"id":"group","type":"group","x":-20,"y":-30,"width":700,"height":450,
       "label":"Research","background":"Pictures/map.svg","backgroundStyle":"ratio",
@@ -34,7 +34,7 @@ const SPEC_CANVAS: &str = r#"{
   ],
   "vendor":{"source":"synthetic","nested":{"v":4}},
   "unusedExtensions":[{"neverDiscard":true}]
-}"#;
+}"###;
 
 fn fixture() -> (tempfile::TempDir, PathBuf, Arc<Core>, Vec<u8>) {
     let dir = tempfile::tempdir().unwrap();
