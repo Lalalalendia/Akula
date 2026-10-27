@@ -4,7 +4,7 @@ use masonry::imaging::{BlurredRoundedRect, ClipRef, FillRef, GeometryRef, GlyphR
 use masonry::kurbo::{Affine, Rect, RoundedRect};
 use masonry::peniko::{BlendMode, BrushRef};
 
-use super::Tracker;
+use super::{overlap, Tracker};
 use super::hash::H;
 use super::stack::{clip_bounds, square};
 use crate::render::paint::convert;
@@ -46,16 +46,8 @@ impl PaintSink for Tracker {
     }
 
     fn fill(&mut self, draw: FillRef<'_>) {
-        if convert::invisible(&draw.brush, draw.composite) {
-            return;
-        }
+        if convert::invisible(&draw.brush, draw.composite) { return; }
         let level = self.top();
-        let mut h = H::new(1);
-        h.affine(Affine::translate((0.0, self.lift(level.region))) * draw.transform);
-        h.geometry(&draw.shape);
-        h.brush(&draw.brush, draw.brush_transform);
-        h.composite(draw.composite);
-        h.fill_rule(draw.fill_rule);
         let bounds = draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape));
         if let BrushRef::Image(image) = &draw.brush
             && let Some(color) = crate::render::sprite::color(image.image.data.id())
@@ -88,21 +80,27 @@ impl PaintSink for Tracker {
                 }
             }
         }
+        if !overlap(bounds, level.clip) { return; }
+        let mut h = H::new(1);
+        h.affine(Affine::translate((0.0, self.lift(level.region))) * draw.transform);
+        h.geometry(&draw.shape);
+        h.brush(&draw.brush, draw.brush_transform);
+        h.composite(draw.composite);
+        h.fill_rule(draw.fill_rule);
         self.add(h, bounds, steady, Self::solid_key(&draw));
     }
 
     fn stroke(&mut self, draw: StrokeRef<'_>) {
-        if convert::invisible(&draw.brush, draw.composite) {
-            return;
-        }
+        if convert::invisible(&draw.brush, draw.composite) { return; }
+        let w = draw.stroke.width.max(1.0) * draw.stroke.miter_limit.max(1.0);
+        let bounds = draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape).inflate(w, w));
+        if !overlap(bounds, self.top().clip) { return; }
         let mut h = H::new(2);
         h.affine(Affine::translate((0.0, self.lift(self.top().region))) * draw.transform);
         h.geometry(&draw.shape);
         h.brush(&draw.brush, draw.brush_transform);
         h.composite(draw.composite);
         h.stroke(draw.stroke);
-        let w = draw.stroke.width.max(1.0) * draw.stroke.miter_limit.max(1.0);
-        let bounds = draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape).inflate(w, w));
         let steady = if draw.stroke.dash_pattern.is_empty() { self.steady(&draw.shape, draw.transform, &draw.brush, w) } else { None };
         self.add(h, bounds, steady, None);
     }
@@ -112,6 +110,9 @@ impl PaintSink for Tracker {
     }
 
     fn blurred_rounded_rect(&mut self, draw: BlurredRoundedRect) {
+        let spread = draw.std_dev * 3.0;
+        let bounds = draw.transform.transform_rect_bbox(draw.rect.inflate(spread, spread));
+        if !overlap(bounds, self.top().clip) { return; }
         let mut h = H::new(4);
         h.affine(Affine::translate((0.0, self.lift(self.top().region))) * draw.transform);
         h.rect(draw.rect);
@@ -121,7 +122,6 @@ impl PaintSink for Tracker {
             h.0.write_u32(v.to_bits());
         }
         h.composite(draw.composite);
-        let spread = draw.std_dev * 3.0;
         let [_, skew_y, skew_x, scale_y, _, _] = draw.transform.as_coeffs();
         let steady = (skew_x == 0.0 && skew_y == 0.0 && scale_y > 0.0).then(|| {
             let inset = draw.radius + spread;
@@ -129,6 +129,6 @@ impl PaintSink for Tracker {
             let clip = self.top().clip;
             (band.y0.max(clip.y0).ceil(), band.y1.min(clip.y1).floor())
         });
-        self.add(h, draw.transform.transform_rect_bbox(draw.rect.inflate(spread, spread)), steady, None);
+        self.add(h, bounds, steady, None);
     }
 }
