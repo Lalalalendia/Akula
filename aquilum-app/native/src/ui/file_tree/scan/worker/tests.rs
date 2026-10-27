@@ -64,4 +64,3 @@ fn last_refresh_wins_after_files_change_during_a_burst() {
     assert!(refreshed.knows(&root.join("new_folder")));
     assert_eq!(refreshed.total(root), Counts::scan(root).total(root));
 }
-
