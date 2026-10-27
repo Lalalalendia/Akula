@@ -1,0 +1,71 @@
+name: Native shadow offscreen cull A/B
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/render/paint/sink/shadow_cull.rs'
+      - 'aquilum-app/native/src/render/paint/sink/shadow_cull/tests.rs'
+      - '.github/workflows/native-shadow-offscreen-ab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-shadow-offscreen-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Release offscreen shadow raster and parity ABBA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore shared main Rust cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Run exact pixel parity and filtered-group safety
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            conservative_cull_preserves_pixels_at_blur_and_viewport_boundaries \
+            -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            filtered_groups_are_not_culled_and_invalid_offscreen_shadows_still_error \
+            -- --nocapture --test-threads=1
+      - name: Measure legacy encoding vs offscreen cull on the same runner
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            benchmark_shadow_offscreen_cull_abba -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/shadow-offscreen-abba.log"
+          test "$(grep -c 'SHADOW_CULL_ABBA scene=' "$GITHUB_WORKSPACE/shadow-offscreen-abba.log")" -eq 8
+          test "$(grep -c 'SHADOW_CULL_ABBA scene=.*parity=PASS' "$GITHUB_WORKSPACE/shadow-offscreen-abba.log")" -eq 8
+          grep 'SHADOW_CULL_ABBA scene=' "$GITHUB_WORKSPACE/shadow-offscreen-abba.log" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload raw shadow-cull A/B log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-shadow-offscreen-ab-${{ github.sha }}
+          path: shadow-offscreen-abba.log
+          if-no-files-found: warn
+          retention-days: 14
