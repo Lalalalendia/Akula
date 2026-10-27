@@ -7,6 +7,7 @@ on:
       - 'scripts/benchmarks/native_windows_filetree_memory.py'
       - 'aquilum-app/native/src/ui/file_tree/scan/worker.rs'
       - 'aquilum-app/native/src/ui/file_tree/scan/worker/benchmark.rs'
+      - 'aquilum-app/native/src/ui/file_tree/scan/worker/tests.rs'
       - '.github/workflows/native-windows-filetree-memory.yml'
   workflow_dispatch:
 

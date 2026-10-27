@@ -1,7 +1,5 @@
-//! Masonry multi-filter groups on Vello CPU's single-primitive filter API.
-//! Vello's PreparedFilter explicitly panics if a graph has >1 primitive.
-//! Compose groups via nested filter layers, from outermost last filter to
-//! innermost first filter, so the original CSS-like filter order is retained.
+//! Encode multiple Masonry filters as nested Vello CPU layers.
+//! Preserve filter order and avoid the multi-primitive graph panic.
 
 use masonry::imaging::Filter;
 use masonry::kurbo::BezPath;
@@ -49,6 +47,7 @@ impl Painter {
             }
         }
         self.ctx.pop_layer();
+        self.filter_budget_stack.exit();
         Ok(())
     }
 }

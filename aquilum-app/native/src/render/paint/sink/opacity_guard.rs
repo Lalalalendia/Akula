@@ -1,13 +1,12 @@
-//! Validate opacity before Peniko's debug-asserting multiply_alpha().
-
+//! Validate brush inputs before Peniko/Vello alpha and gradient math.
 use masonry::peniko::BrushRef;
+mod gradient_guard;
 use super::PaintError;
 
 fn invalid() -> PaintError {
     PaintError::GeometryBudget("нечисловая или отрицательная прозрачность кисти/группы")
 }
 
-/// Preserve existing legal positive >1 factors; reject only unsupported values.
 pub(super) fn validate(alpha: f32) -> Result<(), PaintError> {
     if alpha.is_finite() && alpha >= 0.0 { Ok(()) } else { Err(invalid()) }
 }
@@ -16,6 +15,7 @@ pub(super) fn validate_draw(brush: &BrushRef<'_>, composite_alpha: f32) -> Resul
     validate(composite_alpha)?;
     match brush {
         BrushRef::Image(img) => validate(img.sampler.alpha),
+        BrushRef::Gradient(gradient) => gradient_guard::validate(gradient),
         BrushRef::Solid(color) if !color.components.iter().all(|c| c.is_finite()) => Err(invalid()),
         _ => Ok(()),
     }
