@@ -71,7 +71,7 @@ mod tests {
 
     fn fixture() -> (tempfile::TempDir, Vault) {
         let base = tempfile::tempdir().unwrap();
-        let root = fs::canonicalize(base.path()).unwrap();
+        let root = crate::search::paths::canonical_path(base.path());
         fs::create_dir(root.join("Раздел")).unwrap();
         fs::write(root.join("Раздел/Заметка.md"), "текст").unwrap();
         (base, Vault { root, visible: true })
