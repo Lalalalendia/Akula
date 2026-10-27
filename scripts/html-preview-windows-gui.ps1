@@ -165,7 +165,8 @@ try {
   if(!$ready){throw 'No native Akula window'}
   Write-Host 'AKULA_HTML_WINDOWS_WINDOW_PASS'
   Wait-UIA $proc 'AKULA_HTML_GUI_VISIBLE_813' 'AKULA_HTML_SCRIPT_FORBIDDEN_813' 'html-start'
-  Click-File $proc 'another.md'
+  # Markdown TreeItem is the file stem; non-Markdown attachments keep extensions.
+  Click-File $proc 'another'
   Wait-UIA $proc 'AKULA_MD_GUI_VISIBLE_813' 'AKULA_HTML_GUI_VISIBLE_813' 'markdown-switch'
   Click-File $proc 'article.html'
   Wait-UIA $proc 'AKULA_HTML_TEXT_SECOND_813' 'AKULA_HTML_SCRIPT_FORBIDDEN_813' 'html-return'
