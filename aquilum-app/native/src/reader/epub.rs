@@ -13,7 +13,6 @@ pub struct Epub {
     pub toc: Vec<TocEntry>,
 }
 
-
 fn descendants<'a>(dom: &'a Dom, root: NodeId, name: &'a str) -> impl Iterator<Item = NodeId> + 'a {
     let mut stack = vec![root];
     std::iter::from_fn(move || {
@@ -57,8 +56,9 @@ impl Epub {
                 (href, Cfi::Point(vec![element_path(&opf, itemref)]).to_string())
             })
             .collect::<Vec<_>>();
+        if !limits::valid_spine(&zip, &sections) { return None; }
         let toc = toc::parse(&zip, &opf, &opf_path, &sections);
-        limits::valid_spine(&zip, &sections).then_some(Epub { zip, sections, toc })
+        Some(Epub { zip, sections, toc })
     }
 
     pub fn size(&self, index: usize) -> usize {
