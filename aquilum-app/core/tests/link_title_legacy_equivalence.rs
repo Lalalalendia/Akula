@@ -147,3 +147,98 @@ fn large_html_preserves_title_after_half_megabyte_and_current_corner_cases() {
         assert_eq!(title::parse(fragment), old_parse(fragment), "{fragment}");
     }
 }
+
+#[test]
+#[ignore = "diagnostic-only paired benchmark; never an automatic merge gate"]
+fn benchmark_link_title_parse_abba() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    fn p(samples: &mut [u128], percentile: usize) -> u128 {
+        samples.sort_unstable();
+        let index = (samples.len() * percentile).div_ceil(100).saturating_sub(1);
+        samples[index]
+    }
+
+    let cases = [
+        (
+            "short",
+            "<html><head><TiTlE>One &amp; Two</TITLE></head></html>".to_owned(),
+            2_000,
+        ),
+        (
+            "large_tail",
+            format!("{}<TiTlE lang='ru'>Акула &amp; 海</tItLe>", "x".repeat(512 * 1024)),
+            300,
+        ),
+        (
+            "many_tags",
+            format!(
+                "{}<TITLE lang='ja'>Акула &amp; 海</title>",
+                "<div>unicode 海 test</div>".repeat(8192)
+            ),
+            300,
+        ),
+    ];
+    for (name, html, rounds) in cases {
+        assert_eq!(old_parse(&html), title::parse(&html));
+        let (mut old, mut new) = (Vec::with_capacity(rounds), Vec::with_capacity(rounds));
+        let measure_old = || {
+            let start = Instant::now();
+            black_box(old_parse(black_box(html.as_str())));
+            start.elapsed().as_nanos()
+        };
+        let measure_new = || {
+            let start = Instant::now();
+            black_box(title::parse(black_box(html.as_str())));
+            start.elapsed().as_nanos()
+        };
+        for i in 0..rounds {
+            if i % 2 == 0 {
+                old.push(measure_old());
+                new.push(measure_new());
+            } else {
+                new.push(measure_new());
+                old.push(measure_old());
+            }
+        }
+        let (old_p50, new_p50) = (p(&mut old, 50), p(&mut new, 50));
+        let (old_p95, new_p95) = (p(&mut old, 95), p(&mut new, 95));
+        println!(
+            "BENCH-LINK-TITLE case={name} bytes={} rounds={rounds} old_p50_ns={old_p50} new_p50_ns={new_p50} old_p95_ns={old_p95} new_p95_ns={new_p95} ratio_p50={:.3} parity=PASS",
+            html.len(),
+            new_p50 as f64 / old_p50.max(1) as f64
+        );
+    }
+
+    let encoded = "&AMP;&nbsp;&laquo;&raquo;&#39;&mdash;".repeat(4096);
+    assert_eq!(old_decode(&encoded), entities::decode(&encoded));
+    let rounds = 300;
+    let (mut old, mut new) = (Vec::with_capacity(rounds), Vec::with_capacity(rounds));
+    for i in 0..rounds {
+        let legacy = || {
+            let start = Instant::now();
+            black_box(old_decode(black_box(encoded.as_str())));
+            start.elapsed().as_nanos()
+        };
+        let candidate = || {
+            let start = Instant::now();
+            black_box(entities::decode(black_box(encoded.as_str())));
+            start.elapsed().as_nanos()
+        };
+        if i % 2 == 0 {
+            old.push(legacy());
+            new.push(candidate());
+        } else {
+            new.push(candidate());
+            old.push(legacy());
+        }
+    }
+    let (old_p50, new_p50) = (p(&mut old, 50), p(&mut new, 50));
+    let (old_p95, new_p95) = (p(&mut old, 95), p(&mut new, 95));
+    println!(
+        "BENCH-LINK-TITLE case=entities bytes={} rounds={rounds} old_p50_ns={old_p50} new_p50_ns={new_p50} old_p95_ns={old_p95} new_p95_ns={new_p95} ratio_p50={:.3} parity=PASS",
+        encoded.len(),
+        new_p50 as f64 / old_p50.max(1) as f64
+    );
+}
