@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-
 use super::cfi::{Cfi, element_path};
 use super::dom::{Dom, NodeId};
 use super::text::{decode, numeric_entities, parse_xml};
 use super::zip::Zip;
+mod aggregate;
 mod limits;
 mod toc;
 pub(crate) use toc::Entry as TocEntry;
