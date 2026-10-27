@@ -7,6 +7,7 @@ on:
       - 'aquilum-app/native/src/ui/file_tree/model/load/html.rs'
       - 'aquilum-app/native/tests/fixtures/html/**'
       - 'aquilum-app/Cargo.lock'
+      - 'scripts/html-preview-windows-gui.ps1'
       - '.github/workflows/native-html-preview.yml'
   workflow_dispatch:
 
@@ -48,3 +49,37 @@ jobs:
           git diff --no-ext-diff --unified=3 -- Cargo.lock
           echo 'AKULA_HTML_LOCK_DIFF_END'
           echo "AKULA_HTML_LOCK_BLOB_SHA=$(git hash-object Cargo.lock)"
+
+  windows-gui:
+    name: Windows native HTML and Markdown real UIA smoke (test only)
+    runs-on: windows-2022
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: html-gui-windows
+          cache-on-failure: true
+      - name: Build actual native GUI with opt-in HTML (never released)
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}\.artifacts\cargo-native
+        run: |
+          cargo build --release --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed,html-preview
+          if ($LASTEXITCODE -ne 0) { throw 'Native HTML GUI build failed' }
+          if (!(Test-Path '.artifacts\cargo-native\release\aquilum-native.exe')) { throw 'Native exe missing' }
+      - name: Open HTML and Markdown through real Windows UI, verify source hash
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts/html-preview-windows-gui.ps1 -ExePath '.artifacts\cargo-native\release\aquilum-native.exe' -OutputDir 'html-windows-shots'
+          if ($LASTEXITCODE -ne 0) { throw 'HTML Windows UIA test failed' }
+      - name: Preserve screenshots and accessibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-gui-windows-${{ github.sha }}
+          path: html-windows-shots/
+          if-no-files-found: warn
+          retention-days: 14
