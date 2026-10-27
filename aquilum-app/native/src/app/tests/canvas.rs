@@ -287,3 +287,71 @@ fn canvas_delete_on_external_conflict_preserves_file_and_local_undo_history() {
     assert!(!h.app.canvas_dirty_active());
     assert_eq!(fs::read_to_string(&board).unwrap(), external);
 }
+
+#[test]
+fn canvas_pointer_resize_then_undo_redo_persists_file_gate_revision() {
+    let mut h = Harness::new();
+    let board = h.vault.path().join("resizable.canvas");
+    let raw = r#"{"nodes":[{"id":"a","type":"text","x":20,"y":30,"width":190,"height":100,"text":"Resize me","vendor":{"keep":true}}],"edges":[],"plugin":{"root":"keep"}}"#;
+    fs::write(&board, raw).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+    let initial = canvas_disk(&board);
+    let at = canvas_card(&h, "a");
+    h.click(at.0, at.1);
+    let grip = canvas_local_point(&h, |view| view.resize_handle_center().expect("selected grip"));
+    canvas_drag(&mut h, grip, (grip.0 + 80.0, grip.1 + 55.0));
+    let resized = canvas_disk(&board);
+    assert!(resized["nodes"][0]["width"].as_i64().unwrap() > 190);
+    assert!(resized["nodes"][0]["height"].as_i64().unwrap() > 100);
+    assert_eq!(resized["nodes"][0]["x"], initial["nodes"][0]["x"]);
+    assert_eq!(resized["nodes"][0]["vendor"]["keep"], true);
+    assert_eq!(resized["plugin"]["root"], "keep");
+    assert!(!h.app.canvas_dirty_active(), "resize should save through File Gate");
+    canvas_control(&mut h, 1);
+    assert_eq!(canvas_disk(&board), initial);
+    canvas_control(&mut h, 2);
+    assert_eq!(canvas_disk(&board), resized);
+    assert!(h.app.open(&mut h.root, h.vault.path().join("a.md")));
+    assert!(h.app.open(&mut h.root, board.clone()));
+    assert_eq!(canvas_disk(&board), resized);
+}
+
+#[test]
+fn canvas_pointer_resize_conflict_blocks_save_and_tab_close() {
+    let mut h = Harness::new();
+    let board = h.vault.path().join("resize-conflict.canvas");
+    fs::write(&board, r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":200,"height":100,"text":"original"}]}"#).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+    let at = canvas_card(&h, "a");
+    h.click(at.0, at.1);
+    let grip = canvas_local_point(&h, |view| view.resize_handle_center().expect("resize grip"));
+    let external = r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":200,"height":100,"text":"external"}],"external":true}"#;
+    fs::write(&board, external).unwrap();
+    canvas_drag(&mut h, grip, (grip.0 + 65.0, grip.1 + 45.0));
+    assert!(h.app.canvas_dirty_active(), "external write must block File Gate");
+    assert_eq!(fs::read_to_string(&board).unwrap(), external);
+    let active = h.app.tabs.active_id();
+    h.app.close_active_tab(&mut h.root);
+    assert_eq!(h.app.tabs.active_id(), active);
+    canvas_control(&mut h, 1);
+    assert!(!h.app.canvas_dirty_active());
+    assert_eq!(fs::read_to_string(&board).unwrap(), external);
+}
+
+#[test]
+fn canvas_resize_grip_click_never_changes_small_readable_legacy_card() {
+    let mut h = Harness::new();
+    let board = h.vault.path().join("small-legacy.canvas");
+    let raw = r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":24,"height":20,"text":"tiny but readable"}],"thirdParty":{"preserve":true}}"#;
+    fs::write(&board, raw).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+    let at = canvas_card(&h, "a");
+    h.click(at.0, at.1);
+    let grip = canvas_local_point(&h, |view| view.resize_handle_center().expect("resize grip"));
+    h.click(grip.0, grip.1);
+    assert_eq!(fs::read_to_string(&board).unwrap(), raw, "click is not a resizing edit");
+    assert!(!h.app.canvas_dirty_active());
+}

@@ -2,6 +2,7 @@
 mod model;
 mod interaction;
 mod selection;
+mod resize;
 #[cfg(test)]
 mod scene_tests;
 use model::{Board, Card, Connection, Kind, Side};
@@ -248,7 +249,7 @@ impl Widget for CanvasPage {
         );
         let shaped = self.status.layout(ctx, &status, (viewport.width() - 28.0).max(1.0), Style::ui(20.0));
         render_text(painter, Affine::translate((14.0, 12.0)), shaped, &[tm.text_secondary.into()], true);
-        if self.editable { self.paint_controls(ctx, painter); }
+        if self.editable { self.paint_resize_handle(painter); self.paint_controls(ctx, painter); }
     }
 
     fn accessibility_role(&self) -> Role { Role::Canvas }
@@ -262,7 +263,6 @@ impl Widget for CanvasPage {
 mod tests {
     use super::*;
     use serde_json::json;
-
     fn page() -> CanvasPage {
         let board = Board::from_json(&json!({
             "nodes": [{"id":"a","type":"text","text":"hello",
