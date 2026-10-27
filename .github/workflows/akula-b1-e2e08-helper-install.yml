@@ -1,0 +1,113 @@
+name: Akula B1-E2E-08 signed helper file install HOLD
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/server_root_v3_trust/helper_install.rs'
+      - 'aquilum-app/core/src/server_root_v3_trust/helper_install/**'
+      - 'aquilum-app/core/src/bin/akula_root_helper_publish_lab.rs'
+      - 'aquilum-app/core/Cargo.toml'
+      - '.github/workflows/akula-b1-e2e08-helper-install.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fixed-helper-install-hold:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app
+      - name: Check only touched helper installation Rust sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check \
+            aquilum-app/core/src/server_root_v3_trust/helper_install.rs \
+            aquilum-app/core/src/server_root_v3_trust/helper_install/tests.rs \
+            aquilum-app/core/src/bin/akula_root_helper_publish_lab.rs
+      - name: Unmodified default Core never acquires helper install feature
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core
+      - name: Build exactly one test binary as nonroot
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab --lib \
+            --no-run --message-format=json |
+            jq -r 'select(.reason == "compiler-artifact" and .target.name == "aquilum_core") | .executable // empty' |
+            tail -n 1 > "$RUNNER_TEMP/b1-e2e08-test-binary"
+          test -s "$RUNNER_TEMP/b1-e2e08-test-binary"
+          test -x "$(cat "$RUNNER_TEMP/b1-e2e08-test-binary")"
+      - name: Deny nonroot and prove root-owned disposable-only signed copy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_bin="$(cat "$RUNNER_TEMP/b1-e2e08-test-binary")"
+          "$test_bin" server_root_v3_trust::helper_install::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::helper_install::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::bootstrap_helper::tests --nocapture
+      - name: Prove no runtime installation command or service activation
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The helper's shipping entry accepts only fd0 owner PREVIEW.
+          # It must still deny --install and every other CLI command.
+          cargo build --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab \
+            --bin akula-root-b1d0-helper
+          binary=aquilum-app/target/debug/akula-root-b1d0-helper
+          set +e
+          output="$("$binary" --install 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          test "$output" = "AKULA_B1D0_ROOT_HELPER_HOLD"
+      - name: Verify explicit administrative publisher refuses without enrolled root trust
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab \
+            --bin akula-root-helper-publish-lab
+          admin=aquilum-app/target/debug/akula-root-helper-publish-lab
+          test -x "$admin"
+          # A CI host must have no independently provisioned production trust.
+          test ! -e /var/lib/akula/server-bootstrap/trust/b0v3.enrollment
+          set +e
+          output="$("$admin" 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          test "$output" = "AKULA_B1D0_ADMIN_HELPER_PUBLICATION_REFUSED"
+          # Even UID0 cannot turn argv into an install or arbitrary path.
+          set +e
+          output="$(sudo -n -- "$admin" --install 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          test "$output" = "AKULA_B1D0_ADMIN_HELPER_PUBLICATION_REFUSED"
+          # Root without independent policy + signed helper also refuses.
+          set +e
+          output="$(sudo -n -- "$admin" 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          test "$output" = "AKULA_B1D0_ADMIN_HELPER_PUBLICATION_REFUSED"
+          test ! -e /usr/libexec/akula/akula-root-b1d0-helper

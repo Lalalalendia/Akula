@@ -14,7 +14,15 @@ resolver = "3"
 [features]
 default = []
 # Isolated, default-off live Iroh Connection -> fresh Windows peer-pin check.
-p2p-live-identity = ["aquilum-core/p2p-device-identity"]
+p2p-live-identity = ["aquilum-core/p2p-device-identity", "aquilum-core/device-roster-lab"]
+# Optional lab-only verified Node replica transfer via Staya.
+node-replica-transport-lab = ["aquilum-core/node-replica-auth-lab"]
+# Identity/grant join, never an OS authority or public listener.
+node-live-read-lab = ["node-replica-transport-lab", "aquilum-core/device-roster-lab"]
+node-v1-e2e-tests = ["node-v1-runtime", "aquilum-core/node-v1-transport-tests"]
+# Current protected Node witness and SQLite replay fence, not a public listener.
+node-v1-runtime = ["node-live-read-lab", "aquilum-core/node-v1", "dep:tokio", "dep:ring", "dep:serde", "dep:serde_json", "dep:rustix"]
+
 # Non-shipping one-shot Akula consent to Staya local test-operator handoff.
 sender-arm-lab = []
 # Explicit Windows two-PC OS-backed QUIC HELLO/OK. Never sends user bytes.
@@ -25,14 +33,25 @@ name = "akula-p2p-lan"
 path = "src/bin/lan_probe.rs"
 required-features = ["os-pinned-lan-probe"]
 
+[[bin]]
+name = "akula-node-v1-service"
+path = "src/bin/akula_node_v1_service.rs"
+required-features = ["node-v1-runtime"]
+
 [dependencies]
 aquilum-core = { path = "../../aquilum-app/core", features = ["p2p-inbox-lab"] }
 staya-transfer = { git = "https://github.com/Lalalalendia/staya-transfer", rev = "ccfe82dc6125e2810e95043a6a4ac55954b710e0", default-features = false }
 blake3 = "=1.8.5"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+ring = { version = "=0.17.14", optional = true }
+rustix = { version = "=0.38.44", features = ["fs", "process"], optional = true }
 iroh = "=1.3.0"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"], optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "signal"], optional = true }
 postcard = { version = "=1.1.3", features = ["use-std"] }
 uuid = { version = "=1.23.5", features = ["v4"] }
 
 [dev-dependencies]
+tempfile = "3"
+ring = "0.17.14"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

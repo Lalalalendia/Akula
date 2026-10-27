@@ -221,6 +221,17 @@ if ($LASTEXITCODE -ne 0) {
   throw "Installed Akula Windows UIA acceptance failed: PowerShell exit $LASTEXITCODE"
 }
 
+# Installed real Windows PDF pointer path; separate from native Rust harness.
+$canvasScript = Join-Path $PSScriptRoot 'windows-canvas-installed-uia.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $canvasScript -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula Canvas UIA smoke failed: PowerShell exit $LASTEXITCODE" }
+
+$pdfPointerScript = Join-Path $PSScriptRoot 'windows-pdf-os-pointer.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula PDF OS-pointer acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+
 & $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-dot-folder-uia.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData; if ($LASTEXITCODE -ne 0) { throw "Installed Akula dot-folder UIA failed: PowerShell exit $LASTEXITCODE" }; Start-And-Close -EditNote
 $state = Join-Path $akulaData 'window-state.json'
 if (!(Test-Path $state)) { throw 'Akula window state not persisted to its own AppData' }
@@ -239,6 +250,17 @@ $clipboardSentinel = 'AKULA_CLIPBOARD_POISON_' + [Guid]::NewGuid().ToString('N')
 Set-Clipboard -Value $clipboardSentinel -ErrorAction Stop
 Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
+Assert-LegacyUntouched
+
+# Installed NSIS + foreground OS keyboard regression for the 30k and 100k
+# whole-note replacement path. Test-only vault, never developer/user files.
+. (Join-Path $PSScriptRoot 'windows-beta-replace-all.ps1')
+foreach ($lines in @(30000,100000)) {
+  Test-AkulaBetaReplaceAll -Executable $exe -Vault $vault -DataDir $akulaData -LineCount $lines
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'Large-document acceptance changed the original smoke-test note'
+}
 Assert-LegacyUntouched
 
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'

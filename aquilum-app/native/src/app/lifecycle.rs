@@ -1,5 +1,6 @@
 use super::*;
 mod tick;
+
 impl App {
     pub fn title(&self) -> String {
         let product = if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" };
@@ -23,8 +24,7 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
-        self.flush_canvas_on_shutdown();
-        self.flush_view();
+        self.flush_canvas_on_shutdown(); self.flush_view();
         match &mut self.note {
             Some(note) => note.flush(&self.workspace.core, &self.text),
             None => crate::disk::wait(),

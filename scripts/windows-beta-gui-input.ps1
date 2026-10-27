@@ -223,6 +223,7 @@ function Send-AkulaBetaShortcut {
     }
   }
   if (!$focused) { throw 'Cannot focus reopened Akula before native Ctrl shortcut' }
-  $key = if ($Action -eq 'SelectAll') { [ushort]0x41 } else { [ushort]0x43 }
+  # Windows PowerShell has no [ushort] type accelerator; the Win32 helper expects UInt16.
+  $key = if ($Action -eq 'SelectAll') { [uint16]0x41 } else { [uint16]0x43 }
   [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $Process.Id, $key)
 }

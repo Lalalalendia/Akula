@@ -1,12 +1,14 @@
 pub(super) mod convert;
 mod cull;
 mod error;
+mod filter_chain;
+mod filter_budget;
+mod filter_route;
 mod mask;
 #[cfg(any(test, not(feature = "installed")))]
 mod mipmap;
 mod runs;
 mod sink;
-
 use std::collections::VecDeque;
 
 use masonry::kurbo::{Affine, Rect};
@@ -21,7 +23,6 @@ pub fn settings(threads: u16) -> RenderSettings {
     let level = level.as_sse4_2().map_or(level, vello_cpu::Level::Sse4_2);
     RenderSettings { num_threads: threads, level }
 }
-
 const TOLERANCE: f64 = 0.1;
 
 pub struct Painter {
@@ -30,7 +31,8 @@ pub struct Painter {
     pub(super) settings: RenderSettings,
     pub(super) error: Option<PaintError>,
     pub(super) clip_depth: u32,
-    pub(super) groups: Vec<bool>,
+    pub(super) groups: Vec<usize>,
+    pub(super) filter_budget_stack: filter_budget::FilterBudgetStack,
     pub(super) mask_cache: VecDeque<CachedMask>,
     pub(super) frame: Rect,
     pub(super) shift: Affine,
@@ -38,8 +40,7 @@ pub struct Painter {
     pub(super) culled: u32,
     pub(super) seconds: f64,
     pub(super) regions: Vec<Rect>,
-    /// Optional persistent zero-worker Vello context sharing Resources with the
-    /// parallel renderer. Allocated only when the experimental route is enabled.
+    /// Optional zero-worker context, allocated only for the experimental route.
     serial_ctx: Option<RenderContext>,
     serial_active: bool,
     serial_limit_px: Option<u64>,
@@ -61,6 +62,7 @@ impl Painter {
             error: None,
             clip_depth: 0,
             groups: Vec::new(),
+            filter_budget_stack: Default::default(),
             mask_cache: VecDeque::new(),
             frame: Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
             shift: Affine::IDENTITY,
@@ -89,6 +91,7 @@ impl Painter {
         self.resources = Resources::new();
         self.images = convert::Images::default();
         self.mask_cache = VecDeque::new();
+        self.filter_budget_stack.clear();
     }
 
     pub fn width(&self) -> u16 {
@@ -99,9 +102,7 @@ impl Painter {
         self.ctx.height()
     }
 
-    /// Experimental opt-in: retain one serial context next to the existing
-    /// parallel context. Both use the same glyph/image Resources; do not create
-    /// Rayon pools or caches while switching frames. Does nothing for 0 workers.
+    /// Experimental serial route shares Resources with the parallel renderer.
     pub(crate) fn enable_serial_for_single_damage(&mut self, max_serial_pixels: u64) {
         if self.settings.num_threads == 0 || max_serial_pixels == 0 {
             return;
@@ -116,28 +117,6 @@ impl Painter {
         #[cfg(test)]
         {
             self.test_route_switches = 0;
-        }
-    }
-
-    /// Route once for the ENTIRE frame, before encoding its first dirty region.
-    /// Never route fragmented or empty damage to serial even if each individual
-    /// rectangle is small: that case was falsified by Akula #173/#187.
-    pub(crate) fn route_for_damage(&mut self, areas: &[(u16, u16, u16, u16)]) {
-        let Some(limit) = self.serial_limit_px else { return };
-        let use_serial = match areas {
-            &[(_, _, w, h)] if w > 0 && h > 0 => u64::from(w) * u64::from(h) <= limit,
-            _ => false,
-        };
-        if use_serial != self.serial_active {
-            // The previous frame called finish() before rasterizing. Each
-            // context retains its own dispatcher and allocations when inactive.
-            let alternate = self.serial_ctx.as_mut().expect("serial companion context");
-            std::mem::swap(&mut self.ctx, alternate);
-            self.serial_active = use_serial;
-            #[cfg(test)]
-            {
-                self.test_route_switches += 1;
-            }
         }
     }
 
@@ -170,6 +149,7 @@ impl Painter {
         self.error = None;
         self.clip_depth = 0;
         self.groups.clear();
+        self.filter_budget_stack.clear();
         self.culled = 0;
     }
 

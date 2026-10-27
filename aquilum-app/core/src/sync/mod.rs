@@ -3,7 +3,6 @@
 mod core_scan;
 mod dag;
 mod delta;
-// Experimental and opt-in versioned codec; never an S3 writer or File Gate.
 #[cfg(feature = "sync-text-delta")]
 pub(crate) mod text_delta_codec;
 mod download;
@@ -13,7 +12,6 @@ mod fake_vault;
 mod host_admission;
 mod filegate_lock_custody;
 mod filegate_custody_identity;
-// Host custody epoch is S3-independent; legacy unhosted Core::open is blocked.
 #[cfg(feature = "host-custody")]
 mod host_ledger_identity;
 #[cfg(feature = "host-custody")]
@@ -46,11 +44,15 @@ mod native_windows_replace_probe;
 mod local_recovery;
 mod recovery_review;
 pub mod sealed_archive;
-#[cfg(feature = "sync-s3")]
+#[cfg(feature = "sync-s3-invite")]
+mod s3_pair_connection;
+#[cfg(feature = "sync-s3-invite")]
+pub use s3_pair_connection::{S3ConnectionProfile, S3TransportError};
+#[cfg(feature = "sync-s3-invite")]
 pub mod s3_pair_invite;
 #[cfg(feature = "sync-s3")]
 pub mod s3_pair_bootstrap;
-#[cfg(feature = "sync-s3")]
+#[cfg(feature = "sync-s3-invite")]
 pub mod s3_pair_profile;
 #[cfg(feature = "sync-s3")]
 pub mod s3_pair_host;
@@ -76,8 +78,8 @@ mod pinned_windows;
 mod protocol;
 mod provider;
 mod s3;
-mod s3_manifest;
-mod s3_pack_index;
+#[cfg(any(feature = "sync-s3", feature = "sync-s3-pack-lab"))] #[path = "s3_transport/pack_probe.rs"] mod s3_pack_probe;
+mod s3_manifest; mod s3_pack_index;
 mod s3_manifest_delta;
 mod s3_coord_v2;
 #[cfg(feature = "sync-s3")]
@@ -177,9 +179,9 @@ pub use s3_head_probe::{
 pub use yandex_readonly_probe::{probe_yandex_s3_read_only, YandexS3ProbeError};
 #[cfg(feature = "sync-s3")]
 pub use s3_transport::{
-    AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage, S3PairAccess,
+    AwsS3ProbeClient, S3BoundedObject, S3DiagnosticPage, S3PairAccess,
     S3AwsAccountProofError, S3AwsVerifiedAccountScope,
-    S3ObservedObject, S3PutCondition, S3TransportError,
+    S3ObservedObject, S3PutCondition,
     S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
     S3MultipartPhase, S3MultipartStatus, S3StreamDigest,
     S3HeadAttemptPhase, S3HeadError, S3HeadJournal, S3HeadPublication, S3VerifiedHead,
@@ -198,12 +200,10 @@ pub use vault::{
     LocalFileEntry, LocalFileSnapshot, PreservationReceipt, VaultFileKind, VaultPort,
     VaultPortError,
 };
-
 /// No sync scheduler or external I/O is started by importing these contracts.
 pub const SYNC_ENGINE_FEATURE_ENABLED: bool = cfg!(feature = "sync-engine");
 /// Local custody checks can compile without an S3 SDK or sync scheduler.
 pub const HOST_CUSTODY_FEATURE_ENABLED: bool = cfg!(feature = "host-custody");
-
 #[cfg(all(test, not(feature = "sync-engine")))]
 mod disabled_tests {
     #[test]

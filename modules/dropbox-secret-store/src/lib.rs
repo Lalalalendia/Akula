@@ -4,7 +4,7 @@
 //! fallback in production. Missing OS secret service always fails closed.
 //! This crate has no network calls and no File Gate or Sync Core authority.
 
-use sha2::{Digest, Sha256};
+pub mod account; use sha2::{Digest, Sha256};
 use std::fmt;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;

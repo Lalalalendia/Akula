@@ -183,6 +183,7 @@ test('specialized PR CI isolates obsolete PR runs and preserves manual jobs',()=
     'core-server-bootstrap-b1b4a-cas-fence.yml',
     'core-server-bootstrap-b1b4b-os-witness.yml',
     'core-server-bootstrap-b1c0-fixed-node.yml',
+    'core-server-bootstrap-b1d0-windows-setup.yml',
     'core-node-d1-loopback.yml',
     'core-node-d15-catalog.yml',
     'core-headless-smoke.yml',

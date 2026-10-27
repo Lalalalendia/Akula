@@ -236,3 +236,18 @@ test('Windows beta NSIS apply only accepts signed typed candidate and remains ga
   assert.match(release, /pub\(super\) const PUBLIC_KEY: &str = "[^"]*"/);
   assert.match(release, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(target_os = "windows", feature = "installed"\)\)\s*\}/);
 });
+
+test('installed large-note replacement uses an isolated, PID-bound Win32 shortcut helper', () => {
+  const proof = read('scripts/windows-beta-replace-all.ps1');
+  assert.match(script, /Test-AkulaBetaReplaceAll -Executable \$exe -Vault \$vault -DataDir \$akulaData -LineCount \$lines/);
+  assert.match(proof, /RUNNER_ENVIRONMENT -ne 'github-hosted'/);
+  assert.match(proof, /MainWindowTitle -notlike 'Large paste proof\*'/);
+  assert.match(proof, /GetWindowThreadProcessId/);
+  assert.match(proof, /GetForegroundWindow/);
+  assert.match(proof, /Only synthetic SelectAll\/Copy\/Paste\/Undo\/Redo shortcuts are permitted/);
+  assert.match(proof, /AKULA_WINDOWS_REPLACE_ALL_PASS lines=\$LineCount/);
+  assert.match(proof, /Ctrl\+Y redo paste/);
+  assert.match(proof, /Ctrl\+Y then Ctrl\+Z did not recover exact original source bytes/);
+  assert.doesNotMatch(guiInput, /ValidateSet\('SelectAll', 'Copy', 'Paste'/,
+    'production readback helper must never gain destructive shortcuts');
+});

@@ -1,10 +1,8 @@
-use std::collections::HashMap;
+use std::collections::HashMap; mod limited;
 use std::io::Read;
-
 const END: u32 = 0x0605_4b50;
 const CENTRAL: u32 = 0x0201_4b50;
 const LOCAL: u32 = 0x0403_4b50;
-
 struct Entry {
     method: u16,
     compressed: usize,

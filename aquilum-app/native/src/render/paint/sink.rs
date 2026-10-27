@@ -1,5 +1,4 @@
 //! Реализация трейта `PaintSink` для `Painter`.
-
 use masonry::imaging::{
     BlurredRoundedRect, ClipRef, FillRef, GeometryRef, GlyphRunRef, GroupRef, PaintSink, StrokeRef,
 };
@@ -7,16 +6,17 @@ use masonry::imaging::record::Glyph as SceneGlyph;
 use masonry::kurbo::{Affine, Shape as _};
 use masonry::peniko::{BlendMode, BrushRef};
 
-use super::{Painter, TOLERANCE};
-use super::convert;
-use super::error::PaintError;
-use super::mask;
-
+use super::{convert, error::PaintError, mask, Painter, TOLERANCE};
+mod path_guard;
+mod shadow_guard;
+mod opacity_guard;
+mod image_guard;
+mod brush_transform;
 impl PaintSink for Painter {
     fn push_clip(&mut self, clip: ClipRef<'_>) {
-        if self.error.is_some() || self.cull(&clip) {
-            return;
-        }
+        if self.error.is_some() { return; }
+        if let Err(err) = self.guard_clip(&clip) { self.set_error_once(err); return; }
+        if self.cull(&clip) { return; }
         if let ClipRef::Fill { transform, shape: GeometryRef::Rect(rect), fill_rule } = clip {
             let window = transform.transform_rect_bbox(rect);
             let [_, skew_y, skew_x, _, _, _] = transform.as_coeffs();
@@ -40,7 +40,6 @@ impl PaintSink for Painter {
         }
         self.clip_depth += 1;
     }
-
     fn pop_clip(&mut self) {
         if self.error.is_some() || self.uncull() {
             return;
@@ -52,8 +51,9 @@ impl PaintSink for Painter {
         self.ctx.pop_clip();
         self.clip_depth -= 1;
     }
-
     fn push_group(&mut self, group: GroupRef<'_>) {
+        if let Err(err) = opacity_guard::validate(group.composite.alpha) { self.set_error_once(err); return; }
+        if let Some(clip) = group.clip.as_ref() { if let Err(err) = self.guard_clip(clip) { self.set_error_once(err); return; } }
         if self.error.is_some() || (self.culled > 0 || group.composite.alpha <= 0.0) && self.cull_inside() || group.clip.as_ref().is_some_and(|clip| self.cull(clip)) {
             return;
         }
@@ -66,6 +66,7 @@ impl PaintSink for Painter {
             }
         };
         self.set_transform(clip_transform);
+        if let Err(err) = self.check_filter_budget(group.filters) { self.set_error_once(err); return; }
         let blend: Option<BlendMode> = Some(group.composite.blend);
         let opacity = Some(group.composite.alpha);
         let (width, height) = (self.width(), self.height());
@@ -82,18 +83,15 @@ impl PaintSink for Painter {
                 ) {
                     Ok(m) => Some(m),
                     Err(err) => {
-                        self.set_error_once(err);
-                        None
+                        self.filter_budget_stack.exit(); self.set_error_once(err);
+                        return;
                     }
                 }
             }
             None => None,
         };
-        let filter = convert::filters_to_vello(group.filters);
-        self.ctx.push_layer(clip_path.as_ref(), blend, opacity, mask, filter);
-        self.groups.push(!group.filters.is_empty());
+        self.push_filter_chain(clip_path.as_ref(), blend, opacity, mask, group.filters);
     }
-
     fn pop_group(&mut self) {
         if self.uncull() {
             return;
@@ -101,19 +99,11 @@ impl PaintSink for Painter {
         if self.error.is_some() {
             return;
         }
-        if self.groups.pop().is_none() {
-            self.set_error_once(PaintError::Unbalanced("pop_group без push_group"));
-            return;
+        if let Err(err) = self.pop_filter_chain() {
+            self.set_error_once(err);
         }
-        self.ctx.pop_layer();
     }
-
     fn fill(&mut self, draw: FillRef<'_>) {
-        // IMG-PERF-08 developer-only provenance between the actual editor
-        // ImageBrush ID and Akula's CPU painter scene-culling boundary.
-        // A MediaView::paint call alone is not proof its image fill survived
-        // ancestor clips, region culling and sprite handling. Log at most
-        // one record per (brush ID, offscreen state, sprite state).
         #[cfg(not(feature = "installed"))]
         {
             static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -142,6 +132,10 @@ impl PaintSink for Painter {
                 }
             }
         }
+        if let Err(err) = self.guard_geometry(&draw.shape, draw.transform) { self.set_error_once(err); return; }
+        if let Err(err) = brush_transform::validate(self.shift * draw.transform, draw.brush_transform) { self.set_error_once(err); return; }
+        if let Err(err) = opacity_guard::validate_draw(&draw.brush, draw.composite.alpha) { self.set_error_once(err); return; }
+        if let Err(err) = image_guard::validate(&draw.brush) { self.set_error_once(err); return; }
         if self.error.is_some() || convert::invisible(&draw.brush, draw.composite) || self.offscreen(draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape))) {
             return;
         }
@@ -178,8 +172,11 @@ impl PaintSink for Painter {
             GeometryRef::OwnedPath(p) => self.ctx.fill_path(&p),
         }
     }
-
     fn stroke(&mut self, draw: StrokeRef<'_>) {
+        if let Err(err) = self.guard_stroke(&draw.shape, draw.transform, &draw.stroke) { self.set_error_once(err); return; }
+        if let Err(err) = brush_transform::validate(self.shift * draw.transform, draw.brush_transform) { self.set_error_once(err); return; }
+        if let Err(err) = opacity_guard::validate_draw(&draw.brush, draw.composite.alpha) { self.set_error_once(err); return; }
+        if let Err(err) = image_guard::validate(&draw.brush) { self.set_error_once(err); return; }
         let w = draw.stroke.width.max(1.0) * draw.stroke.miter_limit.max(1.0);
         if self.error.is_some() || convert::invisible(&draw.brush, draw.composite) || self.offscreen(draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape).inflate(w, w))) {
             return;
@@ -197,22 +194,20 @@ impl PaintSink for Painter {
             GeometryRef::OwnedPath(p) => self.ctx.stroke_path(&p),
         }
     }
-
     fn glyph_run(&mut self, draw: GlyphRunRef<'_>, glyphs: &mut dyn Iterator<Item = SceneGlyph>) {
-        if self.error.is_some() {
-            return;
-        }
+        if self.error.is_some() { return; }
+        if let Err(err) = opacity_guard::validate_draw(&draw.brush, draw.composite.alpha) { self.set_error_once(err); return; }
+        if let Err(err) = image_guard::validate(&draw.brush) { self.set_error_once(err); return; }
         self.draw_glyph_run(draw, glyphs);
     }
-
     fn blurred_rounded_rect(&mut self, draw: BlurredRoundedRect) {
         if self.error.is_some() {
             return;
         }
+        if let Err(err) = shadow_guard::validate(&draw) { self.set_error_once(err); return; }
         self.set_transform(draw.transform);
         self.ctx.set_paint(draw.color.multiply_alpha(draw.composite.alpha));
         self.ctx.set_blend_mode(draw.composite.blend);
-        // Обычная тень; инвертированная (внутренняя) в imaging пока не выражается.
         self.ctx.fill_blurred_rounded_rect(&draw.rect, draw.radius as f32, draw.std_dev as f32, false);
     }
 }
