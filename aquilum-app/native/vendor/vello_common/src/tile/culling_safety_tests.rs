@@ -2,6 +2,7 @@
 //! must not index outside the viewport bitmask.
 
 use super::CulledWindings;
+use std::vec::Vec;
 
 #[test]
 fn vello_culling_range_zero_height_and_huge_rows_are_noops() {
