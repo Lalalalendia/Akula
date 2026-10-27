@@ -1,5 +1,5 @@
 //! Controlled bridge from Note to the DESK-15 snapshot sink.
-//! No automatic runtime hookup until an explicit recovery UX is accepted.
+//! Live editor edits are captured; a confirmed File Gate save retires only matching shadows.
 use std::io;
 use std::path::Path;
 
@@ -66,6 +66,19 @@ impl Note {
 
     pub(crate) fn shadow_status(&self) -> Option<CaptureStatus> {
         self.shadow.as_ref().map(SnapshotQueue::status)
+    }
+
+    /// A tab switch drops Note while its File Gate save can still be queued.
+    /// Keep the ACK receiver alive until those serialized jobs complete, then
+    /// run the same verified shadow cleanup as foreground saves. Never clear a
+    /// backup for Conflict, Failed or NeedsReview outcomes.
+    pub(crate) fn finish_detached_save(self) {
+        if self.shadow.is_some() && self.queued > 0 {
+            crate::disk::run(move || {
+                let mut note = self;
+                note.collect();
+            });
+        }
     }
 }
 
