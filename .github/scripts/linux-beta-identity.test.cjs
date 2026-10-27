@@ -44,7 +44,7 @@ test('CI is not a release and updater stays fail closed', () => {
   assert.match(smoke, /grep -Fxq 'AKULA_LINUX_BETA_COEXIST_PASS[^']*' "\$ubuntu_log"/);
   assert.match(smoke, /grep -Fxq 'AKULA_LINUX_BETA_COEXIST_PASS[^']*' "\$fedora_log"/);
   assert.match(smoke, /AKULA_LINUX_BETA_HOST_GATE_PASS/);
-  assert.match(smoke, /dpkg-query -W -f='\\$\\{Status\\}' xdg-desktop-portal/);
+  assert.ok(smoke.includes("dpkg-query -W -f='${Status}' xdg-desktop-portal"));
   assert.match(smoke, /rpm -q xdg-desktop-portal/);
   const updater=file('aquilum-app/native/src/updater/release.rs');
   // The owner key may be pinned before release; pin its entire value so
