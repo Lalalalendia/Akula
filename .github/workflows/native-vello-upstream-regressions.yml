@@ -108,6 +108,7 @@ jobs:
           cargo test --release --locked -p aquilum-native --bin aquilum-native mask_filter_preflight_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native filter_geometry_budget_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native extreme_path_geometry_ -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native viewport_tile_guard_ -- --nocapture --test-threads=1
 
       - name: Supported sequential offset-filter root-mask checks (where present)
         working-directory: aquilum-app
