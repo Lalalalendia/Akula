@@ -117,3 +117,40 @@ fn fb2_reader_has_no_empty_epub_contents_control() {
     assert!(matches!(&h.app.popup, Some(Popup::Reader(state)) if state.ids.contents.is_none()));
     h.escape();
 }
+
+#[test]
+fn toc_header_toggle_settings_switch_and_outside_dismiss_with_real_clicks() {
+    let mut h = Harness::new();
+    let (_tmp, source) = crate::reader::session::epub_acceptance::synthetic_epub();
+    let files = h.vault.path().join("Files");
+    std::fs::create_dir_all(&files).unwrap();
+    let path = files.join("toggle.epub");
+    std::fs::copy(&source, &path).unwrap();
+    open_book(&mut h, &path, None, "EPUB");
+    open_contents(&mut h);
+    let toc_id = match &h.app.popup {
+        Some(Popup::Reader(state)) => state.ids.contents.unwrap(),
+        _ => panic!("Reader closed"),
+    };
+    let area = h.root.get_widget(toc_id).unwrap().ctx().bounding_box();
+    h.click(area.center().x, area.center().y);
+    assert!(reader_view(&h).test_toc_bounds().is_none(), "second click did not close TOC");
+
+    open_contents(&mut h);
+    let settings_id = match &h.app.popup {
+        Some(Popup::Reader(state)) => state.ids.settings,
+        _ => panic!("Reader closed"),
+    };
+    let settings = h.root.get_widget(settings_id).unwrap().ctx().bounding_box();
+    h.click(settings.center().x, settings.center().y);
+    assert!(reader_view(&h).has_popover(), "settings did not open in one click");
+    assert!(reader_view(&h).test_toc_bounds().is_none(), "settings and TOC overlap");
+    h.escape();
+    assert!(h.reader(), "Escape should dismiss settings first");
+
+    open_contents(&mut h);
+    h.click(200.0, 300.0);
+    assert!(reader_view(&h).test_toc_bounds().is_none(), "outside click did not close TOC");
+    assert!(h.reader(), "outside click closed Reader");
+    h.escape();
+}
