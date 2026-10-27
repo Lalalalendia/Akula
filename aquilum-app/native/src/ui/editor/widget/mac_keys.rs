@@ -2,7 +2,7 @@ use super::*;
 use crate::ui::keymap::Command;
 
 impl TextEditor {
-    pub(super) fn vertical_target(&self, command: Option<Command>, down: bool) -> (usize, Affinity) {
+    pub(super) fn vertical_target(&mut self, command: Option<Command>, down: bool) -> (usize, Affinity) {
         match command {
             Some(Command::DocumentStart) => (0, Affinity::Downstream),
             Some(Command::DocumentEnd) => (self.doc.len(), Affinity::Downstream),
@@ -37,7 +37,7 @@ mod tests {
 
     #[test]
     fn document_chords_ignore_visual_column_and_return_document_boundaries() {
-        let editor = TextEditor::new("first\nsecond");
+        let mut editor = TextEditor::new("first\nsecond");
         assert_eq!(editor.vertical_target(Some(Command::DocumentStart), true).0, 0);
         assert_eq!(editor.vertical_target(Some(Command::DocumentEnd), false).0, editor.doc.len());
     }
