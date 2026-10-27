@@ -10,6 +10,7 @@ use masonry::peniko::{BlendMode, BrushRef};
 use super::{convert, error::PaintError, mask, Painter, TOLERANCE};
 mod path_guard;
 mod shadow_guard;
+mod opacity_guard;
 impl PaintSink for Painter {
     fn push_clip(&mut self, clip: ClipRef<'_>) {
         if self.error.is_some() { return; }
@@ -38,7 +39,6 @@ impl PaintSink for Painter {
         }
         self.clip_depth += 1;
     }
-
     fn pop_clip(&mut self) {
         if self.error.is_some() || self.uncull() {
             return;
@@ -52,6 +52,7 @@ impl PaintSink for Painter {
     }
 
     fn push_group(&mut self, group: GroupRef<'_>) {
+        if let Err(err) = opacity_guard::validate(group.composite.alpha) { self.set_error_once(err); return; }
         if let Some(clip) = group.clip.as_ref() { if let Err(err) = self.guard_clip(clip) { self.set_error_once(err); return; } }
         if self.error.is_some() || (self.culled > 0 || group.composite.alpha <= 0.0) && self.cull_inside() || group.clip.as_ref().is_some_and(|clip| self.cull(clip)) {
             return;
@@ -91,7 +92,6 @@ impl PaintSink for Painter {
         };
         self.push_filter_chain(clip_path.as_ref(), blend, opacity, mask, group.filters);
     }
-
     fn pop_group(&mut self) {
         if self.uncull() {
             return;
@@ -135,6 +135,7 @@ impl PaintSink for Painter {
             }
         }
         if let Err(err) = self.guard_geometry(&draw.shape, draw.transform) { self.set_error_once(err); return; }
+        if let Err(err) = opacity_guard::validate_draw(&draw.brush, draw.composite.alpha) { self.set_error_once(err); return; }
         if self.error.is_some() || convert::invisible(&draw.brush, draw.composite) || self.offscreen(draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape))) {
             return;
         }
@@ -171,9 +172,9 @@ impl PaintSink for Painter {
             GeometryRef::OwnedPath(p) => self.ctx.fill_path(&p),
         }
     }
-
     fn stroke(&mut self, draw: StrokeRef<'_>) {
         if let Err(err) = self.guard_stroke(&draw.shape, draw.transform, &draw.stroke) { self.set_error_once(err); return; }
+        if let Err(err) = opacity_guard::validate_draw(&draw.brush, draw.composite.alpha) { self.set_error_once(err); return; }
         let w = draw.stroke.width.max(1.0) * draw.stroke.miter_limit.max(1.0);
         if self.error.is_some() || convert::invisible(&draw.brush, draw.composite) || self.offscreen(draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape).inflate(w, w))) {
             return;
@@ -191,7 +192,6 @@ impl PaintSink for Painter {
             GeometryRef::OwnedPath(p) => self.ctx.stroke_path(&p),
         }
     }
-
     fn glyph_run(&mut self, draw: GlyphRunRef<'_>, glyphs: &mut dyn Iterator<Item = SceneGlyph>) {
         if self.error.is_some() {
             return;
