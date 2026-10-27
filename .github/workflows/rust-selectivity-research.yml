@@ -28,6 +28,7 @@ jobs:
       - name: Record machine information
         if: always()
         run: |
+          mkdir -p rust-selectivity-results
           rustc -Vv > rust-selectivity-results/rustc.txt
           lscpu > rust-selectivity-results/cpu.txt
           sha256sum scripts/benchmarks/rust-functional-style/selectivity.rs > rust-selectivity-results/source_sha256.txt
