@@ -1,0 +1,85 @@
+name: HTML native preview pilot
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/html_preview.rs'
+      - 'aquilum-app/native/src/app/tabs/open/html.rs'
+      - 'aquilum-app/native/src/ui/file_tree/model/load/html.rs'
+      - 'aquilum-app/native/tests/fixtures/html/**'
+      - 'aquilum-app/Cargo.lock'
+      - 'scripts/html-preview-windows-gui.ps1'
+      - '.github/workflows/native-html-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: html-pilot
+      - name: Resolve new optional dependency for diagnostic tests
+        working-directory: aquilum-app
+        run: cargo tree -p aquilum-native --features html-preview --depth 1
+      - name: Run read-only HTML tests
+        working-directory: aquilum-app
+        run: |
+          cargo test -p aquilum-native --features html-preview html_preview::tests:: -- --nocapture
+          cargo test -p aquilum-native --features html-preview html_file_tree_tests -- --nocapture
+          cargo test -p aquilum-native --features html-preview wpt_html_parse_vs_text_render_diagnostic -- --ignored --nocapture
+      - name: Show lockfile update for required CI
+        working-directory: aquilum-app
+        run: |
+          echo 'AKULA_HTML_LOCK_DIFF_BEGIN'
+          git diff --no-ext-diff --unified=3 -- Cargo.lock
+          echo 'AKULA_HTML_LOCK_DIFF_END'
+          echo "AKULA_HTML_LOCK_BLOB_SHA=$(git hash-object Cargo.lock)"
+
+  windows-gui:
+    name: Windows native HTML and Markdown real UIA smoke (test only)
+    runs-on: windows-2022
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: html-gui-windows
+          cache-on-failure: true
+      - name: Build actual native GUI with opt-in HTML (never released)
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}\.artifacts\cargo-native
+        run: |
+          cargo build --release --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed,html-preview
+          if ($LASTEXITCODE -ne 0) { throw 'Native HTML GUI build failed' }
+          if (!(Test-Path '.artifacts\cargo-native\release\aquilum-native.exe')) { throw 'Native exe missing' }
+      - name: Open HTML and Markdown through real Windows UI, verify source hash
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts/html-preview-windows-gui.ps1 -ExePath '.artifacts\cargo-native\release\aquilum-native.exe' -OutputDir 'html-windows-shots'
+          if ($LASTEXITCODE -ne 0) { throw 'HTML Windows UIA test failed' }
+      - name: Preserve screenshots and accessibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-gui-windows-${{ github.sha }}
+          path: html-windows-shots/
+          if-no-files-found: warn
+          retention-days: 14

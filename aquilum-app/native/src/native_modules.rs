@@ -7,6 +7,8 @@ mod poster;
 mod graph; mod reader;
 mod video;
 mod dates; mod docx;
+#[cfg(feature = "html-preview")] mod html_preview;
+#[cfg(feature = "html-preview-shiva")] mod html_preview_shiva;
 #[cfg(feature = "dicom-preview")] mod dicom;
 mod disk;
 mod file_ops;
@@ -44,12 +46,10 @@ mod touchpad;
 #[cfg(not(target_os = "windows"))]
 mod touchpad {
     pub struct Touchpad;
-
     impl Touchpad {
         pub fn attach(_: &dyn winit::window::Window) -> Option<Self> {
             None
         }
-
         pub fn active(&self) -> bool {
             false
         }
