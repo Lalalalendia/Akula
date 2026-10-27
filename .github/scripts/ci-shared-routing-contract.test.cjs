@@ -471,10 +471,12 @@ test('Windows beta standalone and mixed source owners require exactly one signed
   assert.match(body,/^  workflow_dispatch:\n    inputs:\n      ref:\n/m,'manual candidate with ref stays active');
   assert.match(body,/^        default: main$/m);
   assert.doesNotMatch(body,/^  pull_request:/m);
-  assert.equal(r.OWNED_SUITES.owned_windows_beta.length,10,'preserve all 10 former paths');
+  assert.equal(r.OWNED_SUITES.owned_windows_beta.length,12,'preserve 10 former paths and two Canvas installed-smoke owners');
   const owned=['.github/workflows/windows-beta.yml',
     '.github/scripts/windows-beta-identity.test.cjs',
-    'scripts/test-windows-beta.ps1','scripts/build-windows-update-fixture.ps1',
+    'scripts/test-windows-beta.ps1','scripts/windows-canvas-installed-uia.ps1',
+    'aquilum-app/core/tests/fixtures/jsoncanvas/official-sample.canvas',
+    'scripts/build-windows-update-fixture.ps1',
     'scripts/test-windows-beta-upgrade.ps1','scripts/windows-beta-gui-input.ps1',
     'scripts/windows-beta-candidate-manifest.ps1','scripts/windows-accesskit-uia.ps1',
     'aquilum-app/native/packaging/akula-windows.json','aquilum-app/native/Cargo.toml'];
@@ -483,6 +485,11 @@ test('Windows beta standalone and mixed source owners require exactly one signed
     assert.equal(r.assess({paths:[file]}).owned_windows_beta,true,file+' source-only routed');
     assert.equal(r.assess({paths:[file,r.LOCK]}).owned_windows_beta,true,file+' mixed Cargo routed');
   }
+  // Changes to the installed Canvas UIA script or to the official fixture
+  // must run the actual Windows installer, not pass only Rust/Native CI.
+  assert.equal(r.assess({paths:['scripts/windows-canvas-installed-uia.ps1']}).owned_windows_beta,true);
+  assert.equal(r.assess({paths:['aquilum-app/core/tests/fixtures/jsoncanvas/official-sample.canvas']}).owned_windows_beta,true);
+  assert.equal(r.assess({paths:['docs/testing/json-canvas-obsidian-acceptance.md']}).owned_windows_beta,false);
   assert.equal(r.assess({paths:['README.md']}).owned_windows_beta,false);
   assert.match(core,/owned_windows_beta: \$\{\{ steps\.scope\.outputs\.owned_windows_beta \}\}/);
   assert.match(core,/owned_windows_beta: \$\{\{ needs\.classify\.outputs\.owned_windows_beta == 'true' \}\}/);
