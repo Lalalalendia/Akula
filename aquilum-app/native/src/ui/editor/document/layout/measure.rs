@@ -27,7 +27,6 @@ impl Document {
             fresh
         });
         for i in indices {
-            let near = self.placed && self.heights.near(i, keep) || pinned.contains(&i);
             let range = self.span(i);
             let composing = compose.filter(|(at, _)| range.contains(at) || *at == range.end);
             let moved = self.markdown.is_some() && self.local_caret(i, caret) != self.laid.get(i).map_or(&PLAIN, |laid| &laid.decor).caret;
@@ -52,32 +51,34 @@ impl Document {
                         }
                     }
                 }
-                None if current && !near => {
-                    #[cfg(test)]
-                    if tracing {
-                        skipped += 1;
-                    }
-                    if stale.is_some_and(|stale| stale.contains(&i)) {
-                        let height = self.estimate(i, line);
-                        changed |= self.heights.set_text(i, height);
-                    }
-                }
                 None => {
-                    #[cfg(test)]
-                    let begun = tracing.then(std::time::Instant::now);
-                    let laid = self.lay(i, fcx, lcx, styles, composing, caret);
-                    #[cfg(test)]
-                    if let Some(begun) = begun {
-                        built += 1;
-                        shape_time += begun.elapsed();
-                    }
-                    changed |= self.heights.set_text(i, laid.height());
-                    if *self.blocks.get(i) == Block::Text && laid.layout.len() == 1 {
-                        line = laid.height();
-                    }
-                    wanted.extend(laid.decor.links.iter().filter(|l| l.wiki).map(|l| l.target.trim().to_owned()));
-                    if near {
-                        self.laid.insert(i, laid);
+                    let near = self.placed && self.heights.near(i, keep) || pinned.contains(&i);
+                    if current && !near {
+                        #[cfg(test)]
+                        if tracing {
+                            skipped += 1;
+                        }
+                        if stale.is_some_and(|stale| stale.contains(&i)) {
+                            let height = self.estimate(i, line);
+                            changed |= self.heights.set_text(i, height);
+                        }
+                    } else {
+                        #[cfg(test)]
+                        let begun = tracing.then(std::time::Instant::now);
+                        let laid = self.lay(i, fcx, lcx, styles, composing, caret);
+                        #[cfg(test)]
+                        if let Some(begun) = begun {
+                            built += 1;
+                            shape_time += begun.elapsed();
+                        }
+                        changed |= self.heights.set_text(i, laid.height());
+                        if *self.blocks.get(i) == Block::Text && laid.layout.len() == 1 {
+                            line = laid.height();
+                        }
+                        wanted.extend(laid.decor.links.iter().filter(|l| l.wiki).map(|l| l.target.trim().to_owned()));
+                        if near {
+                            self.laid.insert(i, laid);
+                        }
                     }
                 }
             }
