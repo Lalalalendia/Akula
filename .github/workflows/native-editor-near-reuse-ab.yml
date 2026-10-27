@@ -1,0 +1,72 @@
+name: Native editor reused-layout Fenwick A/B
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/ui/editor/document/layout/measure.rs'
+      - 'aquilum-app/native/src/ui/editor/document/layout/measure/near_bench.rs'
+      - '.github/workflows/native-editor-near-reuse-ab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: \${{ github.workflow }}-\${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: \${{ github.event_name == 'pull_request' }}
+
+jobs:
+  probe:
+    name: Release reused-layout Fenwick parity and ABBA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore shared main Rust cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Test cached layouts, resizes and strict near boundaries
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            repeated_reuse_and_resizing_keep_all_paragraph_heights \
+            -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            zero_height_and_exact_viewport_edges_keep_strict_near_semantics \
+            -- --nocapture --test-threads=1
+      - name: Compare exact eager versus lazy reused-layout Fenwick queries
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            benchmark_editor_fenwick_near_reuse_abba \
+            -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/editor-near-abba.log"
+          test "$(grep -c 'EDITOR_NEAR_ABBA lines=' "$GITHUB_WORKSPACE/editor-near-abba.log")" -eq 64
+          test "$(grep -c 'EDITOR_NEAR_ABBA lines=.*parity=PASS' "$GITHUB_WORKSPACE/editor-near-abba.log")" -eq 64
+          grep 'EDITOR_NEAR_ABBA lines=' "$GITHUB_WORKSPACE/editor-near-abba.log" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload benchmark log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-editor-near-reuse-\${{ github.sha }}
+          path: editor-near-abba.log
+          if-no-files-found: warn
+          retention-days: 14
