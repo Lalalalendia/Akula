@@ -56,6 +56,14 @@ jobs:
           $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
           if (!(Test-Path -LiteralPath $binary)) { throw 'Missing Akula.exe test binary' }
           Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Paired FileTree startup saved-sort A/B (release, diagnostic only)
+        shell: pwsh
+        working-directory: aquilum-app
+        timeout-minutes: 25
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --release --locked -p aquilum-native --features installed benchmark_filetree_saved_sort_abba -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'FileTree startup A/B correctness or diagnostics failed' }
       - name: Run B2/B3 synthetic flat-vs-nested 1k/10k/50k cold-warm full matrix
         shell: pwsh
         timeout-minutes: 65
