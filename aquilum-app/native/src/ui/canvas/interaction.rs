@@ -3,7 +3,7 @@
 use super::*;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CanvasAction {
-    AddText(i64, i64),
+    AddText(i64, i64), AddGroup(i64, i64),
     MoveNode(String, i64, i64),
     ResizeNode(String, i64, i64),
     AddEdge(String, String),
@@ -27,7 +27,7 @@ pub(super) enum CanvasDrag {
 impl CanvasPage {
     fn control_rect(&self, index: usize) -> Rect {
         if index == 4 { return self.delete_control_rect(); }
-        if index == 5 { return self.connect_control_rect(); }
+        if index == 5 { return self.connect_control_rect(); } if index == 6 { return self.group_control_rect(); }
         let count = 4.0;
         let x = (self.size.width - CONTROL_RIGHT - count * CONTROL_WIDTH - (count - 1.0) * CONTROL_GAP).max(0.0)
             + index as f64 * (CONTROL_WIDTH + CONTROL_GAP);
@@ -35,7 +35,7 @@ impl CanvasPage {
     }
     fn toolbar_action(&self, point: Point) -> Option<CanvasAction> {
         if !self.editable { return None; }
-        let index = (0..6).find(|i| self.control_rect(*i).contains(point))?;
+        let index = (0..7).find(|i| self.control_rect(*i).contains(point))?;
         match index {
             0 => {
                 let x = ((self.size.width / 2.0 - self.origin.x) / self.zoom).round() as i64;
@@ -45,7 +45,7 @@ impl CanvasPage {
             1 if self.undo => Some(CanvasAction::Undo), 2 if self.redo => Some(CanvasAction::Redo),
             3 if self.dirty => Some(CanvasAction::Save),
             4 => self.selected.as_ref().map(|id| CanvasAction::RemoveNode(id.clone())),
-            _ => None,
+            6 => Some(self.group_action()), _ => None,
         }
     }
     pub(super) fn node_at(&self, position: Point) -> Option<usize> {
@@ -64,7 +64,7 @@ impl CanvasPage {
                     ctx.set_handled(); return;
                 }
                 // Disabled toolbar buttons must never start card dragging.
-                if self.editable && (0..6).any(|i| self.control_rect(i).contains(p)) {
+                if self.editable && (0..7).any(|i| self.control_rect(i).contains(p)) {
                     ctx.set_handled();
                     return;
                 }
@@ -76,7 +76,7 @@ impl CanvasPage {
                 if down.state.count == 2 {
                     self.fit(); self.drag = None; ctx.request_paint_only(); ctx.set_handled(); return;
                 }
-                let hit = self.node_at(p);
+                let hit = self.node_at(p).or_else(|| self.group_outline_at(p));
                 self.selected = hit.map(|index| self.board.cards[index].id.clone());
                 ctx.request_paint_only(); self.drag = match hit {
                     Some(index) => Some(CanvasDrag::Node {
@@ -147,7 +147,7 @@ impl CanvasPage {
     }
     pub(super) fn paint_controls(&mut self, ctx: &mut PaintCtx<'_>, painter: &mut Painter<'_>) {
         let tm = theme::current();
-        for (i, label) in ["+ Text", "Undo", "Redo", "Save", "Delete", "Connect"].into_iter().enumerate() {
+        for (i, label) in ["+ Text", "Undo", "Redo", "Save", "Delete", "Connect", "+ Group"].into_iter().enumerate() {
             let rect = self.control_rect(i);
             let enabled = match i { 1 => self.undo, 2 => self.redo, 3 => self.dirty, 4 | 5 => self.selected.is_some(), _ => true };
             let shape = RoundedRect::from_rect(rect, 6.0);

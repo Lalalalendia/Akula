@@ -418,3 +418,61 @@ fn canvas_connect_cancel_and_external_conflict_protect_original_bytes() {
     assert!(!h.app.canvas_dirty_active());
     assert_eq!(fs::read_to_string(&board).unwrap(), external);
 }
+
+#[test]
+fn canvas_group_create_select_delete_undo_redo_preserves_other_cards_and_links() {
+    let mut h = Harness::new();
+    let board = h.vault.path().join("groups.canvas");
+    let raw = r#"{"nodes":[{"id":"a","type":"text","x":30,"y":40,"width":150,"height":90,"text":"A"},{"id":"b","type":"text","x":280,"y":80,"width":150,"height":90,"text":"B"}],"edges":[{"id":"ab","fromNode":"a","toNode":"b","toEnd":"arrow"}],"extension":{"preserve":[1,2]}}"#;
+    fs::write(&board, raw).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+    let initial = canvas_disk(&board);
+    canvas_control(&mut h, 6);
+    let added = canvas_disk(&board);
+    let group = added["nodes"][0]["id"].as_str().unwrap().to_owned();
+    assert_eq!(added["nodes"][0]["type"], "group");
+    assert_eq!(added["nodes"][0]["label"], "New group");
+    assert_eq!(added["nodes"][0]["width"], 420);
+    assert_eq!(added["nodes"][0]["height"], 260);
+    assert_eq!(added["nodes"][1], initial["nodes"][0]);
+    assert_eq!(added["nodes"][2], initial["nodes"][1]);
+    assert_eq!(added["edges"], initial["edges"]);
+    assert_eq!(added["extension"], initial["extension"]);
+    assert!(!h.app.canvas_dirty_active(), "creation must persist through File Gate");
+    canvas_control(&mut h, 1);
+    assert_eq!(canvas_disk(&board), initial);
+    canvas_control(&mut h, 2);
+    assert_eq!(canvas_disk(&board), added);
+
+    let border = canvas_local_point(&h, |view| view.group_border_point(&group).unwrap());
+    h.click(border.0, border.1);
+    canvas_control(&mut h, 4);
+    assert_eq!(canvas_disk(&board), initial, "deletion must preserve other cards and edges");
+    canvas_control(&mut h, 1);
+    assert_eq!(canvas_disk(&board), added);
+    assert!(h.app.open(&mut h.root, h.vault.path().join("a.md")));
+    assert!(h.app.open(&mut h.root, board.clone()));
+    assert_eq!(canvas_disk(&board), added);
+}
+
+#[test]
+fn canvas_group_external_write_conflict_protects_file_and_unsaved_history() {
+    let mut h = Harness::new();
+    let board = h.vault.path().join("group-conflict.canvas");
+    let raw = r#"{"nodes":[],"thirdParty":{"keep":true}}"#;
+    fs::write(&board, raw).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+    let external = r#"{"nodes":[],"thirdParty":{"external":true}}"#;
+    fs::write(&board, external).unwrap();
+    canvas_control(&mut h, 6);
+    assert!(h.app.canvas_dirty_active());
+    assert_eq!(fs::read_to_string(&board).unwrap(), external);
+    let active = h.app.tabs.active_id();
+    h.app.close_active_tab(&mut h.root);
+    assert_eq!(h.app.tabs.active_id(), active, "cannot close with conflicting unsaved group");
+    canvas_control(&mut h, 1);
+    assert!(!h.app.canvas_dirty_active());
+    assert_eq!(fs::read_to_string(&board).unwrap(), external);
+}

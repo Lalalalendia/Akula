@@ -3,7 +3,7 @@ mod model;
 mod interaction;
 mod selection;
 mod resize;
-mod connections;
+mod connections; mod groups;
 #[cfg(test)]
 mod scene_tests;
 use model::{Board, Card, Connection, Kind, Side};
@@ -33,7 +33,7 @@ pub struct CanvasPage {
     drag: Option<CanvasDrag>, selected: Option<String>, connect_from: Option<String>,
     text: Vec<Vec<Line>>,
     status: Line,
-    controls: [Line; 6],
+    controls: [Line; 7],
     editable: bool,
     dirty: bool,
     undo: bool,
