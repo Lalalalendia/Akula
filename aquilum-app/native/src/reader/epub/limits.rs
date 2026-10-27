@@ -5,12 +5,9 @@ use super::Zip;
 pub(super) const MAX_PACKAGE_BYTES: usize = 4 * 1024 * 1024;
 pub(super) const MAX_SECTION_BYTES: usize = 32 * 1024 * 1024;
 pub(super) const MAX_RESOURCE_BYTES: usize = 32 * 1024 * 1024;
-
+pub(super) const MAX_ARCHIVE_DECLARED_BYTES: usize = 1024 * 1024 * 1024;
 pub(super) fn valid_spine(zip: &Zip, sections: &[(String, String)]) -> bool {
-    !sections.is_empty()
-        && sections.iter().all(|(path, _)| {
-            !path.is_empty() && zip.size(path).is_some_and(|size| size <= MAX_SECTION_BYTES)
-        })
+    super::aggregate::valid(zip, sections)
 }
 
 #[cfg(test)]

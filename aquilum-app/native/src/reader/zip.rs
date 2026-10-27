@@ -1,4 +1,4 @@
-use std::collections::HashMap; mod limited;
+use std::collections::HashMap; mod limited; mod aggregate;
 #[cfg(test)] mod security_tests;
 const MAX_LEGACY_READ_BYTES: usize = 64 * 1024 * 1024;
 const END: u32 = 0x0605_4b50;

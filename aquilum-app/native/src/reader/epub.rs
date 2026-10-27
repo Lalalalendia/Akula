@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-
 use super::cfi::{Cfi, element_path};
 use super::dom::{Dom, NodeId};
 use super::text::{decode, numeric_entities, parse_xml};
 use super::zip::Zip;
+mod aggregate;
 mod limits;
 mod toc;
 pub(crate) use toc::Entry as TocEntry;
@@ -12,7 +12,6 @@ pub struct Epub {
     pub sections: Vec<(String, String)>,
     pub toc: Vec<TocEntry>,
 }
-
 
 fn descendants<'a>(dom: &'a Dom, root: NodeId, name: &'a str) -> impl Iterator<Item = NodeId> + 'a {
     let mut stack = vec![root];
@@ -38,7 +37,7 @@ pub fn document(bytes: &[u8]) -> Option<Dom> {
 
 impl Epub {
     pub fn open(data: Vec<u8>) -> Option<Epub> {
-        let zip = Zip::new(data)?;
+        let zip = Zip::new(data).filter(|zip| zip.declared_total_under(limits::MAX_ARCHIVE_DECLARED_BYTES))?;
         let container = document(&zip.read_limited("META-INF/container.xml", limits::MAX_PACKAGE_BYTES)?)?;
         let rootfile = descendants(&container, Dom::ROOT, "rootfile").next()?;
         let opf_path = container.attr(rootfile, "full-path")?.to_owned();
@@ -57,8 +56,9 @@ impl Epub {
                 (href, Cfi::Point(vec![element_path(&opf, itemref)]).to_string())
             })
             .collect::<Vec<_>>();
+        if !limits::valid_spine(&zip, &sections) { return None; }
         let toc = toc::parse(&zip, &opf, &opf_path, &sections);
-        limits::valid_spine(&zip, &sections).then_some(Epub { zip, sections, toc })
+        Some(Epub { zip, sections, toc })
     }
 
     pub fn size(&self, index: usize) -> usize {
