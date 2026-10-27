@@ -2,7 +2,7 @@
 use super::Zip;
 
 impl Zip {
-    pub(super) fn declared_total_under(&self, limit: usize) -> bool {
+    pub(in crate::reader) fn declared_total_under(&self, limit: usize) -> bool {
         self.entries.values().try_fold(0usize, |sum, entry| {
             let next = sum.checked_add(entry.size)?;
             (next <= limit).then_some(next)
