@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn rejects_repetitive_backrefs_before_expansion() {
         let mut input = vec![b'A'];
-        input.extend(std::iter::repeat_n([0x80u8, 0x0f]).take(10_000).flatten());
+        input.extend(std::iter::repeat_n([0x80u8, 0x0f], 10_000).flatten());
         assert!(decompress_bounded(&input, 100).is_none());
         assert_eq!(decompress_bounded(&input, 100_001).unwrap().len(), 100_001);
     }
