@@ -153,7 +153,7 @@ impl CanvasPage {
             let shape = RoundedRect::from_rect(rect, 6.0);
             painter.fill(shape, tm.bg_surface).draw();
             painter.stroke(&shape, &Stroke::new(1.0), tm.border_subtle).draw();
-            let layout = self.controls[i].layout(ctx, label, CONTROL_WIDTH - 8.0, Style::ui(18.0));
+            let layout = self.controls[i].layout(ctx, if i == 5 && self.connect_from.is_some() { "Linking" } else { label }, CONTROL_WIDTH - 8.0, Style::ui(18.0));
             let color = if enabled { tm.text_primary } else { tm.text_muted };
             let left = rect.x0 + (rect.width() - f64::from(layout.width())) / 2.0;
             render_text(painter, Affine::translate((left, rect.y0 + 7.0)), layout, &[color.into()], true);
