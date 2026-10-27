@@ -36,6 +36,25 @@ mod unix {
         Ok(File::from(fd))
     }
 
+    fn open_root(root: &Path) -> IoResult<File> {
+        if !root.is_absolute() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput,
+                "MCP Vault root must be absolute"));
+        }
+        // Anchor at the filesystem root: no ancestor of the selected Vault
+        // can be swapped to a symlink between lexical preflight and open.
+        let mut dir = File::open("/")?;
+        for part in root.components() {
+            match part {
+                Component::RootDir => {}
+                Component::Normal(name) => dir = open_dir(&dir, name)?,
+                _ => return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput,
+                    "Invalid MCP Vault root component")),
+            }
+        }
+        Ok(dir)
+    }
+
     fn open_regular(parent: &File, component: &OsStr) -> IoResult<File> {
         // NONBLOCK prevents a FIFO/device from hanging before type checking.
         let fd = openat(parent, component,
@@ -55,7 +74,7 @@ mod unix {
         let mut parts = relative.components().peekable();
         // Only normal path components can be opened. Reject '.', '..', roots,
         // and an empty or trailing-directory-only path fail-closed.
-        let mut directory = File::open(&vault.root).map_err(|error| error.to_string())?;
+        let mut directory = open_root(&vault.root).map_err(|error| error.to_string())?;
         if !directory.metadata().map_err(|error| error.to_string())?.is_dir() {
             return Err("MCP Vault root is not a directory".to_owned());
         }
@@ -77,7 +96,7 @@ mod unix {
 
     #[cfg(test)]
     mod tests {
-        use super::{open_dir, open_regular, read_unix};
+        use super::{open_dir, open_regular, open_root, read_unix};
         use crate::mcp::vault::Vault;
         use std::ffi::OsStr;
         use std::fs::{self, File};
@@ -107,11 +126,27 @@ mod unix {
         }
 
         #[test]
+        fn replaced_root_path_cannot_redirect_pinned_read() {
+            let parent = tempfile::tempdir().unwrap();
+            let root = parent.path().join("vault");
+            fs::create_dir(&root).unwrap();
+            fs::write(root.join("Note.md"), b"inside").unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            fs::write(outside.path().join("Note.md"), b"outside").unwrap();
+            let vault = Vault { root: root.clone(), visible: true };
+            fs::rename(&root, parent.path().join("vault-old")).unwrap();
+            symlink(outside.path(), &root).unwrap();
+            assert!(read_unix(&vault, &root.join("Note.md")).is_err());
+            assert!(open_root(&root).is_err());
+            assert_eq!(fs::read(outside.path().join("Note.md")).unwrap(), b"outside");
+        }
+
+        #[test]
         fn held_directory_survives_adversarial_rename_and_replaced_symlink() {
             let (_dir, vault) = fixture();
             let outside = tempfile::tempdir().unwrap();
             fs::write(outside.path().join("Глава.md"), "outside secret").unwrap();
-            let root_fd = File::open(&vault.root).unwrap();
+            let root_fd = open_root(&vault.root).unwrap();
             let held = open_dir(&root_fd, OsStr::new("Проекты")).unwrap();
             fs::rename(vault.root.join("Проекты"), vault.root.join("detached")).unwrap();
             symlink(outside.path(), vault.root.join("Проекты")).unwrap();
