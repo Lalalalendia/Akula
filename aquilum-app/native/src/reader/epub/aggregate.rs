@@ -1,5 +1,5 @@
 //! Aggregate, pre-inflation EPUB spine budget. The DOM cache is per spine index.
-use super::{Zip, MAX_SECTION_BYTES};
+use super::{limits::MAX_SECTION_BYTES, Zip};
 
 const MAX_SPINE_SECTIONS: usize = 10_000;
 const MAX_SPINE_TEXT_BYTES: usize = 512 * 1024 * 1024;
