@@ -33,7 +33,7 @@ mod tests {
         let mut bytes = std::fs::read(path).unwrap();
         let signature = 0x0201_4b50u32.to_le_bytes();
         let at = bytes.windows(4).enumerate().find_map(|(at, chunk)| {
-            (chunk == signature && bytes.get(at + 46..at + 54) == Some(b"mimetype"))
+            (chunk == signature && bytes.get(at + 46..at + 54) == Some(&b"mimetype"[..]))
                 .then_some(at)
         }).expect("mimetype central entry");
         // The mimetype is not part of the spine: old chapter-only checks admit this.
