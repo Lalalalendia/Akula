@@ -314,6 +314,7 @@ jobs:
             win7-lab-output/Akula-Win7-LAB-portable.zip
             win7-lab-output/PROVENANCE.txt
             scripts/akula-win7-sp1-acceptance.ps1
+            scripts/akula-desk15-real-windows-acceptance.ps1
             win7-lab-output/pe-audit/full-audit.md
             win7-lab-output/pe-audit/full-audit.json
             dist/Akula_*-setup.exe
