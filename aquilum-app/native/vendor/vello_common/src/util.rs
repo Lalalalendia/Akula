@@ -401,9 +401,7 @@ impl<T> IndexMut<usize> for RetainVec<T> {
 
 /// Calculate the bounding box of the strips.
 pub fn strip_bbox(strips: &[Strip]) -> Option<RectU16> {
-    // Fill and alpha fill segments internally store their coordinates in tile units,
-    // in order to avoid multiplications in every invocation of the closure we calculate
-    // the bbox in tile units first and then convert back to pixel units.
+    // Accumulate in tile units before saturating to u16 pixel bounds.
     let mut tile_bbox = RectU16::INVERTED;
 
     visit_strip_fill_segments(
@@ -419,15 +417,14 @@ pub fn strip_bbox(strips: &[Strip]) -> Option<RectU16> {
         |bbox, segment| bbox.union(segment.tile_rect()),
     );
 
-    // Convert to pixel units.
     if tile_bbox.is_empty() {
         None
     } else {
         Some(RectU16::new(
-            tile_bbox.x0.checked_mul(Tile::WIDTH).unwrap(),
-            tile_bbox.y0.checked_mul(Tile::HEIGHT).unwrap(),
-            tile_bbox.x1.checked_mul(Tile::WIDTH).unwrap(),
-            tile_bbox.y1.checked_mul(Tile::HEIGHT).unwrap(),
+            tile_bbox.x0.saturating_mul(Tile::WIDTH),
+            tile_bbox.y0.saturating_mul(Tile::HEIGHT),
+            tile_bbox.x1.saturating_mul(Tile::WIDTH),
+            tile_bbox.y1.saturating_mul(Tile::HEIGHT),
         ))
     }
 }
@@ -562,6 +559,9 @@ pub(crate) mod unpremultiply {
     }
 }
 
+#[cfg(test)]
+#[path = "util/strip_bbox_overflow_tests.rs"]
+mod strip_bbox_overflow_tests;
 #[cfg(test)]
 mod tests {
     use super::RectU16;
