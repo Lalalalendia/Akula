@@ -6,7 +6,7 @@ use super::super::model::Counts;
 type Wake = Arc<dyn Fn() + Send + Sync>;
 
 #[derive(Default)]
-pub(super) struct CountScan {
+pub(in crate::ui::file_tree) struct CountScan {
     receiver: Option<mpsc::Receiver<Counts>>,
     pending: bool,
 }
