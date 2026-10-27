@@ -7,7 +7,7 @@ use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
-
+mod browser_guard;
 const MAX_BODY_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 16;
 const MAX_PARALLEL_READS: usize = 4;
@@ -446,9 +446,7 @@ fn admit(
     {
         return Err(refused(403, "Запрещённый Host"));
     }
-    if !head.header("origin").is_none_or(is_loopback_origin) {
-        return Err(refused(403, "Источник запроса запрещён"));
-    }
+    browser_guard::validate(head)?;
     let principal = authentication.authenticate(head)
         .ok_or_else(|| refused(401, "Неверный токен"))?;
     // The legacy HTTP endpoint supports only 2025-06-18. An explicit
