@@ -73,10 +73,45 @@ function Find-RecoveryButton {
     return $button
 }
 
+function Assert-PrivateShadowAcl {
+    param([string]$Base,[string]$Bucket,[string]$Shadow)
+    $userSid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $allowed=@($userSid,'S-1-5-18','S-1-5-32-544')
+    foreach ($path in @($Base,$Bucket,$Shadow)) {
+        $acl=Get-Acl -LiteralPath $path -ErrorAction Stop
+        if ($null -eq $acl) { throw 'Recovery ACL descriptor is missing' }
+        if ($path -ne $Shadow -and !$acl.AreAccessRulesProtected) {
+            throw 'Recovery directory inherits permissions from an untrusted data parent'
+        }
+        $owner=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+        if ($owner -ne $userSid -and $owner -ne 'S-1-5-32-544') {
+            throw 'Recovery file owner is not the current user or local Administrators'
+        }
+        $rules=$acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])
+        $userHasAccess=$false
+        foreach ($rule in $rules) {
+            if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) {
+                continue
+            }
+            $sid=$rule.IdentityReference.Value
+            if ($allowed -notcontains $sid) {
+                throw 'Recovery ACL exposes plaintext to an unexpected security principal'
+            }
+            if ($sid -eq $userSid -and
+                (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadData) -ne 0)) {
+                $userHasAccess=$true
+            }
+        }
+        if (!$userHasAccess) { throw 'Recovery ACL does not explicitly permit its current user' }
+    }
+    Write-Host 'AKULA_WINDOWS_DESK15_PRIVATE_ACL_PASS inherited_broad=0 unauthorized_principals=0 paths=3'
+}
+
 try {
     $app = Start-Installed
     Send-AkulaBetaText -Process $app -Text $marker
     $shadowOk = $false
+    $shadowFile=$null
     for ($i=0;$i -lt 120;$i++) {
         Start-Sleep -Milliseconds 200
         $app.Refresh()
@@ -88,12 +123,14 @@ try {
             $wire = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($record.FullName))
             if ($wire.Contains($marker) -and $wire.StartsWith('AKULA-NOTE-SHADOW-V1')) {
                 $shadowOk = $true
+                $shadowFile=$record.FullName
                 break
             }
         }
         if ($shadowOk) { break }
     }
     if (!$shadowOk) { throw 'Typed complete draft never reached an fsynced shadow' }
+    Assert-PrivateShadowAcl -Base $shadowBase -Bucket (Split-Path -Parent $shadowFile) -Shadow $shadowFile
     Assert-Unchanged
     $app.Kill() # Never call graceful CloseMainWindow/Drop/File Gate flush.
     if (!$app.WaitForExit(20000)) { throw 'Hard-killed installed Akula did not exit' }
