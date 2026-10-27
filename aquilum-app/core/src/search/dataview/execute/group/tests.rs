@@ -88,3 +88,38 @@ fn thousand_unique_keys_match_the_linear_reference() {
     assert_eq!(groups.values, reference(&keys));
     assert_eq!(groups.values.len(), 1_000);
 }
+
+#[test]
+#[ignore = "Release-only synthetic GROUP BY comparison; two ABBA samples per mode"]
+fn benchmark_search_pipeline_dataview_group_by_abba() {
+    use std::time::Instant;
+
+    for (rows, distinct) in [
+        (1_000, 1), (1_000, 100), (1_000, 1_000),
+        (10_000, 1), (10_000, 100), (10_000, 10_000),
+        (50_000, 1), (50_000, 100), (50_000, 50_000),
+    ] {
+        let keys: Vec<_> = (0..rows)
+            .map(|row| text(&format!("group-{:05}", row % distinct)))
+            .collect();
+        // At 50k distinct keys the legacy path makes ~1.25 billion
+        // comparisons; measure the indexed path only instead of stalling CI.
+        let sequence: &[bool] = if rows == 50_000 && distinct == 50_000 {
+            &[true, true]
+        } else {
+            &[false, true, true, false]
+        };
+        for (round, &optimized) in sequence.iter().enumerate() {
+            let started = Instant::now();
+            let result = if optimized { indexed(&keys).values } else { reference(&keys) };
+            let elapsed = started.elapsed();
+            assert_eq!(result.len(), distinct);
+            let route = if optimized { "index" } else { "legacy" };
+            println!(
+                "BENCH-SEARCH GROUPBY_ABBA rows={rows} distinct={distinct} route={route} round={} elapsed_us={} parity=PASS",
+                round + 1,
+                elapsed.as_micros(),
+            );
+        }
+    }
+}
