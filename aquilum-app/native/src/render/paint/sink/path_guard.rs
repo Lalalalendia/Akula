@@ -1,11 +1,11 @@
-//! Bounds untrusted Bézier controls before they reach Vello's SIMD flattening.
-//! Upstream #1277: huge finite cubic controls can cause excessive subdivision.
-//! Reject unsupported geometry with a typed error, never a silent approximation.
+//! Validate untrusted Bézier paths before Vello SIMD flattening.
+//! Reject extreme coordinates and malformed path sequences before rasterization.
 
 use masonry::imaging::{ClipRef, GeometryRef};
 use masonry::kurbo::{Affine, BezPath, PathEl, Point, Stroke};
 
 use super::{Painter, PaintError};
+mod sequence;
 
 const MAX_DEVICE_COORD: f64 = 10_000_000.0;
 const MAX_PATH_ELEMENTS: usize = 262_144;
@@ -20,7 +20,7 @@ fn valid_point(p: Point) -> bool {
 }
 
 fn guard_path(path: &BezPath, transform: Affine) -> Result<(), PaintError> {
-    if path.elements().len() > MAX_PATH_ELEMENTS { return Err(invalid()); }
+    if !sequence::within_budget(path.elements(), MAX_PATH_ELEMENTS) { return Err(invalid()); }
     for el in path.elements() {
         let ok = match transform * *el {
             PathEl::MoveTo(p) | PathEl::LineTo(p) => valid_point(p),

@@ -72,6 +72,8 @@ jobs:
           fi
           cargo test --release --locked -p vello_common --lib gaussian_blur_untrusted_sigma_ -- --nocapture
           cargo test --release --locked -p vello_common --lib unpremultiply_malformed_ -- --nocapture
+          cargo test --release --locked -p vello_common --lib vello_tile_prev_loc_ -- --nocapture
+          cargo test --release --locked -p vello_common --lib vello_culling_range_ -- --nocapture
       - name: Exact real glyph 495 source mask / all atlas slots and crop origins
         working-directory: aquilum-app
         shell: bash
