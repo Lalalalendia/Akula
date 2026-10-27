@@ -6,7 +6,7 @@ impl Vault {
     /// Only MCP read_note / note_outline use this read-only primitive.
     /// A pinned Unix parent prevents a post-preflight symlink swap from
     /// redirecting a leaf open outside the selected Vault.
-    pub(super) fn read_note_bytes(&self, path: &Path) -> Result<Vec<u8>, String> {
+    pub(crate) fn read_note_bytes(&self, path: &Path) -> Result<Vec<u8>, String> {
         #[cfg(unix)]
         {
             read_unix(self, path)
