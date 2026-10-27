@@ -88,3 +88,28 @@ fn concurrent_update_claims_allow_exactly_one_worker() {
     assert_eq!(updater.status(), Status::Checking);
     assert!(!updater.try_start(), "busy updater may not be claimed again");
 }
+
+#[test]
+fn atomic_update_claim_retries_terminal_states_but_preserves_busy_states() {
+    let updater = Updater::new(Arc::new(|| {}));
+    for terminal in [
+        Status::Idle,
+        Status::Latest,
+        Status::Available("0.3.20".into()),
+        Status::Failed("temporary network error".into()),
+    ] {
+        updater.set(terminal);
+        assert!(updater.try_start(), "terminal update state must allow a new operation");
+        assert_eq!(updater.status(), Status::Checking);
+    }
+    for busy in [
+        Status::Checking,
+        Status::Downloading { version: "0.3.20".into(), done: 1, total: Some(100) },
+        Status::Ready("0.3.20".into()),
+        Status::Installing,
+    ] {
+        updater.set(busy.clone());
+        assert!(!updater.try_start(), "busy update state must reject a second operation");
+        assert_eq!(updater.status(), busy);
+    }
+}
