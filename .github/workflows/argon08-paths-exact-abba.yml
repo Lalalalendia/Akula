@@ -102,3 +102,27 @@ jobs:
             paths-abba/
           if-no-files-found: warn
           retention-days: 21
+
+  windows_paths:
+    name: Windows path identity and Unicode compatibility
+    runs-on: windows-2022
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Validate Windows NFC, casefold, extended paths and UNC with existing Rust tests
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib search::paths::tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "Windows path parity regression" }
