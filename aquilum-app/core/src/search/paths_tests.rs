@@ -134,3 +134,118 @@ fn decomposed_and_composed_names_share_one_identity() {
     assert_ne!(composed.to_str(), decomposed.to_str());
     assert_eq!(super::identity(composed), super::identity(decomposed));
 }
+
+fn original_same_path(left: &Path, right: &Path) -> bool {
+    super::identity(left) == super::identity(right)
+}
+
+fn original_strip_root<'a>(root: &Path, path: &'a Path) -> Option<&'a Path> {
+    let mut rest = path.components();
+    let inside = root.components().all(|part| {
+        rest.next().is_some_and(|other| original_same_path(Path::new(&part), Path::new(&other)))
+    });
+    inside.then_some(rest.as_path())
+}
+
+#[test]
+fn exact_osstr_fast_path_preserves_legacy_normalization_semantics() {
+    // Path component equality may ignore ".", but the identity contract does not.
+    assert!(!same_path(Path::new("vault/./note.md"), Path::new("vault/note.md")));
+    assert!(!same_path(Path::new("vault//note.md"), Path::new("vault/note.md")));
+    assert!(same_path(Path::new("vault/Мой план.md"), Path::new("vault/Мои\u{306} план.md")));
+    let corpus = [
+        "", ".", "vault", "vault/", "vault//", "vault/./note.md",
+        "vault/note.md", "vault//note.md", "vault/notes/one.md",
+        "vault/notes/../one.md", "vault/.заметки/Идея.md",
+        "vault/Мой план.md", "vault/Мои\u{306} план.md",
+        "C:/Книги/Глава.MD", r"c:\книги\глава.md",
+        r"\\?\C:\Книги\Глава.MD", r"\\server\share\A.md",
+    ];
+    for left in corpus {
+        for right in corpus {
+            let left = Path::new(left);
+            let right = Path::new(right);
+            assert_eq!(
+                same_path(left, right), original_same_path(left, right),
+                "same_path drift: {left:?} versus {right:?}"
+            );
+            assert_eq!(
+                strip_root(left, right), original_strip_root(left, right),
+                "strip_root drift: {left:?} versus {right:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn strip_root_retains_unicode_compatibility_and_exact_suffix() {
+    let path = Path::new("vault/Мои\u{306} план/Глава.md");
+    assert_eq!(
+        strip_root(Path::new("vault/Мой план"), path),
+        Some(Path::new("Глава.md"))
+    );
+    assert_eq!(
+        strip_root(Path::new("vault/Мои\u{306} план"), path),
+        Some(Path::new("Глава.md"))
+    );
+}
+
+#[test]
+#[ignore = "opt-in same-runner A/B, reports CPU nanoseconds per call only"]
+fn benchmark_path_exact_identity() {
+    use std::hint::black_box;
+    use std::time::Instant;
+    let exact: Vec<(std::path::PathBuf, std::path::PathBuf)> = (0..256)
+        .map(|i| {
+            let path = std::path::PathBuf::from(format!("vault/Книги/Раздел/{i:04}/Глава.md"));
+            (path.clone(), path)
+        })
+        .collect();
+    let normalized: Vec<_> = (0..256)
+        .map(|i| (
+            std::path::PathBuf::from(format!("vault/Мой план/{i:04}/Глава.md")),
+            std::path::PathBuf::from(format!("vault/Мои\u{306} план/{i:04}/Глава.md")),
+        ))
+        .collect();
+    let different: Vec<_> = (0..256)
+        .map(|i| (
+            std::path::PathBuf::from(format!("vault/Книги/{i:04}/Глава.md")),
+            std::path::PathBuf::from(format!("vault/Книги/{i:04}/Другая.md")),
+        ))
+        .collect();
+    let root = Path::new("vault/Книги/Раздел");
+    let strip_exact: Vec<_> = (0..256)
+        .map(|i| std::path::PathBuf::from(format!("vault/Книги/Раздел/{i:04}/Глава.md")))
+        .collect();
+    let normalized_root = Path::new("vault/Мой план");
+    let strip_normalized: Vec<_> = (0..256)
+        .map(|i| std::path::PathBuf::from(format!("vault/Мои\u{306} план/{i:04}/Глава.md")))
+        .collect();
+    let measure = |name: &str, mut test: Box<dyn FnMut() -> bool>| {
+        let mut samples = Vec::new();
+        for _ in 0..3 {
+            black_box(test());
+        }
+        let repeats = 64usize;
+        for _ in 0..16 {
+            let before = Instant::now();
+            let mut hits = 0usize;
+            for _ in 0..repeats {
+                hits += usize::from(black_box(test()));
+            }
+            let per_call = before.elapsed().as_secs_f64() * 1e9 / repeats as f64;
+            black_box(hits);
+            samples.push(per_call);
+        }
+        samples.sort_by(f64::total_cmp);
+        let p50 = (samples[7] + samples[8]) / 2.0;
+        let p95 = samples[14];
+        eprintln!("PATHS_ABBA case={name} samples=16 p50_ns_per_256={p50:.2} p95_ns_per_256={p95:.2}");
+    };
+    // Each sample is one batch of 256 comparisons; divide by that count.
+    measure("same_exact", Box::new(|| exact.iter().filter(|(a,b)| same_path(black_box(a), black_box(b))).count() == 256));
+    measure("same_nfc", Box::new(|| normalized.iter().filter(|(a,b)| same_path(black_box(a), black_box(b))).count() == 256));
+    measure("same_different", Box::new(|| different.iter().all(|(a,b)| !same_path(black_box(a), black_box(b)))));
+    measure("strip_exact", Box::new(|| strip_exact.iter().filter(|p| strip_root(black_box(root), black_box(p)).is_some()).count() == 256));
+    measure("strip_nfc", Box::new(|| strip_normalized.iter().filter(|p| strip_root(black_box(normalized_root), black_box(p)).is_some()).count() == 256));
+}
