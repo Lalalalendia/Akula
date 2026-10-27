@@ -60,14 +60,21 @@ $privateData = Join-Path $base 'data'
 $shots = Join-Path $base 'screenshots'
 New-Item -ItemType Directory -Force -Path $vault, $privateData, $shots | Out-Null
 $note = Join-Path $vault 'Win7 QA.md'
+# Reconstruct non-ASCII fixture names in memory. UTF-8-no-BOM scripts are
+# decoded as ANSI by Windows PowerShell 2/5; source code must stay ASCII.
+function UnicodeLabel([int[]]$codepoints) {
+    $value = ''
+    foreach ($point in $codepoints) { $value += [char]$point }
+    return $value
+}
 [IO.File]::WriteAllText($note, '# Windows 7 QA' + [Environment]::NewLine + 'Disposable note.')
 # A folder chosen through Akula's ordinary picker must expose these files.
 # They are created before the first GUI launch, not injected via --open.
-$txt = Join-Path $vault 'Новый текстовый документ.txt'
-$upperTxt = Join-Path $vault 'С ПРОБЕЛАМИ.TXT'
-$txtFolder = Join-Path $vault 'Вложенная папка'
+$txt = Join-Path $vault ((UnicodeLabel @(0x041d, 0x043e, 0x0432, 0x044b, 0x0439, 0x0020, 0x0442, 0x0435, 0x043a, 0x0441, 0x0442, 0x043e, 0x0432, 0x044b, 0x0439, 0x0020, 0x0434, 0x043e, 0x043a, 0x0443, 0x043c, 0x0435, 0x043d, 0x0442)) + '.txt')
+$upperTxt = Join-Path $vault ((UnicodeLabel @(0x0421, 0x0020, 0x041f, 0x0420, 0x041e, 0x0411, 0x0415, 0x041b, 0x0410, 0x041c, 0x0418)) + '.TXT')
+$txtFolder = Join-Path $vault ((UnicodeLabel @(0x0412, 0x043b, 0x043e, 0x0436, 0x0435, 0x043d, 0x043d, 0x0430, 0x044f, 0x0020, 0x043f, 0x0430, 0x043f, 0x043a, 0x0430)) + '')
 New-Item -ItemType Directory -Force -Path $txtFolder | Out-Null
-$nestedTxt = Join-Path $txtFolder 'Внутри.txt'
+$nestedTxt = Join-Path $txtFolder ((UnicodeLabel @(0x0412, 0x043d, 0x0443, 0x0442, 0x0440, 0x0438)) + '.txt')
 $utf8 = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList @($false)
 [IO.File]::WriteAllText($txt, 'AKULA_WIN7_TXT_FOLDER_NEEDLE', $utf8)
 [IO.File]::WriteAllText($upperTxt, 'AKULA_WIN7_UPPERCASE_TXT', $utf8)
@@ -81,19 +88,19 @@ $log = Join-Path $base 'evidence.txt'
 function Record([string]$line) { [IO.File]::AppendAllText($log, $line + [Environment]::NewLine) }
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Add-Type -TypeDefinition ([string]::Join([Environment]::NewLine, @(
-  'using System;',
-  'using System.Runtime.InteropServices;',
-  'namespace AkulaWin7QA {',
-  '  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }',
-  '  public static class Native {',
-  '    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);',
-  '    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);',
-  '    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);',
-  '    [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h,int x,int y,int w,int hgt,bool repaint);',
-  '  }',
-  '}'
-)))
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace AkulaWin7QA {
+  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+  public static class Native {
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h,int x,int y,int w,int hgt,bool repaint);
+  }
+}
+'@
 function Snapshot([string]$file) {
     $screen = [Windows.Forms.Screen]::PrimaryScreen.Bounds
     $bmp = New-Object -TypeName System.Drawing.Bitmap -ArgumentList @($screen.Width, $screen.Height)
