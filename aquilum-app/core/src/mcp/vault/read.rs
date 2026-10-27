@@ -99,7 +99,7 @@ mod unix {
         use super::{open_dir, open_regular, open_root, read_unix};
         use crate::mcp::vault::Vault;
         use std::ffi::OsStr;
-        use std::fs::{self, File};
+        use std::fs;
         use std::io::Read;
         use std::os::unix::fs::symlink;
 
