@@ -70,6 +70,7 @@ impl App {
         let op_result = match op {
             CanvasAction::AddText(x, y) => session.add_text("New card", *x, *y).map(|_| true),
             CanvasAction::MoveNode(node, x, y) => session.move_node(node, *x, *y),
+            CanvasAction::ResizeNode(node, w, h) => session.resize_node(node, *w, *h),
             CanvasAction::RemoveNode(node) => session.remove_node(node),
             CanvasAction::Undo => session.undo(),
             CanvasAction::Redo => session.redo(),
@@ -107,7 +108,6 @@ impl App {
             CanvasPage::update_state(&mut widget, &value, dirty, undo, redo, notice);
         });
     }
-
     #[cfg(test)]
     pub(in crate::app) fn canvas_view_id(&self) -> Option<WidgetId> {
         self.canvas.view.map(Handle::id)

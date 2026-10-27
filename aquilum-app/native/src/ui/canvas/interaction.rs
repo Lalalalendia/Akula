@@ -5,26 +5,24 @@ use super::*;
 pub enum CanvasAction {
     AddText(i64, i64),
     MoveNode(String, i64, i64),
+    ResizeNode(String, i64, i64),
     RemoveNode(String),
     Undo,
     Redo,
     Save,
 }
-
 use masonry::core::{PointerScrollEvent, ScrollDelta};
-
 const CONTROL_WIDTH: f64 = 72.0;
 const CONTROL_HEIGHT: f64 = 32.0;
 const CONTROL_GAP: f64 = 5.0;
 const CONTROL_RIGHT: f64 = 14.0;
 const CONTROL_TOP: f64 = 9.0;
 const DRAG_THRESHOLD: f64 = 2.0;
-
 pub(super) enum CanvasDrag {
     Pan { last: Point },
     Node { index: usize, from: Point, original: Rect },
+    Resize { index: usize, from: Point, original: Rect },
 }
-
 impl CanvasPage {
     fn control_rect(&self, index: usize) -> Rect {
         if index == 4 { return self.delete_control_rect(); }
@@ -69,12 +67,12 @@ impl CanvasPage {
                     ctx.set_handled();
                     return;
                 }
+                if let Some(index) = self.resize_target(p) {
+                    self.drag = Some(CanvasDrag::Resize { index, from: p, original: self.board.cards[index].rect });
+                    ctx.capture_pointer(); ctx.set_handled(); return;
+                }
                 if down.state.count == 2 {
-                    self.fit();
-                    self.drag = None;
-                    ctx.request_paint_only();
-                    ctx.set_handled();
-                    return;
+                    self.fit(); self.drag = None; ctx.request_paint_only(); ctx.set_handled(); return;
                 }
                 let hit = self.node_at(p);
                 self.selected = hit.map(|index| self.board.cards[index].id.clone());
@@ -90,6 +88,7 @@ impl CanvasPage {
             }
             PointerEvent::Move(update) => {
                 let p = ctx.local_position(update.current.position);
+                if self.preview_resize(p) { ctx.request_paint_only(); return; }
                 match &mut self.drag {
                     Some(CanvasDrag::Pan { last }) => {
                         self.origin += p - *last;
@@ -108,6 +107,7 @@ impl CanvasPage {
                 }
             }
             PointerEvent::Up(up) => {
+                if self.finish_resize(ctx, ctx.local_position(up.state.position)) { return; }
                 if let Some(CanvasDrag::Node { index, from, original }) = self.drag.take() {
                     let p = ctx.local_position(up.state.position);
                     let delta = (p - from) / self.zoom;
@@ -124,9 +124,9 @@ impl CanvasPage {
                 } else { self.drag = None; }
             }
             PointerEvent::Cancel(_) => {
+                if self.cancel_resize(ctx) { return; }
                 if let Some(CanvasDrag::Node { index, original, .. }) = self.drag.take() {
-                    self.board.cards[index].rect = original;
-                    ctx.request_paint_only();
+                    self.board.cards[index].rect = original; ctx.request_paint_only();
                 }
             }
             PointerEvent::Scroll(PointerScrollEvent { delta, state, .. }) => {

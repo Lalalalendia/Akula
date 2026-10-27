@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use crate::app_core::Core;
 use super::{StructuredDocument, StructuredError};
+mod resize;
 
 const HISTORY_LIMIT: usize = 64;
 const EDIT_COORD_LIMIT: i64 = 100_000_000;
@@ -17,6 +18,7 @@ pub enum CanvasSessionError {
     MissingNode(String),
     NotTextNode(String),
     CoordinateOutOfRange,
+    InvalidDimensions,
 }
 
 impl From<StructuredError> for CanvasSessionError {
@@ -30,6 +32,7 @@ impl fmt::Display for CanvasSessionError {
             Self::MissingNode(id) => write!(f, "Canvas node does not exist: {id}"),
             Self::NotTextNode(id) => write!(f, "Canvas node is not text: {id}"),
             Self::CoordinateOutOfRange => f.write_str("Canvas position is outside the supported editable range"),
+            Self::InvalidDimensions => f.write_str("Canvas size must be within supported editable bounds"),
         }
     }
 }
@@ -169,7 +172,6 @@ impl CanvasSession {
         }
         self.stage(next)
     }
-
     pub fn undo(&mut self) -> Result<bool, CanvasSessionError> {
         let Some(previous) = self.undo.last().cloned() else { return Ok(false); };
         self.document.replace_canvas(&previous)?;
@@ -178,7 +180,6 @@ impl CanvasSession {
         self.redo.push(before);
         Ok(true)
     }
-
     pub fn redo(&mut self) -> Result<bool, CanvasSessionError> {
         let Some(next) = self.redo.last().cloned() else { return Ok(false); };
         self.document.replace_canvas(&next)?;
@@ -187,7 +188,6 @@ impl CanvasSession {
         self.undo.push(before);
         Ok(true)
     }
-
     /// On File Gate conflict, the edited Value and both history stacks survive
     /// unchanged for explicit user recovery. No silent overwrite or retry.
     pub fn save(&mut self, core: &Core) -> Result<bool, CanvasSessionError> {
