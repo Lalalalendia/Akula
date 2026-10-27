@@ -161,25 +161,61 @@ function Activate-Other-Tab([Diagnostics.Process]$Process) {
         throw 'Two real document tabs were not present after OS Ctrl+Shift+click'
     }
 }
-function Focus-Editor([Diagnostics.Process]$Process) {
+function Focus-Editor([Diagnostics.Process]$Process,[string]$ExpectedBody) {
     $tree = Root-Ui $Process
-    $condition = [Windows.Automation.PropertyCondition]::new(
-        [Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Edit)
+    $bounds = $tree.Current.BoundingRectangle
+    $condition = [Windows.Automation.OrCondition]::new([Windows.Automation.Condition[]]@(
+        [Windows.Automation.PropertyCondition]::new(
+            [Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [Windows.Automation.ControlType]::Edit),
+        [Windows.Automation.PropertyCondition]::new(
+            [Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [Windows.Automation.ControlType]::Document)))
     $items = $tree.FindAll([Windows.Automation.TreeScope]::Descendants,$condition)
-    $best = $null
-    $bestArea = 0.0
+    $candidates = @()
+    $matching = @()
     for ($i=0; $i -lt $items.Count; $i++) {
         $item = $items.Item($i)
-        $bounds = $item.Current.BoundingRectangle
-        $area = $bounds.Width * $bounds.Height
-        if ($item.Current.IsKeyboardFocusable -and !$item.Current.IsOffscreen -and
-            $bounds.Width -gt 200 -and $bounds.Height -gt 100 -and $area -gt $bestArea) {
-            $best = $item
-            $bestArea = $area
+        try {
+            $rect = $item.Current.BoundingRectangle
+            # Windowed Markdown editors are sized to their actual text.
+            # A one-line body can be 20-40px high, NOT a 100px input.
+            if (!$item.Current.IsEnabled -or !$item.Current.IsKeyboardFocusable -or
+                $item.Current.IsOffscreen -or $rect.IsEmpty -or
+                $rect.Width -lt 160 -or $rect.Height -lt 10 -or
+                $rect.Left -lt $bounds.Left -or $rect.Right -gt $bounds.Right -or
+                $rect.Top -lt $bounds.Top -or $rect.Bottom -gt $bounds.Bottom) { continue }
+            $candidates += $item
+            # AccessKit exports TextEditor::doc.loaded() as its UIA Value
+            # where supported. Prefer content identity over screen geometry.
+            $value = ''
+            $pattern = $null
+            if ($item.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) {
+                $value = ([Windows.Automation.ValuePattern]$pattern).Current.Value
+            }
+            if ($ExpectedBody -and $value.Contains($ExpectedBody)) { $matching += $item }
+        } catch [System.Windows.Automation.ElementNotAvailableException] {
+            continue
         }
     }
-    if ($null -eq $best) { throw 'Installed note editor is not a focusable multiline UIA text input' }
-    $best.SetFocus()
+    if ($matching.Count -gt 1) { throw 'Ambiguous body value in installed Akula UIA tree' }
+    if ($matching.Count -eq 1) {
+        $target = $matching[0]
+    } elseif ($candidates.Count -ge 2) {
+        # Body editor follows its single-line title vertically; do not use
+        # area as a proxy for the height of a short Markdown document.
+        $ordered = @($candidates | Sort-Object { $_.Current.BoundingRectangle.Top })
+        $target = $ordered[$ordered.Count - 1]
+    } else {
+        throw "Body editor not identified in installed Akula UIA tree: editor_candidates=$($candidates.Count) matching_value=$($matching.Count)"
+    }
+    $target.SetFocus()
+    $focused = $false
+    for ($attempt=0; $attempt -lt 25; $attempt++) {
+        Start-Sleep -Milliseconds 100
+        if ($target.Current.HasKeyboardFocus) { $focused=$true; break }
+    }
+    if (!$focused) { throw 'Windows UIA did not focus the selected body editor' }
 }
 function Wait-Shadow([string]$marker,[Diagnostics.Process]$Process) {
     for ($i=0; $i -lt 120; $i++) {
@@ -227,7 +263,7 @@ try {
     if ((Get-FileHash -LiteralPath $second -Algorithm SHA256).Hash -ne $secondHash) {
         throw 'Second tab was modified before editor focus'
     }
-    Focus-Editor $app
+    Focus-Editor $app 'original second tab'
     Send-AkulaBetaText -Process $app -Text $markerB
     $null=Wait-Shadow $markerB $app
     if ((Get-FileHash -LiteralPath $second -Algorithm SHA256).Hash -ne $secondHash) {
@@ -273,7 +309,7 @@ try {
     }
     # File Gate bytes alone do not prove that the *installed editor* displays
     # the recovered text. Read the actual foreground widget with native OS keys.
-    Focus-Editor $app
+    Focus-Editor $app $markerB
     $app.Refresh()
     $hwnd = [IntPtr]$app.MainWindowHandle
     if ($app.MainWindowTitle -notlike 'Second note*' -or
