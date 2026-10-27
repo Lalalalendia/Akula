@@ -270,6 +270,19 @@ if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
 }
 Assert-LegacyUntouched
 
+# Exercise the separate two-tab path through the installed Windows GUI:
+# Ctrl+Shift+pointer click, detached File Gate ACK cleanup, and a second
+# unsaved tab recovered after a hard process kill.
+$recoveryTabs = Join-Path $PSScriptRoot 'windows-beta-recovery-tabs.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $recoveryTabs -ExePath $exe
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula two-tab hard-kill recovery failed: PowerShell exit $LASTEXITCODE"
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'DESK-15 two-tab test changed original beta source'
+}
+Assert-LegacyUntouched
+
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
 if (!(Test-Path $uninstall)) { throw 'Akula uninstaller missing' }
 $removed = Start-Process $uninstall -ArgumentList '/S' -Wait -PassThru
