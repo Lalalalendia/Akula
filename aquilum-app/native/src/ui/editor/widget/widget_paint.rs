@@ -73,7 +73,7 @@ impl TextEditor {
         let palette = markdown::palette(&tm, color);
         let markdown = self.doc.markdown.is_some();
         if markdown {
-            self.paint_blocks(painter, first, last);
+            self.paint_list_blocks(painter, first, last);
             for &i in &texts {
                 self.paint_backdrop(painter, i);
             }
