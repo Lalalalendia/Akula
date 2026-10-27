@@ -18,14 +18,14 @@ fn open_anchored_root(root: &Path) -> Result<File, String> {
     // Every remaining parent (including the Vault root) is opened with
     // NtCreateFile(RootDirectory=held HANDLE, FILE_OPEN_REPARSE_POINT).
     let anchor = PathBuf::from(prefix.as_os_str()).join("\\");
-    let mut directory = open_root(&anchor).map_err(|error| error.to_string())?;
+    let mut directory = open_root(&anchor).map_err(|error| format!("{error:?}"))?;
     for part in parts {
         let Component::Normal(name) = part else {
             return Err("Non-normal MCP Vault root component".to_owned());
         };
         directory = open_child(&directory,
             name.to_str().ok_or("Non-Unicode MCP Vault root component")?, false)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| format!("{error:?}"))?;
     }
     Ok(directory)
 }
@@ -42,12 +42,12 @@ pub(super) fn read_windows(vault: &Vault, path: &Path) -> Result<Vec<u8>, String
         let leaf = names.peek().is_none();
         let file = open_child(&directory,
             name.to_str().ok_or("Non-Unicode MCP note name")?, leaf)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| format!("{error:?}"))?;
         if leaf {
             // Hardlinking an outside file into the Vault must not grant read
             // access to the external inode. Use the same pinned file HANDLE.
             let (_volume, _identity, links) = file_identity_with_links(&file)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| format!("{error:?}"))?;
             if links != 1 {
                 return Err("MCP note has multiple hard links".to_owned());
             }
