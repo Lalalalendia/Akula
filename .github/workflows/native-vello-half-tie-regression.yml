@@ -76,6 +76,7 @@ jobs:
           cargo test --release --locked -p vello_common --lib vello_culling_range_ -- --nocapture
           cargo test --release --locked -p vello_common --lib vello_strip_pixel_coords_ -- --nocapture
           cargo test --release --locked -p vello_common --lib vello_decimation_sizer_ -- --nocapture
+          cargo test --release --locked -p vello_common --lib vello_pixmap_oob_ -- --nocapture
       - name: Exact real glyph 495 source mask / all atlas slots and crop origins
         working-directory: aquilum-app
         shell: bash

@@ -18,7 +18,7 @@ pub mod text;
 pub mod theme;
 pub mod titlebar;
 pub mod timer;
-pub mod graph;
+pub mod graph; pub mod canvas;
 pub mod motion;
 pub mod palette;
 pub mod reader;
