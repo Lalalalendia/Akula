@@ -70,6 +70,7 @@ impl App {
         let op_result = match op {
             CanvasAction::AddText(x, y) => session.add_text("New card", *x, *y).map(|_| true),
             CanvasAction::MoveNode(node, x, y) => session.move_node(node, *x, *y),
+            CanvasAction::RemoveNode(node) => session.remove_node(node),
             CanvasAction::Undo => session.undo(),
             CanvasAction::Redo => session.redo(),
             CanvasAction::Save => Ok(false),
@@ -111,7 +112,6 @@ impl App {
     pub(in crate::app) fn canvas_view_id(&self) -> Option<WidgetId> {
         self.canvas.view.map(Handle::id)
     }
-
     pub(in crate::app) fn flush_canvas_on_shutdown(&mut self) {
         for (path, session) in &mut self.canvas.documents {
             if session.dirty() {

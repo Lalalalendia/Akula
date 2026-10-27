@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory = $true)][string]$ExePath,
     [Parameter(Mandatory = $true)][string]$VaultPath,
     [Parameter(Mandatory = $true)][string]$DataDir,
-    [switch]$Editable
+    [switch]$Editable,
+    [switch]$IncludeDelete
 )
 $ErrorActionPreference = 'Stop'
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
@@ -19,6 +20,7 @@ if ([System.IO.Path]::GetFullPath($ExePath) -ne [System.IO.Path]::GetFullPath($i
     !(Test-Path -LiteralPath $installed)) {
     throw 'Refusing to test non-installed Akula'
 }
+if ($IncludeDelete -and !$Editable) { throw 'Canvas Delete acceptance requires Editable mode' }
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes -ErrorAction Stop
 
 . (Join-Path $PSScriptRoot 'windows-beta-gui-input.ps1')
@@ -92,12 +94,27 @@ function Invoke-CanvasToolbar {
     $dpi = [AkulaCanvasInstalledPointer]::GetDpiForWindow($hwnd)
     if ($dpi -lt 96 -or $dpi -gt 480) { throw "Unexpected Canvas window DPI $dpi" }
     $scale = [double]$dpi / 96.0
-    # Matches CanvasPage::control_rect: 4 controls, 72x32, gap=5,
-    # right=14, top=9. Only fixed synthetic toolbar points are allowed.
-    if ($Index -lt 0 -or $Index -gt 2) { throw 'Non-whitelisted Canvas control index' }
-    $localX = [Math]::Max(0.0, $CanvasBounds.Width / $scale - 317.0) + 36.0 + $Index * 77.0
+    # Indices 0..2: original toolbar. 4: lower-row Delete. 5:
+    # verified synthetic first-card center using CanvasPage::fit.
+    if ($Index -notin @(0, 1, 2, 4, 5)) { throw 'Non-whitelisted Canvas click target' }
+    $w = $CanvasBounds.Width / $scale
+    $h = $CanvasBounds.Height / $scale
+    $localX = [Math]::Max(0.0, $w - 317.0) + 36.0 + $Index * 77.0
+    $localY = 25.0
+    if ($Index -eq 4) {
+        $localX = [Math]::Max(0.0, $w - 86.0) + 36.0
+        $localY = 62.0
+    } elseif ($Index -eq 5) {
+        # Fixture bounding group = 0..420 x 0..260; text card 'first'
+        # center = (114, 82). Transform with fitted Canvas camera.
+        $zoom = [Math]::Min([Math]::Max(1.0, $w - 96.0) / 420.0,
+                            [Math]::Max(1.0, $h - 96.0) / 260.0)
+        $zoom = [Math]::Min(8.0, [Math]::Max(0.05, $zoom))
+        $localX = $w / 2.0 - 96.0 * $zoom
+        $localY = $h / 2.0 - 48.0 * $zoom
+    }
     $x = [int][Math]::Round($CanvasBounds.Left + $localX * $scale)
-    $y = [int][Math]::Round($CanvasBounds.Top + 25.0 * $scale)
+    $y = [int][Math]::Round($CanvasBounds.Top + $localY * $scale)
     if ($x -lt $CanvasBounds.Left + 5 -or $x -ge $CanvasBounds.Right - 5 -or
         $y -lt $CanvasBounds.Top + 5 -or $y -ge $CanvasBounds.Bottom - 5 -or
         $x -lt $WindowBounds.Left + 5 -or $x -ge $WindowBounds.Right - 5 -or
@@ -229,6 +246,34 @@ foreach ($test in $checks) {
             $expectedHash = (Get-FileHash -LiteralPath $test.Path -Algorithm SHA256).Hash
             if ($expectedHash -eq $originalHash) { throw 'Installed Canvas mouse edits did not change source bytes' }
             Write-Host 'AKULA_WINDOWS_CANVAS_EDIT_PASS add=1 undo=1 redo=1 file_gate=1 vendor_preserved=1'
+            if ($IncludeDelete) {
+                Invoke-CanvasToolbar -Index 5 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                # Selection is in-memory: it must not alter the 4-card file.
+                if (@((Get-Content -LiteralPath $test.Path -Raw | ConvertFrom-Json).nodes).Count -ne 4) {
+                    throw 'Canvas card selection unexpectedly modified the file'
+                }
+                Invoke-CanvasToolbar -Index 4 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $removed = Wait-CanvasNodeCount -Path $test.Path -Count 3 -Process $proc
+                if (@($removed.edges).Count -ne 0 -or $removed.vendor.opaque -ne 'preserve' -or
+                    @($removed.nodes | Where-Object { $_.id -eq 'first' }).Count -ne 0 -or
+                    @($removed.nodes | Where-Object { $_.id -eq $newNodeId }).Count -ne 1) {
+                    throw 'Installed Canvas Delete lost an unrelated card, failed to remove the edge, or damaged vendor JSON'
+                }
+                Invoke-CanvasToolbar -Index 1 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $restored = Wait-CanvasNodeCount -Path $test.Path -Count 4 -Process $proc
+                if ($restored.edges[0].id -ne 'edge' -or $restored.nodes[1].id -ne 'first') {
+                    throw 'Installed Canvas Delete Undo failed to restore original node and connection'
+                }
+                Invoke-CanvasToolbar -Index 2 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $removedAgain = Wait-CanvasNodeCount -Path $test.Path -Count 3 -Process $proc
+                if (@($removedAgain.edges).Count -ne 0 -or
+                    @($removedAgain.nodes | Where-Object { $_.id -eq 'first' }).Count -ne 0) {
+                    throw 'Installed Canvas Delete Redo did not remove the same node and edge'
+                }
+                $expectedHash = (Get-FileHash -LiteralPath $test.Path -Algorithm SHA256).Hash
+                Write-Host 'AKULA_WINDOWS_CANVAS_DELETE_PASS selected=1 delete=1 undo=1 redo=1 linked_edge=1 file_gate=1'
+            }
+
         }
 
     } finally {
