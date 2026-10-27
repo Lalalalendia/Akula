@@ -1,4 +1,4 @@
-# Installed Windows smoke: nine scenario notes and a plain DOCX, all synthetic.
+﻿# Installed Windows smoke: nine scenario notes and a plain DOCX, all synthetic.
 # This is R2 opening/reading evidence, not full mouse-and-keyboard acceptance.
 param(
   [Parameter(Mandatory = $true)][string]$ExePath,
