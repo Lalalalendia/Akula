@@ -35,6 +35,24 @@ impl TreeModel {
             Ok(mut items) => {
                 #[cfg(feature = "dicom-preview")]
                 dicom::append_dicom_entries(dir, &mut items);
+                // Win7-only release evidence: distinguish a successful disk
+                // enumeration from a blank/non-rendering sidebar. Log counts,
+                // never user filenames or document contents.
+                #[cfg(target_os = "windows")]
+                if crate::host::native_frame() {
+                    let txt = items.iter().filter(|item| {
+                        item.item_type == FileItemType::File
+                            && aquilum_core::search::paths::is_plain_text(Path::new(&item.id))
+                    }).count();
+                    if txt > 0 || self.root.as_deref() == Some(dir) {
+                        report!(
+                            "WIN7_TREE_SCAN root={} entries={} txt={}",
+                            self.root.as_deref() == Some(dir),
+                            items.len(),
+                            txt
+                        );
+                    }
+                }
                 if self.sort.by_time() {
                     self.stamp(&items);
                 }
