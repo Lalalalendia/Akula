@@ -1,13 +1,13 @@
-//! Bound untrusted filtered-group geometry before Vello allocates intermediate
-//! Pixmaps. A finite blur plan alone does not prevent OOM or tile-coordinate
-//! overflow when large sigmas, offsets, or transforms expand the filter layers.
-//! Rejection is reported as a PaintError, never rendered as a silently omitted
-//! effect. Unfiltered groups follow the original fast path without any work.
+//! Bound filter-layer memory across nested groups and chains.
+//! Reject unsafe geometry before allocation; never silently omit effects.
+//! Preserve the unfiltered fast path and normal pixels.
 
 use masonry::imaging::Filter;
 use masonry::kurbo::Affine;
 
 use super::{Painter, convert, error::PaintError};
+mod nested;
+pub(super) use nested::FilterBudgetStack;
 
 /// Total permitted filtered-layer working set (~384 MiB at 4 bytes/pixel).
 /// It is deliberately a cumulative budget: nested filter chains each allocate
@@ -19,14 +19,15 @@ const MAX_FILTER_AXIS: f64 = 65_000.0;
 const TILE_ALIGNMENT_SLACK: f64 = 64.0;
 
 impl Painter {
-    pub(super) fn check_filter_budget(&self, filters: &[Filter]) -> Result<(), PaintError> {
-        validate(filters, *self.ctx.transform(), self.ctx.width(), self.ctx.height())
+    pub(super) fn check_filter_budget(&mut self, filters: &[Filter]) -> Result<(), PaintError> {
+        let pixels = validate(filters, *self.ctx.transform(), self.ctx.width(), self.ctx.height())?;
+        self.filter_budget_stack.admit(pixels, FILTER_WORK_PIXELS)
     }
 }
 
-fn validate(filters: &[Filter], transform: Affine, width: u16, height: u16) -> Result<(), PaintError> {
+fn validate(filters: &[Filter], transform: Affine, width: u16, height: u16) -> Result<f64, PaintError> {
     if filters.is_empty() {
-        return Ok(());
+        return Ok(0.0);
     }
     let invalid = || PaintError::FilterBudget("нечисловые параметры или чрезмерный буфер");
     if !transform.as_coeffs().iter().all(|coefficient| coefficient.is_finite()) {
@@ -83,9 +84,8 @@ fn validate(filters: &[Filter], transform: Affine, width: u16, height: u16) -> R
             return Err(invalid());
         }
     }
-    Ok(())
+    Ok(total_pixels)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
