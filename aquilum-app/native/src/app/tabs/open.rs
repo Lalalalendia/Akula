@@ -17,7 +17,6 @@ fn is_structured_file(path: &Path) -> bool {
 }
 const MAX_INACTIVE_NOTES: usize = 2;
 const MAX_INACTIVE_BYTES: usize = 8 * 1024 * 1024;
-
 /// Clean text only. A cached Rope is *never* authoritative without comparing
 /// its raw-file BLAKE3 digest against the actual bytes on every reopening.
 pub(in crate::app) struct CachedNote {
@@ -167,6 +166,7 @@ impl App {
         self.leave_note();
         #[cfg(test)]
         record_stage(|s| s.leave = started.elapsed());
+
         let read = aq_trace::zone("открытие: чтение файла");
         #[cfg(test)]
         let started = std::time::Instant::now();
@@ -208,7 +208,7 @@ impl App {
     pub(in crate::app) fn show_open_error(&mut self, root: &mut RenderRoot, path: &Path, error: &str) {
         self.note = None;
         self.note_ids = None;
-        self.embeds = None;
+        self.embeds = None; self.open_error = Some((path.to_path_buf(), error.to_owned()));
         let (page, ids) = crate::ui::note::open_error_page(path, error);
         self.open_error_ids = Some(ids);
         if let Some(chrome) = &self.chrome {
@@ -327,6 +327,7 @@ impl App {
     }
 
     pub(in crate::app) fn close_active_tab(&mut self, root: &mut RenderRoot) -> Outcome {
+        if self.canvas_dirty_active() { self.canvas_notify(root, "Canvas has unsaved changes. Save it before closing."); return Outcome::default(); }
         self.tabs.close(self.tabs.active_id());
         self.show_active(root);
         Outcome { title: true, ..Outcome::default() }

@@ -1,5 +1,4 @@
 use super::*;
-
 impl App {
     /// Действие виджета; `window` — размер окна в логических пикселях (для меню у края).
     pub fn on_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: ErasedAction, window: Size) -> Outcome {
@@ -31,6 +30,7 @@ impl App {
         if self.popup.is_some() {
             return self.on_popup_action(root, id, &action);
         }
+        if self.on_canvas_action(root, id, &action) { return Outcome::default(); }
         if self.is_graph_widget(id) {
             let title = self.on_graph_action(root, id, &action);
             return Outcome { title, ..Outcome::default() };

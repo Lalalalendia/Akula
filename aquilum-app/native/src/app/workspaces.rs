@@ -77,7 +77,7 @@ impl App {
         self.popup = Some(Popup::Workspaces(WorkspacesState { dialog, forget: None }));
     }
 
-    fn close_workspaces(&mut self, root: &mut RenderRoot) {
+    pub(in crate::app) fn close_workspaces(&mut self, root: &mut RenderRoot) {
         if let Some(Popup::Workspaces(state)) = self.popup.take() {
             if let Some((forget, _, _)) = state.forget {
                 crate::ui::dialog::close(root, forget.layer);

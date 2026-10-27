@@ -8,7 +8,8 @@ impl App {
             Some((session, tabs)) => (Some(session), tabs),
             None => (None, Tabs::default()),
         };
-        let (panel_tx, panel_rx) = channel(); let (search_tx, search_rx) = channel();
+        let (panel_tx, panel_rx) = channel();
+        let (search_tx, search_rx) = channel();
         let (picked_tx, picked_rx) = channel();
         let (transfer_tx, transfer_rx) = channel();
         let (home_tx, home_rx) = channel();
@@ -27,7 +28,7 @@ impl App {
             popup: None,
             typing: None,
             server_probe: settings::server_state::ServerProbeState::default(),
-            graph: graph_page::GraphState::default(),
+            graph: graph_page::GraphState::default(), canvas: canvas::CanvasState::default(),
             transfer: transfer::TransferState::default(),
             suggest_layer: None,
             find: None,
