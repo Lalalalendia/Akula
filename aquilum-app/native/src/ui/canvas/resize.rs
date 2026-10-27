@@ -48,13 +48,13 @@ impl CanvasPage {
         let Some(CanvasDrag::Resize { index, from, original }) = self.drag.take() else {
             return false;
         };
+        let point = ctx.local_position(up.state.position);
         // A click without deliberate travel is not a resize. This matters for
         // valid legacy cards smaller than the minimum for newly edited sizes.
         if (point - from).x.abs() + (point - from).y.abs() <= 2.0 {
             self.board.cards[index].rect = original;
             ctx.request_paint_only(); ctx.set_handled(); return true;
         }
-        let point = ctx.local_position(up.state.position);
         let resized = Self::resize_rect(original, (point - from) / self.zoom);
         let width = resized.width() as i64;
         let height = resized.height() as i64;
