@@ -163,7 +163,9 @@ impl App {
     }
 
     pub fn attach_window_controls(&mut self, root: &mut RenderRoot, window: Size) {
-        if cfg!(target_os = "macos") {
+        if crate::host::native_frame() {
+            self.window = window;
+            self.apply_widths(root);
             return;
         }
         if let Some((layer, _)) = self.controls.take() {
