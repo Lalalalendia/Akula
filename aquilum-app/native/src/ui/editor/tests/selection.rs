@@ -29,13 +29,13 @@ fn selection_is_replaced_by_typing() {
     }
     typing(&mut root, "there");
     assert_eq!(text(&root), "hello there");
-    press(&mut root, Key::Named(NamedKey::Backspace), command());
+    let word_modifier = if cfg!(target_os = "macos") { Modifiers::ALT } else { command() };
+    press(&mut root, Key::Named(NamedKey::Backspace), word_modifier);
     assert_eq!(text(&root), "hello ");
     command_key(&mut root, "a");
     named(&mut root, NamedKey::Delete);
     assert_eq!(text(&root), "");
 }
-
 #[test]
 fn double_tap_selects_word_everywhere() {
     for (source, word) in [("- & Буллит один\n\nтекст", "Буллит"), ("1. Буллит один\n\nтекст", "Буллит"), ("> [!quote] Буллит один\n\nтекст", "Буллит"), ("Буллит один\n\nтекст", "Буллит"), ("\t- Буллит один\n\nтекст", "Буллит")] {
