@@ -116,3 +116,6 @@ mod tests {
     }
 
 }
+
+#[cfg(all(test, target_os = "windows"))]
+mod benchmark;
