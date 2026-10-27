@@ -5,7 +5,30 @@ use masonry::imaging::BlurredRoundedRect;
 
 use super::super::Painter;
 
+// Test-only switch: compare both algorithms through the same Painter sink.
+#[cfg(test)]
+thread_local! {
+    static TEST_CULL_ENABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+#[cfg(test)]
+pub(super) fn with_test_culling<T>(enabled: bool, run: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_CULL_ENABLED.with(|slot| slot.set(self.0));
+        }
+    }
+    let prior = TEST_CULL_ENABLED.with(|slot| slot.replace(enabled));
+    let _restore = Restore(prior);
+    run()
+}
+
 pub(super) fn outside(painter: &Painter, draw: &BlurredRoundedRect) -> bool {
+    #[cfg(test)]
+    if !TEST_CULL_ENABLED.with(|slot| slot.get()) {
+        return false;
+    }
     // Vello CPU expands analytic blur by 2.5 sigma. Use 3 sigma plus
     // local and device pixel margins to allow raster/rounding differences.
     let spread = 3.0 * draw.std_dev + 2.0;

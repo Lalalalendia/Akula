@@ -57,9 +57,10 @@ jobs:
           cargo test --release --locked -p aquilum-native --bin aquilum-native \
             benchmark_shadow_offscreen_cull_abba -- --ignored --nocapture --test-threads=1 \
             2>&1 | tee "$GITHUB_WORKSPACE/shadow-offscreen-abba.log"
-          test "$(grep -c 'SHADOW_CULL_ABBA scene=' "$GITHUB_WORKSPACE/shadow-offscreen-abba.log")" -eq 8
-          test "$(grep -c 'SHADOW_CULL_ABBA scene=.*parity=PASS' "$GITHUB_WORKSPACE/shadow-offscreen-abba.log")" -eq 8
-          grep 'SHADOW_CULL_ABBA scene=' "$GITHUB_WORKSPACE/shadow-offscreen-abba.log" \
+          test "$(grep -c 'SHADOW_CULL_ABBA scene=' "$GITHUB_WORKSPACE/shadow-offscreen-abba.log")" -eq 128
+          test "$(grep -c 'SHADOW_CULL_ABBA scene=.*parity=PASS' "$GITHUB_WORKSPACE/shadow-offscreen-abba.log")" -eq 128
+          test "$(grep -c 'SHADOW_CULL_MEDIAN scene=' "$GITHUB_WORKSPACE/shadow-offscreen-abba.log")" -eq 4
+          grep 'SHADOW_CULL_MEDIAN scene=' "$GITHUB_WORKSPACE/shadow-offscreen-abba.log" \
             | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload raw shadow-cull A/B log
         if: always()

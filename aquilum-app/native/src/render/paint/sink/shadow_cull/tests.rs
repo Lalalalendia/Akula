@@ -89,27 +89,52 @@ fn filtered_groups_are_not_culled_and_invalid_offscreen_shadows_still_error() {
 #[ignore = "diagnostic Release shadow-cull ABBA; no application FPS claim"]
 fn benchmark_shadow_offscreen_cull_abba() {
     use std::time::Instant;
+    const CYCLES: usize = 8; // 16 paired samples per implementation per scene.
     let offscreen: Vec<_> = (0..256).map(|i| {
         shadow(Rect::new(250.0 + f64::from(i), 10.0, 280.0 + f64::from(i), 35.0), 3.0, Affine::IDENTITY)
     }).collect();
     let boundary: Vec<_> = (0..64).map(|i| {
         shadow(Rect::new(92.0 + f64::from(i % 5), 10.0, 122.0 + f64::from(i % 5), 35.0), 3.0, Affine::IDENTITY)
     }).collect();
+    let visible: Vec<_> = (0..64).map(|i| {
+        let x = 12.0 + f64::from(i % 8) * 4.0;
+        shadow(Rect::new(x, 12.0, x + 20.0, 32.0), 3.0, Affine::IDENTITY)
+    }).collect();
+    let mixed: Vec<_> = offscreen.iter().take(64).chain(boundary.iter()).copied().collect();
 
-    for (name, draws) in [("offscreen", offscreen.as_slice()), ("boundary", boundary.as_slice())] {
-        let expected = pixels(draws, false);
-        for (round, candidate) in [false, true, true, false].into_iter().enumerate() {
-            let began = Instant::now();
-            let actual = pixels(draws, candidate);
-            let elapsed = began.elapsed();
-            assert_eq!(actual, expected, "ABBA pixel parity failed");
-            println!(
-                "SHADOW_CULL_ABBA scene={name} route={} round={} draws={} elapsed_us={} parity=PASS",
-                if candidate { "cull" } else { "legacy" },
-                round + 1,
-                draws.len(),
-                elapsed.as_micros(),
-            );
+    for (name, draws) in [
+        ("offscreen", offscreen.as_slice()),
+        ("boundary", boundary.as_slice()),
+        ("visible", visible.as_slice()),
+        ("mixed", mixed.as_slice()),
+    ] {
+        let reference = pixels(draws, false); // Independent direct-Vello pixel oracle.
+        let mut legacy = Vec::with_capacity(CYCLES * 2);
+        let mut cull = Vec::with_capacity(CYCLES * 2);
+        for cycle in 0..CYCLES {
+            for (phase, candidate) in [false, true, true, false].into_iter().enumerate() {
+                let began = Instant::now();
+                // Both A and B use the *same* validated Painter path; the only
+                // switch is whether shadow_cull::outside() can reject a draw.
+                let actual = with_test_culling(candidate, || pixels(draws, true));
+                let elapsed_us = began.elapsed().as_micros();
+                assert_eq!(actual, reference, "ABBA pixel parity: {name}");
+                if candidate { &mut cull } else { &mut legacy }.push(elapsed_us);
+                println!(
+                    "SHADOW_CULL_ABBA scene={name} route={} cycle={} phase={} draws={} elapsed_us={} parity=PASS",
+                    if candidate { "cull" } else { "legacy" },
+                    cycle + 1, phase + 1, draws.len(), elapsed_us,
+                );
+            }
         }
+        legacy.sort_unstable();
+        cull.sort_unstable();
+        let mid = CYCLES;
+        let legacy_us = (legacy[mid - 1] + legacy[mid]) / 2;
+        let cull_us = (cull[mid - 1] + cull[mid]) / 2;
+        println!(
+            "SHADOW_CULL_MEDIAN scene={name} samples_per_route={} legacy_us={legacy_us} cull_us={cull_us} pixel_parity=PASS",
+            CYCLES * 2,
+        );
     }
 }
