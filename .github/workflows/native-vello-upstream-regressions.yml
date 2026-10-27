@@ -107,6 +107,7 @@ jobs:
           cargo test --release --locked -p aquilum-native --bin aquilum-native multi_filter_chain_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native mask_filter_preflight_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native mask_cache_budget_ -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native blurred_rounded_shadow_guard_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native malformed_path_sequence_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native filter_geometry_budget_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native extreme_path_geometry_ -- --nocapture --test-threads=1
