@@ -35,7 +35,6 @@ mod tests;
 use std::sync::{Arc, Mutex};
 
 use release::{PUBLIC_KEY, Release, find, verify};
-
 pub(crate) use apply::apply;
 
 #[derive(Clone, Debug, PartialEq)]
