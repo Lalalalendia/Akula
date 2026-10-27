@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn unindented_code_and_horizontal_rules_break_branches() {
-        assert!(spans("- parent\n\`\`\`rust\nlet x = 1;\n\`\`\`\n- sibling").is_empty());
+        assert!(spans("- parent\n```rust\nlet x = 1;\n```\n- sibling").is_empty());
         assert_eq!(spans("- parent\n  - child\n---\n- sibling"), vec![(0, 1)]);
     }
 
