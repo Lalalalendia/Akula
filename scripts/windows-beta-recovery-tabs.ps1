@@ -151,14 +151,38 @@ function Activate-Other-Tab([Diagnostics.Process]$Process) {
         if ($Process.MainWindowTitle -like 'Second note*') { break }
     }
     if ($Process.MainWindowTitle -notlike 'Second note*') { throw 'OS Ctrl+Shift+click did not open second note' }
-    $tree = Root-Ui $Process
+    # Changing the native title precedes AccessKit's asynchronous UIA tree
+    # projection. A single immediate query can see only the previous tab.
+    # Require BOTH real semantic TabItem nodes before accepting the click,
+    # retrying transient accessibility-tree updates with a bounded timeout.
     $cond = [Windows.Automation.PropertyCondition]::new(
         [Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::TabItem)
-    $tabs = $tree.FindAll([Windows.Automation.TreeScope]::Descendants,$cond)
     $names = @()
-    for ($i=0; $i -lt $tabs.Count; $i++) { $names += [string]$tabs.Item($i).Current.Name }
-    if ($names.Count -lt 2 -or $names -notcontains 'First note' -or $names -notcontains 'Second note') {
-        throw 'Two real document tabs were not present after OS Ctrl+Shift+click'
+    $tabProof = $false
+    for ($attempt=0; $attempt -lt 60; $attempt++) {
+        Start-Sleep -Milliseconds 200
+        $Process.Refresh()
+        if ($Process.HasExited) { throw 'Akula exited while exposing new-tab UIA tree' }
+        try {
+            $tree = Root-Ui $Process
+            $tabs = $tree.FindAll([Windows.Automation.TreeScope]::Descendants,$cond)
+            $names = @()
+            for ($i=0; $i -lt $tabs.Count; $i++) {
+                $names += [string]$tabs.Item($i).Current.Name
+            }
+            if ($names.Count -ge 2 -and
+                $names -contains 'First note' -and $names -contains 'Second note') {
+                $tabProof = $true
+                break
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] {
+            $names = @()
+        }
+    }
+    if (!$tabProof) {
+        # These are names of disposable synthetic fixture tabs, not user data.
+        $observed = [string]::Join(' | ', [string[]]$names)
+        throw "Installed two-tab UIA verification timed out: count=$($names.Count); names=$observed; title=$($Process.MainWindowTitle)"
     }
 }
 function Focus-Editor([Diagnostics.Process]$Process,[string]$ExpectedBody) {
