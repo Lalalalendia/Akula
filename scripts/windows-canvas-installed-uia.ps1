@@ -6,7 +6,8 @@ param(
     [Parameter(Mandatory = $true)][string]$DataDir,
     [switch]$Editable,
     [switch]$IncludeDelete,
-    [switch]$IncludeResize
+    [switch]$IncludeResize,
+    [switch]$IncludeConnect
 )
 $ErrorActionPreference = 'Stop'
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
@@ -23,6 +24,7 @@ if ([System.IO.Path]::GetFullPath($ExePath) -ne [System.IO.Path]::GetFullPath($i
 }
 if ($IncludeDelete -and !$Editable) { throw 'Canvas Delete acceptance requires Editable mode' }
 if ($IncludeResize -and !$Editable) { throw 'Canvas Resize acceptance requires Editable mode' }
+if ($IncludeConnect -and !$Editable) { throw 'Canvas Connect acceptance requires Editable mode' }
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes -ErrorAction Stop
 
 . (Join-Path $PSScriptRoot 'windows-beta-gui-input.ps1')
@@ -129,7 +131,7 @@ function Invoke-CanvasToolbar {
     $scale = [double]$dpi / 96.0
     # Indices 0..2: original toolbar. 4: lower-row Delete. 5:
     # verified synthetic first-card center using CanvasPage::fit.
-    if ($Index -notin @(0, 1, 2, 4, 5)) { throw 'Non-whitelisted Canvas click target' }
+    if ($Index -notin @(0, 1, 2, 4, 5, 6, 7)) { throw 'Non-whitelisted Canvas click target' }
     $w = $CanvasBounds.Width / $scale
     $h = $CanvasBounds.Height / $scale
     $localX = [Math]::Max(0.0, $w - 317.0) + 36.0 + $Index * 77.0
@@ -145,6 +147,18 @@ function Invoke-CanvasToolbar {
         $zoom = [Math]::Min(8.0, [Math]::Max(0.05, $zoom))
         $localX = $w / 2.0 - 96.0 * $zoom
         $localY = $h / 2.0 - 48.0 * $zoom
+    } elseif ($Index -eq 6) {
+        # Second toolbar row: Connect button to the left of Delete.
+        $localX = [Math]::Max(0.0, $w - 163.0) + 36.0
+        $localY = 62.0
+    } elseif ($Index -eq 7) {
+        # The synthetic new text card is created at fitted board center
+        # (210,130) with size 240x120. Its center is (330,190).
+        $zoom = [Math]::Min([Math]::Max(1.0, $w - 96.0) / 420.0,
+                            [Math]::Max(1.0, $h - 96.0) / 260.0)
+        $zoom = [Math]::Min(8.0, [Math]::Max(0.05, $zoom))
+        $localX = $w / 2.0 + 120.0 * $zoom
+        $localY = $h / 2.0 + 60.0 * $zoom
     }
     $x = [int][Math]::Round($CanvasBounds.Left + $localX * $scale)
     $y = [int][Math]::Round($CanvasBounds.Top + $localY * $scale)
@@ -369,6 +383,55 @@ foreach ($test in $checks) {
                 }
                 $expectedHash = (Get-FileHash -LiteralPath $test.Path -Algorithm SHA256).Hash
                 Write-Host 'AKULA_WINDOWS_CANVAS_RESIZE_PASS select=1 pointer_drag=1 undo=1 redo=1 file_gate=1'
+            }
+            if ($IncludeConnect) {
+                # Connect an existing text card to the newly added text card.
+                # Arm one-shot mode, click target, and verify actual disk JSON.
+                Invoke-CanvasToolbar -Index 5 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                Invoke-CanvasToolbar -Index 6 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                Invoke-CanvasToolbar -Index 7 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $linked = $null
+                for ($attempt = 0; $attempt -lt 80; $attempt++) {
+                    Start-Sleep -Milliseconds 150
+                    $proc.Refresh()
+                    if ($proc.HasExited) { throw 'Akula exited before installed Canvas Connect persisted' }
+                    try {
+                        $candidate = [System.IO.File]::ReadAllText($test.Path) | ConvertFrom-Json
+                        if (@($candidate.edges).Count -eq 2) { $linked = $candidate; break }
+                    } catch [System.IO.IOException] { }
+                }
+                if ($null -eq $linked -or $linked.vendor.opaque -ne 'preserve' -or
+                    $linked.edges[0].id -ne 'edge' -or
+                    $linked.edges[1].fromNode -ne 'first' -or
+                    $linked.edges[1].toNode -ne $newNodeId -or
+                    $linked.edges[1].toEnd -ne 'arrow') {
+                    throw 'Installed Canvas Connect failed to create standard edge while preserving vendor data'
+                }
+                $edgeId = [string]$linked.edges[1].id
+                if ([string]::IsNullOrWhiteSpace($edgeId)) { throw 'Installed Canvas Connect edge has no ID' }
+                Invoke-CanvasToolbar -Index 1 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $edgeUndo = $null
+                for ($attempt = 0; $attempt -lt 60; $attempt++) {
+                    Start-Sleep -Milliseconds 150
+                    $candidate = [System.IO.File]::ReadAllText($test.Path) | ConvertFrom-Json
+                    if (@($candidate.edges).Count -eq 1) { $edgeUndo = $candidate; break }
+                }
+                if ($null -eq $edgeUndo -or $edgeUndo.edges[0].id -ne 'edge') {
+                    throw 'Installed Canvas Connect Undo failed to restore original edges'
+                }
+                Invoke-CanvasToolbar -Index 2 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $edgeRedo = $null
+                for ($attempt = 0; $attempt -lt 60; $attempt++) {
+                    Start-Sleep -Milliseconds 150
+                    $candidate = [System.IO.File]::ReadAllText($test.Path) | ConvertFrom-Json
+                    if (@($candidate.edges).Count -eq 2) { $edgeRedo = $candidate; break }
+                }
+                if ($null -eq $edgeRedo -or $edgeRedo.edges[1].id -ne $edgeId -or
+                    $edgeRedo.vendor.opaque -ne 'preserve') {
+                    throw 'Installed Canvas Connect Redo lost generated edge ID or vendor property'
+                }
+                $expectedHash = (Get-FileHash -LiteralPath $test.Path -Algorithm SHA256).Hash
+                Write-Host 'AKULA_WINDOWS_CANVAS_CONNECT_PASS source=1 target=1 edge=1 undo=1 redo=1 file_gate=1'
             }
             if ($IncludeDelete) {
                 Invoke-CanvasToolbar -Index 5 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
