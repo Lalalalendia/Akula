@@ -1,6 +1,7 @@
 //! Native, read-only JSON Canvas. All pointer gestures affect the camera only.
 mod model;
 mod interaction;
+mod selection;
 #[cfg(test)]
 mod scene_tests;
 use model::{Board, Card, Connection, Kind, Side};
@@ -27,10 +28,10 @@ pub struct CanvasPage {
     zoom: f64,
     origin: Vec2,
     fitted: bool,
-    drag: Option<CanvasDrag>,
+    drag: Option<CanvasDrag>, selected: Option<String>,
     text: Vec<Vec<Line>>,
     status: Line,
-    controls: [Line; 4],
+    controls: [Line; 5],
     editable: bool,
     dirty: bool,
     undo: bool,
@@ -52,7 +53,7 @@ impl CanvasPage {
         let text = board.cards.iter().map(|c| c.lines.iter().map(|_| Line::default()).collect()).collect();
         Self {
             board, size: Size::ZERO, zoom: 1.0, origin: Vec2::ZERO,
-            fitted: false, drag: None, text, status: Line::default(),
+            fitted: false, drag: None, selected: None, text, status: Line::default(),
             controls: std::array::from_fn(|_| Line::default()), editable, dirty, undo, redo, error,
         }
     }
@@ -62,6 +63,7 @@ impl CanvasPage {
         undo: bool, redo: bool, error: Option<String>,
     ) {
         this.widget.board = Board::from_json(value);
+        this.widget.refresh_selection();
         this.widget.text = this.widget.board.cards.iter()
             .map(|card| card.lines.iter().map(|_| Line::default()).collect()).collect();
         this.widget.drag = None;
@@ -219,6 +221,7 @@ impl Widget for CanvasPage {
                 painter.fill(box_shape, tm.bg_surface).draw();
             }
             painter.stroke(&box_shape, &Stroke::new(if card.kind == Kind::Group { 2.0 } else { 1.0 }), outline).draw();
+            if self.selected.as_deref() == Some(card.id.as_str()) { painter.stroke(&box_shape, &Stroke::new(3.0), tm.text_primary).draw(); }
             if r.width() < 48.0 || r.height() < 18.0 { continue; }
             // Use the same world-to-screen transform for text and card geometry:
             // without it, zooming stretches the card but leaves its text at 100%.
@@ -268,12 +271,11 @@ mod tests {
         CanvasPage {
             text: board.cards.iter().map(|c| c.lines.iter().map(|_| Line::default()).collect()).collect(),
             board, size: Size::new(800.0, 600.0), zoom: 1.0,
-            origin: Vec2::ZERO, fitted: false, drag: None, status: Line::default(),
+            origin: Vec2::ZERO, fitted: false, drag: None, selected: None, status: Line::default(),
             controls: std::array::from_fn(|_| Line::default()), editable: false,
             dirty: false, undo: false, redo: false, error: None,
         }
     }
-
     #[test]
     fn fit_places_cards_inside_viewport_and_keeps_valid_zoom() {
         let mut page = page();
@@ -283,7 +285,6 @@ mod tests {
         assert!(card.x1 <= page.size.width && card.y1 <= page.size.height);
         assert!((MIN_ZOOM..=MAX_ZOOM).contains(&page.zoom));
     }
-
     #[test]
     fn zoom_preserves_the_world_point_under_cursor() {
         let mut page = page();
@@ -298,7 +299,6 @@ mod tests {
         assert!((after.x - cursor.x).abs() < 1e-9);
         assert!((after.y - cursor.y).abs() < 1e-9);
     }
-
     #[test]
     fn valid_short_and_long_canvas_colors_include_alpha() {
         let fallback = Color::BLACK;
