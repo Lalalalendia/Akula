@@ -69,6 +69,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $script = Get-Content -LiteralPath 'scripts/akula-win7-sp1-acceptance.ps1' -Raw
           foreach ($required in @('Get-WmiObject Win32_OperatingSystem', 'ServicePackMajorVersion',
+                                   'if ([int]$os.ProductType -ne 1)', 'acceptance_script_sha256=',
                                    'if (-not $DisposableVm)', 'installed_app_and_shiva_hashes=PASS',
                                    'pdf_roundtrip=PASS', 'cover_uncover_20=COMPLETED_REQUIRES_VISUAL_REVIEW',
                                    'Cold-reopened', 'Sha256 $Installer', 'Start-Process -FilePath $Installer')) {
@@ -81,6 +82,7 @@ jobs:
           # operator-confirmed, and must never claim a real power-cut PASS.
           $desk15 = Get-Content -LiteralPath 'scripts/akula-desk15-real-windows-acceptance.ps1' -Raw
           foreach ($required in @('if (-not $DisposableMachine)', 'Get-WmiObject Win32_OperatingSystem',
+                                   'if ([int]$os.ProductType -ne 1)', 'acceptance_script_sha256=',
                                    'Get-Process -Name', 'Sha256 $exe', 'Wait-Shadow $markerB $app',
                                    'Check-Acl $shadowB', '$app.Kill()', 'no_auto_overwrite=PASS',
                                    'restored_second_gui_exact=PASS', 'power_cut=NOT_TESTED',
@@ -89,6 +91,37 @@ jobs:
           }
           if ($desk15 -match 'Invoke-WebRequest|Invoke-RestMethod|iex\b|DownloadString|Get-FileHash|Remove-Item|Stop-Process') {
             throw 'DESK-15 real-OS acceptance must be Windows PS2-compatible and non-destructive'
+          }
+
+      # A version-only check would mislabel Server 2008 R2 as Win7 SP1,
+      # and Server 2022 as Windows 10/11. Exercise both guards on this hosted
+      # Windows Server 2022 runner, before any test files could be created.
+      - name: Prove real-OS harnesses reject Windows Server editions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $winPs = Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          if (!(Test-Path -LiteralPath $winPs)) { throw 'Windows PowerShell for the negative test is missing' }
+          $missing = Join-Path $env:RUNNER_TEMP 'akula-negative-control-does-not-exist.exe'
+          if (Test-Path -LiteralPath $missing) { throw 'Negative-control fixture unexpectedly exists' }
+          $cases = @(
+            @{ Name = 'WIN7_SP1'; File = 'scripts/akula-win7-sp1-acceptance.ps1';
+               Marker = 'Win7 SP1 acceptance requires a workstation Windows edition';
+               Args = @('-Installer', $missing, '-InstallerAudit', $missing,
+                        '-Provenance', $missing, '-DisposableVm') },
+            @{ Name = 'DESK15'; File = 'scripts/akula-desk15-real-windows-acceptance.ps1';
+               Marker = 'DESK-15 acceptance requires a workstation Windows edition';
+               Args = @('-ExePath', $missing, '-ExpectedSha256', ('0' * 64),
+                        '-DisposableMachine') }
+          )
+          foreach ($case in $cases) {
+            $argsList = @('-NoProfile', '-NonInteractive', '-Sta', '-ExecutionPolicy',
+                          'Bypass', '-File', (Join-Path $env:GITHUB_WORKSPACE $case.File)) + $case.Args
+            $output = (& $winPs @argsList 2>&1 | Out-String)
+            if ($LASTEXITCODE -eq 0 -or !$output.Contains($case.Marker)) {
+              throw "Unsafe real-OS acceptance guard: $($case.Name) exited $LASTEXITCODE; $output"
+            }
+            Write-Host "$($case.Name)_SERVER_EDITION_NEGATIVE_PASS"
           }
 
       - name: Verify fail-closed COM import staging decisions
