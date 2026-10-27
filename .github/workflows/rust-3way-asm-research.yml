@@ -1,0 +1,43 @@
+name: Rust 3-way performance and assembly research
+
+on:
+  push:
+    branches:
+      - research/rust-functional-asm-3way-20261027
+    paths:
+      - 'scripts/benchmarks/rust-functional-style/**'
+      - '.github/workflows/rust-3way-asm-research.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - name: Run correctness tests
+        run: rustc --edition=2021 --test -O scripts/benchmarks/rust-functional-style/compare.rs -o /tmp/rust-three-tests && /tmp/rust-three-tests
+      - name: Compile and inspect machine code
+        run: |
+          mkdir -p rust-functional-results
+          rustc --edition=2021 -C opt-level=3 -C target-cpu=x86-64 -C debuginfo=1 scripts/benchmarks/rust-functional-style/compare.rs -o /tmp/rust-three
+          objdump -d --no-show-raw-insn /tmp/rust-three > rust-functional-results/disassembly.txt
+          nm -n /tmp/rust-three | grep -E ' (imperative|functional|branchless)$' | tee rust-functional-results/symbols.txt
+      - name: Run balanced three-way benchmark
+        run: /tmp/rust-three
+      - name: Capture environment
+        if: always()
+        run: |
+          rustc -Vv > rust-functional-results/rustc.txt
+          lscpu > rust-functional-results/cpu.txt
+          sha256sum scripts/benchmarks/rust-functional-style/compare.rs > rust-functional-results/sha256.txt
+      - name: Save results and disassembly
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-three-style-results
+          path: rust-functional-results/**
+          retention-days: 30
