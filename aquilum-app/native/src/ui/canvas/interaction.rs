@@ -48,7 +48,7 @@ impl CanvasPage {
             _ => None,
         }
     }
-    fn node_at(&self, position: Point) -> Option<usize> {
+    pub(super) fn node_at(&self, position: Point) -> Option<usize> {
         if !self.editable { return None; }
         self.board.cards.iter().enumerate().rev()
             .find(|(_, card)| card.kind == Kind::Text && self.rect(card.rect).contains(position))
