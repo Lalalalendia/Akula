@@ -19,7 +19,7 @@ fn read_limit(file: &mut File, limit: u64) -> Result<Vec<u8>, String> {
     // The limit is enforced on the live handle, not only by metadata: a
     // concurrent process may append after the initial size preflight.
     let mut bytes = Vec::new();
-    file.take(limit.saturating_add(1)).read_to_end(&mut bytes)
+    (&mut *file).take(limit.saturating_add(1)).read_to_end(&mut bytes)
         .map_err(|error| error.to_string())?;
     if bytes.len() as u64 > limit {
         return Err(format!("MCP note exceeds {limit} byte limit"));
@@ -64,7 +64,7 @@ mod tests {
     fn zero_length_regular_note_is_allowed() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("empty.md");
-        fs::write(&path, []).unwrap();
+        fs::write(&path, b"").unwrap();
         assert_eq!(read(File::open(&path).unwrap()).unwrap(), Vec::<u8>::new());
     }
 }
