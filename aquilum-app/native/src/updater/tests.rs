@@ -82,7 +82,7 @@ fn concurrent_update_claims_allow_exactly_one_worker() {
         }));
     }
     barrier.wait();
-    let claims = workers.into_iter().filter(|worker| worker.join().unwrap()).count();
+    let claims = workers.into_iter().map(|worker| worker.join().unwrap()).filter(|claimed| *claimed).count();
     assert_eq!(claims, 1, "concurrent calls must not create multiple update workers");
     assert_eq!(wakes.load(Ordering::SeqCst), 1);
     assert_eq!(updater.status(), Status::Checking);
