@@ -1,0 +1,40 @@
+name: Rust selectivity five-way research
+on:
+  push:
+    branches:
+      - research/rust-functional-selectivity-20261027
+    paths:
+      - 'scripts/benchmarks/rust-functional-style/selectivity.rs'
+      - '.github/workflows/rust-selectivity-research.yml'
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - name: Check correctness
+        run: rustc --edition=2021 -O --test scripts/benchmarks/rust-functional-style/selectivity.rs -o /tmp/selectivity-tests && /tmp/selectivity-tests
+      - name: Build and examine instructions
+        run: |
+          mkdir -p rust-selectivity-results
+          rustc --edition=2021 -C opt-level=3 -C target-cpu=x86-64 scripts/benchmarks/rust-functional-style/selectivity.rs -o /tmp/selectivity
+          objdump -d --no-show-raw-insn /tmp/selectivity > rust-selectivity-results/disassembly.txt
+          nm -n /tmp/selectivity | grep -E ' (imperative|functional|branchless|combined_cond|dual_accum)$' > rust-selectivity-results/symbols.txt
+      - name: Measure all five selectivity levels
+        run: /tmp/selectivity
+      - name: Record machine information
+        if: always()
+        run: |
+          rustc -Vv > rust-selectivity-results/rustc.txt
+          lscpu > rust-selectivity-results/cpu.txt
+          sha256sum scripts/benchmarks/rust-functional-style/selectivity.rs > rust-selectivity-results/source_sha256.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-selectivity-results
+          path: rust-selectivity-results/**
+          retention-days: 30
