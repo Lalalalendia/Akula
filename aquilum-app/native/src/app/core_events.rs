@@ -149,7 +149,7 @@ impl App {
                 self.refresh_settings(root);
             }
         }
-        if let Some(payload) = self.updater.take_ready() {
+        if let Some(payload) = self.updater.take_ready(&self.workspace.data_dir) {
             let _ = root.redraw();
             if let Err(error) = crate::updater::apply(&payload, || self.shutdown()) {
                 report!("обновление не установлено: {error}");
