@@ -2,7 +2,6 @@
 //! Keep the existing shadow_guard validation before calling this helper.
 
 use masonry::imaging::BlurredRoundedRect;
-use masonry::kurbo::Rect;
 
 use super::super::Painter;
 
