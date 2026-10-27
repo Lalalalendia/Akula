@@ -17,7 +17,7 @@ const READ_CHUNK: usize = 16 * 1024;
 const FRAMING_TOO_LARGE: &str = "Слишком длинный заголовок запроса";
 const BAD_CHUNK: &str = "Некорректное chunked-тело запроса";
 const BODY_TOO_LARGE: &str = "Слишком большой запрос";
-
+#[cfg(test)] mod preauth_tests;
 pub enum Failure {
     Gone,
     Refused(Response),
