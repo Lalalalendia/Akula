@@ -37,10 +37,7 @@ pub(super) fn validate_run(run: &GlyphRunRef<'_>) -> Result<(), PaintError> {
         return Err(invalid());
     }
     if let Style::Stroke(stroke) = run.style {
-        if !stroke.width.is_finite() || stroke.width < 0.0 || stroke.width > MAX_DEVICE_COORD
-            || !stroke.miter_limit.is_finite() || stroke.miter_limit > 10_000.0 {
-            return Err(invalid());
-        }
+        super::super::stroke_style::validate(stroke)?;
     }
     Ok(())
 }
