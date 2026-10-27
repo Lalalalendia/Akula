@@ -7,11 +7,9 @@ use masonry::imaging::record::Glyph as SceneGlyph;
 use masonry::kurbo::{Affine, Shape as _};
 use masonry::peniko::{BlendMode, BrushRef};
 
-use super::{Painter, TOLERANCE};
-use super::convert;
-use super::error::PaintError;
-use super::mask;
+use super::{convert, error::PaintError, mask, Painter, TOLERANCE};
 mod path_guard;
+mod shadow_guard;
 impl PaintSink for Painter {
     fn push_clip(&mut self, clip: ClipRef<'_>) {
         if self.error.is_some() { return; }
@@ -205,6 +203,7 @@ impl PaintSink for Painter {
         if self.error.is_some() {
             return;
         }
+        if let Err(err) = shadow_guard::validate(&draw) { self.set_error_once(err); return; }
         self.set_transform(draw.transform);
         self.ctx.set_paint(draw.color.multiply_alpha(draw.composite.alpha));
         self.ctx.set_blend_mode(draw.composite.blend);
