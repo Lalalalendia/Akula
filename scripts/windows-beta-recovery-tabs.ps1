@@ -121,7 +121,7 @@ function Activate-Other-Tab([Diagnostics.Process]$Process) {
     $target = $null
     for ($i=0; $i -lt 100; $i++) {
         Start-Sleep -Milliseconds 200
-        $target = Find-Named $Process ([Windows.Automation.ControlType]::TreeItem) 'Second note.md'
+        $target = Find-Named $Process ([Windows.Automation.ControlType]::TreeItem) 'Second note'
         if ($null -ne $target) { break }
     }
     if ($null -eq $target) { throw 'Second note not accessible in real file tree' }
