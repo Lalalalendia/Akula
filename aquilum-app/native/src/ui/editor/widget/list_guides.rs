@@ -204,6 +204,41 @@ mod tests {
     }
 
     #[test]
+    fn guide_is_visible_in_a_rasterized_frame() {
+        let source = "- parent\n  - child one\n  - child two";
+        let options = RenderRootOptions {
+            default_properties: Arc::new(default_property_set()),
+            use_system_fonts: true,
+            size_policy: WindowSizePolicy::User,
+            size: PhysicalSize::new(WIDTH, HEIGHT),
+            scale_factor: 1.0,
+            test_font: None,
+        };
+        let mut root = RenderRoot::new(
+            NewWidget::new(TextEditor::new(source).markdown()).with_tag(TAG).erased(),
+            |_| {},
+            options,
+        );
+        let (layers, _) = root.redraw();
+        let editor = root.get_widget_with_tag(TAG).expect("editor").inner();
+        let guides = editor.list_guide_rects(0, 2);
+        assert_eq!(guides.len(), 1);
+        let guide = guides[0];
+        let mut renderer = crate::render::Renderer::new(2);
+        renderer.render(&layers, WIDTH as u16, HEIGHT as u16, 1.0, theme::background()).unwrap();
+        let pixels = renderer.frame_pixels();
+        let x = guide.center().x.round() as usize;
+        let reference = x.saturating_sub(6);
+        let from = (guide.y0 + 1.0).ceil().max(0.0) as usize;
+        let to = (guide.y1 - 1.0).floor().min(HEIGHT as f64) as usize;
+        assert!(reference < x && x < WIDTH as usize && to > from);
+        let tinted_rows = (from..to)
+            .filter(|&y| pixels[y * WIDTH as usize + x] != pixels[y * WIDTH as usize + reference])
+            .count();
+        assert!(tinted_rows >= 4, "guide must paint at least four pixels beyond the adjacent background");
+    }
+
+    #[test]
     fn guide_geometry_is_nested_and_rendering_does_not_change_markdown() {
         let source = "- A\n  - B\n    - C\n  - D";
         with_editor(source, |editor| {
