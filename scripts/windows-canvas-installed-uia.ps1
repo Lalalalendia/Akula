@@ -1,5 +1,6 @@
 # Installed Akula Canvas UIA smoke on a disposable GitHub-hosted Windows runner.
-# This test uses isolated synthetic .canvas files, with guarded edit/Undo/Redo persistence.
+# This test uses isolated synthetic .canvas and the pinned official published
+# JSON Canvas sample, with guarded edit/Undo/Redo persistence.
 param(
     [Parameter(Mandatory = $true)][string]$ExePath,
     [Parameter(Mandatory = $true)][string]$VaultPath,
@@ -218,7 +219,12 @@ function Invoke-CanvasResize {
 
 $populatedPath = Join-Path $VaultPath 'canvas-installed-populated.canvas'
 $emptyPath = Join-Path $VaultPath 'canvas-installed-empty.canvas'
-foreach ($path in @($populatedPath, $emptyPath)) {
+$officialSource = Join-Path (Split-Path -Parent $PSScriptRoot) 'aquilum-app\core\tests\fixtures\jsoncanvas\official-sample.canvas'
+$officialPath = Join-Path $VaultPath 'canvas-installed-official-sample.canvas'
+if (!(Test-Path -LiteralPath $officialSource -PathType Leaf)) {
+    throw "Pinned official JSON Canvas fixture is missing: $officialSource"
+}
+foreach ($path in @($populatedPath, $emptyPath, $officialPath)) {
     if (Test-Path -LiteralPath $path) { throw "Canvas fixture is not clean: $path" }
 }
 $populated = @'
@@ -235,9 +241,17 @@ $populated = @'
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 [System.IO.File]::WriteAllText($populatedPath, $populated, $utf8)
 [System.IO.File]::WriteAllText($emptyPath, '{"nodes":[],"edges":[]}', $utf8)
+[System.IO.File]::WriteAllBytes($officialPath, [System.IO.File]::ReadAllBytes($officialSource))
+$officialValue = [System.IO.File]::ReadAllText($officialPath) | ConvertFrom-Json
+if (@($officialValue.nodes).Count -ne 5 -or @($officialValue.edges).Count -ne 1 -or
+    $officialValue.nodes[0].type -ne 'group' -or
+    $officialValue.nodes[2].file -ne '_site/logo.svg') {
+    throw 'Official JSON Canvas reference fixture is not the pinned five-node board'
+}
 $checks = @(
     @{ Path = $populatedPath; Label = 'Canvas: 3 nodes, 1 edges'; Opposite = 'Canvas: 0 nodes, 0 edges' },
-    @{ Path = $emptyPath; Label = 'Canvas: 0 nodes, 0 edges'; Opposite = 'Canvas: 3 nodes, 1 edges' }
+    @{ Path = $emptyPath; Label = 'Canvas: 0 nodes, 0 edges'; Opposite = 'Canvas: 3 nodes, 1 edges' },
+    @{ Path = $officialPath; Label = 'Canvas: 5 nodes, 1 edges'; Opposite = 'Canvas: 0 nodes, 0 edges'; Official = $true }
 )
 
 foreach ($test in $checks) {
@@ -512,6 +526,9 @@ foreach ($test in $checks) {
     }
     if ((Get-FileHash -LiteralPath $test.Path -Algorithm SHA256).Hash -ne $expectedHash) {
         throw 'Closing installed Canvas changed the expected saved revision'
+    }
+    if ($test.Official) {
+        Write-Host 'AKULA_WINDOWS_CANVAS_OFFICIAL_REFERENCE_PASS nodes=5 edges=1 uia=1 source_sha256_unchanged=1'
     }
 }
 Write-Host ("AKULA_WINDOWS_CANVAS_INSTALLED_PASS populated=1 empty=1 uia=1 file_gate_edit={0} source_sha256=1" -f $Editable.IsPresent)
