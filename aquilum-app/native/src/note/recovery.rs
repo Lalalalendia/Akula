@@ -3,6 +3,8 @@
 //! signature and cannot prove zero data loss before its durable-write ACK.
 #![allow(dead_code)]
 mod queue;
+#[cfg(target_os = "windows")]
+mod acl;
 pub(super) use queue::{CaptureStatus, SnapshotQueue};
 
 use std::fs::{self, File, OpenOptions};
@@ -104,9 +106,16 @@ fn folder(data: &Path, workspace: Uuid, create: bool) -> io::Result<Option<PathB
     let bucket = base.join(workspace.to_string());
     // Verify each segment BEFORE traversing or chmod: never follow a
     // pre-existing symlink/junction into an attacker-selected location.
-    if !checked_directory(&base, create)? || !checked_directory(&bucket, create)? {
+    if !checked_directory(&base, create)? {
         return Ok(None);
     }
+    #[cfg(target_os = "windows")]
+    acl::restrict(&base)?;
+    if !checked_directory(&bucket, create)? {
+        return Ok(None);
+    }
+    #[cfg(target_os = "windows")]
+    acl::restrict(&bucket)?;
     #[cfg(unix)]
     if create {
         use std::os::unix::fs::PermissionsExt;
@@ -165,6 +174,9 @@ fn read_bounded(path: &Path) -> io::Result<Vec<u8>> {
     if !meta.is_file() || reparse(&meta) || meta.len() > MAX_WIRE as u64 {
         return Err(denied("unsafe or oversized recovery record"));
     }
+    // Upgrade a legacy shadow's inherited DACL before inspecting its plaintext.
+    #[cfg(target_os = "windows")]
+    acl::restrict(path)?;
     let mut bytes = Vec::new();
     File::open(path)?.take((MAX_WIRE + 1) as u64).read_to_end(&mut bytes)?;
     if bytes.len() > MAX_WIRE {
