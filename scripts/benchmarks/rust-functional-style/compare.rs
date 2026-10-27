@@ -1,4 +1,4 @@
-//! Comparison of three Rust styles on the same deterministic book catalog.
+//! Comparison of five Rust styles on the same deterministic book catalog.
 //! Isolated research only. No external dependencies or production changes.
 use std::hint::black_box;
 use std::time::Instant;
@@ -43,6 +43,44 @@ fn branchless(books: &[Book]) -> u64 {
         total += u64::from(book.chapters) * selected;
     }
     total
+}
+
+// Both booleans are evaluated before the branch, unlike short-circuit &&.
+#[no_mangle]
+#[inline(never)]
+fn combined_cond(books: &[Book]) -> u64 {
+    let mut total = 0_u64;
+    for book in books {
+        if book.published & book.ru {
+            total += u64::from(book.chapters);
+        }
+    }
+    total
+}
+
+// Two independently maintained sums for adjacent records.
+#[no_mangle]
+#[inline(never)]
+fn dual_accum(books: &[Book]) -> u64 {
+    let mut even = 0_u64;
+    let mut odd = 0_u64;
+    let mut pairs = books.chunks_exact(2);
+    for pair in &mut pairs {
+        let a = &pair[0];
+        let b = &pair[1];
+        if a.published && a.ru {
+            even += u64::from(a.chapters);
+        }
+        if b.published && b.ru {
+            odd += u64::from(b.chapters);
+        }
+    }
+    for book in pairs.remainder() {
+        if book.published && book.ru {
+            even += u64::from(book.chapters);
+        }
+    }
+    even + odd
 }
 
 fn books_fixture(count: usize) -> Vec<Book> {
@@ -96,9 +134,11 @@ fn main() {
     let expected = imperative(&books);
     assert_eq!(functional(&books), expected);
     assert_eq!(branchless(&books), expected);
+    assert_eq!(combined_cond(&books), expected);
+    assert_eq!(dual_accum(&books), expected);
 
-    let methods: [fn(&[Book]) -> u64; 3] = [imperative, functional, branchless];
-    let names = ["imperative", "functional", "branchless"];
+    let methods: [fn(&[Book]) -> u64; 5] = [imperative, functional, branchless, combined_cond, dual_accum];
+    let names = ["imperative", "functional", "branchless", "combined_cond", "dual_accum"];
 
     // Identical warm-up count for each method.
     for _ in 0..3 {
@@ -107,20 +147,23 @@ fn main() {
         }
     }
 
-    let mut times: [Vec<f64>; 3] = std::array::from_fn(|_| Vec::with_capacity(TRIALS));
+    let mut times: [Vec<f64>; 5] = std::array::from_fn(|_| Vec::with_capacity(TRIALS));
     let mut csv = String::from("trial,variant,ms_per_full_scan\n");
-    // Six balanced orders; each method appears first, middle and last equally often.
-    const ORDERS: [[usize; 3]; 6] = [
-        [0, 1, 2], [1, 2, 0], [2, 0, 1],
-        [2, 1, 0], [1, 0, 2], [0, 2, 1],
+    // 10 balanced orders repeated six times: each variant appears 12 times
+    // in each of the five positions, reducing order / cache-warming bias.
+    const ORDERS: [[usize; 5]; 10] = [
+        [0, 1, 2, 3, 4], [1, 2, 3, 4, 0], [2, 3, 4, 0, 1],
+        [3, 4, 0, 1, 2], [4, 0, 1, 2, 3],
+        [4, 3, 2, 1, 0], [3, 2, 1, 0, 4], [2, 1, 0, 4, 3],
+        [1, 0, 4, 3, 2], [0, 4, 3, 2, 1],
     ];
 
     for trial in 0..TRIALS {
-        let mut result = [0_f64; 3];
+        let mut result = [0_f64; 5];
         for &method in &ORDERS[trial % ORDERS.len()] {
             result[method] = run_many(&books, methods[method], REPETITIONS);
         }
-        for method in 0..3 {
+        for method in 0..5 {
             times[method].push(result[method]);
             csv.push_str(&format!("{trial},{},{:.6}\n", names[method], result[method]));
         }
@@ -135,6 +178,10 @@ fn main() {
     let a_p95 = p95(&times[0]);
     let b_p95 = p95(&times[1]);
     let c_p95 = p95(&times[2]);
+    let d_med = median(&times[3]);
+    let e_med = median(&times[4]);
+    let d_p95 = p95(&times[3]);
+    let e_p95 = p95(&times[4]);
 
     println!("BOOKS={BOOKS} REPETITIONS={REPETITIONS} TRIALS={TRIALS}");
     println!("FULL_SCANS_PER_VARIANT={}", REPETITIONS * TRIALS);
@@ -144,9 +191,13 @@ fn main() {
     println!("IMPERATIVE_MEDIAN_MS={a_med:.6} IMPERATIVE_P95_MS={a_p95:.6}");
     println!("FUNCTIONAL_MEDIAN_MS={b_med:.6} FUNCTIONAL_P95_MS={b_p95:.6}");
     println!("BRANCHLESS_MEDIAN_MS={c_med:.6} BRANCHLESS_P95_MS={c_p95:.6}");
+    println!("COMBINED_COND_MEDIAN_MS={d_med:.6} COMBINED_COND_P95_MS={d_p95:.6}");
+    println!("DUAL_ACCUM_MEDIAN_MS={e_med:.6} DUAL_ACCUM_P95_MS={e_p95:.6}");
     println!("FUNCTIONAL_TO_IMPERATIVE_RATIO={:.6}", b_med / a_med);
     println!("BRANCHLESS_TO_IMPERATIVE_RATIO={:.6}", c_med / a_med);
     println!("BRANCHLESS_TO_FUNCTIONAL_RATIO={:.6}", c_med / b_med);
+    println!("COMBINED_TO_FUNCTIONAL_RATIO={:.6}", d_med / b_med);
+    println!("DUAL_TO_FUNCTIONAL_RATIO={:.6}", e_med / b_med);
 
     std::fs::create_dir_all("rust-functional-results").unwrap();
     let summary = format!(
@@ -163,15 +214,23 @@ fn main() {
   "functional_p95_ms": {b_p95:.6},
   "branchless_median_ms": {c_med:.6},
   "branchless_p95_ms": {c_p95:.6},
+  "combined_cond_median_ms": {d_med:.6},
+  "combined_cond_p95_ms": {d_p95:.6},
+  "dual_accum_median_ms": {e_med:.6},
+  "dual_accum_p95_ms": {e_p95:.6},
   "functional_to_imperative_ratio": {:.6},
   "branchless_to_imperative_ratio": {:.6},
-  "branchless_to_functional_ratio": {:.6}
+  "branchless_to_functional_ratio": {:.6},
+  "combined_to_functional_ratio": {:.6},
+  "dual_to_functional_ratio": {:.6}
 }}
 "#,
         std::mem::size_of::<Book>(),
         b_med / a_med,
         c_med / a_med,
         c_med / b_med,
+        d_med / b_med,
+        e_med / b_med,
     );
     std::fs::write("rust-functional-results/summary.json", summary).unwrap();
     std::fs::write("rust-functional-results/trials.csv", csv).unwrap();
@@ -185,6 +244,8 @@ mod tests {
         assert_eq!(imperative(books), expected);
         assert_eq!(functional(books), expected);
         assert_eq!(branchless(books), expected);
+        assert_eq!(combined_cond(books), expected);
+        assert_eq!(dual_accum(books), expected);
     }
 
     #[test]
@@ -216,6 +277,17 @@ mod tests {
     fn large_fixture_parity() {
         let books = books_fixture(100_000);
         assert_agree(&books, imperative(&books));
+    }
+
+    #[test]
+    fn odd_length_and_one_record() {
+        let books = [
+            Book { published: true, ru: true, chapters: 8 },
+            Book { published: false, ru: true, chapters: 7 },
+            Book { published: true, ru: true, chapters: 9 },
+        ];
+        assert_agree(&books[..1], 8);
+        assert_agree(&books, 17);
     }
 
     #[test]
