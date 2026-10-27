@@ -14,7 +14,7 @@ fn should_start(running: bool, pending: &mut bool) -> bool {
 }
 
 impl FileTree {
-    pub(super) fn count_notes(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
+    pub(in crate::ui::file_tree) fn count_notes(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
         let Some(root) = self.model.root().map(Path::to_path_buf) else { return };
         if !should_start(self.counting.is_some(), &mut self.pending_count_scan) {
             return;
