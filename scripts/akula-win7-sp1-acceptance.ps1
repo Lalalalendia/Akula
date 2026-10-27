@@ -11,6 +11,8 @@ param(
 $ErrorActionPreference = 'Stop'
 if (-not $DisposableVm) { throw 'Use -DisposableVm on a disposable Windows 7 SP1 x64 VM snapshot' }
 $os = Get-WmiObject Win32_OperatingSystem
+# Server 2008 R2 SP1 shares 6.1.7601 with Windows 7 SP1: require client OS.
+if ([int]$os.ProductType -ne 1) { throw 'Win7 SP1 acceptance requires a workstation Windows edition, not Windows Server' }
 if ($os.Version -notmatch '^6\.1\.7601' -or [int]$os.ServicePackMajorVersion -ne 1 -or
     [string]$os.OSArchitecture -notmatch '64') {
     throw 'This test requires Windows 7 SP1 x64 build 7601'
@@ -72,6 +74,9 @@ $utf8 = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList @($false)
 [IO.File]::WriteAllText($nestedTxt, 'AKULA_WIN7_NESTED_TXT', $utf8)
 $log = Join-Path $base 'evidence.txt'
 [IO.File]::WriteAllText($log, 'os=Windows 7 SP1 x64' + [Environment]::NewLine +
+    'os_caption=' + $os.Caption + [Environment]::NewLine +
+    'os_product_type=' + $os.ProductType + [Environment]::NewLine +
+    'acceptance_script_sha256=' + (Sha256 $MyInvocation.MyCommand.Path) + [Environment]::NewLine +
     'installer_sha256=' + (Sha256 $Installer) + [Environment]::NewLine)
 function Record([string]$line) { [IO.File]::AppendAllText($log, $line + [Environment]::NewLine) }
 Add-Type -AssemblyName System.Windows.Forms
