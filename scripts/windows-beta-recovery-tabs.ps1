@@ -271,7 +271,39 @@ try {
     if (![IO.File]::ReadAllText($first).Contains($markerA)) {
         throw 'Second-tab recovery changed previously saved first tab'
     }
-    Write-Host 'AKULA_WINDOWS_DESK15_TWO_TABS_PASS os_ctrlshift_click=1 tabs=2 detached_ack=1 crash=1 second_restore=1 file_gate=1 shadows_retired=1'
+    # File Gate bytes alone do not prove that the *installed editor* displays
+    # the recovered text. Read the actual foreground widget with native OS keys.
+    Focus-Editor $app
+    $app.Refresh()
+    $hwnd = [IntPtr]$app.MainWindowHandle
+    if ($app.MainWindowTitle -notlike 'Second note*' -or
+        [AkulaBetaGuiInput]::GetForegroundWindow() -ne $hwnd) {
+        throw 'Cannot verify foreground second-tab editor for recovered GUI readback'
+    }
+    $poison = 'DESK15_TAB_CLIPBOARD_POISON_' + [Guid]::NewGuid().ToString('N')
+    Set-Clipboard -Value $poison -ErrorAction Stop
+    [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $app.Id, [uint16]0x41) # Ctrl+A
+    Start-Sleep -Milliseconds 350
+    [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $app.Id, [uint16]0x43) # Ctrl+C
+    $readback = $null
+    for ($i=0; $i -lt 40; $i++) {
+        Start-Sleep -Milliseconds 200
+        try {
+            $clipboard = Get-Clipboard -Raw -ErrorAction Stop
+            if (![string]::IsNullOrEmpty($clipboard) -and $clipboard -cne $poison -and
+                $clipboard.Contains($markerB)) { $readback = $clipboard; break }
+        } catch [Runtime.InteropServices.ExternalException] { }
+    }
+    if ($null -eq $readback) { throw 'Second-tab GUI never copied the recovered draft' }
+    $normal = {
+        param([string]$value)
+        ([regex]::Replace($value, '\r\n?', [string][char]10)).TrimEnd([char]10)
+    }
+    if (![string]::Equals((& $normal $readback),
+        (& $normal ([IO.File]::ReadAllText($second))), [StringComparison]::Ordinal)) {
+        throw 'Second-tab installed editor readback differs from exact recovered File Gate bytes'
+    }
+    Write-Host 'AKULA_WINDOWS_DESK15_TWO_TABS_PASS os_ctrlshift_click=1 tabs=2 detached_ack=1 crash=1 second_restore=1 file_gate=1 shadows_retired=1 gui_exact=1'
     if (!$app.CloseMainWindow() -or !$app.WaitForExit(20000)) {
         throw 'Installed Akula refused graceful close after two-tab test'
     }
