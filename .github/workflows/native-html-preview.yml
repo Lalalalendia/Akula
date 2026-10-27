@@ -40,4 +40,8 @@ jobs:
           cargo test -p aquilum-native --features html-preview wpt_html_parse_vs_text_render_diagnostic -- --ignored --nocapture
       - name: Show lockfile update for required CI
         working-directory: aquilum-app
-        run: git diff --stat -- Cargo.lock
+        run: |
+          echo 'AKULA_HTML_LOCK_DIFF_BEGIN'
+          git diff --no-ext-diff --unified=3 -- Cargo.lock
+          echo 'AKULA_HTML_LOCK_DIFF_END'
+          echo "AKULA_HTML_LOCK_BLOB_SHA=$(git hash-object Cargo.lock)"
