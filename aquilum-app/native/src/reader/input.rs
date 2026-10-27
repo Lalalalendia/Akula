@@ -8,13 +8,17 @@ pub(super) const MAX_BOOK_INPUT_BYTES: usize = 512 * 1024 * 1024;
 const CHUNK_BYTES: usize = 32 * 1024;
 
 pub(super) fn read(path: &Path) -> Option<Vec<u8>> {
+    read_path_with_limit(path, MAX_BOOK_INPUT_BYTES)
+}
+
+fn read_path_with_limit(path: &Path, limit: usize) -> Option<Vec<u8>> {
     let file = File::open(path).ok()?;
-    // Fast-fail regular files, but never trust metadata as the only guard:
-    // another process may append while we read an already-open file handle.
-    if file.metadata().ok()?.len() > MAX_BOOK_INPUT_BYTES as u64 {
+    // Metadata is only a fast rejection: enforce the cap again while reading
+    // the open file handle, in case another process grows the file.
+    if file.metadata().ok()?.len() > limit as u64 {
         return None;
     }
-    read_stream(file, MAX_BOOK_INPUT_BYTES)
+    read_stream(file, limit)
 }
 
 fn read_stream(mut source: impl Read, limit: usize) -> Option<Vec<u8>> {
@@ -37,7 +41,7 @@ fn read_stream(mut source: impl Read, limit: usize) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{read, read_stream, CHUNK_BYTES, MAX_BOOK_INPUT_BYTES};
+    use super::{read, read_path_with_limit, read_stream, CHUNK_BYTES, MAX_BOOK_INPUT_BYTES};
     use std::io::{Cursor, Read};
 
     #[test]
@@ -66,14 +70,6 @@ mod tests {
         assert_eq!(read_path_with_limit(&path, 9), Some(b"123456789".to_vec()));
         assert!(MAX_BOOK_INPUT_BYTES > 9);
         assert!(read(&dir.path().join("does-not-exist.epub")).is_none());
-    }
-
-    fn read_path_with_limit(path: &std::path::Path, limit: usize) -> Option<Vec<u8>> {
-        let file = std::fs::File::open(path).ok()?;
-        if file.metadata().ok()?.len() > limit as u64 {
-            return None;
-        }
-        read_stream(file, limit)
     }
 
     struct InterruptedOnce<R>(bool, R);
