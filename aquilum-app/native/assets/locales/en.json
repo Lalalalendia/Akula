@@ -678,6 +678,7 @@
       "scrollLineDown": "Scroll one line down",
       "deleteWord": "Delete word to the left",
       "deleteWordForward": "Delete word to the right",
+      "deleteLineBackward": "Delete to beginning of line",
       "tables": "Tables",
       "nextCell": "Next cell",
       "previousCell": "Previous cell",
