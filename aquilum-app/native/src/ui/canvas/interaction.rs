@@ -107,7 +107,7 @@ impl CanvasPage {
                 }
             }
             PointerEvent::Up(up) => {
-                if self.finish_resize(ctx, ctx.local_position(up.state.position)) { return; }
+                if self.finish_resize(ctx, up) { return; }
                 if let Some(CanvasDrag::Node { index, from, original }) = self.drag.take() {
                     let p = ctx.local_position(up.state.position);
                     let delta = (p - from) / self.zoom;
