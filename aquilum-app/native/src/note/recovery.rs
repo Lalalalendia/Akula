@@ -3,6 +3,7 @@
 //! signature and cannot prove zero data loss before its durable-write ACK.
 #![allow(dead_code)]
 mod queue;
+mod pending;
 #[cfg(target_os = "windows")]
 mod acl;
 pub(super) use queue::{CaptureStatus, SnapshotQueue};
@@ -202,6 +203,7 @@ pub(super) fn stage(
     }
     let relative = checked_relative(vault, document)?;
     let bucket = folder(data, workspace, true)?.ok_or_else(|| invalid("missing recovery directory"))?;
+    pending::clean_stale(&bucket)?;
     let prefix = format!("{}-", key(&relative));
     // Admission happens BEFORE writing the new snapshot. Without this guard,
     // the 257th draft makes inspect() fail and strands every older backup.
