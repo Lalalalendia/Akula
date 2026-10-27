@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'scripts/benchmarks/native_windows_filetree_memory.py'
+      - 'aquilum-app/native/src/ui/file_tree/scan/worker.rs'
+      - 'aquilum-app/native/src/ui/file_tree/scan/worker/benchmark.rs'
+      - 'aquilum-app/native/src/ui/file_tree/scan/worker/tests.rs'
       - '.github/workflows/native-windows-filetree-memory.yml'
   workflow_dispatch:
 
@@ -56,6 +59,31 @@ jobs:
           $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
           if (!(Test-Path -LiteralPath $binary)) { throw 'Missing Akula.exe test binary' }
           Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Assert FileTree count scan coalescing and fresh counts on Win32 Release
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --release --locked -p aquilum-native --features installed ui::file_tree::scan::worker::tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'FileTree count-scan freshness or burst test failed' }
+      - name: FileTree scan-burst paired CPU and IO A/B (Windows Release diagnostic only)
+        working-directory: aquilum-app
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'windows-filetree-countscan-ab.log'
+          cargo test --release --locked -p aquilum-native --features installed benchmark_filetree_countscan_cpu_io_abba -- --ignored --nocapture | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { throw 'CountScan A/B benchmark parity or process test failed' }
+          if (!(Select-String -Path $log -Pattern 'FILETREE_COUNTSCAN_AB' -Quiet)) { throw 'No CountScan A/B data' }
+      - name: Publish scan-burst A/B before long 18-process matrix
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-filetree-countscan-ab-${{ github.sha }}
+          path: windows-filetree-countscan-ab.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Paired FileTree startup saved-sort A/B (release, diagnostic only)
         shell: pwsh
         working-directory: aquilum-app

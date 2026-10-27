@@ -24,7 +24,7 @@ use crate::ui::scroll::ScrollArea;
 use crate::ui::tokens::size;
 
 use drag::Drag;
-use model::{Counts, TreeModel};
+use model::TreeModel;
 pub use model::{Press, Sort};
 use parts::Toolbar;
 use pinned::Pinned;
@@ -48,7 +48,7 @@ pub struct FileTree {
     row_ids: Vec<WidgetId>,
     scroll: Option<Handle<ScrollArea<Flex>>>,
     pinned: Option<Handle<Pinned>>,
-    counting: Option<std::sync::mpsc::Receiver<Counts>>,
+    counting: scan::worker::CountScan,
     wake: std::sync::Arc<dyn Fn() + Send + Sync>,
     rename: Option<Handle<TextEditor>>,
     store: ExpandedStore,
@@ -79,7 +79,7 @@ impl FileTree {
             row_ids: Vec::new(),
             scroll: None,
             pinned: None,
-            counting: None,
+            counting: scan::worker::CountScan::default(),
             wake: std::sync::Arc::clone(&wake),
             rename: None,
             store,
