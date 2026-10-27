@@ -132,3 +132,52 @@ fn clean_session_refreshes_external_revision_and_invalidates_old_history() {
     assert_eq!(session.value()["nodes"][0]["id"], "new");
     assert_eq!(fs::read_to_string(&path).unwrap(), new_doc);
 }
+
+#[test]
+fn bounded_resize_undo_redo_and_vendor_fields_survive_guarded_save() {
+    let (_dir, path, core) = setup();
+    let mut session = CanvasSession::open(&path).unwrap();
+    let before = session.value().clone();
+    assert!(!session.resize_node("a", 200, 80).unwrap(), "same size must be a no-op");
+    assert!(session.resize_node("a", 340, 150).unwrap());
+    assert_eq!(session.value()["nodes"][0]["width"], 340);
+    assert_eq!(session.value()["nodes"][0]["height"], 150);
+    assert_eq!(session.value()["nodes"][0]["plugin"]["keep"], true);
+    assert_eq!(session.value()["vendor"]["unknown"], json!([1, 2, 3]));
+    assert!(session.undo().unwrap());
+    assert_eq!(session.value(), &before);
+    assert!(session.redo().unwrap());
+    assert_eq!(session.value()["nodes"][0]["width"], 340);
+    assert!(session.save(&core).unwrap());
+    assert_eq!(disk(&path)["nodes"][0]["width"], 340);
+    assert_eq!(disk(&path)["vendor"]["unknown"], json!([1, 2, 3]));
+}
+
+#[test]
+fn invalid_dimensions_and_nontext_resizes_leave_history_and_file_unchanged() {
+    let (_dir, path, _core) = setup();
+    let mut session = CanvasSession::open(&path).unwrap();
+    for (id, w, h) in [
+        ("a", 47, 90), ("a", 50, 31), ("a", i64::MAX, 90),
+        ("a", 90, i64::MAX), ("missing", 80, 80), ("b", 80, 80),
+    ] {
+        assert!(session.resize_node(id, w, h).is_err());
+        assert!(!session.can_undo());
+        assert!(!session.dirty());
+    }
+    assert_eq!(fs::read_to_string(&path).unwrap(), ORIGINAL);
+}
+
+#[test]
+fn external_conflict_keeps_resized_state_and_prevents_overwrite() {
+    let (_dir, path, core) = setup();
+    let mut session = CanvasSession::open(&path).unwrap();
+    assert!(session.resize_node("a", 420, 210).unwrap());
+    fs::write(&path, r#"{"nodes":[],"external":true}"#).unwrap();
+    assert!(matches!(session.save(&core), Err(CanvasSessionError::Document(
+        StructuredError::File(FileCommandError::Conflict { .. })
+    ))));
+    assert_eq!(session.value()["nodes"][0]["width"], 420);
+    assert!(session.dirty() && session.can_undo());
+    assert_eq!(disk(&path)["external"], true);
+}
