@@ -65,7 +65,7 @@ fn run(lines: usize) {
         .expect("jump CPU frame");
     let jump_ms = ms(start.elapsed());
 
-    let initial_offset = super::super::support::note_offset(&h);
+    let initial_offset = super::super::super::support::note_offset(&h);
     let mut scroll_total = Vec::with_capacity(32);
     let mut scroll_input = Vec::with_capacity(32);
     let mut scroll_scene = Vec::with_capacity(32);
@@ -86,7 +86,7 @@ fn run(lines: usize) {
         scroll_raster.push(ms(after_scene.elapsed()));
         scroll_total.push(ms(started.elapsed()));
     }
-    let moved = (super::super::support::note_offset(&h) - initial_offset).abs();
+    let moved = (super::super::super::support::note_offset(&h) - initial_offset).abs();
     assert!(moved > 4.0, "scroll did not move the editor: {moved}");
 
     // Real editor pointer focus and character-key path, not a synthetic

@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/src/app/tests/perf/editor_journey.rs'
+      - 'aquilum-app/native/src/app/tests/perf/timing.rs'
       - '.github/workflows/native-large-editor-journey.yml'
   workflow_dispatch:
 
@@ -12,8 +13,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-large-editor-journey-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   benchmark:
