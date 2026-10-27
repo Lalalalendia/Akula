@@ -4,7 +4,6 @@ use std::io;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 use ureq::{Agent, AgentBuilder};
-
 fn public_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
@@ -21,6 +20,7 @@ fn public_ip(ip: IpAddr) -> bool {
             let segments = v6.segments();
             // Global unicast only, excluding IETF protocol and documentation blocks.
             (segments[0] & 0xe000) == 0x2000
+                && segments[0] != 0x2002
                 && !(segments[0] == 0x2001 && (segments[1] == 0 || segments[1] == 0x0db8))
         }
     }
@@ -61,7 +61,7 @@ mod tests {
             "192.168.1.1", "169.254.169.254", "100.64.0.3", "0.1.2.3",
             "192.0.2.1", "198.18.0.1", "198.51.100.5", "203.0.113.9",
             "224.0.0.1", "255.255.255.255", "::1", "::ffff:127.0.0.1",
-            "fe80::1", "fc00::1", "2001:db8::1", "2001::1",
+            "fe80::1", "fc00::1", "2001:db8::1", "2001::1", "2002:7f00:1::",
         ] {
             let ip: IpAddr = source.parse().unwrap();
             assert!(!public_ip(ip), "allowed a non-public IP: {source}");
