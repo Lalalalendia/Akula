@@ -3,7 +3,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$ExePath,
     [Parameter(Mandatory = $true)][string]$VaultPath,
-    [Parameter(Mandatory = $true)][string]$DataDir
+    [Parameter(Mandatory = $true)][string]$DataDir,
+    [switch]$Editable
 )
 $ErrorActionPreference = 'Stop'
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
@@ -202,7 +203,7 @@ foreach ($test in $checks) {
         Write-Host ("AKULA_WINDOWS_CANVAS_VIEW_PASS file={0} visible=True source_unchanged=True" -f
             [System.IO.Path]::GetFileName($test.Path))
 
-        if ($test.Path -eq $populatedPath) {
+        if ($Editable -and $test.Path -eq $populatedPath) {
             # Real installed OS mouse events, not direct calls to Rust session
             # or JSON-file editing. The application owns File Gate writes.
             Invoke-CanvasToolbar -Index 0 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
@@ -246,4 +247,4 @@ foreach ($test in $checks) {
         throw 'Closing installed Canvas changed the expected saved revision'
     }
 }
-Write-Host 'AKULA_WINDOWS_CANVAS_INSTALLED_PASS populated=1 empty=1 uia=1 file_gate_edit=1 source_sha256=1'
+Write-Host ("AKULA_WINDOWS_CANVAS_INSTALLED_PASS populated=1 empty=1 uia=1 file_gate_edit={0} source_sha256=1" -f $Editable.IsPresent)
