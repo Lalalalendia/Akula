@@ -34,6 +34,7 @@ mod create;
 mod crash;
 mod edges;
 mod events;
+mod win7_frame;
 mod frame;
 mod keyboard;
 mod launch;
@@ -56,7 +57,7 @@ const PRIMARY_MOUSE: PointerInfo = PointerInfo {
 };
 
 const RESIZE_BORDER: f64 = 6.0;
-const NATIVE_FRAME: bool = cfg!(target_os = "macos");
+pub(crate) use win7_frame::native_frame;
 
 struct Host {
     args: Args,
