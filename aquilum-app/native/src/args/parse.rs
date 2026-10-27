@@ -65,12 +65,27 @@ pub fn parse() -> Result<Args, String> {
             "--replay-graph" => args.replay = Some((replay::Kind::Graph, value()?.into())),
             #[cfg(not(feature = "installed"))]
             "--replay-focus" => args.replay = Some((replay::Kind::Focus, value()?.into())),
+            // Explorer passes the selected file as a bare, quoted command-line
+            // argument rather than as "--open <path>".
+            other if args.open.is_none() && std::path::Path::new(other).is_file() => {
+                args.open = Some(std::path::PathBuf::from(other));
+            }
             other => return Err(format!("неизвестный аргумент {other}")),
         }
     }
     #[cfg(feature = "dicom-preview")]
     if args.open.is_some() && args.open_dicom.is_some() {
         return Err("--open и --open-dicom нельзя использовать одновременно".into());
+    }
+    // A directly opened document needs an active vault for File Gate's
+    // path authorization. Never infer a vault from an arbitrary missing
+    // argument, and never override an explicitly selected --vault.
+    if args.vault.is_none() {
+        if let Some(path) = args.open.as_ref() {
+            if let Some(parent) = path.parent().filter(|parent| parent.is_dir()) {
+                args.vault = Some(parent.to_path_buf());
+            }
+        }
     }
     Ok(args)
 }
