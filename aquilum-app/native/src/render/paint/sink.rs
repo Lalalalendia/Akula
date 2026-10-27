@@ -194,9 +194,9 @@ impl PaintSink for Painter {
         }
     }
     fn glyph_run(&mut self, draw: GlyphRunRef<'_>, glyphs: &mut dyn Iterator<Item = SceneGlyph>) {
-        if self.error.is_some() {
-            return;
-        }
+        if self.error.is_some() { return; }
+        if let Err(err) = opacity_guard::validate_draw(&draw.brush, draw.composite.alpha) { self.set_error_once(err); return; }
+        if let Err(err) = image_guard::validate(&draw.brush) { self.set_error_once(err); return; }
         self.draw_glyph_run(draw, glyphs);
     }
     fn blurred_rounded_rect(&mut self, draw: BlurredRoundedRect) {
