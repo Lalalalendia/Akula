@@ -1,14 +1,13 @@
 //! Conservative per-entry inflation caps for untrusted EPUB archives.
 //! The ZIP payload is still held in memory by the existing Book::open API.
 use super::Zip;
-mod aggregate;
 
 pub(super) const MAX_PACKAGE_BYTES: usize = 4 * 1024 * 1024;
 pub(super) const MAX_SECTION_BYTES: usize = 32 * 1024 * 1024;
 pub(super) const MAX_RESOURCE_BYTES: usize = 32 * 1024 * 1024;
 
 pub(super) fn valid_spine(zip: &Zip, sections: &[(String, String)]) -> bool {
-    aggregate::valid(zip, sections)
+    super::aggregate::valid(zip, sections)
 }
 
 #[cfg(test)]
