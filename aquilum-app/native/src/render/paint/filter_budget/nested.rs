@@ -4,13 +4,13 @@ use super::PaintError;
 const MAX_GROUP_DEPTH: usize = 4096;
 
 #[derive(Default, Debug)]
-pub(super) struct FilterBudgetStack {
+pub(crate) struct FilterBudgetStack {
     pixels: f64,
     layers: Vec<f64>,
 }
 
 impl FilterBudgetStack {
-    pub(super) fn admit(&mut self, pixels: f64, limit: f64) -> Result<(), PaintError> {
+    pub(crate) fn admit(&mut self, pixels: f64, limit: f64) -> Result<(), PaintError> {
         let new_total = self.pixels + pixels;
         if !pixels.is_finite() || pixels < 0.0 || !new_total.is_finite()
             || new_total > limit || self.layers.len() >= MAX_GROUP_DEPTH {
@@ -20,12 +20,12 @@ impl FilterBudgetStack {
         self.pixels = new_total;
         Ok(())
     }
-    pub(super) fn exit(&mut self) {
+    pub(crate) fn exit(&mut self) {
         if let Some(last) = self.layers.pop() {
             self.pixels = (self.pixels - last).max(0.0);
         }
     }
-    pub(super) fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.pixels = 0.0;
         self.layers.clear();
     }
