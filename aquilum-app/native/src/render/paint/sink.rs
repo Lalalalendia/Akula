@@ -5,10 +5,10 @@ use masonry::imaging::{
 use masonry::imaging::record::Glyph as SceneGlyph;
 use masonry::kurbo::{Affine, Shape as _};
 use masonry::peniko::{BlendMode, BrushRef};
-
 use super::{convert, error::PaintError, mask, Painter, TOLERANCE};
 mod path_guard;
 mod shadow_guard;
+mod shadow_cull;
 mod opacity_guard;
 mod image_guard;
 mod brush_transform;
@@ -204,7 +204,7 @@ impl PaintSink for Painter {
         if self.error.is_some() {
             return;
         }
-        if let Err(err) = shadow_guard::validate(&draw) { self.set_error_once(err); return; }
+        if let Err(err) = shadow_guard::validate(&draw) { self.set_error_once(err); return; } else if shadow_cull::outside(self, &draw) { return; }
         self.set_transform(draw.transform);
         self.ctx.set_paint(draw.color.multiply_alpha(draw.composite.alpha));
         self.ctx.set_blend_mode(draw.composite.blend);
