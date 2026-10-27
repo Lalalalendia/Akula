@@ -147,9 +147,8 @@ impl Note {
     }
 
     pub fn leave(mut self, core: &Arc<Core>, text: &crop::Rope) {
-        if self.pending.is_some() && !self.save_safety.held() {
-            self.queue(core, text);
-        }
+        if self.pending.is_some() && !self.save_safety.held() { self.queue(core, text); }
+        self.finish_detached_save();
     }
 
     pub fn take_replaced(&mut self) -> Option<crop::Rope> {
