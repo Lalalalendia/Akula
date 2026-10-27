@@ -119,7 +119,8 @@ fn benchmark_shadow_offscreen_cull_abba() {
                 let actual = with_test_culling(candidate, || pixels(draws, true));
                 let elapsed_us = began.elapsed().as_micros();
                 assert_eq!(actual, reference, "ABBA pixel parity: {name}");
-                if candidate { &mut cull } else { &mut legacy }.push(elapsed_us);
+                let samples = if candidate { &mut cull } else { &mut legacy };
+                samples.push(elapsed_us);
                 println!(
                     "SHADOW_CULL_ABBA scene={name} route={} cycle={} phase={} draws={} elapsed_us={} parity=PASS",
                     if candidate { "cull" } else { "legacy" },
