@@ -59,7 +59,14 @@ mod tests {
     fn opacity_guard_rejects_nonfinite_group_alpha_in_actual_sink() {
         for alpha in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.5] {
             assert!(validate(alpha).is_err());
-            assert!(matches!(render(&scene(alpha)).0, Err(PaintError::GeometryBudget(_))));
+            let mut painter = Painter::new(32, 32, crate::render::paint::settings(0));
+            painter.begin(0, 0, 32, 32);
+            painter.push_group(
+                masonry::imaging::GroupRef::new()
+                    .with_composite(Composite::new(Default::default(), alpha)),
+            );
+            assert!(matches!(painter.finish(), Err(PaintError::GeometryBudget(_))),
+                "untrusted group opacity {alpha:?} reached Vello");
         }
     }
 
