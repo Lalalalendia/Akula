@@ -71,6 +71,7 @@ impl App {
             CanvasAction::AddText(x, y) => session.add_text("New card", *x, *y).map(|_| true),
             CanvasAction::MoveNode(node, x, y) => session.move_node(node, *x, *y),
             CanvasAction::ResizeNode(node, w, h) => session.resize_node(node, *w, *h),
+            CanvasAction::AddEdge(from, to) => session.add_edge(from, to).map(|_| true),
             CanvasAction::RemoveNode(node) => session.remove_node(node),
             CanvasAction::Undo => session.undo(),
             CanvasAction::Redo => session.redo(),
@@ -95,7 +96,6 @@ impl App {
             .and_then(|path| self.canvas.documents.get(path))
             .is_some_and(CanvasSession::dirty)
     }
-
     pub(in crate::app) fn canvas_notify(&mut self, root: &mut RenderRoot, notice: &str) {
         self.canvas.notice = Some(notice.to_owned());
         let Some(path) = self.tabs.active().path.as_ref() else { return };

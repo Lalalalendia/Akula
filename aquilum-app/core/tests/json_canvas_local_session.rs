@@ -181,3 +181,60 @@ fn external_conflict_keeps_resized_state_and_prevents_overwrite() {
     assert!(session.dirty() && session.can_undo());
     assert_eq!(disk(&path)["external"], true);
 }
+
+#[test]
+fn add_edge_preserves_vendor_fields_and_round_trips_undo_redo() {
+    let (_dir, path, core) = setup();
+    let mut session = CanvasSession::open(&path).unwrap();
+    let original = session.value().clone();
+    let id = session.add_edge("a", "b").unwrap();
+    assert_eq!(session.value()["edges"].as_array().unwrap().len(), 2);
+    assert_eq!(session.value()["edges"][1]["id"], id);
+    assert_eq!(session.value()["edges"][1]["fromNode"], "a");
+    assert_eq!(session.value()["edges"][1]["toNode"], "b");
+    assert_eq!(session.value()["edges"][1]["toEnd"], "arrow");
+    assert_eq!(session.value()["edges"][0], original["edges"][0]);
+    assert_eq!(session.value()["vendor"]["unknown"], json!([1,2,3]));
+    assert!(session.undo().unwrap());
+    assert_eq!(session.value(), &original);
+    assert!(session.redo().unwrap());
+    assert_eq!(session.value()["edges"][1]["id"], id);
+    assert!(session.save(&core).unwrap());
+    assert_eq!(disk(&path)["edges"][1]["id"], id);
+}
+
+#[test]
+fn add_edge_rejects_missing_endpoints_without_mutating_disk_or_history() {
+    let (_dir, path, _core) = setup();
+    let mut session = CanvasSession::open(&path).unwrap();
+    for (from, to) in [("missing", "b"), ("a", "missing"), ("", "b")] {
+        assert!(matches!(session.add_edge(from, to), Err(CanvasSessionError::MissingNode(_))));
+        assert!(!session.dirty() && !session.can_undo());
+    }
+    assert_eq!(fs::read_to_string(&path).unwrap(), ORIGINAL);
+}
+
+#[test]
+fn add_edge_file_gate_conflict_retains_dirty_history_without_overwrite() {
+    let (_dir, path, core) = setup();
+    let mut session = CanvasSession::open(&path).unwrap();
+    let id = session.add_edge("b", "a").unwrap();
+    fs::write(&path, r#"{"nodes":[],"vendor":{"external":true}}"#).unwrap();
+    assert!(matches!(session.save(&core), Err(CanvasSessionError::Document(
+        StructuredError::File(FileCommandError::Conflict { .. })
+    ))));
+    assert!(session.dirty() && session.can_undo());
+    assert_eq!(session.value()["edges"][1]["id"], id);
+    assert_eq!(disk(&path)["vendor"]["external"], true);
+}
+
+#[test]
+fn add_edge_initializes_optional_edges_array_without_data_loss() {
+    let (_dir, path, core) = setup();
+    fs::write(&path, r#"{"nodes":[{"id":"a","type":"text","text":"a","x":0,"y":0,"width":100,"height":40},{"id":"b","type":"text","text":"b","x":140,"y":0,"width":100,"height":40}],"addon":{"unchanged":17}}"#).unwrap();
+    let mut session = CanvasSession::open(&path).unwrap();
+    let id = session.add_edge("a", "b").unwrap();
+    assert_eq!(session.value()["edges"][0]["id"], id);
+    assert!(session.save(&core).unwrap());
+    assert_eq!(disk(&path)["addon"]["unchanged"], 17);
+}

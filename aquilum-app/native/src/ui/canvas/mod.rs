@@ -3,6 +3,7 @@ mod model;
 mod interaction;
 mod selection;
 mod resize;
+mod connections;
 #[cfg(test)]
 mod scene_tests;
 use model::{Board, Card, Connection, Kind, Side};
@@ -29,10 +30,10 @@ pub struct CanvasPage {
     zoom: f64,
     origin: Vec2,
     fitted: bool,
-    drag: Option<CanvasDrag>, selected: Option<String>,
+    drag: Option<CanvasDrag>, selected: Option<String>, connect_from: Option<String>,
     text: Vec<Vec<Line>>,
     status: Line,
-    controls: [Line; 5],
+    controls: [Line; 6],
     editable: bool,
     dirty: bool,
     undo: bool,
@@ -54,7 +55,7 @@ impl CanvasPage {
         let text = board.cards.iter().map(|c| c.lines.iter().map(|_| Line::default()).collect()).collect();
         Self {
             board, size: Size::ZERO, zoom: 1.0, origin: Vec2::ZERO,
-            fitted: false, drag: None, selected: None, text, status: Line::default(),
+            fitted: false, drag: None, selected: None, connect_from: None, text, status: Line::default(),
             controls: std::array::from_fn(|_| Line::default()), editable, dirty, undo, redo, error,
         }
     }
@@ -64,7 +65,7 @@ impl CanvasPage {
         undo: bool, redo: bool, error: Option<String>,
     ) {
         this.widget.board = Board::from_json(value);
-        this.widget.refresh_selection();
+        this.widget.refresh_selection(); this.widget.refresh_connection();
         this.widget.text = this.widget.board.cards.iter()
             .map(|card| card.lines.iter().map(|_| Line::default()).collect()).collect();
         this.widget.drag = None;
@@ -258,7 +259,6 @@ impl Widget for CanvasPage {
     }
     fn children_ids(&self) -> ChildrenIds { ChildrenIds::new() }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,7 +271,7 @@ mod tests {
         CanvasPage {
             text: board.cards.iter().map(|c| c.lines.iter().map(|_| Line::default()).collect()).collect(),
             board, size: Size::new(800.0, 600.0), zoom: 1.0,
-            origin: Vec2::ZERO, fitted: false, drag: None, selected: None, status: Line::default(),
+            origin: Vec2::ZERO, fitted: false, drag: None, selected: None, connect_from: None, status: Line::default(),
             controls: std::array::from_fn(|_| Line::default()), editable: false,
             dirty: false, undo: false, redo: false, error: None,
         }
