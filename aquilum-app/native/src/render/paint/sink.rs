@@ -1,5 +1,4 @@
 //! Реализация трейта `PaintSink` для `Painter`.
-
 use masonry::imaging::{
     BlurredRoundedRect, ClipRef, FillRef, GeometryRef, GlyphRunRef, GroupRef, PaintSink, StrokeRef,
 };
@@ -12,6 +11,7 @@ mod path_guard;
 mod shadow_guard;
 mod opacity_guard;
 mod image_guard;
+mod brush_transform;
 impl PaintSink for Painter {
     fn push_clip(&mut self, clip: ClipRef<'_>) {
         if self.error.is_some() { return; }
@@ -104,7 +104,6 @@ impl PaintSink for Painter {
         }
     }
     fn fill(&mut self, draw: FillRef<'_>) {
-        // IMG-PERF-08: optional ImageBrush visibility and culling trace.
         #[cfg(not(feature = "installed"))]
         {
             static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -134,6 +133,7 @@ impl PaintSink for Painter {
             }
         }
         if let Err(err) = self.guard_geometry(&draw.shape, draw.transform) { self.set_error_once(err); return; }
+        if let Err(err) = brush_transform::validate(draw.transform, draw.brush_transform) { self.set_error_once(err); return; }
         if let Err(err) = opacity_guard::validate_draw(&draw.brush, draw.composite.alpha) { self.set_error_once(err); return; }
         if let Err(err) = image_guard::validate(&draw.brush) { self.set_error_once(err); return; }
         if self.error.is_some() || convert::invisible(&draw.brush, draw.composite) || self.offscreen(draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape))) {
@@ -174,6 +174,7 @@ impl PaintSink for Painter {
     }
     fn stroke(&mut self, draw: StrokeRef<'_>) {
         if let Err(err) = self.guard_stroke(&draw.shape, draw.transform, &draw.stroke) { self.set_error_once(err); return; }
+        if let Err(err) = brush_transform::validate(draw.transform, draw.brush_transform) { self.set_error_once(err); return; }
         if let Err(err) = opacity_guard::validate_draw(&draw.brush, draw.composite.alpha) { self.set_error_once(err); return; }
         if let Err(err) = image_guard::validate(&draw.brush) { self.set_error_once(err); return; }
         let w = draw.stroke.width.max(1.0) * draw.stroke.miter_limit.max(1.0);
@@ -207,7 +208,6 @@ impl PaintSink for Painter {
         self.set_transform(draw.transform);
         self.ctx.set_paint(draw.color.multiply_alpha(draw.composite.alpha));
         self.ctx.set_blend_mode(draw.composite.blend);
-        // Обычная тень; инвертированная (внутренняя) в imaging пока не выражается.
         self.ctx.fill_blurred_rounded_rect(&draw.rect, draw.radius as f32, draw.std_dev as f32, false);
     }
 }
