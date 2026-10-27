@@ -1,6 +1,8 @@
 mod readonly;
 mod open_in;
 mod docx;
+#[cfg(feature = "html-preview")]
+mod html;
 #[cfg(feature = "dicom-preview")]
 mod dicom;
 use std::path::{Path, PathBuf};
@@ -134,6 +136,8 @@ impl App {
         #[cfg(feature = "dicom-preview")]
         if crate::dicom::is_candidate(&path) || self.dicom_external_sources.contains(&path) { return self.show_dicom_tab(root, path); }
         if crate::docx::is_docx_path(&path) { return self.show_docx_tab(root, path); }
+        #[cfg(feature = "html-preview")]
+        if crate::html_preview::is_html_path(&path) { return self.show_html_tab(root, path); }
         if is_structured_file(&path) {
             self.leave_note();
             self.show_structured_readonly(root, &path);

@@ -7,7 +7,11 @@ impl App {
         let dicom = crate::dicom::is_candidate(&path) || self.dicom_external_sources.contains(&path);
         #[cfg(not(feature = "dicom-preview"))]
         let dicom = false;
-        if !image && !dicom && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) && !crate::docx::is_docx_path(&path) {
+        #[cfg(feature = "html-preview")]
+        let html = crate::html_preview::is_html_path(&path);
+        #[cfg(not(feature = "html-preview"))]
+        let html = false;
+        if !image && !dicom && !html && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) && !crate::docx::is_docx_path(&path) {
             return false;
         }
         // Validate the image before changing tabs or navigation: no paths
@@ -16,6 +20,8 @@ impl App {
             return false;
         }
         if crate::docx::is_docx_path(&path) && self.tree.root().and_then(|v| crate::docx::admit(v, &path).ok()).is_none() { return false; }
+        #[cfg(feature = "html-preview")]
+        if html && self.tree.root().is_none_or(|v| crate::html_preview::admit(v, &path).is_err()) { return false; }
         #[cfg(feature = "dicom-preview")]
         if dicom && !self.is_dicom_admitted(&path) { return false; }
         if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {

@@ -30,6 +30,8 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
 messaging-w4-pilot = []
 memory-probe = []
+# Experimental only; not included in the installed feature bundle.
+html-preview = ["dep:html2text"]
 # Opt-in experimental local DICOM viewing. Not included in the installed build.
 dicom-preview = ["dep:dicom-core", "dep:dicom-object", "dep:dicom-pixeldata", "dep:zip"]
 # User-visible Windows read-only SSH verification. No install grant.
@@ -57,6 +59,7 @@ sync-installed-host-unix-root-witness = ["sync-installed-host-witness", "aquilum
 [dependencies]
 tokio = { version = "1", features = ["rt", "time"], optional = true }
 aquilum-core = { path = "../core", features = ["host-custody"] }
+html2text = { version = "=0.17.1", default-features = false, optional = true }
 akula-dropbox-connect-lab = { path = "../../modules/dropbox-connect-lab", optional = true }
 akula-dropbox-secret-store = { path = "../../modules/dropbox-secret-store", features = ["system-store"], optional = true }
 akula-dropbox-t0 = { path = "../../modules/dropbox-t0", optional = true }

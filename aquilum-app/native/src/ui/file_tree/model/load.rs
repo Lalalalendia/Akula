@@ -1,4 +1,5 @@
 #[cfg(feature = "dicom-preview")] mod dicom;
+#[cfg(feature = "html-preview")] mod html;
 mod changes;
 mod expand;
 #[cfg(target_os = "windows")]
@@ -25,6 +26,8 @@ impl TreeModel {
             Ok(mut items) => {
                 #[cfg(feature = "dicom-preview")]
                 dicom::append_dicom_entries(dir, &mut items);
+                #[cfg(feature = "html-preview")]
+                html::append_html_entries(dir, &mut items);
                 #[cfg(target_os = "windows")]
                 win7_scan::trace(self.root.as_deref(), dir, &items);
                 if self.sort.by_time() {
