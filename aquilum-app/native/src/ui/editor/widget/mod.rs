@@ -19,7 +19,6 @@ use masonry::core::{
 };
 use masonry::layout::{LenReq, Length};
 use crate::ui::editor::TextAction;
-
 use super::{document::Document, markdown::Fonts};
 use super::history::History;
 use crate::ui::theme;
@@ -44,6 +43,7 @@ mod source_shortcut;
 mod links;
 mod media;
 mod marks;
+mod list_guides;
 mod multicursor;
 mod outline;
 mod pages;
