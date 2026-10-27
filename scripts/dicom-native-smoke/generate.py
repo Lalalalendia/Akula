@@ -77,6 +77,28 @@ def generate_medical_contrasts(directory: Path) -> None:
         image.save_as(directory / filename, enforce_file_format=True)
     print("SYNTHETIC_CONTRAST_OK signed16_frames=3 invert_controls=2")
 
+
+def generate_multiseries(directory: Path) -> None:
+    """Synthetic disc: two series, three slices each, no real patient data."""
+    root = directory / "multiseries_root"
+    fs = FileSet()
+    fs.ID = "AKULA_MULTI"
+    for group, series_uid in enumerate(("2.25.456789000000002", "2.25.456789000000003")):
+        for i in range(3):
+            ds = sample(group * 3 + i)
+            ds.SeriesInstanceUID = series_uid
+            ds.SeriesNumber = group + 1
+            ds.InstanceNumber = i + 1
+            fs.add(ds)
+    fs.write(str(root))
+    restored = FileSet(str(root / "DICOMDIR"))
+    assert len(restored) == 6
+    assert all(Path(item.path).suffix == "" for item in restored)
+    series = {str(pydicom.dcmread(item.path, stop_before_pixels=True).SeriesInstanceUID)
+              for item in restored}
+    assert len(series) == 2
+    print("SYNTHETIC_MULTISERIES_OK series=2 slices_per_series=3 extensionless=6")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=Path)
@@ -110,6 +132,7 @@ def main():
             (loose / destination).write_bytes(z.read(n))
     with zipfile.ZipFile(a.directory / 'unsafe.zip', 'w') as z:
         z.writestr('../escape.dcm', b'REJECT')
-    print('SYNTHETIC_INPLACE_OK zip=1 loose_folder=1 traversal_zip=1')
+    generate_multiseries(a.directory)
+    print('SYNTHETIC_INPLACE_OK zip=1 loose_folder=1 traversal_zip=1 multiseries=1')
 if __name__ == "__main__":
     main()
