@@ -91,6 +91,7 @@ fn choosing_an_existing_txt_only_folder_switches_the_tree_and_opens_its_file() {
     assert!(outcome.title);
     assert_eq!(h.app.tree.root(), Some(chosen.path()));
     assert_eq!(h.app.tree.names(), ["Документ из Windows 7.txt"]);
+    h.settle();
 
     let row = h.app.tree.row_id("Документ из Windows 7.txt").expect("TXT не виден после выбора папки");
     let center = h.root.get_widget(row).unwrap().ctx().bounding_box().center();
