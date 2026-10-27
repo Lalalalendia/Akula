@@ -12,7 +12,9 @@ use crate::fearless_simd::{Level, dispatch, mask8x16, prelude::*, u8x16, u8x32, 
 use crate::peniko::{ImageAlphaType, color::PremulRgba8};
 use crate::util::{Div255Ext, narrow, unpremultiply, widen};
 mod unpremultiply_guard;
-
+#[cfg(test)]
+#[path = "pixmap/sampling_guard_tests.rs"]
+mod sampling_guard_tests;
 #[cfg(feature = "png")]
 extern crate std;
 
@@ -384,20 +386,18 @@ impl Pixmap {
         }
     }
 
-    /// Sample a pixel from the pixmap.
-    ///
-    /// The pixel data is [premultiplied RGBA8][PremulRgba8].
+    /// Sample a premultiplied RGBA8 pixel. Out-of-bounds reads are transparent.
     #[inline(always)]
     pub fn sample(&self, x: u16, y: u16) -> PremulRgba8 {
+        if x >= self.width || y >= self.height { return PremulRgba8::from_u32(0); }
         let idx = self.width as usize * y as usize + x as usize;
-        self.buf[idx]
+        self.buf.get(idx).copied().unwrap_or(PremulRgba8::from_u32(0))
     }
 
-    /// Sample a pixel from a custom-calculated index. This index should be calculated assuming that
-    /// the data is stored in row-major order.
+    /// Sample a pixel using a custom row-major index.
     #[inline(always)]
     pub fn sample_idx(&self, idx: u32) -> PremulRgba8 {
-        self.buf[idx as usize]
+        self.buf.get(idx as usize).copied().unwrap_or(PremulRgba8::from_u32(0))
     }
 
     /// Set a pixel in the pixmap at the given coordinates.
@@ -420,7 +420,6 @@ impl Pixmap {
         if self.may_have_transparency && alpha_type == ImageAlphaType::Alpha {
             unpremultiply_rgba8(bytemuck::cast_slice_mut(&mut self.buf));
         }
-
         bytemuck::cast_vec(self.buf)
     }
 
