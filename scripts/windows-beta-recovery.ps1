@@ -18,6 +18,26 @@ $vault = Join-Path $root 'vault'
 $data = Join-Path $root 'appdata'
 [IO.Directory]::CreateDirectory($vault) | Out-Null
 [IO.Directory]::CreateDirectory($data) | Out-Null
+# Negative control: deliberately make ONLY this disposable data parent
+# readable by Everyone. The application must seal its child recovery DACL,
+# rather than silently relying on standard LocalAppData inheritance.
+$everyone=[System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
+$broadRule=[System.Security.AccessControl.FileSystemAccessRule]::new(
+    $everyone,[System.Security.AccessControl.FileSystemRights]::ReadAndExecute,
+    [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+    [System.Security.AccessControl.PropagationFlags]::None,
+    [System.Security.AccessControl.AccessControlType]::Allow)
+$dataAcl=Get-Acl -LiteralPath $data -ErrorAction Stop
+$dataAcl.AddAccessRule($broadRule)
+Set-Acl -LiteralPath $data -AclObject $dataAcl -ErrorAction Stop
+$testRules=(Get-Acl -LiteralPath $data).GetAccessRules(
+    $true,$true,[System.Security.Principal.SecurityIdentifier])
+$public=@($testRules | Where-Object {
+    $_.IdentityReference.Value -eq 'S-1-1-0' -and
+    $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow
+})
+if ($public.Count -eq 0) { throw 'Recovery ACL negative control did not create a broad inherited parent' }
+Write-Host 'AKULA_WINDOWS_DESK15_ACL_NEGATIVE_CONTROL_PASS disposable_parent_everyone_read=1'
 $note = Join-Path $vault 'First note.md'
 $initial = '# First note' + [Environment]::NewLine + [Environment]::NewLine + 'Original source before recovery'
 [IO.File]::WriteAllText($note,$initial,[Text.UTF8Encoding]::new($false))
