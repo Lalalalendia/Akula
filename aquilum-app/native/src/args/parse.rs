@@ -1,29 +1,7 @@
+mod startup;
 use super::*;
 pub fn parse() -> Result<Args, String> {
-    let mut args = Args {
-        vault: None,
-        data_dir: None,
-        size: None,
-        text: String::new(),
-        threads: std::thread::available_parallelism().map_or(2, |n| n.get().clamp(2, 4) as u16),
-        metrics: None,
-        trace: false,
-        paint_flashing: false,
-        focus: false,
-        restore: true,
-        keep_position: false,
-        #[cfg(not(feature = "installed"))]
-        replay: None,
-        open: None,
-        #[cfg(feature = "dicom-preview")]
-        open_dicom: None,
-        #[cfg(not(feature = "installed"))]
-        trace_frames: None,
-        #[cfg(feature = "memory-probe")]
-        memory_probe: None,
-        #[cfg(feature = "memory-probe")]
-        probe_notes: Vec::new(),
-    };
+    let mut args = startup::defaults();
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or_else(|| format!("{flag}: нет значения"));
@@ -65,27 +43,12 @@ pub fn parse() -> Result<Args, String> {
             "--replay-graph" => args.replay = Some((replay::Kind::Graph, value()?.into())),
             #[cfg(not(feature = "installed"))]
             "--replay-focus" => args.replay = Some((replay::Kind::Focus, value()?.into())),
-            // Explorer passes the selected file as a bare, quoted command-line
-            // argument rather than as "--open <path>".
-            other if args.open.is_none() && std::path::Path::new(other).is_file() => {
-                args.open = Some(std::path::PathBuf::from(other));
-            }
-            other => return Err(format!("неизвестный аргумент {other}")),
+            other => startup::positional(&mut args, other)?,
         }
     }
     #[cfg(feature = "dicom-preview")]
     if args.open.is_some() && args.open_dicom.is_some() {
         return Err("--open и --open-dicom нельзя использовать одновременно".into());
     }
-    // A directly opened document needs an active vault for File Gate's
-    // path authorization. Never infer a vault from an arbitrary missing
-    // argument, and never override an explicitly selected --vault.
-    if args.vault.is_none() {
-        if let Some(path) = args.open.as_ref() {
-            if let Some(parent) = path.parent().filter(|parent| parent.is_dir()) {
-                args.vault = Some(parent.to_path_buf());
-            }
-        }
-    }
-    Ok(args)
+    startup::finish(args)
 }

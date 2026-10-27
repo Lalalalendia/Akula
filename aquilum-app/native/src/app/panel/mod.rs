@@ -163,11 +163,7 @@ impl App {
     }
 
     pub fn attach_window_controls(&mut self, root: &mut RenderRoot, window: Size) {
-        if crate::host::native_frame() {
-            self.window = window;
-            self.apply_widths(root);
-            return;
-        }
+        if crate::host::native_frame() { self.window_resized(root, window); return; }
         if let Some((layer, _)) = self.controls.take() {
             root.remove_layer(layer);
         }

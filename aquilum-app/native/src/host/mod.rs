@@ -47,7 +47,6 @@ mod window_events;
 
 pub(crate) use crash::report;
 pub use launch::run;
-use crash::install_crash_log;
 use window::{cloak, set_background, window_icon};
 
 const PRIMARY_MOUSE: PointerInfo = PointerInfo {

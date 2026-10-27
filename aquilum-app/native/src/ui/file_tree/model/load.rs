@@ -1,5 +1,8 @@
 #[cfg(feature = "dicom-preview")] mod dicom;
 mod changes;
+mod expand;
+#[cfg(target_os = "windows")]
+mod win7_scan;
 use std::path::{Path, PathBuf};
 
 use aquilum_core::files::models::{FileItem, FileItemType};
@@ -8,19 +11,6 @@ use aquilum_core::files::workspace::read_directory_impl;
 use super::{Row, TreeModel, comparable};
 
 impl TreeModel {
-    pub fn expand_to(&mut self, path: &Path) {
-        let Some(root) = self.root.clone() else { return };
-        let mut folders: Vec<PathBuf> = path.ancestors().skip(1).take_while(|dir| dir.starts_with(&root) && *dir != root.as_path()).map(Path::to_path_buf).collect();
-        folders.reverse();
-        for folder in folders {
-            let key = comparable(&folder);
-            if self.expanded.insert(key.clone(), folder.clone()).is_none() && !self.directories.contains_key(&key) {
-                self.load(&folder);
-            }
-        }
-        self.rebuild();
-    }
-
     pub fn reload_all(&mut self) {
         self.directories.clear();
         self.times.clear();
@@ -35,24 +25,8 @@ impl TreeModel {
             Ok(mut items) => {
                 #[cfg(feature = "dicom-preview")]
                 dicom::append_dicom_entries(dir, &mut items);
-                // Win7-only release evidence: distinguish a successful disk
-                // enumeration from a blank/non-rendering sidebar. Log counts,
-                // never user filenames or document contents.
                 #[cfg(target_os = "windows")]
-                if crate::host::native_frame() {
-                    let txt = items.iter().filter(|item| {
-                        item.item_type == FileItemType::File
-                            && aquilum_core::search::paths::is_plain_text(Path::new(&item.id))
-                    }).count();
-                    if txt > 0 || self.root.as_deref() == Some(dir) {
-                        report!(
-                            "WIN7_TREE_SCAN root={} entries={} txt={}",
-                            self.root.as_deref() == Some(dir),
-                            items.len(),
-                            txt
-                        );
-                    }
-                }
+                win7_scan::trace(self.root.as_deref(), dir, &items);
                 if self.sort.by_time() {
                     self.stamp(&items);
                 }
