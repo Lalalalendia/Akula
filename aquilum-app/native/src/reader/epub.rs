@@ -37,7 +37,7 @@ pub fn document(bytes: &[u8]) -> Option<Dom> {
 
 impl Epub {
     pub fn open(data: Vec<u8>) -> Option<Epub> {
-        let zip = Zip::new(data)?;
+        let zip = Zip::new(data).filter(|zip| zip.declared_total_under(limits::MAX_ARCHIVE_DECLARED_BYTES))?;
         let container = document(&zip.read_limited("META-INF/container.xml", limits::MAX_PACKAGE_BYTES)?)?;
         let rootfile = descendants(&container, Dom::ROOT, "rootfile").next()?;
         let opf_path = container.attr(rootfile, "full-path")?.to_owned();
