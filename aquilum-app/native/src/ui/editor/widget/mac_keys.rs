@@ -30,3 +30,33 @@ impl TextEditor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn document_chords_ignore_visual_column_and_return_document_boundaries() {
+        let editor = TextEditor::new("first\nsecond");
+        assert_eq!(editor.vertical_target(Some(Command::DocumentStart), true).0, 0);
+        assert_eq!(editor.vertical_target(Some(Command::DocumentEnd), false).0, editor.doc.len());
+    }
+
+    #[test]
+    fn command_backspace_removes_to_visual_line_start_without_erasing_other_lines() {
+        let mut editor = TextEditor::new("first\nsecond");
+        editor.focus = editor.doc.len();
+        editor.anchor = editor.focus;
+        editor.backspace_with_command(Some(Command::LineDeleteBackward));
+        assert_eq!(editor.text(), "first\n");
+    }
+
+    #[test]
+    fn command_backspace_respects_existing_selection() {
+        let mut editor = TextEditor::new("alpha beta");
+        editor.anchor = 0;
+        editor.focus = 5;
+        editor.backspace_with_command(Some(Command::LineDeleteBackward));
+        assert_eq!(editor.text(), " beta");
+    }
+}
