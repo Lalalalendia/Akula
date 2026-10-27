@@ -62,8 +62,18 @@ jobs:
         timeout-minutes: 25
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo test --release --locked -p aquilum-native --features installed benchmark_filetree_saved_sort_abba -- --ignored --nocapture
+          $log = Join-Path $env:GITHUB_WORKSPACE 'windows-filetree-startup-ab.log'
+          cargo test --release --locked -p aquilum-native --features installed benchmark_filetree_saved_sort_abba -- --ignored --nocapture | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { throw 'FileTree startup A/B correctness or diagnostics failed' }
+          if (!(Select-String -Path $log -Pattern 'FILETREE_STARTUP_SORT_AB' -Quiet)) { throw 'Missing A/B measurement lines' }
+      - name: Publish FileTree A/B before long 18-process matrix
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-filetree-saved-sort-ab-${{ github.sha }}
+          path: windows-filetree-startup-ab.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Run B2/B3 synthetic flat-vs-nested 1k/10k/50k cold-warm full matrix
         shell: pwsh
         timeout-minutes: 65

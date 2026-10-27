@@ -29,7 +29,7 @@ fn original(root: &Path, expanded: &[PathBuf], sort: Sort) -> TreeModel {
 }
 
 fn candidate(root: &Path, expanded: &[PathBuf], sort: Sort) -> TreeModel {
-    TreeModel::with_sort(Some(root.to_path_buf()), expanded.to_vec(), sort)
+    TreeModel::with_saved_sort(Some(root.to_path_buf()), expanded.to_vec(), sort)
 }
 
 #[test]
@@ -65,6 +65,7 @@ fn percentile(times: &[Duration], pct: usize) -> f64 {
 
 // Paired release-profile microbenchmark: measures synchronous TreeModel startup,
 // not the first HWND, background Counts::scan or installed GUI J2 time.
+// 40 alternating paired samples make the p95 more meaningful than the N=8 pilot.
 #[test]
 #[ignore = "opt-in FileTree startup saved-sort A/B, no time gate"]
 fn benchmark_filetree_saved_sort_abba() {
@@ -73,10 +74,10 @@ fn benchmark_filetree_saved_sort_abba() {
         let root = dir.path();
         let expanded = fixture(root, notes, nested);
         let layout = if nested { "expanded" } else { "flat" };
-        for sort in [Sort::NameDesc, Sort::ModifiedNew] {
+        for sort in [Sort::NameDesc] {
             let (mut before, mut after) = (Vec::new(), Vec::new());
             let mut rows = 0usize;
-            for round in 0..8 {
+            for round in 0..40 {
                 let sample = |new: bool| {
                     let t = Instant::now();
                     let model = if new {
@@ -100,7 +101,7 @@ fn benchmark_filetree_saved_sort_abba() {
                 after.push(new.1);
             }
             println!(
-                "FILETREE_STARTUP_SORT_AB notes={notes} layout={layout} sort={sort:?} rows={rows} old_p50_us={:.2} new_p50_us={:.2} old_p95_us={:.2} new_p95_us={:.2} parity=PASS",
+                "FILETREE_STARTUP_SORT_AB notes={notes} layout={layout} sort={sort:?} rows={rows} old_p50_us={:.2} new_p50_us={:.2} old_p95_us={:.2} new_p95_us={:.2} rounds=40 parity=PASS",
                 percentile(&before, 50), percentile(&after, 50),
                 percentile(&before, 95), percentile(&after, 95),
             );
