@@ -19,7 +19,6 @@ use masonry::core::{
 };
 use masonry::layout::{LenReq, Length};
 use crate::ui::editor::TextAction;
-
 use super::{document::Document, markdown::Fonts};
 use super::history::History;
 use crate::ui::theme;
@@ -39,6 +38,7 @@ mod format;
 mod geometry;
 use geometry::{rect, visible};
 mod keys;
+mod mac_keys;
 mod lifecycle;
 mod source_shortcut;
 mod links;
