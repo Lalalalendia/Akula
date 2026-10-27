@@ -134,7 +134,7 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/akula-damage-base" "$base"
           export CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.artifacts/cargo-native"
           mkdir -p damage-abba
-          printf 'base=%s\\nhead=%s\\n' "$base" "$(git rev-parse HEAD)" > damage-abba/revisions.txt
+          printf 'base=%s\nhead=%s\n' "$base" "$(git rev-parse HEAD)" > damage-abba/revisions.txt
           for mode in base candidate; do
             if [ "$mode" = base ]; then tree="$RUNNER_TEMP/akula-damage-base"; else tree="$GITHUB_WORKSPACE"; fi
             (cd "$tree/aquilum-app" && cargo test -p aquilum-native --bin aquilum-native --locked \
