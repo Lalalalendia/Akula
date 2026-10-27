@@ -72,6 +72,66 @@ fn inserted_text_reaches_the_disk() {
 }
 
 #[test]
+fn two_dirty_tabs_survive_conflicting_first_write_and_second_crash() {
+    use crate::ui::dialog::DialogAnswer;
+
+    let mut h = Harness::new();
+    let first = h.write_note("two-dirty-first.md", "first baseline");
+    let second = h.write_note("two-dirty-second.md", "second baseline");
+    assert!(h.app.open(&mut h.root, first.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    let first_draft = "first unsaved Unicode 😀";
+    let second_draft = "second unsaved Unicode 漢字";
+    h.app.commit_text(&mut h.root, crop::Rope::from(first_draft));
+    crate::disk::wait();
+    std::fs::write(&first, "external writer changed first").unwrap();
+
+    // Switching away queues the first write. File Gate must not treat the
+    // externally diverged file as a successful ACK or retire its shadow.
+    assert!(h.app.open_in(&mut h.root, second.clone(), true));
+    crate::disk::wait();
+    crate::disk::wait();
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "external writer changed first");
+    let first_copy = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &first,
+    ).unwrap().unwrap();
+    assert_eq!(first_copy.body.to_string(), first_draft);
+    assert!(first_copy.source_changed);
+
+    h.app.commit_text(&mut h.root, crop::Rope::from(second_draft));
+    crate::disk::wait();
+    drop(h.app.note.take()); // hard exit before second File Gate debounce
+    let second_copy = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &second,
+    ).unwrap().unwrap();
+    assert_eq!(second_copy.body.to_string(), second_draft);
+    assert!(!second_copy.source_changed);
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "second baseline");
+
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    let layer = match &h.app.popup {
+        Some(Popup::Recovery(state)) => state.dialog.layer,
+        _ => panic!("second unsaved tab must offer explicit recovery"),
+    };
+    h.send(layer, DialogAnswer::Cancel);
+    assert!(h.app.popup.is_none());
+
+    assert!(h.app.open(&mut h.root, first.clone()));
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    assert!(matches!(h.app.popup, Some(Popup::Recovery(_))),
+        "conflicted first tab must independently request review");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "external writer changed first");
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "second baseline");
+    let second_after = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &second,
+    ).unwrap().unwrap();
+    assert_eq!(second_after.body.to_string(), second_draft);
+}
+
+#[test]
 fn switching_tabs_retires_only_acknowledged_shadow_and_preserves_crashed_tab() {
     let mut h = Harness::new();
     let first = h.write_note("recover-switch-first.md", "original first");
