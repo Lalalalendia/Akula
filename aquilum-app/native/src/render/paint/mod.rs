@@ -9,8 +9,8 @@ mod mask;
 mod mipmap;
 mod runs;
 mod sink;
+mod stroke_style;
 use std::collections::VecDeque;
-
 use masonry::kurbo::{Affine, Rect};
 use vello_cpu::{RenderContext, RenderSettings, Resources};
 
