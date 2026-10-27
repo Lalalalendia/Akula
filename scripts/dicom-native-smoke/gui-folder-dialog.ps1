@@ -107,19 +107,30 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait($folder)
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 350
-    $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($dialogHandle)
-    $accept = @(Get-Descendants $dialog | Where-Object {
-        $_.Current.ControlType.ProgrammaticName -eq 'ControlType.Button' -and
-        $_.Current.IsEnabled -and
-        $_.Current.Name -match '^(Select Folder|Choose Folder|Выбрать папку|Выбор папки|Open|Открыть|OK)$'
-    })
-    if ($accept.Count -eq 0) {
-        $names = @(Get-Descendants $dialog | ForEach-Object { $_.Current.Name } |
-            Where-Object { ![string]::IsNullOrWhiteSpace($_) })
-        $names | Out-File -FilePath 'shots/dicom-picker-controls.txt' -Encoding utf8
-        throw 'Native folder dialog lacks a Select Folder confirmation control'
+    # Windows Common Item Dialog may expose the "Select Folder" caption as
+    # a text/control descendant, not strictly ControlType.Button. Click its
+    # visible on-screen bounds, which is what the user does with a mouse.
+    $confirm = $null
+    for ($attempt = 0; $attempt -lt 40; $attempt++) {
+        Start-Sleep -Milliseconds 250
+        $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($dialogHandle)
+        $candidates = @(Get-Descendants $dialog | Where-Object {
+            $_.Current.Name.Trim() -in @('Select Folder', 'Choose Folder', 'Выбрать папку', 'Выбор папки')
+        })
+        $usable = @($candidates | Where-Object { $_.Current.IsEnabled -and !$_.Current.IsOffscreen })
+        if ($usable.Count -gt 0) { $confirm = $usable[0]; break }
     }
-    Click-Control $accept[0]
+    if ($null -eq $confirm) {
+        $snapshot = @(Get-Descendants $dialog | Where-Object {
+            $_.Current.Name -match 'Folder|папк|Open|Открыть'
+        } | ForEach-Object {
+            "$($_.Current.Name) type=$($_.Current.ControlType.ProgrammaticName) enabled=$($_.Current.IsEnabled) offscreen=$($_.Current.IsOffscreen)"
+        })
+        $snapshot | Out-File -FilePath 'shots/dicom-picker-controls.txt' -Encoding utf8
+        throw 'Windows folder dialog did not expose an enabled Select Folder control'
+    }
+    Write-Host "AKULA_DICOM_FOLDER_PICKER_CONFIRM_FOUND type=$($confirm.Current.ControlType.ProgrammaticName)"
+    Click-Control $confirm
     Wait-DicomFolder $mainWindow
     Write-Host 'AKULA_DICOM_FOLDER_PICKER_OPENED_PASS source=multiseries_root series=2 slices=3'
     $after = @(Get-ChildItem -LiteralPath $folder -File -Recurse |
