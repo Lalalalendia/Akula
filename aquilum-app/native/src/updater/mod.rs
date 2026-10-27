@@ -2,6 +2,8 @@ mod apply;
 #[cfg(any(target_os = "windows", test))]
 mod attempts;
 mod claim;
+#[cfg(target_os = "windows")]
+mod handoff;
 mod download_guard;
 mod release;
 #[cfg(target_os = "linux")]
@@ -154,22 +156,6 @@ impl Updater {
 
     pub fn fail(&self, error: String) {
         self.set(Status::Failed(error));
-    }
-
-    // A single GUI call-site retains the same name on each target, but the
-    // Windows type is non-forgeable outside signed manifest admission.
-    #[cfg(target_os = "windows")]
-    pub(crate) fn take_ready(&self, data_dir: &std::path::Path) -> Option<release::SignedCandidate> {
-        if !matches!(self.status(), Status::Ready(_)) {
-            return None;
-        }
-        let candidate = self.payload.lock().unwrap_or_else(|e| e.into_inner()).take()?;
-        if let Err(error) = attempts::record(data_dir, candidate.version(), candidate.sha256()) {
-            self.fail(error);
-            return None;
-        }
-        self.set(Status::Installing);
-        Some(candidate)
     }
 
     #[cfg(not(target_os = "windows"))]
