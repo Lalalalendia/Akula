@@ -258,7 +258,7 @@ if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
   throw 'Large-document acceptance changed the original smoke-test note'
 }
 Assert-LegacyUntouched
-
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-user-scenarios-installed.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData; if ($LASTEXITCODE -ne 0) { throw 'Installed Windows scenario and DOCX UIA readback failed' }
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
 if (!(Test-Path $uninstall)) { throw 'Akula uninstaller missing' }
 $removed = Start-Process $uninstall -ArgumentList '/S' -Wait -PassThru
