@@ -51,6 +51,9 @@ test('S3 UIA is still executed against the real opt-in Windows-native build', ()
   assert.match(uia, /\[AkulaBetaGuiInput\]::TypeAsciiKeys/);
   assert.match(uia, /AKULA_CLOUD_SAVE_UIA_PASS/);
   assert.match(uia, /AKULA_CLOUD_DISCARD_UIA_PASS/);
+  assert.match(uia, /AKULA_DROPBOX_MODAL_UIA_PASS/);
+  // PowerShell 5.1 decodes BOM-less scripts as ANSI on Windows runners.
+  assert.doesNotMatch(uia, /[^\x00-\x7F]/, 'UIA script must be ASCII or explicitly UTF-8 BOM');
 });
 
 test('PR cancellation is scoped; manually dispatched acceptance is preserved', () => {
@@ -59,4 +62,30 @@ test('PR cancellation is scoped; manually dispatched acceptance is preserved', (
   assert.match(workflow, /github\.workflow/);
   assert.match(workflow, /github\.event\.pull_request\.number \|\| github\.ref/);
   assert.match(workflow, /cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}/);
+});
+
+test('Notion-only leaf changes do not trigger S3 pairing; shared modal code still does', () => {
+  // A leaf owned by the optional Notion integration has no S3 runtime effect.
+  // Do not weaken the S3 checks for generic modal, dispatch or bindings edits.
+  const { parse, matches } = require('./ci-file-ratchet.cjs');
+  const policy = parse(workflow);
+  const isolated = [
+    'aquilum-app/native/src/app/settings/cloud_action/notion_draft.rs',
+    'aquilum-app/native/src/ui/settings/cloud/notion.rs',
+    'aquilum-app/native/src/ui/settings/cloud/notion/bases/grid.rs',
+    'aquilum-app/native/src/notion_bases/schema_editor.rs',
+    'aquilum-app/native/src/notion_offline/session.rs',
+  ];
+  for (const file of isolated) {
+    assert.equal(matches(policy, file), false,
+      'S3 Windows/Linux smoke must not run for Notion-only leaf: ' + file);
+  }
+  for (const shared of [
+    'aquilum-app/native/src/app/settings/cloud_action.rs',
+    'aquilum-app/native/src/ui/settings/cloud.rs',
+    'aquilum-app/native/src/ui/settings/binding.rs',
+  ]) {
+    assert.equal(matches(policy, shared), true,
+      'shared modal or bindings changes can regress S3 and must be checked: ' + shared);
+  }
 });

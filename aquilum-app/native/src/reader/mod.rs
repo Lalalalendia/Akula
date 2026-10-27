@@ -10,7 +10,7 @@ pub mod page;
 pub mod quotes;
 pub mod session;
 mod text;
-mod zip;
+pub(crate) mod zip;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -21,7 +21,7 @@ use std::path::Path;
 
 pub use cfi::Point;
 pub use dom::{Dom, NodeId};
-
+pub(crate) use epub::TocEntry;
 pub struct Section {
     pub base: String,
     dom: OnceCell<Option<Dom>>,

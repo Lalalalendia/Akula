@@ -1,21 +1,20 @@
 mod readonly;
-
+mod open_in;
+mod docx;
+#[cfg(feature = "dicom-preview")]
+mod dicom;
 use std::path::{Path, PathBuf};
-
 use aquilum_core::search::paths::{is_markdown, is_plain_text};
 use masonry::app::RenderRoot;
 use masonry::widgets::IndexedStack;
-
 use super::super::{App, Outcome};
 use crate::note::Note;
 use crate::ui::editor::TextEditor;
 use crate::ui::widgets::Slot;
-
 fn is_structured_file(path: &Path) -> bool {
     path.extension().and_then(|value| value.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas") || ext.eq_ignore_ascii_case("base"))
 }
-
 const MAX_INACTIVE_NOTES: usize = 2;
 const MAX_INACTIVE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -67,6 +66,8 @@ fn record_stage(update: impl FnOnce(&mut TabSwitchStages)) {
 
 impl App {
     pub(in crate::app) fn show_active(&mut self, root: &mut RenderRoot) {
+        #[cfg(feature = "dicom-preview")]
+        dicom::retain_dicom_grants(&mut self.dicom_external_sources, &self.tabs);
         // Closing/renaming a tab also invalidates any cached text associated
         // with its old identity; workspace switches clear the cache outright.
         self.inactive_notes.retain(|entry| {
@@ -130,6 +131,9 @@ impl App {
             self.show_page(root, 0);
             return;
         }
+        #[cfg(feature = "dicom-preview")]
+        if crate::dicom::is_candidate(&path) || self.dicom_external_sources.contains(&path) { return self.show_dicom_tab(root, path); }
+        if crate::docx::is_docx_path(&path) { return self.show_docx_tab(root, path); }
         if is_structured_file(&path) {
             self.leave_note();
             self.show_structured_readonly(root, &path);
@@ -314,30 +318,6 @@ impl App {
 
     pub(in crate::app) fn open_in(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool) -> bool {
         self.open_in_with_offset(root, path, new_tab, None)
-    }
-
-    pub(crate) fn open_in_with_offset(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool, offset: Option<usize>) -> bool {
-        let image = crate::images::kind(&path.to_string_lossy()) == Some(crate::images::MediaKind::Image);
-        if !image && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) {
-            return false;
-        }
-        // Validate the image before changing tabs or navigation: no paths
-        // outside this vault, symlinks, oversized or corrupt sources.
-        if image && self.tree.root().and_then(|vault| super::super::media::local_image_preview(vault, &path)).is_none() {
-            return false;
-        }
-        if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {
-            self.navigation.push(&current);
-        }
-        self.navigation.push(&path);
-        self.pending_reveal = offset;
-        if new_tab {
-            self.tabs.open_new(path);
-        } else {
-            self.tabs.open(path);
-        }
-        self.show_active(root);
-        true
     }
 
     pub(in crate::app) fn new_tab(&mut self, root: &mut RenderRoot) -> Outcome {

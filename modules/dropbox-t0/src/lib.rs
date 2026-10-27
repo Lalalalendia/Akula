@@ -11,6 +11,9 @@ pub const UPLOAD_ROUTE: &str = "/2/files/upload";
 pub const METADATA_ROUTE: &str = "/2/files/get_metadata";
 pub const CONTINUE_ROUTE: &str = "/2/files/list_folder/continue";
 
+mod listing;
+pub use listing::{prepare_list, parse_delta_page, parse_list_cursor,
+    DropboxDeltaEntry, DropboxDeltaPage, LIST_ROUTE, LATEST_CURSOR_ROUTE};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     InvalidScope,
@@ -48,7 +51,6 @@ fn safe_label(label: &str, max: usize) -> bool {
     !label.is_empty() && label.len() <= max
         && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scope {
     account_id: String,
@@ -86,7 +88,6 @@ impl Scope {
     pub fn vault_id(&self) -> &str { &self.vault_id }
     pub fn profile_id(&self) -> &str { &self.profile_id }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectKey(String);
 
@@ -109,7 +110,6 @@ impl ObjectKey {
     pub fn as_str(&self) -> &str { &self.0 }
     pub fn is_head(&self) -> bool { self.0 == "refs/current.json" }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DropboxRevision(String);
 

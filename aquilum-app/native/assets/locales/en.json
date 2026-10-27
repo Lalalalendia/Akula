@@ -1,4 +1,10 @@
 {
+  "dicom": {
+    "openFolder": "DICOM: open folder without import",
+    "openFile": "DICOM: open ZIP or file",
+    "openCurrentFolder": "DICOM: view this folder without import",
+    "openCurrentFile": "Open DICOM without import"
+  },
   "transfer": {
     "title": "File transfers",
     "close": "Close transfers",
@@ -217,16 +223,16 @@
     "loading": "Loading…",
     "navAria": "Settings sections",
     "server": {
-      "title": "Your server · setup draft",
-      "state": "Installation status",
-      "stateHint": "First installation of Akula Node on your own Linux server. No connection or remote change has occurred.",
-      "notConnected": "Not connected · install locked",
+      "title": "Connect your server",
+      "state": "Status",
+      "stateHint": "",
+      "notConnected": "Server not checked yet",
       "host": "Server address",
-      "hostHint": "DNS host or IPv4. Draft fields do not run SSH.",
+      "hostHint": "IP address or domain",
       "port": "SSH port",
-      "portHint": "Usually 22. No connection is started here.",
+      "portHint": "22 by default",
       "user": "SSH user",
-      "userHint": "A nonprivileged account whose sudo rights must be independently checked.",
+      "userHint": "For example: ubuntu",
       "publicKey": "Public SSH host key",
       "publicKeyHint": "Only ssh-ed25519 AAAA... obtained independently from the provider console, never a private key.",
       "fingerprint": "Independent SHA-256 fingerprint",
@@ -238,10 +244,24 @@
       "noSecrets": "Credential protection",
       "noSecretsHint": "Never paste an SSH private key, password, seed, token or sudo credential.",
       "noCredentials": "Secrets are neither accepted nor stored",
-      "verify": "Host inspection and installation",
-      "verifyHint": "Disabled until protected Windows OpenSSH transport, real owner approval and the Linux installer pass security acceptance.",
-      "verifyButton": "Verify SSH (unavailable)",
-      "installButton": "Install Node (unavailable)"
+      "verify": "Connection",
+      "verifyHint": "",
+      "verifyButton": "Check server",
+      "installButton": "Install Node",
+      "probing": "Checking SSH and server compatibility…",
+      "verifiedReadOnly": "Server verified · Node not installed",
+      "unsupported": "Server is not suitable for installing Node",
+      "adminAuthorizationRequired": "SSH verified · administrator authorization required for installation",
+      "verificationFailed": "Could not verify server or its host key",
+      "observedFacts": "Server information",
+      "observedFactsHint": "Collected after authenticated SSH key exchange",
+      "identity": "Server key or SHA-256 fingerprint",
+      "identityHint": "Paste a public SSH key or SHA256:… from your hosting provider",
+      "safety": "Security",
+      "shortHint": "Port 22 by default. Never paste a password or private key.",
+      "advanced": "Settings",
+      "advancedShow": "Advanced settings",
+      "advancedHide": "Hide advanced settings"
     },
     "cloud": {
       "catalogTitle": "Cloud connections",
@@ -766,6 +786,7 @@
     "title": "Reader",
     "book": "Book",
     "settings": "Reading settings",
+    "contents": "Table of contents",
     "closeSettings": "Close the reading settings",
     "close": "Close",
     "back": "Back",
@@ -867,6 +888,7 @@
     "forgetPending": "Removing…",
     "listFailed": "Could not read the list of knowledge bases: {{reason}}",
     "closeActive": "Close knowledge base",
-    "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning."
+    "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning.",
+    "switchSaveFailed": "Could not switch folders because a note was not saved. The current folder stays open. Check the editor warning."
   }
 }

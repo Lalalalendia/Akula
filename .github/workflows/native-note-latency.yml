@@ -59,6 +59,19 @@ jobs:
             echo "::error::Expected three complete tab and editor-page profiles"
             exit 1
           fi
+      - name: Compare old and bounded highlight paragraph scans (opt-in diagnostic)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p aquilum-native --bin aquilum-native --locked benchmark_editor_highlight_range_abba \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/range-paint-ab.log"
+          test "$(grep -c 'EDITOR_RANGE_AB lines=' "$GITHUB_WORKSPACE/range-paint-ab.log")" -eq 4
+          {
+            echo "### Editor highlight candidate scan (debug/test profile)"
+            echo "Same-process A/B; no rendering or event-to-present claim."
+            grep 'EDITOR_RANGE_AB lines=' "$GITHUB_WORKSPACE/range-paint-ab.log"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Summarize comparable measurements
         if: success()
         shell: bash
@@ -172,6 +185,271 @@ jobs:
           name: native-note-latency-${{ github.sha }}
           path: |
             note-latency.log
+            range-paint-ab.log
             note-latency-summary.md
           if-no-files-found: warn
           retention-days: 21
+
+  windows-code-search-smoke:
+    name: Windows native editor code search and screenshots (diagnostic)
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.number == 604)
+    runs-on: windows-2025
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-memory-pilot-v1
+          cache-workspace-crates: true
+          save-if: false
+      - name: Build normal installed-feature Windows Release
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native --features installed
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Release build failed' }
+          if (!(Test-Path ../.artifacts/cargo-native/release/aquilum-native.exe)) { throw 'Native exe missing' }
+      - name: Real Win32 foreground, horizontal wheel, search and screenshots
+        shell: pwsh
+        timeout-minutes: 4
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
+            throw 'Refuse OS input outside disposable GitHub-hosted Windows'
+          }
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class AkulaWin32 {
+            [StructLayout(LayoutKind.Sequential)]
+            public struct RECT { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+            [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, int data, UIntPtr extra);
+          }
+          "@
+          $vault = Join-Path $env:RUNNER_TEMP 'akula-perf604-synthetic-vault'
+          $profile = Join-Path $env:RUNNER_TEMP 'akula-perf604-synthetic-profile'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'perf604-win32-smoke'
+          New-Item -ItemType Directory -Force -Path $vault,$profile,$out | Out-Null
+          $note = Join-Path $vault 'Highlight-Code-Synthetic.md'
+          if (Test-Path -LiteralPath $note) { throw 'Refuse existing synthetic fixture' }
+          $doc = [System.Text.StringBuilder]::new()
+          [void]$doc.AppendLine('# Windows code search diagnostic')
+          [void]$doc.AppendLine('~~~rust')
+          # Unbroken repeated token guarantees horizontal overflow; a spaced sequence may wrap.
+          [void]$doc.AppendLine(('let needle_marker = "' + ('needle0123456789_' * 90) + '";'))
+          [void]$doc.AppendLine('~~~')
+          for ($i=0; $i -lt 30000; $i++) {
+            [void]$doc.AppendLine("Paragraph $i : UTF-8 Привет 中文 and regular Markdown.")
+          }
+          [System.IO.File]::WriteAllText($note, $doc.ToString(), [System.Text.UTF8Encoding]::new($false))
+          $beforeHash = (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
+          $bin = (Resolve-Path .artifacts/cargo-native/release/aquilum-native.exe).Path
+          $binaryHash = (Get-FileHash -LiteralPath $bin -Algorithm SHA256).Hash
+          $args = @("--vault", "`"$vault`"", "--data-dir", "`"$profile`"", "--open", "`"$note`"", "--focus", "--size", "1000x650")
+          $app = Start-Process -FilePath $bin -ArgumentList $args -PassThru
+          try {
+            $deadline = [DateTime]::UtcNow.AddSeconds(55)
+            $hwnd = [IntPtr]::Zero
+            do {
+              Start-Sleep -Milliseconds 350
+              $app.Refresh()
+              if ($app.HasExited) { throw "Akula exited before native HWND ($($app.ExitCode))" }
+              $hwnd = $app.MainWindowHandle
+            } while ($hwnd -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
+            if ($hwnd -eq [IntPtr]::Zero) { throw 'No PID-owned native HWND' }
+            $rect = [AkulaWin32+RECT]::new()
+            if (![AkulaWin32]::GetWindowRect($hwnd, [ref]$rect)) { throw 'No native window bounds' }
+            $width = $rect.Right - $rect.Left
+            $height = $rect.Bottom - $rect.Top
+            if ($width -lt 400 -or $height -lt 300) { throw 'Invalid native window size' }
+            if (![AkulaWin32]::SetForegroundWindow($hwnd)) { throw 'Cannot focus native test window' }
+            Start-Sleep -Milliseconds 600
+            if ([AkulaWin32]::GetForegroundWindow() -ne $hwnd) { throw 'Wrong foreground process, refusing OS events' }
+            function Capture([string]$name) {
+              $img = [System.Drawing.Bitmap]::new($width,$height)
+              $gfx = [System.Drawing.Graphics]::FromImage($img)
+              try {
+                $gfx.CopyFromScreen(
+                  [System.Drawing.Point]::new($rect.Left,$rect.Top),
+                  [System.Drawing.Point]::Empty,
+                  [System.Drawing.Size]::new($width,$height))
+                $img.Save((Join-Path $out $name), [System.Drawing.Imaging.ImageFormat]::Png)
+              } finally {
+                $gfx.Dispose()
+                $img.Dispose()
+              }
+            }
+            function GreenCodePixels([string]$name) {
+              # This fixture contains a long Rust string; in the isolated default light
+              # theme its syntax-highlighted code has green glyphs. This rejects
+              # a console/desktop screenshot even if HWND appeared already.
+              $img = [System.Drawing.Bitmap]::FromFile((Join-Path $out $name))
+              try {
+                # Two light-background anchors reject the earlier dark GitHub console
+                # false-positive; the syntax token provides an independent code witness.
+                $top = $img.GetPixel([int]($img.Width*0.45), [int]($img.Height*0.15))
+                $paper = $img.GetPixel([int]($img.Width*0.60), [int]($img.Height*0.30))
+                if ($top.R -lt 235 -or $top.G -lt 235 -or $top.B -lt 235 -or $paper.R -lt 235 -or $paper.G -lt 235 -or $paper.B -lt 235) { return 0 }
+                $green = 0
+                for ($y=[int]($img.Height*0.495); $y -lt [int]($img.Height*0.565); $y+=2) {
+                  for ($x=[int]($img.Width*0.32); $x -lt [int]($img.Width*0.61); $x+=2) {
+                    $pixel = $img.GetPixel($x,$y)
+                    if ($pixel.G -gt 75 -and $pixel.G -gt $pixel.R*1.3 -and $pixel.G -gt $pixel.B*1.1) { $green++ }
+                  }
+                }
+                return $green
+              } finally { $img.Dispose() }
+            }
+            # Compare PNGs from the verified, stable Akula frame. Require a substantial
+            # native bitmap change *inside the body*, but not in the fixed header.
+            # An inserted caret accounts for only ~50-150 pixels and must not pass.
+            function ChangedPixels([string]$before, [string]$after,
+                                   [double]$left, [double]$top,
+                                   [double]$right, [double]$bottom) {
+              $a = [System.Drawing.Bitmap]::FromFile((Join-Path $out $before))
+              $b = [System.Drawing.Bitmap]::FromFile((Join-Path $out $after))
+              try {
+                if ($a.Width -ne $b.Width -or $a.Height -ne $b.Height) { throw 'Screenshot dimensions changed' }
+                $changed = 0
+                for ($y=[int]($a.Height*$top); $y -lt [int]($a.Height*$bottom); $y++) {
+                  for ($x=[int]($a.Width*$left); $x -lt [int]($a.Width*$right); $x++) {
+                    if ($a.GetPixel($x,$y).ToArgb() -ne $b.GetPixel($x,$y).ToArgb()) { $changed++ }
+                  }
+                }
+                return $changed
+              } finally {
+                $a.Dispose()
+                $b.Dispose()
+              }
+            }
+            $ready = $false
+            for ($attempt=0; $attempt -lt 35; $attempt++) {
+              $app.Refresh()
+              if ($app.HasExited) { throw 'Akula exited before a stable code frame' }
+              if ([AkulaWin32]::GetForegroundWindow() -ne $hwnd) {
+                [void][AkulaWin32]::SetForegroundWindow($hwnd)
+              }
+              Start-Sleep -Milliseconds 400
+              Capture 'opened.png'
+              if ((GreenCodePixels 'opened.png') -lt 60) { continue }
+              Start-Sleep -Milliseconds 650
+              Capture 'opened-stable.png'
+              if ((GreenCodePixels 'opened-stable.png') -lt 60) { continue }
+              $codeSettled = ChangedPixels 'opened.png' 'opened-stable.png' 0.33 0.495 0.61 0.565
+              if ($codeSettled -le 45) {
+                Copy-Item -LiteralPath (Join-Path $out 'opened-stable.png') -Destination (Join-Path $out 'opened.png') -Force
+                $ready = $true
+                break
+              }
+            }
+            if (!$ready) { throw 'No stable native Akula code frame witnessed; refusing scroll measurement' }
+            if ([AkulaWin32]::GetForegroundWindow() -ne $hwnd) {
+              throw 'Native Akula window not foreground after stabilization'
+            }
+
+            # Code body lies below the title and the fixed fence header.
+            # The previous (310,155) position targeted the H1, not the code.
+            $targetX = $rect.Left + [Math]::Min(420,[int]($width * 0.42))
+            $targetY = $rect.Top + [Math]::Min(338,[int]($height * 0.52))
+            if (![AkulaWin32]::SetCursorPos($targetX,$targetY)) { throw 'Cannot target code panel' }
+            # Ensure winit receives a PointerButton at the code location. A plain
+            # SetCursorPos may not update its cached mouse position on CI Windows.
+            [AkulaWin32]::mouse_event(0x0001,1,0,0,[UIntPtr]::Zero)
+            [AkulaWin32]::mouse_event(0x0002,0,0,0,[UIntPtr]::Zero)
+            [AkulaWin32]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 350
+            if ([AkulaWin32]::GetForegroundWindow() -ne $hwnd) { throw 'Code click lost Akula foreground' }
+            Capture 'before-horizontal-wheel.png'
+            # Win32 MOUSEEVENTF_HWHEEL reports a signed x delta through winit.
+            # The editor applies -dx; verify either polarity without weakening
+            # the observed-movement and fixed-header assertions.
+            $codePixelsChanged = 0
+            $headerPixelsChanged = 0
+            $wheelDirection = 0
+            foreach ($direction in @(240,-240)) {
+              [AkulaWin32]::mouse_event(0x1000,0,0,$direction,[UIntPtr]::Zero)
+              Start-Sleep -Milliseconds 650
+              $frame = if ($direction -gt 0) { 'wheel-positive.png' } else { 'wheel-negative.png' }
+              Capture $frame
+              # The code is one unwrapped row (y≈328-359), with a static
+              # language/fence header around y≈300.
+              $codePixelsChanged = ChangedPixels 'before-horizontal-wheel.png' $frame 0.33 0.495 0.61 0.565
+              $headerPixelsChanged = ChangedPixels 'before-horizontal-wheel.png' $frame 0.30 0.45 0.60 0.49
+              Write-Host "CODE_HWHEEL direction=$direction bodyPixels=$codePixelsChanged headerPixels=$headerPixelsChanged"
+              if ($headerPixelsChanged -gt 120) {
+                throw "Fixed code header moved while sending HWHEEL ${direction}: changed=$headerPixelsChanged"
+              }
+              if ($codePixelsChanged -ge 450) {
+                $wheelDirection = $direction
+                Copy-Item -LiteralPath (Join-Path $out $frame) -Destination (Join-Path $out 'after-horizontal-wheel.png') -Force
+                break
+              }
+            }
+            if ($wheelDirection -eq 0) {
+              throw "Neither HWHEEL polarity shifted code-body pixels: last_changed=$codePixelsChanged"
+            }
+            if ([AkulaWin32]::GetForegroundWindow() -ne $hwnd) { throw 'Native window lost focus' }
+            [System.Windows.Forms.SendKeys]::SendWait('^f')
+            Start-Sleep -Milliseconds 350
+            [System.Windows.Forms.SendKeys]::SendWait('needle')
+            Start-Sleep -Milliseconds 850
+            Capture 'after-search.png'
+            $app.Refresh()
+            if ($app.HasExited) { throw 'Akula exited during native search' }
+            $afterHash = (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
+            if ($afterHash -ne $beforeHash) { throw 'Synthetic Markdown was modified' }
+            $screens = @('opened.png','after-horizontal-wheel.png','after-search.png')
+            $hashes = @($screens | ForEach-Object { (Get-FileHash -LiteralPath (Join-Path $out $_) -Algorithm SHA256).Hash })
+            if ($hashes[0] -eq $hashes[2]) { throw 'No pixel change after native OS search interaction' }
+            $relativeX = [int]$targetX - [int]$rect.Left
+            $relativeY = [int]$targetY - [int]$rect.Top
+            [ordered]@{
+              repo_head = (git rev-parse HEAD).Trim()
+              binary_sha256 = $binaryHash
+              fixture_sha256 = $beforeHash
+              pid = $app.Id
+              hwnd = $hwnd.ToInt64()
+              hwnd_width = $width
+              hwnd_height = $height
+              foreground_verified = $true
+              os_horizontal_wheel_injected = $true
+              horizontal_code_pixels_changed = $codePixelsChanged
+              win32_hwheel_delta = $wheelDirection
+              input_target_relative = @($relativeX, $relativeY)
+              fixed_code_header_pixels_changed = $headerPixelsChanged
+              screenshot_region_scroll_witness = $true
+              stable_code_frame_witness = $ready
+              code_green_pixels = (GreenCodePixels 'opened.png')
+              os_find_keys_injected = $true
+              screenshot_sha256 = $hashes
+              pixel_change_does_not_prove_highlight_correctness = $true
+              unpackaged_release_not_signed_installer = $true
+            } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $out 'witness.json') -Encoding utf8
+          } finally {
+            $app.Refresh()
+            if (!$app.HasExited) {
+              [void]$app.CloseMainWindow()
+              if (!$app.WaitForExit(20000)) { Stop-Process -Id $app.Id -Force }
+            }
+          }
+          "Windows real-window code scroll: bodyPixels=$codePixelsChanged headerPixels=$headerPixelsChanged. Not installed NSIS, not J2 p95." |
+            Out-File -Append -Encoding utf8 -FilePath $env:GITHUB_STEP_SUMMARY
+      - name: Save Win32 GUI screenshots and source witness
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf604-win32-code-search
+          path: perf604-win32-smoke/
+          if-no-files-found: warn
+          retention-days: 14

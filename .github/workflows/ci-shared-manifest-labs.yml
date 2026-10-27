@@ -24,10 +24,43 @@ on:
       owned_host_custody:
         required: true
         type: boolean
+      owned_b1b4b_witness:
+        required: true
+        type: boolean
+      owned_b1c0_node:
+        required: true
+        type: boolean
+      owned_b1b4b1_ipc:
+        required: true
+        type: boolean
+      owned_b1b3c_fd:
+        required: true
+        type: boolean
+      owned_b1d0_opt:
+        required: true
+        type: boolean
+      owned_b1b2b_vm:
+        required: true
+        type: boolean
+      owned_b1c1_vm:
+        required: true
+        type: boolean
+      owned_b0c_ssh:
+        required: true
+        type: boolean
       owned_sync_protection:
         required: true
         type: boolean
       owned_text_delta:
+        required: true
+        type: boolean
+      text_delta_module_required:
+        required: true
+        type: boolean
+      text_delta_pack_fast_path:
+        required: true
+        type: boolean
+      text_delta_pack_boundary_changed:
         required: true
         type: boolean
       owned_appimage:
@@ -58,14 +91,19 @@ jobs:
     if: ${{ inputs.core || inputs.native || inputs.owned_host_custody }}
     uses: ./.github/workflows/sync-host-custody.yml
 
+  route-b0c-ssh-native:
+    name: Impacted native manifest / b0c-windows-ssh
+    if: ${{ inputs.native || inputs.owned_b0c_ssh }}
+    uses: ./.github/workflows/core-server-bootstrap-b0c-windows-ssh.yml
+
   route-b1b2b-ubuntu:
     name: Impacted shared manifest / b1b2b-ubuntu
-    if: ${{ inputs.core }}
+    if: ${{ inputs.core || inputs.owned_b1b2b_vm }}
     uses: ./.github/workflows/core-server-bootstrap-b1b2b-ubuntu.yml
 
   route-b1c1-vm:
     name: Impacted shared manifest / b1c1-vm
-    if: ${{ inputs.core }}
+    if: ${{ inputs.core || inputs.owned_b1c1_vm }}
     uses: ./.github/workflows/core-server-bootstrap-b1c1-real-elf-vm.yml
 
   route-b1b2a-systemd:
@@ -80,7 +118,7 @@ jobs:
 
   route-b1b3c-fd:
     name: Impacted shared manifest / b1b3c-fd
-    if: ${{ inputs.core || inputs.lib }}
+    if: ${{ inputs.core || inputs.lib || inputs.owned_b1b3c_fd }}
     uses: ./.github/workflows/core-server-bootstrap-b1b3c-signed-fd.yml
 
   route-b1b4a-cas:
@@ -90,22 +128,22 @@ jobs:
 
   route-b1b4b-witness:
     name: Impacted shared manifest / b1b4b-witness
-    if: ${{ inputs.core || inputs.lib }}
+    if: ${{ inputs.core || inputs.lib || inputs.owned_b1b4b_witness }}
     uses: ./.github/workflows/core-server-bootstrap-b1b4b-os-witness.yml
 
   route-b1b4b1-ipc:
     name: Impacted shared manifest / b1b4b1-ipc
-    if: ${{ inputs.core }}
+    if: ${{ inputs.core || inputs.owned_b1b4b1_ipc }}
     uses: ./.github/workflows/core-server-bootstrap-b1b4b1-witness-ipc.yml
 
   route-b1c0-node:
     name: Impacted shared manifest / b1c0-node
-    if: ${{ inputs.core || inputs.lib }}
+    if: ${{ inputs.core || inputs.lib || inputs.owned_b1c0_node }}
     uses: ./.github/workflows/core-server-bootstrap-b1c0-fixed-node.yml
 
   route-b1d0-opt:
     name: Impacted shared manifest / b1d0-opt
-    if: ${{ inputs.core || inputs.lib }}
+    if: ${{ inputs.core || inputs.lib || inputs.owned_b1d0_opt }}
     uses: ./.github/workflows/core-server-bootstrap-b1d0-opt.yml
 
   route-b0b-ssh:
@@ -157,6 +195,10 @@ jobs:
     name: Impacted shared manifest / text-delta
     if: ${{ inputs.core || inputs.lock || inputs.owned_text_delta }}
     uses: ./.github/workflows/sync-text-delta-rust.yml
+    with:
+      codec_already_tested: ${{ inputs.text_delta_module_required }}
+      lightweight_pack_probe: ${{ inputs.text_delta_pack_fast_path }}
+      verify_lightweight_boundary: ${{ inputs.text_delta_pack_boundary_changed }}
 
   route-appimage-beta:
     name: Impacted shared manifest / appimage-beta
@@ -195,7 +237,7 @@ jobs:
 
   boundary-1:
     name: Verify required subset 1
-    needs: [route-host-custody, route-b1b2b-ubuntu, route-b1c1-vm, route-b1b2a-systemd, route-b1b3b-helper, route-b1b3c-fd, route-b1b4a-cas, route-b1b4b-witness, route-b1b4b1-ipc, route-b1c0-node, route-b1d0-opt, route-b0b-ssh]
+    needs: [route-host-custody, route-b0c-ssh-native, route-b1b2b-ubuntu, route-b1c1-vm, route-b1b2a-systemd, route-b1b3b-helper, route-b1b3c-fd, route-b1b4a-cas, route-b1b4b-witness, route-b1b4b1-ipc, route-b1c0-node, route-b1d0-opt, route-b0b-ssh]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -209,7 +251,7 @@ jobs:
           node <<'JS'
           const needs=JSON.parse(process.env.NEEDS_JSON);
           const flags=JSON.parse(process.env.INPUTS_JSON);
-          const cases=[["route-host-custody",["owned_host_custody","core","native"]],["route-b1b2b-ubuntu",["core"]],["route-b1c1-vm",["core"]],["route-b1b2a-systemd",["core"]],["route-b1b3b-helper",["core"]],["route-b1b3c-fd",["core","lib"]],["route-b1b4a-cas",["core","lib"]],["route-b1b4b-witness",["core","lib"]],["route-b1b4b1-ipc",["core"]],["route-b1c0-node",["core","lib"]],["route-b1d0-opt",["core","lib"]],["route-b0b-ssh",["core","lib"]]];
+          const cases=[["route-host-custody",["owned_host_custody","core","native"]],["route-b0c-ssh-native",["native","owned_b0c_ssh"]],["route-b1b2b-ubuntu",["core","owned_b1b2b_vm"]],["route-b1c1-vm",["core","owned_b1c1_vm"]],["route-b1b2a-systemd",["core"]],["route-b1b3b-helper",["core"]],["route-b1b3c-fd",["core","lib","owned_b1b3c_fd"]],["route-b1b4a-cas",["core","lib"]],["route-b1b4b-witness",["core","lib","owned_b1b4b_witness"]],["route-b1b4b1-ipc",["core","owned_b1b4b1_ipc"]],["route-b1c0-node",["core","lib","owned_b1c0_node"]],["route-b1d0-opt",["core","lib","owned_b1d0_opt"]],["route-b0b-ssh",["core","lib"]]];
           const errors=[];
           for(const [job,keys] of cases){
             const expected=keys.some(k=>flags[k]===true);

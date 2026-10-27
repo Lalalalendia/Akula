@@ -1,0 +1,122 @@
+name: DICOM preview isolated native check
+on:
+  push:
+    branches:
+      - 'feat/dicom-readonly-preview-20261026'
+    paths:
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/native/src/dicom.rs'
+      - 'aquilum-app/native/src/dicom/**'
+      - 'aquilum-app/native/src/app/book/**'
+      - 'aquilum-app/native/src/app/mod.rs'
+      - 'aquilum-app/native/assets/locales/ru.json'
+      - 'aquilum-app/native/assets/locales/en.json'
+      - 'aquilum-app/native/src/host/create.rs'
+      - 'aquilum-app/native/src/args.rs'
+      - 'aquilum-app/native/src/ui/workspaces/helpers.rs'
+      - 'aquilum-app/native/src/ui/shell.rs'
+      - 'aquilum-app/native/src/ui/new_tab.rs'
+      - 'aquilum-app/native/src/app/root_ui.rs'
+      - 'aquilum-app/native/src/app/actions.rs'
+      - 'aquilum-app/native/src/app/init/bootstrap.rs'
+      - 'aquilum-app/Cargo.lock'
+      - 'aquilum-app/native/src/ui/dicom.rs'
+      - 'aquilum-app/native/src/ui/mod.rs'
+      - 'aquilum-app/native/src/native_modules.rs'
+      - 'aquilum-app/native/src/app/tabs/open.rs'
+      - 'aquilum-app/native/src/app/tabs/open/dicom.rs'
+      - 'aquilum-app/native/src/ui/file_tree/model/load.rs'
+      - 'aquilum-app/native/src/ui/file_tree/actions.rs'
+      - 'aquilum-app/native/src/app/file_menu.rs'
+      - 'aquilum-app/native/src/app/file_menu/popup.rs'
+      - 'scripts/dicom-native-smoke/**'
+      - '.github/workflows/dicom-native-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: dicom-native-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  standalone-core:
+    name: DICOM source-model tests and real FileSet
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install independent DICOM fixture generator
+        run: python -m pip install 'pydicom==3.0.1' 'numpy==2.2.6'
+      - name: Generate full synthetic FileSet and extensionless images
+        run: python scripts/dicom-native-smoke/generate.py scripts/dicom-native-smoke/fixture
+      - name: Run source-model unit tests in standalone crate
+        run: cargo test --manifest-path scripts/dicom-native-smoke/Cargo.toml -- --nocapture
+      - name: Open DICOMDIR and render each referenced image with native core
+        run: |
+          cargo run --manifest-path scripts/dicom-native-smoke/Cargo.toml --release -- \
+            scripts/dicom-native-smoke/fixture \
+            scripts/dicom-native-smoke/fixture/DICOMDIR
+      - name: Verify signed 16-bit multi-frame DICOM with window and rescale
+        run: |
+          cargo run --manifest-path scripts/dicom-native-smoke/Cargo.toml --release -- \
+            scripts/dicom-native-smoke/fixture \
+            scripts/dicom-native-smoke/fixture/SIGNED16.dcm
+      - name: Read ZIP without extraction and standalone folder without DICOMDIR
+        run: |
+          cargo run --manifest-path scripts/dicom-native-smoke/Cargo.toml --release -- scripts/dicom-native-smoke/fixture scripts/dicom-native-smoke/fixture/study.zip
+          cargo run --manifest-path scripts/dicom-native-smoke/Cargo.toml --release -- scripts/dicom-native-smoke/fixture scripts/dicom-native-smoke/fixture/loose_folder
+      - name: Save independent verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dicom-source-model-${{ github.run_id }}
+          path: scripts/dicom-native-smoke/fixture/DICOMDIR
+          if-no-files-found: warn
+          retention-days: 7
+  native-build:
+    name: Akula native optional DICOM feature check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Check native UI integration (feature opted in)
+        working-directory: aquilum-app
+        env:
+          CARGO_TARGET_DIR: ../.artifacts/cargo-native
+        run: cargo check -p aquilum-native --features dicom-preview --locked
+      - name: Test native DICOM file-tree visibility without running unrelated tests
+        working-directory: aquilum-app
+        env:
+          CARGO_TARGET_DIR: ../.artifacts/cargo-native
+        run: |
+          cargo test -p aquilum-native --features dicom-preview --locked dicom_file_tree_tests -- --nocapture
+          cargo test -p aquilum-native --features dicom-preview --locked dicom_external_surface_tests -- --nocapture
+          cargo test -p aquilum-native --features dicom-preview --locked dicom_menu_readonly_tests -- --nocapture
+          cargo test -p aquilum-native --features dicom-preview --locked dicom_permission_lifetime_tests -- --nocapture
+          cargo test -p aquilum-native --features dicom-preview --locked dicom_locale_tests -- --nocapture
+      - name: Capture resolved Cargo lockfile for later audited commit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dicom-native-lock-${{ github.run_id }}
+          path: aquilum-app/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 7

@@ -3,8 +3,8 @@
 
 This program is not a publisher, does not activate Akula's updater and writes
 only to disposable /tmp/akula-release-e2e-* directories inside Docker.
-v1 is the normal 0.3.9 AppImage; v2 is independently recompiled and packaged
-with a *CI-only* 0.3.10 version. No signing root or release is shipped.
+v1 is the normal 0.3.13 AppImage; v2 is independently recompiled and packaged
+with a *CI-only* 0.3.14 version. No signing root or release is shipped.
 """
 import hashlib
 import json
@@ -200,18 +200,18 @@ def signed_lab_manifest(root, image, sha):
     require(len(locked) == 64 and all(c in "0123456789abcdef" for c in locked),
             "exact patched v2 Cargo.lock SHA-256 was not supplied")
     manifest = {
-        "schema": 1, "product": "Akula", "version": "0.3.10",
+        "schema": 1, "product": "Akula", "version": "0.3.14",
         "source_commit": source, "cargo_lock_sha256": locked,
         "artifacts": {
-            "windows-x86_64": {"filename": "Akula_0.3.10_x64-setup.exe",
+            "windows-x86_64": {"filename": "Akula_0.3.14_x64-setup.exe",
                                "sha256": "c" * 64, "size": 12},
             "linux-x86_64-appimage": {
                 "filename": image.name, "sha256": sha,
                 "size": image.stat().st_size
             },
-            "linux-x86_64-deb": {"filename": "Akula_0.3.10_amd64.deb",
+            "linux-x86_64-deb": {"filename": "Akula_0.3.14_amd64.deb",
                                  "sha256": "c" * 64, "size": 12},
-            "linux-x86_64-rpm": {"filename": "Akula-0.3.10-1.x86_64.rpm",
+            "linux-x86_64-rpm": {"filename": "Akula-0.3.14-1.x86_64.rpm",
                                  "sha256": "c" * 64, "size": 12}
         }
     }
@@ -243,8 +243,8 @@ def main():
             and os.environ.get("AKULA_DISPOSABLE_UPDATE_LAB") == "1",
             "CI-only real package experiment is disabled")
     v1, v2, harness = map(Path, sys.argv[1:])
-    require(v1.name == "akula-app_0.3.9_x86_64.AppImage", "wrong compiled v1 identity")
-    require(v2.name == "akula-app_0.3.10_x86_64.AppImage", "wrong compiled v2 identity")
+    require(v1.name == "akula-app_0.3.13_x86_64.AppImage", "wrong compiled v1 identity")
+    require(v2.name == "akula-app_0.3.14_x86_64.AppImage", "wrong compiled v2 identity")
     require(all(x.is_file() for x in (v1, v2, harness)), "missing real binaries")
     old_hash, new_hash = digest(v1), digest(v2)
     require(old_hash != new_hash and len(old_hash) == 64 and len(new_hash) == 64,

@@ -1,5 +1,4 @@
 use super::super::*;
-
 impl App {
     pub fn new(workspace: Workspace, initial_text: String) -> Self {
         let tree = FileTree::new(workspace.root.clone(), &workspace.data_dir, Arc::clone(&workspace.wake));
@@ -17,17 +16,18 @@ impl App {
         let (titles_tx, titles_rx) = channel();
         let workspace_wake = Arc::clone(&workspace.wake);
         let auto_update = workspace.core.settings.get_config().updates.auto;
-        let mut yandex_probe = crate::yandex_probe_session::ProbeSession::new(
-            Arc::clone(&workspace_wake),
-        );
+        let mut yandex_probe = crate::yandex_probe_session::ProbeSession::new(Arc::clone(&workspace_wake));
         yandex_probe.set_bucket(&workspace.core.settings.get_config().s3_onboarding.bucket);
         let mut app = App {
             workspace,
+            #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview::new(),
             tree,
+            #[cfg(feature = "dicom-preview")] dicom_external_sources: HashSet::new(),
             chrome: None,
             interface,
             popup: None,
             typing: None,
+            server_probe: settings::server_state::ServerProbeState::default(),
             graph: graph_page::GraphState::default(),
             transfer: transfer::TransferState::default(),
             suggest_layer: None,
@@ -35,8 +35,7 @@ impl App {
             note: None,
             text: crop::Rope::from(initial_text),
             inactive_notes: Vec::new(),
-            #[cfg(test)]
-            parley_trial_enabled: false,
+            #[cfg(test)] parley_trial_enabled: false,
             #[cfg(test)]
             parley_capture: None,
             #[cfg(test)]

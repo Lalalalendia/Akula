@@ -217,3 +217,52 @@ fn exclusion_stems_are_normalized_and_do_not_appear_in_result_terms() {
     assert!(found.results[0].path.ends_with("Свободная.md"));
     assert!(!found.terms.iter().any(|term| term.contains("ошиб")));
 }
+
+#[test]
+fn a_quoted_phrase_requires_adjacent_words_in_order() {
+    let (_guard, index) = indexed(&[
+        ("Слитно.md", "Квантовая физика помогает."),
+        ("Раздельно.md", "Квантовая экспериментальная физика помогает."),
+        ("Наоборот.md", "Физика квантовая помогает."),
+    ]);
+    let found = search(&index, "\"квантовая физика\"");
+    assert_eq!(found.len(), 1, "only a consecutive phrase in order must match");
+    assert!(found[0].path.ends_with("Слитно.md"));
+}
+
+#[test]
+fn a_quoted_phrase_jumps_to_the_phrase_not_an_earlier_separate_word() {
+    let body = "# Заголовок\nКвантовая идея начинается здесь.\n\n## Раздел\nНужна квантовая физика.\n";
+    let (_guard, index) = indexed(&[("Документ.md", body)]);
+    let result = &search(&index, "\"квантовая физика\"")[0];
+    let at = body.find("квантовая физика").unwrap();
+    assert_eq!(result.match_offset, body[..at].encode_utf16().count());
+    assert_eq!(result.heading.as_deref(), Some("Раздел"));
+    assert!(result.snippet.contains("квантовая физика"));
+}
+
+#[test]
+fn a_quoted_single_word_is_not_a_prefix_search() {
+    let (_guard, index) = indexed(&[
+        ("Один.md", "прин"),
+        ("Два.md", "принтер"),
+        ("Три.md", "принцип"),
+    ]);
+    let found = search(&index, "\"прин\"");
+    assert_eq!(found.len(), 1);
+    assert!(found[0].path.ends_with("Один.md"));
+}
+
+#[test]
+fn a_quoted_phrase_combines_with_exclusions_without_losing_partial_search() {
+    let (_guard, index) = indexed(&[
+        ("Открыто.md", "Первый второй полезный"),
+        ("Запрет.md", "Первый второй ошибка"),
+        ("Разрыв.md", "Первый другой второй полезный"),
+    ]);
+    let found = search(&index, "\"первый второй\" -ошибка");
+    assert_eq!(found.len(), 1);
+    assert!(found[0].path.ends_with("Открыто.md"));
+    let partial = search(&index, "первый второй");
+    assert_eq!(partial.len(), 3, "unquoted OR ranking is unchanged");
+}

@@ -1,0 +1,29 @@
+[package]
+name = "akula-win7-ab-lab"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+# Identical release profile in both target builds; no downgraded toolchain/crates.
+[profile.release]
+opt-level = 2
+lto = "thin"
+codegen-units = 8
+panic = "abort"
+
+[dependencies]
+getrandom02 = { package = "getrandom", version = "=0.2.17" }
+getrandom03 = { package = "getrandom", version = "=0.3.4" }
+getrandom04 = { package = "getrandom", version = "=0.4.3" }
+windows-result = "=0.4.1"
+winit = { version = "=0.31.0-beta.3", default-features = false, optional = true }
+
+[features]
+gui = ["dep:winit"]
+
+[[bin]]
+name = "gui_probe"
+path = "src/bin/gui_probe.rs"
+required-features = ["gui"]

@@ -6,6 +6,8 @@ on:
       - 'aquilum-app/core/src/history/service.rs'
       - 'aquilum-app/core/src/history/milestone.rs'
       - 'aquilum-app/core/src/history/store.rs'
+      - 'aquilum-app/core/src/history/store/integrity.rs'
+      - 'aquilum-app/core/tests/history_integrity_seal_contract.rs'
       - '.github/workflows/sync-history-version-evidence.yml'
       - 'docs/sync/p0g3b-history-version-evidence.md'
   workflow_dispatch:
@@ -43,3 +45,9 @@ jobs:
       - name: Complete HistoryService compatibility suite
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-s3 history::service::tests -- --nocapture --test-threads=1
+      - name: Fixed-version BLAKE3, legacy CRLF and Windows deep-path regressions
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-s3 history::store::integrity::tests -- --nocapture --test-threads=1
+      - name: PC-FG-03 File Gate restore-selection tamper regression
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-s3 --test history_integrity_seal_contract -- --nocapture --test-threads=1

@@ -10,6 +10,8 @@ on:
       # existing native/src/app/** and schema/** families violates the
       # repository's protected CI fanout budget.
       - '.github/workflows/yandex-s3-native-preview.yml'
+      - '.github/scripts/ci-yandex-preview-route.cjs'
+      - '.github/scripts/ci-yandex-preview-route.test.cjs'
       - 'aquilum-app/native/src/yandex_credentials.rs'
       - 'aquilum-app/native/src/yandex_probe_session.rs'
       - 'aquilum-app/native/src/yandex_probe_worker.rs'
@@ -34,8 +36,31 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  classify-preview:
+    name: Classify optional Yandex Windows preview
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      heavy: ${{ steps.scope.outputs.heavy }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check fail-closed diff classification
+        id: scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/ci-yandex-preview-route.test.cjs
+          node .github/scripts/ci-yandex-preview-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
   windows-readonly-preview:
     name: No-credentials Windows read-only connection preview
+    needs: classify-preview
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || (needs.classify-preview.result == 'success' && needs.classify-preview.outputs.heavy == 'true')) }}
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
@@ -50,8 +75,10 @@ jobs:
         shell: pwsh
         run: |
           $cargo = Get-Content -Raw aquilum-app/native/Cargo.toml
-          if ($cargo -notmatch 'installed\s*=\s*\[\s*\]') {
-            throw "installed feature must be empty: S3 UI preview may not ship"
+          # Normal installer enables only read-only Dropbox and pinned SSH KEX;
+          # neither authorizes cloud writes, Node install or S3 preview.
+          if ($cargo -notmatch '(?m)^installed\s*=\s*\[\s*"dropbox-readonly-preview"\s*,\s*"server-readonly-preflight"\s*\]\s*$') {
+            throw "installed may enable only read-only Dropbox and SSH preflight"
           }
           if ($cargo -notmatch 'yandex-s3-connection-preview\s*=') {
             throw "missing explicit opt-in feature"

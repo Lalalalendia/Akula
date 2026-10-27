@@ -60,6 +60,22 @@ jobs:
           assert matches[0]["version"] == "0.3.0", matches[0]["version"]
           print("Using Akula-vendored vello_common", path)
           PY
+      - name: Vello Common gradient hard-stop LUT regression
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q 'fn gradient_nearly_equal_stops_never_extrapolate_to_white' native/vendor/vello_common/src/encode.rs; then
+            cargo test --release --locked -p vello_common --lib gradient_nearly_equal_stops_never_extrapolate_to_white -- --nocapture
+          else
+            echo "Gradient LUT regression not present on this branch" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          cargo test --release --locked -p vello_common --lib gaussian_blur_untrusted_sigma_ -- --nocapture
+          cargo test --release --locked -p vello_common --lib unpremultiply_malformed_ -- --nocapture
+          cargo test --release --locked -p vello_common --lib vello_tile_prev_loc_ -- --nocapture
+          cargo test --release --locked -p vello_common --lib vello_culling_range_ -- --nocapture
+          cargo test --release --locked -p vello_common --lib vello_strip_pixel_coords_ -- --nocapture
+          cargo test --release --locked -p vello_common --lib vello_decimation_sizer_ -- --nocapture
       - name: Exact real glyph 495 source mask / all atlas slots and crop origins
         working-directory: aquilum-app
         shell: bash

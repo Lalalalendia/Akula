@@ -1,0 +1,74 @@
+name: DICOM Windows native preview compile
+on:
+  push:
+    branches:
+      - 'feat/dicom-readonly-preview-20261026'
+    paths:
+      - '.github/workflows/dicom-windows-preview.yml'
+      - 'aquilum-app/native/src/dicom.rs'
+      - 'aquilum-app/native/src/dicom/**'
+      - 'aquilum-app/native/src/app/book/**'
+      - 'aquilum-app/native/src/app/file_menu.rs'
+      - 'aquilum-app/native/src/app/file_menu/popup.rs'
+      - 'aquilum-app/native/src/app/init/bootstrap.rs'
+      - 'aquilum-app/native/assets/locales/ru.json'
+      - 'aquilum-app/native/assets/locales/en.json'
+      - 'aquilum-app/native/src/app/tabs/open.rs'
+      - 'aquilum-app/native/src/host/create.rs'
+      - 'aquilum-app/native/src/args.rs'
+      - 'aquilum-app/native/src/ui/workspaces/helpers.rs'
+      - 'aquilum-app/native/src/ui/shell.rs'
+      - 'aquilum-app/native/src/ui/new_tab.rs'
+      - 'aquilum-app/native/src/app/root_ui.rs'
+      - 'aquilum-app/native/src/app/actions.rs'
+      - 'aquilum-app/native/src/ui/dicom.rs'
+      - 'aquilum-app/native/src/app/tabs/open/dicom.rs'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
+      - 'scripts/dicom-native-smoke/**'
+permissions:
+  contents: read
+concurrency:
+  group: dicom-windows-preview-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-native:
+    name: Windows installed+preview compile (no release)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: dicom-windows-preview
+          cache-on-failure: true
+      - name: Compile Windows Akula with DICOM feature opt-in
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}\.artifacts\cargo-native
+        run: |
+          cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed,dicom-preview
+          if ($LASTEXITCODE -ne 0) { throw 'Windows DICOM native feature compile failed' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate synthetic DICOM folder and ZIP on Windows
+        shell: pwsh
+        run: |
+          python -m pip install 'pydicom==3.0.1' 'numpy==2.2.6'
+          python scripts/dicom-native-smoke/generate.py scripts/dicom-native-smoke/fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Windows fixture creation failed' }
+      - name: Decode ZIP and folder in place on Windows
+        shell: pwsh
+        run: |
+          cargo run --manifest-path scripts/dicom-native-smoke/Cargo.toml --release -- scripts/dicom-native-smoke/fixture scripts/dicom-native-smoke/fixture/study.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Windows direct ZIP reader failed' }
+          cargo run --manifest-path scripts/dicom-native-smoke/Cargo.toml --release -- scripts/dicom-native-smoke/fixture scripts/dicom-native-smoke/fixture/loose_folder
+          if ($LASTEXITCODE -ne 0) { throw 'Windows direct folder reader failed' }
+      - name: Evidence marker
+        shell: pwsh
+        run: |
+          Write-Output 'AKULA_DICOM_WINDOWS_COMPILE_PASS installed_and_dicom_preview=1'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value 'Windows installed + dicom-preview compilation PASS. No executable was published or installed.'

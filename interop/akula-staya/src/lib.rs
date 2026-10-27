@@ -10,6 +10,12 @@ use aquilum_core::p2p_offer_lab::{
 };
 #[cfg(feature = "p2p-live-identity")]
 pub mod live_identity;
+#[cfg(all(target_os = "linux", feature = "node-live-read-lab"))]
+pub mod node_live_read;
+#[cfg(all(target_os = "linux", feature = "node-v1-runtime"))]
+pub mod node_v1_runtime;
+#[cfg(feature = "p2p-live-identity")]
+pub mod roster_observation_lab;
 #[cfg(feature = "sender-arm-lab")]
 pub mod sender_arm_lab;
 

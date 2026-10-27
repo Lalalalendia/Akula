@@ -1,12 +1,12 @@
+mod interprocess_lock;
 mod moves;
 mod trash;
 mod write;
-
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod interprocess_probe;
-
+pub(crate) use interprocess_lock::FileGateInterprocessLock;
 pub use moves::{move_across, rename};
 pub use trash::{cleanup_retention, ensure_trash, restore, restore_deletion, trash};
 pub use write::{copy, create, create_binary, create_folder, ensure_folder_tree, name_version, write};

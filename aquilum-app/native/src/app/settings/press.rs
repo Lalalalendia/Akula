@@ -1,7 +1,6 @@
 use super::*;
 use std::path::Path;
 use crate::i18n::t;
-
 impl App {
     pub(super) fn press(&mut self, dialog: &mut SettingsDialog, action: Action) -> Effect {
         let core = &self.workspace.core;
@@ -11,6 +10,8 @@ impl App {
             // Review actions require the separately confirmed modal flow.
             Action::OpenCloudProvider(_) => Effect::None,
             Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
+            #[cfg(feature = "dropbox-readonly-preview")]
+            a @ (Action::DropboxLoginAccount | Action::DropboxResumeAccount | Action::DropboxForgetAccount | Action::DropboxConnectReadOnly | Action::DropboxResumeReadOnly) => self.press_dropbox(a, dialog.section),
             Action::OpenTrash => {
                 if let Some(workspace) = workspace {
                     match gate::ensure_trash(core, &workspace) {
@@ -212,9 +213,8 @@ impl App {
             #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
             Action::ConfigureS3Pair | Action::ExportS3Pair |
                 Action::ImportS3Pair | Action::SyncS3PairOnce => Effect::None,
-            Action::StoreYandexKeys | Action::RemoveYandexKeys |
-                Action::CheckYandexConnection => Effect::None,
+            Action::StoreYandexKeys | Action::RemoveYandexKeys | Action::CheckYandexConnection => Effect::None,
+            other => self.handle_server_button(dialog, other),
         }
     }
-
 }

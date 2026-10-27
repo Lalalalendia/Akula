@@ -1,8 +1,6 @@
-use std::ops::{Range, RangeInclusive};
 use masonry::core::{PaintCtx, PropertiesRef, render_text};
 use masonry::imaging::Painter;
 use masonry::kurbo::{Affine, RoundedRect, Vec2};
-use masonry::parley::{Affinity, BoundingBox, Cursor};
 use masonry::properties::{ContentColor, SelectionColor};
 use super::Fold;
 use crate::ui::editor::markdown;
@@ -156,45 +154,4 @@ impl TextEditor {
         self.paint_extra_carets(painter, ink);
     }
 
-    pub(super) fn paint_range(&self, painter: &mut Painter<'_>, shown: RangeInclusive<usize>, range: Range<usize>, color: masonry::peniko::Color) {
-        for i in shown {
-            let p = self.doc.paragraph(i);
-            if !(matches!(p.fold, Fold::None | Fold::Above) && p.laid().is_some() && p.start <= range.end && p.end() >= range.start) {
-                continue;
-            }
-            let origin = self.doc.origin(i) - Vec2::new(self.code_offset_at(i), 0.0);
-            let layout = p.layout();
-            let a = range.start.max(p.start) - p.start;
-            let b = range.end.min(p.end()) - p.start;
-            let range_rects: Vec<_> = markdown::range_rects(layout, a, b)
-                .into_iter()
-                .map(|(bounds, _)| {
-                    super::rect(BoundingBox::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1), 0.0) + origin + self.shift()
-                })
-                .collect();
-            let continuation = if range.end > p.end() && b == p.len as usize {
-                let end = Cursor::from_byte_index(layout, p.len as usize, Affinity::Upstream).geometry(layout, 1.0);
-                Some(super::rect(BoundingBox::new(end.x0, end.y0, end.x0 + 8.0, end.y1), 0.0) + origin + self.shift())
-            } else {
-                None
-            };
-            if let Some(viewport) = self.code_viewport(i) {
-                painter.with_fill_clip(viewport, |clipped| {
-                    for rect in &range_rects {
-                        clipped.fill(*rect, color).draw();
-                    }
-                    if let Some(rect) = continuation {
-                        clipped.fill(rect, color).draw();
-                    }
-                });
-            } else {
-                for rect in range_rects {
-                    painter.fill(rect, color).draw();
-                }
-                if let Some(rect) = continuation {
-                    painter.fill(rect, color).draw();
-                }
-            }
-        }
-    }
 }
