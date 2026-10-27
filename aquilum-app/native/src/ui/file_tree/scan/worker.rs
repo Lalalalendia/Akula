@@ -1,55 +1,79 @@
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, mpsc};
 
-use super::super::FileTree;
 use super::super::model::Counts;
 
-fn should_start(running: bool, pending: &mut bool) -> bool {
-    if running {
-        *pending = true;
-        false
-    } else {
-        true
-    }
+type Wake = Arc<dyn Fn() + Send + Sync>;
+
+#[derive(Default)]
+pub(super) struct CountScan {
+    receiver: Option<mpsc::Receiver<Counts>>,
+    pending: bool,
 }
 
-impl FileTree {
-    pub(in crate::ui::file_tree) fn count_notes(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
-        let Some(root) = self.model.root().map(Path::to_path_buf) else { return };
-        if !should_start(self.counting.is_some(), &mut self.pending_count_scan) {
+impl CountScan {
+    pub fn idle(&self) -> bool {
+        self.receiver.is_none()
+    }
+
+    pub fn request(&mut self, path: PathBuf, wake: Wake) {
+        if self.receiver.is_some() {
+            self.pending = true;
             return;
         }
-        let (sender, receiver) = std::sync::mpsc::channel();
+        self.start(path, wake);
+    }
+
+    fn start(&mut self, path: PathBuf, wake: Wake) {
+        let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
-            if sender.send(Counts::scan(&root)).is_ok() {
+            if sender.send(Counts::scan(&path)).is_ok() {
                 wake();
             }
         });
-        self.counting = Some(receiver);
+        self.receiver = Some(receiver);
+    }
+
+    pub fn poll(&mut self, path: &Path, wake: Wake) -> Option<Counts> {
+        let counts = self.receiver.as_ref()?.try_recv().ok()?;
+        self.receiver = None;
+        if self.pending {
+            self.pending = false;
+            self.start(path.to_path_buf(), wake);
+            return None;
+        }
+        Some(counts)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::should_start;
+    use super::*;
 
     #[test]
-    fn repeated_requests_while_running_coalesce_to_one_restart() {
-        let mut pending = false;
-        assert!(should_start(false, &mut pending));
+    fn repeated_requests_keep_only_one_pending_scan() {
+        let mut coordinator = CountScan::default();
+        let (sender, receiver) = mpsc::channel();
+        coordinator.receiver = Some(receiver);
+        let wake: Wake = Arc::new(|| {});
+        let path = PathBuf::from("synthetic");
         for _ in 0..100 {
-            assert!(!should_start(true, &mut pending));
+            coordinator.request(path.clone(), Arc::clone(&wake));
         }
-        assert!(pending);
-        pending = false; // Poll discards the stale result and starts one new pass.
-        assert!(should_start(false, &mut pending));
-        assert!(!pending);
+        assert!(coordinator.pending);
+        assert!(sender.send(Counts::default()).is_ok());
+        assert!(coordinator.poll(&path, Arc::clone(&wake)).is_none());
+        assert!(!coordinator.pending);
+        assert!(!coordinator.idle());
     }
 
     #[test]
-    fn idle_request_starts_without_marking_a_rescan() {
-        let mut pending = false;
-        assert!(should_start(false, &mut pending));
-        assert!(!pending);
+    fn finished_scan_yields_result_if_nothing_supersedes_it() {
+        let mut coordinator = CountScan::default();
+        let (sender, receiver) = mpsc::channel();
+        coordinator.receiver = Some(receiver);
+        assert!(sender.send(Counts::default()).is_ok());
+        assert!(coordinator.poll(Path::new("synthetic"), Arc::new(|| {})).is_some());
+        assert!(coordinator.idle());
     }
 }
