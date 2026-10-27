@@ -61,7 +61,7 @@ impl TextEditor {
                 continue;
             }
             if matches!(block, Block::Code { .. }) {
-                let indent = content.bytes().take_while(|b| matches!(b, b' ' | b'\t')).count();
+                let indent = content.bytes().take_while(|b| matches!(*b, b' ' | b'\t')).count();
                 let mut nested = false;
                 for guide in &mut open {
                     let parent_indent = self.doc.block(guide.parent).item().map_or(0, |item| item.indent());
