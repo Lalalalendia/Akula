@@ -66,7 +66,7 @@ $upperTxt = Join-Path $vault 'С ПРОБЕЛАМИ.TXT'
 $txtFolder = Join-Path $vault 'Вложенная папка'
 New-Item -ItemType Directory -Force -Path $txtFolder | Out-Null
 $nestedTxt = Join-Path $txtFolder 'Внутри.txt'
-$utf8 = New-Object System.Text.UTF8Encoding($false)
+$utf8 = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList @($false)
 [IO.File]::WriteAllText($txt, 'AKULA_WIN7_TXT_FOLDER_NEEDLE', $utf8)
 [IO.File]::WriteAllText($upperTxt, 'AKULA_WIN7_UPPERCASE_TXT', $utf8)
 [IO.File]::WriteAllText($nestedTxt, 'AKULA_WIN7_NESTED_TXT', $utf8)
