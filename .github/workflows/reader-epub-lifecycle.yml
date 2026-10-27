@@ -9,6 +9,8 @@ on:
       - "aquilum-app/native/src/reader/session/layout.rs"
       - "aquilum-app/native/src/reader/cfi/**"
       - "aquilum-app/native/src/reader/epub.rs"
+      - "aquilum-app/native/src/reader/mod.rs"
+      - "aquilum-app/native/src/reader/input.rs"
       - "aquilum-app/native/src/app/reader/mod.rs"
       - "aquilum-app/native/src/app/tests/reader/pages.rs"
       - "aquilum-app/native/src/ui/reader/view.rs"
