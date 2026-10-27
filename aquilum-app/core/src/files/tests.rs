@@ -278,8 +278,8 @@ fn workspace_preflight_preserves_case_unicode_ids_and_supported_formats() {
         "Image.PNG", "Notes", "Paper.PDF", "text.TXT",
     ]);
     for item in &items {
-        let actual = root.join(if item.name == "Notes" { "Notes.MD" } else { &item.name });
-        assert_eq!(item.id, actual.to_string_lossy(), "ID must be the unchanged filesystem path");
+        let actual = root.join(if item.name == "Notes" { "Notes.MD" } else { item.name.as_str() });
+        assert_eq!(item.id, actual.to_string_lossy().as_ref(), "ID must be the unchanged filesystem path");
     }
     assert_eq!(items.iter().filter(|item| item.item_type == FileItemType::Folder).count(), 2);
 }
