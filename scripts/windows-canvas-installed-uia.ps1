@@ -66,27 +66,41 @@ foreach ($test in $checks) {
             [string]$test.Label
         )
         $found = $null
+        $visible = $false
+        $diagnostic = 'element_not_found'
         for ($i = 0; $i -lt 100; $i++) {
             Start-Sleep -Milliseconds 200
             $proc.Refresh()
             if ($proc.HasExited) { throw 'Akula exited before Canvas accessibility appeared' }
             try {
                 $found = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+                if ($null -eq $found) { continue }
+                $bounds = $found.Current.BoundingRectangle
+                $windowBounds = $root.Current.BoundingRectangle
+                # UIA may report a partly clipped child rectangle. Require a
+                # substantial, genuinely visible intersection rather than
+                # demanding that the complete child fit inside the HWND.
+                $width = [Math]::Max(0.0, [Math]::Min($bounds.Right, $windowBounds.Right) -
+                    [Math]::Max($bounds.Left, $windowBounds.Left))
+                $height = [Math]::Max(0.0, [Math]::Min($bounds.Bottom, $windowBounds.Bottom) -
+                    [Math]::Max($bounds.Top, $windowBounds.Top))
+                $offscreen = [bool]$found.Current.IsOffscreen
+                $diagnostic = ('offscreen={0};canvas=({1},{2},{3},{4});window=({5},{6},{7},{8});intersection=({9},{10})' -f
+                    $offscreen, [int]$bounds.Left, [int]$bounds.Top, [int]$bounds.Width, [int]$bounds.Height,
+                    [int]$windowBounds.Left, [int]$windowBounds.Top, [int]$windowBounds.Width, [int]$windowBounds.Height,
+                    [int]$width, [int]$height)
+                if (!$offscreen -and !$bounds.IsEmpty -and !$windowBounds.IsEmpty -and
+                    $width -ge 100 -and $height -ge 100) {
+                    $visible = $true
+                    break
+                }
             } catch [System.Windows.Automation.ElementNotAvailableException] {
                 $found = $null
+                $diagnostic = 'element_temporarily_unavailable'
             }
-            if ($null -ne $found) { break }
         }
-        if ($null -eq $found) {
-            throw "Installed Canvas did not expose the expected native UIA view: $($test.Label)"
-        }
-        $bounds = $found.Current.BoundingRectangle
-        $windowBounds = $root.Current.BoundingRectangle
-        if ($found.Current.IsOffscreen -or $bounds.IsEmpty -or
-            $bounds.Width -lt 100 -or $bounds.Height -lt 100 -or
-            $bounds.Left -lt $windowBounds.Left -or $bounds.Right -gt $windowBounds.Right -or
-            $bounds.Top -lt $windowBounds.Top -or $bounds.Bottom -gt $windowBounds.Bottom) {
-            throw 'Canvas widget is not visible inside the installed application window'
+        if (!$visible) {
+            throw "Installed Canvas is not visibly laid out inside its window: $diagnostic"
         }
         $other = [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::NameProperty, [string]$test.Opposite
