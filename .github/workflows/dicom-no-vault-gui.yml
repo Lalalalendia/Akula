@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+      - 'test/dicom-native-folder-dialog-20261027'
     paths:
       - '.github/workflows/dicom-no-vault-gui.yml'
       - 'aquilum-app/native/src/dicom.rs'
