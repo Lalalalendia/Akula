@@ -78,9 +78,9 @@ fn p95(sorted: &[f64]) -> f64 {
 }
 
 fn main() {
-    const BOOKS: usize = 1_000_000;
+    const BOOKS: usize = 10_000_000;
     const REPETITIONS: usize = 32;
-    const TRIALS: usize = 20;
+    const TRIALS: usize = 60;
 
     let books = books_fixture(BOOKS);
     let expected = imperative(&books);
@@ -121,6 +121,8 @@ fn main() {
     let b_p95 = p95(&functional_times);
 
     println!("BOOKS={BOOKS} REPETITIONS={REPETITIONS} TRIALS={TRIALS}");
+    println!("FULL_SCANS_PER_VARIANT={}", REPETITIONS * TRIALS);
+    println!("RECORDS_PROCESSED_PER_VARIANT={}", (BOOKS as u64) * (REPETITIONS as u64) * (TRIALS as u64));
     println!("EXPECTED_CHAPTERS={expected}");
     println!("BOOK_SIZE_BYTES={}", std::mem::size_of::<Book>());
     println!("IMPERATIVE_MEDIAN_MS={a_med:.6} IMPERATIVE_P95_MS={a_p95:.6}");
