@@ -49,6 +49,14 @@ pub(super) fn record(data_dir: &Path, version: &str, sha256: &str) -> Result<(),
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err("Akula updater retry directory is not a real directory".into());
     }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // Junctions and other reparse points must not redirect attempt writes.
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err("Akula updater retry directory is a reparse point".into());
+        }
+    }
 
     for slot in 1..=MAX_ATTEMPTS {
         let path = directory.join(ticket_name(version, sha256, slot));
