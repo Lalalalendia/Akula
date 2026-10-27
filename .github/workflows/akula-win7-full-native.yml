@@ -14,6 +14,7 @@ on:
       - '.github/scripts/akula-win7-dumpbin-audit.py'
       - '.github/scripts/akula-win7-dumpbin-audit.test.py'
       - 'scripts/akula-win7-sp1-acceptance.ps1'
+      - 'scripts/akula-desk15-real-windows-acceptance.ps1'
       # DESK-15 AppData shadow and guarded File Gate ACK must compile for Win7.
       - 'aquilum-app/native/src/app/note_recovery.rs'
       - 'aquilum-app/native/src/note/bridge.rs'
@@ -49,7 +50,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           foreach ($file in @('scripts/akula-win7-nsis-candidate.ps1', 'scripts/akula-win7-signed-stage.ps1',
-                              'scripts/akula-win7-sp1-acceptance.ps1')) {
+                              'scripts/akula-win7-sp1-acceptance.ps1',
+                              'scripts/akula-desk15-real-windows-acceptance.ps1')) {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE $file), [ref]$tokens, [ref]$errors) | Out-Null
@@ -74,6 +76,19 @@ jobs:
           }
           if ($script -match 'Invoke-WebRequest|Invoke-RestMethod|iex\b|DownloadString') {
             throw 'Win7 acceptance harness must not download or execute network content'
+          }
+          # DESK-15 physical acceptance must remain disposable, explicitly
+          # operator-confirmed, and must never claim a real power-cut PASS.
+          $desk15 = Get-Content -LiteralPath 'scripts/akula-desk15-real-windows-acceptance.ps1' -Raw
+          foreach ($required in @('if (-not $DisposableMachine)', 'Get-WmiObject Win32_OperatingSystem',
+                                   'Get-Process -Name', 'Sha256 $exe', 'Wait-Shadow $markerB $app',
+                                   'Check-Acl $shadowB', '$app.Kill()', 'no_auto_overwrite=PASS',
+                                   'restored_second_gui_exact=PASS', 'power_cut=NOT_TESTED',
+                                   'status=PASS_DESK15_REAL_OS_MANUAL_HARD_KILL')) {
+            if (-not $desk15.Contains($required)) { throw "DESK-15 physical acceptance scenario missing: $required" }
+          }
+          if ($desk15 -match 'Invoke-WebRequest|Invoke-RestMethod|iex\b|DownloadString|Get-FileHash|Remove-Item|Stop-Process') {
+            throw 'DESK-15 real-OS acceptance must be Windows PS2-compatible and non-destructive'
           }
 
       - name: Verify fail-closed COM import staging decisions
