@@ -3,13 +3,12 @@ mod response;
 mod body_guard;
 pub(in crate::mcp) use request::Head;
 pub(in crate::mcp) use response::Response;
-
 use request::Body;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
-
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+const PREAUTH_TIMEOUT: Duration = Duration::from_secs(5);
 const HEADER_POLL: Duration = Duration::from_millis(50);
 const HANG_UP_WAIT: Duration = Duration::from_secs(1);
 const MAX_FRAMING_BYTES: usize = 16 * 1024;
@@ -18,12 +17,11 @@ const READ_CHUNK: usize = 16 * 1024;
 const FRAMING_TOO_LARGE: &str = "Слишком длинный заголовок запроса";
 const BAD_CHUNK: &str = "Некорректное chunked-тело запроса";
 const BODY_TOO_LARGE: &str = "Слишком большой запрос";
-
+#[cfg(test)] mod preauth_tests;
 pub enum Failure {
     Gone,
     Refused(Response),
 }
-
 impl From<io::Error> for Failure {
     fn from(_: io::Error) -> Self {
         Self::Gone
@@ -33,10 +31,10 @@ impl From<io::Error> for Failure {
 pub fn refused(status: u16, message: &str) -> Failure {
     Failure::Refused(Response::text(status, message))
 }
-
 pub struct Connection<'a> {
     stream: &'a TcpStream,
     received: Vec<u8>,
+    authenticated: bool,
 }
 
 impl<'a> Connection<'a> {
@@ -46,6 +44,7 @@ impl<'a> Connection<'a> {
         Ok(Self {
             stream,
             received: Vec::new(),
+            authenticated: false,
         })
     }
 
@@ -54,16 +53,17 @@ impl<'a> Connection<'a> {
     pub fn has_buffered_data(&self) -> bool {
         !self.received.is_empty()
     }
-
+    pub fn mark_authenticated(&mut self) { self.authenticated = true; }
     pub fn read_head(&mut self, mut on_activity: impl FnMut(bool) -> bool) -> Result<Head, Failure> {
         // SO_RCVTIMEO/close on a cloned socket cannot be relied on to wake a
         // blocked recv on every supported OS. Poll the cooperative idle-evict
         // flag with a short receive timeout instead, then restore the longer
         // body read timeout for the next phase of this request.
         self.stream.set_read_timeout(Some(HEADER_POLL))?;
-        let deadline = Instant::now() + IDLE_TIMEOUT;
+        let deadline = Instant::now() + if self.authenticated { IDLE_TIMEOUT } else { PREAUTH_TIMEOUT };
         let result = (|| {
             loop {
+                if Instant::now() >= deadline { return Err(Failure::Gone); }
                 if let Some(head) = self.parse_head()? {
                     return Ok(head);
                 }
