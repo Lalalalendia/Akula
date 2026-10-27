@@ -107,12 +107,24 @@ function Click-File([Diagnostics.Process]$proc,[string]$name) {
   $root=[Windows.Automation.AutomationElement]::FromHandle($hwnd)
   $kind=New-Object Windows.Automation.PropertyCondition(
     [Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::TreeItem)
-  $list=$root.FindAll([Windows.Automation.TreeScope]::Descendants,$kind)
   $item=$null
-  for($i=0;$i -lt $list.Count;$i++){
-    if ([string]$list.Item($i).Current.Name -ceq $name) { $item=$list.Item($i); break }
+  $names=@()
+  for($attempt=0;$attempt -lt 60;$attempt++){
+    $list=$root.FindAll([Windows.Automation.TreeScope]::Descendants,$kind)
+    $names=@()
+    for($i=0;$i -lt $list.Count;$i++){
+      $entry=$list.Item($i)
+      $label=[string]$entry.Current.Name
+      $names+= $label
+      if ($label -ceq $name) { $item=$entry; break }
+    }
+    if($null -ne $item){break}
+    Start-Sleep -Milliseconds 250
   }
-  if ($null -eq $item) { throw "Cannot find file tree item: $name" }
+  if($null -eq $item){
+    $names | Out-File -LiteralPath (Join-Path $OutputDir 'tree-items-failure.txt') -Encoding utf8
+    throw "Cannot find file tree item: $name; observed $($names.Count) TreeItems"
+  }
   $r=$item.Current.BoundingRectangle
   $w=$root.Current.BoundingRectangle
   if($item.Current.IsOffscreen -or $r.IsEmpty -or $r.Width -le 0 -or $r.Height -le 0){throw "Invisible file $name"}
