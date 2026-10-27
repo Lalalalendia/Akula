@@ -10,76 +10,46 @@ use std::path::Path;
 const DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "epub", "mobi", "azw3", "fb2", "txt", "canvas", "base", "docx"];
 
 fn is_attachment(extension: &str) -> bool {
-    MEDIA_EXTENSIONS.contains(&extension) || DOCUMENT_EXTENSIONS.contains(&extension)
+    MEDIA_EXTENSIONS.iter().chain(DOCUMENT_EXTENSIONS).any(|known| known.eq_ignore_ascii_case(extension))
 }
 
 pub fn read_directory_impl(path: &Path) -> Result<Vec<FileItem>, FileCommandError> {
     let mut items = Vec::new();
-
     for entry in fs::read_dir(path)? {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => continue,
-        };
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let file_type = match entry.file_type() {
-            Ok(file_type) => file_type,
-            Err(_) => continue,
-        };
-
-        if is_hidden_name(&entry.file_name()) || file_type.is_symlink() {
+        let Ok(entry) = entry else { continue };
+        let name = entry.file_name();
+        let Ok(file_type) = entry.file_type() else { continue };
+        // Only internal dot names are hidden; user .hidden.md and .заметки stay visible.
+        if file_type.is_symlink() || name.as_encoded_bytes().first() == Some(&b'.') && is_hidden_name(&name) {
             continue;
         }
-
-        let id = path.to_string_lossy().into_owned();
-        if file_type.is_dir() {
-            items.push(FileItem {
-                id,
-                name,
-                item_type: FileItemType::Folder,
-            });
-            continue;
-        }
-
-        if !file_type.is_file() {
-            continue;
-        }
-
-        let extension = path
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(|value| value.to_ascii_lowercase());
-        let Some(extension) = extension else {
-            continue;
-        };
-
-        let is_markdown = extension == "md";
-        if !is_markdown && !is_attachment(extension.as_str()) {
-            continue;
-        }
-
-        let display_name = if is_markdown {
-            path.file_stem()
-                .map(|value| value.to_string_lossy().into_owned())
-                .unwrap_or(name)
+        let folder = file_type.is_dir();
+        let markdown = if folder {
+            false
         } else {
-            name
+            if !file_type.is_file() { continue; }
+            let Some(extension) = Path::new(&name).extension().and_then(|ext| ext.to_str()) else { continue };
+            if !extension.eq_ignore_ascii_case("md") && !is_attachment(extension) { continue; }
+            extension.eq_ignore_ascii_case("md")
+        };
+        // Do not allocate a path, a display name or an ID for rejected files.
+        let path = entry.path();
+        let id = path.to_string_lossy().into_owned();
+        let name = if markdown {
+            path.file_stem().map(|v| v.to_string_lossy().into_owned())
+                .unwrap_or_else(|| name.to_string_lossy().into_owned())
+        } else {
+            name.to_string_lossy().into_owned()
         };
         items.push(FileItem {
             id,
-            name: display_name,
-            item_type: FileItemType::File,
+            name,
+            item_type: if folder { FileItemType::Folder } else { FileItemType::File },
         });
     }
-
     items.sort_by_cached_key(|item| {
-        (
-            item.item_type == FileItemType::File,
-            item.name.to_lowercase(),
-        )
+        (item.item_type == FileItemType::File, item.name.to_lowercase())
     });
-
     Ok(items)
 }
 
