@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/benchmarks/native_windows_filetree_memory.py'
+      - 'aquilum-app/native/src/ui/file_tree/scan/worker.rs'
       - '.github/workflows/native-windows-filetree-memory.yml'
   workflow_dispatch:
 
@@ -56,6 +57,13 @@ jobs:
           $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
           if (!(Test-Path -LiteralPath $binary)) { throw 'Missing Akula.exe test binary' }
           Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Assert FileTree count scan coalescing and fresh counts on Win32 Release
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --release --locked -p aquilum-native --features installed ui::file_tree::scan::worker::tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'FileTree count-scan freshness or burst test failed' }
       - name: Paired FileTree startup saved-sort A/B (release, diagnostic only)
         shell: pwsh
         working-directory: aquilum-app
