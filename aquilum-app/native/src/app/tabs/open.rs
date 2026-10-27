@@ -166,7 +166,6 @@ impl App {
         self.leave_note();
         #[cfg(test)]
         record_stage(|s| s.leave = started.elapsed());
-
         let read = aq_trace::zone("открытие: чтение файла");
         #[cfg(test)]
         let started = std::time::Instant::now();
