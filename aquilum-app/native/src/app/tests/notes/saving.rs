@@ -72,6 +72,46 @@ fn inserted_text_reaches_the_disk() {
 }
 
 #[test]
+fn switching_tabs_retires_only_acknowledged_shadow_and_preserves_crashed_tab() {
+    let mut h = Harness::new();
+    let first = h.write_note("recover-switch-first.md", "original first");
+    let second = h.write_note("recover-switch-second.md", "original second");
+    assert!(h.app.open(&mut h.root, first.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    h.app.commit_text(&mut h.root, crop::Rope::from("saved after switching tabs"));
+    crate::disk::wait(); // publish the first immutable shadow
+    assert!(crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &first,
+    ).unwrap().is_some());
+
+    assert!(h.app.open_in(&mut h.root, second.clone(), true));
+    // Note::leave queues File Gate and detaches the Note. The worker must
+    // still observe its saved ACK and retire the matching plaintext shadow.
+    crate::disk::wait();
+    crate::disk::wait(); // cleanup is queued after the detached ACK collector
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "saved after switching tabs");
+    assert!(crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &first,
+    ).unwrap().is_none(), "tab switch left an already-saved plaintext backup");
+
+    h.app.commit_text(&mut h.root, crop::Rope::from("unsaved second draft 🐱"));
+    crate::disk::wait();
+    drop(h.app.note.take()); // simulate a hard stop BEFORE this tab's File Gate save
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "original second");
+    let candidate = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &second,
+    ).unwrap().unwrap();
+    assert_eq!(candidate.body, "unsaved second draft 🐱");
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    assert!(matches!(h.app.popup, Some(Popup::Recovery(_))),
+        "the second tab's unsaved text must still be reviewable");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "saved after switching tabs");
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "original second");
+}
+
+#[test]
 fn dirty_edit_offers_explicit_review_after_window_note_is_lost() {
     let mut h = Harness::new();
     let path = h.write_note("recover.md", "original");
