@@ -313,7 +313,7 @@ impl Tile {
     /// Check whether `self` is adjacent to the left of `other`.
     #[inline]
     pub const fn prev_loc(&self, other: &Self) -> bool {
-        self.same_row(other) && self.x + 1 == other.x
+        self.same_row(other) && self.x != u16::MAX && self.x + 1 == other.x
     }
 
     /// Check whether two tiles are on the same row.
@@ -1301,6 +1301,20 @@ mod tests {
     use crate::tile::{B, L, R, T, Tile, Tiles, W};
     use fearless_simd::Level;
     use std::vec::Vec;
+
+    #[test]
+    fn vello_tile_prev_loc_max_u16_never_wraps() {
+        // Upstream linebender/vello#2005: sentinel.x + 1 overflowed
+        // in debug, and wrapped to zero in release.
+        let first_on_sentinel_row = Tile::new(0, u16::MAX, 0, 0);
+        assert!(!Tile::SENTINEL.prev_loc(&first_on_sentinel_row));
+        assert!(!Tile::SENTINEL.prev_loc(&Tile::SENTINEL));
+        let last = Tile::new(u16::MAX, 5, 0, 0);
+        assert!(Tile::new(u16::MAX - 1, 5, 0, 0).prev_loc(&last));
+        assert!(!last.prev_loc(&Tile::new(0, 5, 0, 0)));
+        assert!(Tile::new(10, 3, 0, 0).prev_loc(&Tile::new(11, 3, 0, 0)));
+        assert!(!Tile::new(10, 3, 0, 0).prev_loc(&Tile::new(11, 4, 0, 0)));
+    }
 
     const VIEW_DIM: u16 = 100;
     const F_V_DIM: f32 = VIEW_DIM as f32;
