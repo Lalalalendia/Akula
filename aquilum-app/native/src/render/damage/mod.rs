@@ -8,7 +8,6 @@ mod stack;
 #[cfg(test)]
 mod prehash_tests;
 use masonry::kurbo::{Affine, Rect, RoundedRect, Vec2};
-
 #[cfg(test)]
 use std::time::{Duration, Instant};
 
