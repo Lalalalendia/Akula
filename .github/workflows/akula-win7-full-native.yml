@@ -123,6 +123,10 @@ jobs:
             }
             Write-Host "$($case.Name)_SERVER_EDITION_NEGATIVE_PASS"
           }
+          # The two expected child-process failures leave LASTEXITCODE=1.
+          # Clear it only AFTER both fail-closed assertions passed, otherwise
+          # the GitHub pwsh wrapper incorrectly fails this step.
+          $global:LASTEXITCODE = 0
 
       - name: Verify fail-closed COM import staging decisions
         shell: pwsh
