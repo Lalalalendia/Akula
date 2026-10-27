@@ -1,8 +1,11 @@
+#[cfg(target_os = "macos")]
 use masonry::core::keyboard::{Key, Modifiers, NamedKey};
 
 use super::chord::Os;
 use super::table::BINDINGS;
-use super::{command, Command, Scope};
+use super::Command;
+#[cfg(target_os = "macos")]
+use super::{command, Scope};
 
 #[test]
 fn mac_navigation_aliases_do_not_replace_non_mac_primary_bindings() {
