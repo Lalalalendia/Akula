@@ -283,3 +283,47 @@ fn workspace_preflight_preserves_case_unicode_ids_and_supported_formats() {
     }
     assert_eq!(items.iter().filter(|item| item.item_type == FileItemType::Folder).count(), 2);
 }
+
+#[test]
+#[ignore = "opt-in same-runner A/B of actual directory listing, not FileTree startup FPS"]
+fn benchmark_workspace_scan_abba() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let corpus = std::path::PathBuf::from(
+        std::env::var_os("AKULA_WORKSPACE_SCAN_ABBA_DIR")
+            .expect("set AKULA_WORKSPACE_SCAN_ABBA_DIR to the pre-created deterministic corpus"),
+    );
+    for cohort in ["mostly_unsupported", "mixed", "mostly_supported"] {
+        let path = corpus.join(cohort);
+        let reference = read_directory_impl(&path).expect("initial directory scan");
+        let mut fingerprint = 0xcbf29ce484222325u64;
+        for item in &reference {
+            for &byte in item.id.as_bytes().iter().chain(item.name.as_bytes()) {
+                fingerprint = (fingerprint ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+            }
+            fingerprint = (fingerprint ^ u64::from(item.item_type == FileItemType::File))
+                .wrapping_mul(0x100000001b3);
+        }
+        let expected = reference.len();
+        for _ in 0..4 {
+            black_box(read_directory_impl(&path).expect("warmup scan"));
+        }
+        let mut samples = Vec::with_capacity(40);
+        for _ in 0..40 {
+            let started = Instant::now();
+            let items = read_directory_impl(&path).expect("timed scan");
+            let elapsed = started.elapsed();
+            assert_eq!(items.len(), expected, "scan changed item count");
+            black_box(items);
+            samples.push(elapsed.as_secs_f64() * 1_000_000.0);
+        }
+        samples.sort_by(f64::total_cmp);
+        let p50 = (samples[19] + samples[20]) / 2.0;
+        let p95 = samples[37];
+        eprintln!(
+            "WORKSPACE_SCAN_ABBA cohort={cohort} accepted={expected} checksum={fingerprint:016x} \
+             runs=40 p50_us={p50:.2} p95_us={p95:.2}"
+        );
+    }
+}
