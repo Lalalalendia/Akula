@@ -32,6 +32,8 @@ messaging-w4-pilot = []
 memory-probe = []
 # Experimental only; not included in the installed feature bundle.
 html-preview = ["dep:html2text"]
+# Experimental opt-in trusted worker; no in-process fallback when enabled.
+html-preview-shiva = ["html-preview", "dep:shiva-worker-client"]
 # Opt-in experimental local DICOM viewing. Not included in the installed build.
 dicom-preview = ["dep:dicom-core", "dep:dicom-object", "dep:dicom-pixeldata", "dep:zip"]
 # User-visible Windows read-only SSH verification. No install grant.
@@ -60,6 +62,7 @@ sync-installed-host-unix-root-witness = ["sync-installed-host-witness", "aquilum
 tokio = { version = "1", features = ["rt", "time"], optional = true }
 aquilum-core = { path = "../core", features = ["host-custody"] }
 html2text = { version = "=0.17.1", default-features = false, optional = true }
+shiva-worker-client = { git = "https://github.com/Lalalalendia/shiva", rev = "40b72a90b1dac39812c77c7321e57d613a81cb51", optional = true }
 akula-dropbox-connect-lab = { path = "../../modules/dropbox-connect-lab", optional = true }
 akula-dropbox-secret-store = { path = "../../modules/dropbox-secret-store", features = ["system-store"], optional = true }
 akula-dropbox-t0 = { path = "../../modules/dropbox-t0", optional = true }

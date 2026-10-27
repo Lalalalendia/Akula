@@ -12,7 +12,6 @@ pub(crate) fn is_html_path(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"))
 }
-
 /// Only ordinary files inside the current vault; never follow a source link.
 pub(crate) fn admit(vault: &Path, path: &Path) -> Result<PathBuf, String> {
     if !is_html_path(path) { return Err("Нужен файл HTML или HTM".into()); }
@@ -30,7 +29,6 @@ pub(crate) fn admit(vault: &Path, path: &Path) -> Result<PathBuf, String> {
     }
     Ok(source)
 }
-
 fn render_html(bytes: &[u8]) -> Result<String, String> {
     let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
     // Reject unknown encodings rather than silently corrupt Cyrillic.
@@ -44,7 +42,6 @@ fn render_html(bytes: &[u8]) -> Result<String, String> {
     }
     Ok(text)
 }
-
 pub(crate) fn read(vault: &Path, path: &Path) -> Result<String, String> {
     let source = admit(vault, path)?;
     let mut input = fs::File::open(&source).map_err(|e| e.to_string())?;
@@ -55,9 +52,11 @@ pub(crate) fn read(vault: &Path, path: &Path) -> Result<String, String> {
     if bytes.len() as u64 != len || bytes.len() as u64 > MAX_HTML_BYTES {
         return Err("HTML изменился во время чтения".into());
     }
+    #[cfg(feature = "html-preview-shiva")]
+    { return crate::html_preview_shiva::render_trusted(&bytes); }
+    #[cfg(not(feature = "html-preview-shiva"))]
     render_html(&bytes)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,7 +73,6 @@ mod tests {
         assert!(!script.contains("document.createElement"));
         assert!(!script.contains("assert_false"));
     }
-
     #[test]
     fn unicode_links_lists_and_malformed_html_are_readable() {
         let html = r#"<!doctype html><title>Пример</title><h1>Акула 海</h1>
@@ -92,6 +90,7 @@ mod tests {
         assert!(!text.contains("fetch("));
     }
 
+    #[cfg(not(feature = "html-preview-shiva"))]
     #[test]
     fn bounded_read_does_not_modify_original() {
         let vault = tempfile::tempdir().unwrap();
