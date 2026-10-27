@@ -1,4 +1,5 @@
 mod apply;
+mod claim;
 mod download_guard;
 mod release;
 #[cfg(target_os = "linux")]
@@ -79,15 +80,10 @@ impl Updater {
         (self.wake)();
     }
 
-    fn busy(&self) -> bool {
-        matches!(self.status(), Status::Checking | Status::Downloading { .. } | Status::Ready(_) | Status::Installing)
-    }
-
     pub fn check(&self) {
-        if !available() || self.busy() {
+        if !available() || !self.try_start() {
             return;
         }
-        self.set(Status::Checking);
         let this = self.clone();
         std::thread::spawn(move || {
             this.set(match find() {
@@ -99,10 +95,9 @@ impl Updater {
     }
 
     pub fn install(&self) {
-        if !available() || self.busy() {
+        if !available() || !self.try_start() {
             return;
         }
-        self.set(Status::Checking);
         let this = self.clone();
         std::thread::spawn(move || {
             let result = find().and_then(|release| match release {
