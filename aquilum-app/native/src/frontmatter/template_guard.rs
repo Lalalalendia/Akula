@@ -14,8 +14,8 @@ pub(super) fn render(fields: &[(&str, &str)]) -> String {
     let mut out = String::from("---\n");
     for &(key, value) in fields {
         let quoted_key = (key.is_empty() || key.contains(':')
-            || key.contains(LINE_BREAKS) || key.starts_with(['#', '?', '-', '!']));
-        let quoted_value = value.contains(LINE_BREAKS)
+            || key.contains(&LINE_BREAKS[..]) || key.starts_with(&['#', '?', '-', '!'][..]));
+        let quoted_value = value.contains(&LINE_BREAKS[..])
             || value.contains(": ") || value.contains(" #");
         if quoted_key { out.push_str(&quote(key)); } else { out.push_str(key); }
         out.push_str(": ");
