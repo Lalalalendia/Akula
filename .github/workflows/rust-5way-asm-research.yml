@@ -1,0 +1,43 @@
+name: Rust five-way performance and assembly research
+
+on:
+  push:
+    branches:
+      - research/rust-functional-5way-20261027
+    paths:
+      - 'scripts/benchmarks/rust-functional-style/**'
+      - '.github/workflows/rust-5way-asm-research.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - name: Run correctness tests
+        run: rustc --edition=2021 --test -O scripts/benchmarks/rust-functional-style/compare.rs -o /tmp/rust-five-tests && /tmp/rust-five-tests
+      - name: Compile and inspect machine code
+        run: |
+          mkdir -p rust-functional-results
+          rustc --edition=2021 -C opt-level=3 -C target-cpu=x86-64 -C debuginfo=1 scripts/benchmarks/rust-functional-style/compare.rs -o /tmp/rust-five
+          objdump -d --no-show-raw-insn /tmp/rust-five > rust-functional-results/disassembly.txt
+          nm -n /tmp/rust-five | grep -E ' (imperative|functional|branchless|combined_cond|dual_accum)$' | tee rust-functional-results/symbols.txt
+      - name: Run balanced five-way benchmark
+        run: /tmp/rust-five
+      - name: Capture environment
+        if: always()
+        run: |
+          rustc -Vv > rust-functional-results/rustc.txt
+          lscpu > rust-functional-results/cpu.txt
+          sha256sum scripts/benchmarks/rust-functional-style/compare.rs > rust-functional-results/sha256.txt
+      - name: Save results and disassembly
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-five-style-results
+          path: rust-functional-results/**
+          retention-days: 30
