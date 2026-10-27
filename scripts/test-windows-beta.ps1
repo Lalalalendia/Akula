@@ -222,6 +222,10 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Installed real Windows PDF pointer path; separate from native Rust harness.
+$canvasScript = Join-Path $PSScriptRoot 'windows-canvas-installed-uia.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $canvasScript -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula Canvas UIA smoke failed: PowerShell exit $LASTEXITCODE" }
+
 $pdfPointerScript = Join-Path $PSScriptRoot 'windows-pdf-os-pointer.ps1'
 & $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf
 if ($LASTEXITCODE -ne 0) {
