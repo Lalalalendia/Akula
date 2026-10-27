@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+      - 'test/dicom-native-zip-picker-20261027'
     paths:
       - '.github/workflows/dicom-no-vault-gui.yml'
       - 'aquilum-app/native/src/dicom.rs'
@@ -118,6 +119,11 @@ jobs:
         run: |
           pwsh -NoProfile -File scripts/dicom-native-smoke/gui-folder-dialog.ps1 -Executable '.artifacts/cargo-native/release/aquilum-native.exe' -FixtureRoot 'scripts/dicom-native-smoke/fixture'
           if ($LASTEXITCODE -ne 0) { throw 'DICOM native folder picker test failed' }
+      - name: Open DICOM ZIP through file button and Windows Open dialog
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/dicom-native-smoke/gui-folder-dialog.ps1 -Executable '.artifacts/cargo-native/release/aquilum-native.exe' -FixtureRoot 'scripts/dicom-native-smoke/fixture' -SourceKind File
+          if ($LASTEXITCODE -ne 0) { throw 'DICOM native file picker test failed' }
       - name: Launch real DICOM ZIP and folder with no vault or import
         shell: pwsh
         run: |
