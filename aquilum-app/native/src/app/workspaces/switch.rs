@@ -1,5 +1,4 @@
 use super::*;
-
 impl App {
     pub(in crate::app) fn switch_workspace(&mut self, root: &mut RenderRoot, path: PathBuf) -> Outcome {
         let path = crate::workspace::normalize(&path);
@@ -23,6 +22,7 @@ impl App {
             self.close_workspaces(root);
             return Outcome::default();
         }
+        if !self.canvas_can_leave_workspace(root) { return Outcome::default(); }
         if !self.save_before_workspace_change(root) {
             self.close_workspaces(root);
             self.show_workspaces(root, Some(t("workspaces.switchSaveFailed")));
@@ -61,7 +61,7 @@ impl App {
         self.version_view = None;
         self.version_notice = None;
         self.home = None;
-        self.graph = super::super::graph_page::GraphState::default();
+        self.graph = super::super::graph_page::GraphState::default(); self.canvas = super::super::canvas::CanvasState::default();
         self.start_index();
         self.refresh_home();
         self.cleanup_retention();

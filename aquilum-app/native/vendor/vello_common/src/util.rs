@@ -194,6 +194,9 @@ pub fn extract_scales(transform: &Affine) -> (f32, f32) {
 }
 
 /// Extension methods for rectangles.
+#[cfg(test)]
+#[path = "util/tile_snap_guard_tests.rs"]
+mod tile_snap_guard_tests;
 pub trait RectExt {
     /// Snap the rect to whole tile coordinates.
     fn snap_to_tile_coordinates(self) -> Self;
@@ -221,9 +224,6 @@ impl RectExt for Rect {
 impl RectExt for RectU16 {
     #[inline]
     fn snap_to_tile_coordinates(self) -> Self {
-        // This method will panic if we have a viewport of size u16::MAX and draw
-        // at the very edge, but better than returning a wrong result.
-
         let x0 = (self.x0 / Tile::WIDTH).checked_mul(Tile::WIDTH).unwrap();
         let y0 = (self.y0 / Tile::HEIGHT).checked_mul(Tile::HEIGHT).unwrap();
 
@@ -234,8 +234,8 @@ impl RectExt for RectU16 {
         Self::new(
             x0,
             y0,
-            self.x1.checked_next_multiple_of(Tile::WIDTH).unwrap(),
-            self.y1.checked_next_multiple_of(Tile::HEIGHT).unwrap(),
+            self.x1.checked_next_multiple_of(Tile::WIDTH).unwrap_or(u16::MAX),
+            self.y1.checked_next_multiple_of(Tile::HEIGHT).unwrap_or(u16::MAX),
         )
     }
 }

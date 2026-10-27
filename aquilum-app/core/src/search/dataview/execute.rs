@@ -1,3 +1,5 @@
+mod group;
+
 use super::ast::{Clause, Column, Direction, Expr, Query, Shape, Source};
 use super::eval::{evaluate, note_object, Scope};
 use super::rows::Row;
@@ -188,33 +190,11 @@ fn apply_clauses(query: &Query, mut entries: Vec<Entry>) -> Result<Vec<Entry>, S
                 entries = keyed.into_iter().map(|(_, entry)| entry).collect();
             }
             Clause::Limit(limit) => entries.truncate(*limit),
-            Clause::GroupBy { value, name } => entries = group(entries, value, name)?,
+            Clause::GroupBy { value, name } => entries = group::group(entries, value, name)?,
             Clause::Flatten { value, name } => entries = flatten(entries, value, name)?,
         }
     }
     Ok(entries)
-}
-
-fn group(entries: Vec<Entry>, value: &Expr, name: &str) -> Result<Vec<Entry>, String> {
-    let mut groups: Vec<(Value, Vec<Value>)> = Vec::new();
-    for entry in entries {
-        let key = evaluate(value, &entry.scope())?;
-        let item = match &entry.note {
-            Some(note) => note_object(note),
-            None => Value::Object(entry.vars.clone()),
-        };
-        match groups.iter_mut().find(|(found, _)| found.equals(&key)) {
-            Some((_, items)) => items.push(item),
-            None => groups.push((key, vec![item])),
-        }
-    }
-    Ok(groups
-        .into_iter()
-        .map(|(key, items)| Entry {
-            note: None,
-            vars: vec![(name.to_owned(), key), (ROWS.to_owned(), Value::List(items))],
-        })
-        .collect())
 }
 
 fn flatten(entries: Vec<Entry>, value: &Expr, name: &str) -> Result<Vec<Entry>, String> {

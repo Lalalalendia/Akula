@@ -50,7 +50,7 @@ fn kind_for(path: &Path) -> Result<Format, StructuredError> {
     }
 }
 
-mod schema;
+mod schema; pub mod session;
 use schema::validate_canvas;
 
 impl StructuredDocument {

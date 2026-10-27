@@ -4,7 +4,7 @@ use std::io::Read;
 
 impl Zip {
     /// The declared and actual sizes must both be within the cap.
-    /// The legacy, unbounded read() remains unchanged for EPUB callers.
+    /// Legacy read() delegates here with its own cap; EPUB uses stricter limits.
     pub fn read_limited(&self, name: &str, limit: usize) -> Option<Vec<u8>> {
         let entry = self.entries.get(name)?;
         if entry.size > limit {

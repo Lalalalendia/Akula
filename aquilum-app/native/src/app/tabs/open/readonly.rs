@@ -4,7 +4,7 @@ impl App {
     /// First-stage format view: no TextEditor and no save path for structured files.
     /// Reopening always reparses from disk rather than reusing a stale tab cache.
     pub(super) fn show_structured_readonly(&mut self, root: &mut RenderRoot, path: &Path) {
-        use aquilum_core::files::structured::{Format, StructuredDocument};
+        use aquilum_core::files::structured::StructuredDocument;
         use masonry::core::NewWidget;
         use masonry::widgets::Flex;
         self.note = None;
@@ -12,20 +12,19 @@ impl App {
         self.embeds = None;
         self.open_error = None;
         self.open_error_ids = None;
-        let result = StructuredDocument::open(path).and_then(|doc| {
-            match doc.format() {
-                Format::Canvas => Ok(Ok(doc.canvas()?)),
-                Format::Base => Ok(Err(doc.text().chars().take(2048).collect::<String>())),
+        if path.extension().and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas"))
+        {
+            if let Err(error) = self.show_canvas_tab(root, path) {
+                self.show_open_error(root, path, &error);
             }
-        });
+            return;
+        }
+        // Bases YAML remains a separate read-only preview.
+        let result = StructuredDocument::open(path)
+            .map(|doc| doc.text().chars().take(2048).collect::<String>());
         match result {
-            Ok(Ok(canvas)) => {
-                let page = crate::ui::canvas::CanvasPage::new(&canvas);
-                if let Some(chrome) = &self.chrome {
-                    chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
-                }
-            }
-            Ok(Err(preview)) => {
+            Ok(preview) => {
                 let page = NewWidget::new(
                     Flex::column()
                         .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(

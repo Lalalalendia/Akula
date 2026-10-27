@@ -64,6 +64,7 @@ impl App {
                     MenuChoice::Item(_) | MenuChoice::Dismissed | MenuChoice::Hover(_) => {}
                 }
             }
+            Some(Popup::Recovery(prompt)) => return self.on_note_recovery_action(root, id, action, prompt),
             Some(Popup::PdfImport { dialog, source }) => match dialog.answer(id, action) {
                 Some(answer) => {
                     crate::ui::dialog::close(root, dialog.layer);
@@ -117,5 +118,4 @@ impl App {
         }
         Outcome::default()
     }
-
 }
