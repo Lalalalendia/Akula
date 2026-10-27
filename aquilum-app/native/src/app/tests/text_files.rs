@@ -60,7 +60,7 @@ fn opening_a_folder_with_existing_txt_files_shows_and_opens_them_from_the_tree()
         assert!(h.app.tree.names().iter().any(|row| row == name), "{name}: пропал при первичном открытии папки");
     }
 
-    let mut click = |h: &mut Harness, name: &str| {
+    let click = |h: &mut Harness, name: &str| {
         let id = h.app.tree.row_id(name).expect("строка видна в дереве");
         let center = h.root.get_widget(id).unwrap().ctx().bounding_box().center();
         h.click(center.x, center.y);
