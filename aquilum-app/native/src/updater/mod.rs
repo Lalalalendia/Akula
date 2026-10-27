@@ -79,15 +79,23 @@ impl Updater {
         (self.wake)();
     }
 
-    fn busy(&self) -> bool {
-        matches!(self.status(), Status::Checking | Status::Downloading { .. } | Status::Ready(_) | Status::Installing)
+    // Claim the operation while holding the state lock. A separate busy()
+    // check followed by set(Checking) allowed two GUI callers to start workers.
+    fn try_start(&self) -> bool {
+        let mut status = self.status.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(*status, Status::Checking | Status::Downloading { .. } | Status::Ready(_) | Status::Installing) {
+            return false;
+        }
+        *status = Status::Checking;
+        drop(status);
+        (self.wake)();
+        true
     }
 
     pub fn check(&self) {
-        if !available() || self.busy() {
+        if !available() || !self.try_start() {
             return;
         }
-        self.set(Status::Checking);
         let this = self.clone();
         std::thread::spawn(move || {
             this.set(match find() {
@@ -99,10 +107,9 @@ impl Updater {
     }
 
     pub fn install(&self) {
-        if !available() || self.busy() {
+        if !available() || !self.try_start() {
             return;
         }
-        self.set(Status::Checking);
         let this = self.clone();
         std::thread::spawn(move || {
             let result = find().and_then(|release| match release {
