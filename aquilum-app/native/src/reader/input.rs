@@ -15,7 +15,8 @@ fn read_path_with_limit(path: &Path, limit: usize) -> Option<Vec<u8>> {
     let file = File::open(path).ok()?;
     // Metadata is only a fast rejection: enforce the cap again while reading
     // the open file handle, in case another process grows the file.
-    if file.metadata().ok()?.len() > limit as u64 {
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > limit as u64 {
         return None;
     }
     read_stream(file, limit)
@@ -70,6 +71,7 @@ mod tests {
         assert_eq!(read_path_with_limit(&path, 9), Some(b"123456789".to_vec()));
         assert!(MAX_BOOK_INPUT_BYTES > 9);
         assert!(read(&dir.path().join("does-not-exist.epub")).is_none());
+        assert!(read(dir.path()).is_none(), "a directory is not a book");
     }
 
     struct InterruptedOnce<R>(bool, R);
