@@ -105,6 +105,19 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_or_modified_ticket_is_never_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(DIRECTORY);
+        fs::create_dir(&root).unwrap();
+        let first = root.join(ticket_name(VERSION, SHA, 1));
+        fs::write(&first, b"interrupted before fsync").unwrap();
+
+        assert!(record(dir.path(), VERSION, SHA).is_ok());
+        assert_eq!(fs::read(&first).unwrap(), b"interrupted before fsync");
+        assert!(record(dir.path(), VERSION, SHA).is_err());
+    }
+
+    #[test]
     fn concurrent_process_style_claims_cannot_exceed_two_slots() {
         let dir = tempfile::tempdir().unwrap();
         let barrier = Arc::new(Barrier::new(17));
