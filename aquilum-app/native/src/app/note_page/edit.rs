@@ -6,7 +6,6 @@ use super::super::App;
 use crate::file_ops;
 use crate::frontmatter;
 use crate::ui::widgets::Slot;
-
 impl App {
     pub(super) fn body_edited(&mut self, root: &mut RenderRoot, _edits: &[crate::ui::editor::Edit]) {
         let had = frontmatter::end_of(&self.text).is_some();
@@ -42,6 +41,7 @@ impl App {
             let debounce = self.workspace.core.settings.get_config().editor.save_debounce_ms;
             note.edit(Duration::from_millis(u64::from(debounce)));
         }
+        self.capture_note_recovery();
     }
 
     fn metadata_changed(&mut self, root: &mut RenderRoot, had: bool) {

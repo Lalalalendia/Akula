@@ -14,6 +14,12 @@ on:
       - '.github/scripts/akula-win7-dumpbin-audit.py'
       - '.github/scripts/akula-win7-dumpbin-audit.test.py'
       - 'scripts/akula-win7-sp1-acceptance.ps1'
+      # DESK-15 AppData shadow and guarded File Gate ACK must compile for Win7.
+      - 'aquilum-app/native/src/app/note_recovery.rs'
+      - 'aquilum-app/native/src/note/bridge.rs'
+      - 'aquilum-app/native/src/note/recovery.rs'
+      - 'aquilum-app/native/src/note/recovery/**'
+      - 'scripts/windows-beta-recovery*.ps1'
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

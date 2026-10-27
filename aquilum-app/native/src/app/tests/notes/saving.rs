@@ -72,6 +72,242 @@ fn inserted_text_reaches_the_disk() {
 }
 
 #[test]
+fn two_dirty_tabs_survive_conflicting_first_write_and_second_crash() {
+    use crate::ui::dialog::DialogAnswer;
+
+    let mut h = Harness::new();
+    let first = h.write_note("two-dirty-first.md", "first baseline");
+    let second = h.write_note("two-dirty-second.md", "second baseline");
+    assert!(h.app.open(&mut h.root, first.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    let first_draft = "first unsaved Unicode 😀";
+    let second_draft = "second unsaved Unicode 漢字";
+    h.app.commit_text(&mut h.root, crop::Rope::from(first_draft));
+    crate::disk::wait();
+    std::fs::write(&first, "external writer changed first").unwrap();
+
+    // Switching away queues the first write. File Gate must not treat the
+    // externally diverged file as a successful ACK or retire its shadow.
+    assert!(h.app.open_in(&mut h.root, second.clone(), true));
+    crate::disk::wait();
+    crate::disk::wait();
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "external writer changed first");
+    let first_copy = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &first,
+    ).unwrap().unwrap();
+    assert_eq!(first_copy.body.to_string(), first_draft);
+    assert!(first_copy.source_changed);
+
+    h.app.commit_text(&mut h.root, crop::Rope::from(second_draft));
+    crate::disk::wait();
+    drop(h.app.note.take()); // hard exit before second File Gate debounce
+    let second_copy = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &second,
+    ).unwrap().unwrap();
+    assert_eq!(second_copy.body.to_string(), second_draft);
+    assert!(!second_copy.source_changed);
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "second baseline");
+
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    let layer = match &h.app.popup {
+        Some(Popup::Recovery(state)) => state.dialog.layer,
+        _ => panic!("second unsaved tab must offer explicit recovery"),
+    };
+    h.send(layer, DialogAnswer::Cancel);
+    assert!(h.app.popup.is_none());
+
+    assert!(h.app.open(&mut h.root, first.clone()));
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    assert!(matches!(h.app.popup, Some(Popup::Recovery(_))),
+        "conflicted first tab must independently request review");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "external writer changed first");
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "second baseline");
+    let second_after = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &second,
+    ).unwrap().unwrap();
+    assert_eq!(second_after.body.to_string(), second_draft);
+}
+
+#[test]
+fn switching_tabs_retires_only_acknowledged_shadow_and_preserves_crashed_tab() {
+    let mut h = Harness::new();
+    let first = h.write_note("recover-switch-first.md", "original first");
+    let second = h.write_note("recover-switch-second.md", "original second");
+    assert!(h.app.open(&mut h.root, first.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    h.app.commit_text(&mut h.root, crop::Rope::from("saved after switching tabs"));
+    crate::disk::wait(); // publish the first immutable shadow
+    assert!(crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &first,
+    ).unwrap().is_some());
+
+    assert!(h.app.open_in(&mut h.root, second.clone(), true));
+    // Note::leave queues File Gate and detaches the Note. The worker must
+    // still observe its saved ACK and retire the matching plaintext shadow.
+    crate::disk::wait();
+    crate::disk::wait(); // cleanup is queued after the detached ACK collector
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "saved after switching tabs");
+    assert!(crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &first,
+    ).unwrap().is_none(), "tab switch left an already-saved plaintext backup");
+
+    h.app.commit_text(&mut h.root, crop::Rope::from("unsaved second draft 🐱"));
+    crate::disk::wait();
+    drop(h.app.note.take()); // simulate a hard stop BEFORE this tab's File Gate save
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "original second");
+    let candidate = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &second,
+    ).unwrap().unwrap();
+    assert_eq!(candidate.body, "unsaved second draft 🐱");
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    assert!(matches!(h.app.popup, Some(Popup::Recovery(_))),
+        "the second tab's unsaved text must still be reviewable");
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "saved after switching tabs");
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "original second");
+}
+
+#[test]
+fn dirty_edit_offers_explicit_review_after_window_note_is_lost() {
+    let mut h = Harness::new();
+    let path = h.write_note("recover.md", "original");
+    assert!(h.app.open(&mut h.root, path.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    h.app.commit_text(&mut h.root, crop::Rope::from("несохранённый текст 😀"));
+    crate::disk::wait();
+    let candidate = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &path,
+    ).unwrap().unwrap();
+    assert_eq!(candidate.body.to_string(), "несохранённый текст 😀");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "original");
+    drop(h.app.note.take()); // no File Gate flush
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    assert!(matches!(h.app.popup, Some(Popup::Recovery(_))));
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "original");
+}
+
+#[test]
+fn closing_recovery_modal_never_sticks_or_discards_the_shadow() {
+    use crate::ui::dialog::DialogAnswer;
+    let mut h = Harness::new();
+    let path = h.write_note("recover-close.md", "persisted");
+    assert!(h.app.open(&mut h.root, path.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    h.app.commit_text(&mut h.root, crop::Rope::from("unsaved private draft"));
+    crate::disk::wait();
+    drop(h.app.note.take());
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    let layer = match &h.app.popup {
+        Some(Popup::Recovery(state)) => state.dialog.layer,
+        _ => panic!("recovery confirmation expected"),
+    };
+    h.send(layer, DialogAnswer::Closed);
+    assert!(h.app.popup.is_none(), "closed modal must unlock other actions");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "persisted");
+    let record = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &path,
+    ).unwrap().unwrap();
+    assert_eq!(record.body.to_string(), "unsaved private draft");
+}
+
+#[test]
+fn recovery_confirm_writes_through_file_gate_and_clears_only_after_ack() {
+    use crate::ui::dialog::DialogAnswer;
+    let mut h = Harness::new();
+    let path = h.write_note("recover-confirm.md", "confirmed disk");
+    assert!(h.app.open(&mut h.root, path.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    let draft = "unsaved кириллица 🐱";
+    h.app.commit_text(&mut h.root, crop::Rope::from(draft));
+    crate::disk::wait();
+    drop(h.app.note.take());
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    let layer = match &h.app.popup {
+        Some(Popup::Recovery(state)) => state.dialog.layer,
+        _ => panic!("expected a recovery prompt"),
+    };
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "confirmed disk");
+    h.send(layer, DialogAnswer::Confirm);
+    assert!(h.app.popup.is_none());
+    assert_eq!(h.app.text.to_string(), draft);
+    h.save_now();
+    crate::disk::wait();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), draft);
+    assert!(crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &path,
+    ).unwrap().is_none());
+}
+
+#[test]
+fn recovery_of_external_conflict_leaves_original_and_backup_unchanged() {
+    use crate::ui::dialog::DialogAnswer;
+    let mut h = Harness::new();
+    let path = h.write_note("recover-conflict.md", "old disk");
+    assert!(h.app.open(&mut h.root, path.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    h.app.commit_text(&mut h.root, crop::Rope::from("my unsaved 🐱"));
+    crate::disk::wait();
+    drop(h.app.note.take());
+    std::fs::write(&path, "external edit").unwrap();
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    let layer = match &h.app.popup {
+        Some(Popup::Recovery(state)) => state.dialog.layer,
+        _ => panic!("external conflict should offer manual review"),
+    };
+    h.send(layer, DialogAnswer::Cancel);
+    assert!(h.app.popup.is_none());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "external edit");
+    let record = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &path,
+    ).unwrap().unwrap();
+    assert_eq!(record.body.to_string(), "my unsaved 🐱");
+    assert!(record.source_changed);
+}
+
+#[test]
+fn recovery_confirmation_rechecks_external_edit_after_dialog_is_shown() {
+    use crate::ui::dialog::DialogAnswer;
+    let mut h = Harness::new();
+    let path = h.write_note("confirm-race.md", "last confirmed");
+    assert!(h.app.open(&mut h.root, path.clone()));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    let draft = "unpublished private draft 🐱";
+    h.app.commit_text(&mut h.root, crop::Rope::from(draft));
+    crate::disk::wait();
+    drop(h.app.note.take());
+    h.app.show_active(&mut h.root);
+    crate::disk::wait();
+    h.app.poll_note_recovery(&mut h.root);
+    let layer = match &h.app.popup {
+        Some(Popup::Recovery(state)) => state.dialog.layer,
+        _ => panic!("recovery prompt was not shown"),
+    };
+    // The source changes AFTER the initial recovery dialog is created.
+    std::fs::write(&path, "external update during confirmation").unwrap();
+    h.send(layer, DialogAnswer::Confirm);
+    assert!(h.app.popup.is_none());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "external update during confirmation");
+    assert_ne!(h.app.text.to_string(), draft, "stale candidate must not enter the editor");
+    let record = crate::note::bridge::inspect_for_recovery(
+        &h.app.workspace.data_dir, h.vault.path(), workspace, &path,
+    ).unwrap().unwrap();
+    assert_eq!(record.body.to_string(), draft);
+    assert!(record.source_changed);
+}
+
+#[test]
 fn unsaved_text_is_written_on_shutdown() {
     let mut h = Harness::new();
     let path = h.vault.path().join("a.md");
