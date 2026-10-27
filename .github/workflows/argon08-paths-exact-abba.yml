@@ -1,0 +1,104 @@
+name: Argon 8.3 path exact-match paired Release A/B
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/argon08-paths-exact-abba.yml'
+      - 'aquilum-app/core/src/search/paths_tests.rs'
+      - 'scripts/benchmarks/paths-exact-abba.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  abba:
+    name: Real Rust path comparison ABBA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-native
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Pin baseline and install identical benchmark-only test source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          git fetch --no-tags origin "$base"
+          git worktree add --detach "$RUNNER_TEMP/akula-paths-base" "$base"
+          cp aquilum-app/core/src/search/paths_tests.rs \
+            "$RUNNER_TEMP/akula-paths-base/aquilum-app/core/src/search/paths_tests.rs"
+          {
+            echo "PR_BASE=$base"
+            echo "PR_HEAD=$(git rev-parse HEAD)"
+            rustc --version
+            cargo --version
+            grep -m1 "model name" /proc/cpuinfo || true
+          } > paths-abba-env.txt
+      - name: Compile exact baseline and candidate test binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mode in base candidate; do
+            if [ "$mode" = base ]; then tree="$RUNNER_TEMP/akula-paths-base"; else tree="$GITHUB_WORKSPACE"; fi
+            (
+              cd "$tree/aquilum-app"
+              cargo test --release --locked -p aquilum-core --lib \
+                benchmark_path_exact_identity --no-run --message-format=json
+            ) > "$RUNNER_TEMP/$mode-build.json"
+            python3 - "$RUNNER_TEMP/$mode-build.json" "$RUNNER_TEMP/paths-$mode-test" <<'PY'
+          import json
+          from pathlib import Path
+          import shutil
+          import sys
+          manifest, output = map(Path, sys.argv[1:])
+          paths = []
+          for line in manifest.read_text().splitlines():
+              try:
+                  obj = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              target = obj.get("target") or {}
+              if (obj.get("reason") == "compiler-artifact"
+                      and target.get("name") == "aquilum_core"
+                      and obj.get("executable")):
+                  paths.append(Path(obj["executable"]))
+          if not paths or not paths[-1].is_file():
+              raise SystemExit("Missing aquilum_core test binary")
+          shutil.copy2(paths[-1], output)
+          PY
+          done
+      - name: Paired Release A/B exact/NFC/strip_root path comparisons
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/benchmarks/paths-exact-abba.py \
+            --baseline "$RUNNER_TEMP/paths-base-test" \
+            --candidate "$RUNNER_TEMP/paths-candidate-test" \
+            --out paths-abba
+          cat paths-abba/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain benchmark logs and pinned revisions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: argon08-path-exact-${{ github.event.pull_request.head.sha }}
+          path: |
+            paths-abba-env.txt
+            paths-abba/
+          if-no-files-found: warn
+          retention-days: 21
