@@ -1,5 +1,4 @@
 //! Кэширование и отрисовка масок групп.
-
 use std::collections::VecDeque;
 
 use masonry::imaging::MaskMode;
@@ -20,7 +19,8 @@ pub struct CachedMask {
 }
 
 pub const MASK_CACHE_LIMIT: usize = 8;
-
+#[cfg(test)]
+mod failure_propagation_tests;
 pub fn get_or_render_mask(
     cache: &mut VecDeque<CachedMask>,
     scene: &Scene,
