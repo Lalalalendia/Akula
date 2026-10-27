@@ -355,3 +355,66 @@ fn canvas_resize_grip_click_never_changes_small_readable_legacy_card() {
     assert_eq!(fs::read_to_string(&board).unwrap(), raw, "click is not a resizing edit");
     assert!(!h.app.canvas_dirty_active());
 }
+
+#[test]
+fn canvas_connect_two_text_cards_with_real_pointer_and_guarded_undo_redo() {
+    let mut h = Harness::new();
+    let board = h.vault.path().join("connected.canvas");
+    let raw = r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":170,"height":100,"text":"Source"},{"id":"b","type":"text","x":280,"y":40,"width":170,"height":100,"text":"Target"}],"edges":[],"vendor":{"preserve":"yes"}}"#;
+    fs::write(&board, raw).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+    let original = fs::read(&board).unwrap();
+    canvas_control(&mut h, 5);
+    assert_eq!(fs::read(&board).unwrap(), original, "Connect is inert without selection");
+    let first = canvas_card(&h, "a");
+    h.click(first.0, first.1);
+    canvas_control(&mut h, 5);
+    assert_eq!(fs::read(&board).unwrap(), original, "arming Connect does not edit disk");
+    let second = canvas_card(&h, "b");
+    h.click(second.0, second.1);
+    let joined = canvas_disk(&board);
+    assert_eq!(joined["edges"].as_array().unwrap().len(), 1);
+    assert_eq!(joined["edges"][0]["fromNode"], "a");
+    assert_eq!(joined["edges"][0]["toNode"], "b");
+    assert_eq!(joined["edges"][0]["toEnd"], "arrow");
+    assert_eq!(joined["vendor"]["preserve"], "yes");
+    assert!(!h.app.canvas_dirty_active(), "File Gate persists new edge");
+    canvas_control(&mut h, 1);
+    assert_eq!(canvas_disk(&board), serde_json::from_str::<serde_json::Value>(raw).unwrap());
+    canvas_control(&mut h, 2);
+    assert_eq!(canvas_disk(&board), joined);
+    assert!(h.app.open(&mut h.root, h.vault.path().join("a.md")));
+    assert!(h.app.open(&mut h.root, board.clone()));
+    assert_eq!(canvas_disk(&board), joined);
+}
+
+#[test]
+fn canvas_connect_cancel_and_external_conflict_protect_original_bytes() {
+    let mut h = Harness::new();
+    let board = h.vault.path().join("connect-conflict.canvas");
+    fs::write(&board, r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":160,"height":100,"text":"a"},{"id":"b","type":"text","x":240,"y":0,"width":160,"height":100,"text":"b"}],"edges":[]}"#).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+    let first = canvas_card(&h, "a");
+    let second = canvas_card(&h, "b");
+    h.click(first.0, first.1);
+    canvas_control(&mut h, 5);
+    canvas_control(&mut h, 5);
+    h.click(second.0, second.1);
+    assert!(canvas_disk(&board)["edges"].as_array().unwrap().is_empty(), "Connect toggle cancels");
+
+    h.click(first.0, first.1);
+    canvas_control(&mut h, 5);
+    let external = r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":160,"height":100,"text":"external"},{"id":"b","type":"text","x":240,"y":0,"width":160,"height":100,"text":"b"}],"edges":[],"external":true}"#;
+    fs::write(&board, external).unwrap();
+    h.click(second.0, second.1);
+    assert!(h.app.canvas_dirty_active(), "external conflict retains unsaved edge");
+    assert_eq!(fs::read_to_string(&board).unwrap(), external);
+    let active = h.app.tabs.active_id();
+    h.app.close_active_tab(&mut h.root);
+    assert_eq!(h.app.tabs.active_id(), active);
+    canvas_control(&mut h, 1);
+    assert!(!h.app.canvas_dirty_active());
+    assert_eq!(fs::read_to_string(&board).unwrap(), external);
+}
