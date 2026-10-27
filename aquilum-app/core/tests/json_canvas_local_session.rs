@@ -238,3 +238,73 @@ fn add_edge_initializes_optional_edges_array_without_data_loss() {
     assert!(session.save(&core).unwrap());
     assert_eq!(disk(&path)["addon"]["unchanged"], 17);
 }
+
+#[test]
+fn add_group_is_front_of_node_list_but_behind_existing_cards_in_draw_order() {
+    let (_dir, path, core) = setup();
+    let mut session = CanvasSession::open(&path).unwrap();
+    let old = session.value().clone();
+    let id = session.add_group("New group", 25, 50).unwrap();
+    assert_eq!(session.value()["nodes"].as_array().unwrap().len(), 3);
+    assert_eq!(session.value()["nodes"][0]["id"], id);
+    assert_eq!(session.value()["nodes"][0]["type"], "group");
+    assert_eq!(session.value()["nodes"][0]["label"], "New group");
+    assert_eq!(session.value()["nodes"][0]["width"], 420);
+    assert_eq!(session.value()["nodes"][0]["height"], 260);
+    assert_eq!(session.value()["nodes"][1], old["nodes"][0]);
+    assert_eq!(session.value()["nodes"][2], old["nodes"][1]);
+    assert_eq!(session.value()["edges"], old["edges"]);
+    assert_eq!(session.value()["vendor"], old["vendor"]);
+    assert!(session.undo().unwrap());
+    assert_eq!(session.value(), &old);
+    assert!(session.redo().unwrap());
+    assert_eq!(session.value()["nodes"][0]["id"], id);
+    assert!(session.save(&core).unwrap());
+    assert_eq!(disk(&path)["nodes"][0]["id"], id);
+    assert_eq!(disk(&path)["vendor"], old["vendor"]);
+}
+
+#[test]
+fn adding_group_to_empty_canvas_keeps_unknown_fields_and_valid_schema() {
+    let (_dir, path, core) = setup();
+    fs::write(&path, r#"{"nodes":[],"vendor":{"thirdParty":true}}"#).unwrap();
+    let mut session = CanvasSession::open(&path).unwrap();
+    let id = session.add_group("First", -10, -20).unwrap();
+    assert_eq!(session.value()["nodes"][0]["id"], id);
+    assert_eq!(session.value()["nodes"][0]["x"], -10);
+    assert_eq!(session.value()["nodes"][0]["y"], -20);
+    assert!(session.save(&core).unwrap());
+    assert_eq!(disk(&path)["vendor"]["thirdParty"], true);
+    assert_eq!(disk(&path)["nodes"][0]["label"], "First");
+}
+
+#[test]
+fn group_creation_rejects_out_of_range_without_touching_undo_or_bytes() {
+    let (_dir, path, _core) = setup();
+    let mut session = CanvasSession::open(&path).unwrap();
+    assert!(matches!(
+        session.add_group("bad", i64::MAX, 0),
+        Err(CanvasSessionError::CoordinateOutOfRange)
+    ));
+    assert!(!session.dirty() && !session.can_undo());
+    assert_eq!(fs::read_to_string(&path).unwrap(), ORIGINAL);
+}
+
+#[test]
+fn group_creation_external_conflict_keeps_unsaved_changes() {
+    let (_dir, path, core) = setup();
+    let mut session = CanvasSession::open(&path).unwrap();
+    let group = session.add_group("Local", 10, 20).unwrap();
+    fs::write(&path, r#"{"nodes":[],"external":true}"#).unwrap();
+    assert!(matches!(
+        session.save(&core),
+        Err(CanvasSessionError::Document(
+            StructuredError::File(FileCommandError::Conflict { .. })
+        ))
+    ));
+    assert!(session.dirty() && session.can_undo());
+    assert_eq!(session.value()["nodes"][0]["id"], group);
+    assert_eq!(disk(&path)["external"], true);
+    assert!(session.undo().unwrap());
+    assert!(!session.dirty());
+}
