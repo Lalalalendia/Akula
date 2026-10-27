@@ -5,6 +5,7 @@ use super::*;
 pub enum CanvasAction {
     AddText(i64, i64),
     MoveNode(String, i64, i64),
+    RemoveNode(String),
     Undo,
     Redo,
     Save,
@@ -26,15 +27,15 @@ pub(super) enum CanvasDrag {
 
 impl CanvasPage {
     fn control_rect(&self, index: usize) -> Rect {
+        if index == 4 { return self.delete_control_rect(); }
         let count = 4.0;
         let x = (self.size.width - CONTROL_RIGHT - count * CONTROL_WIDTH - (count - 1.0) * CONTROL_GAP).max(0.0)
             + index as f64 * (CONTROL_WIDTH + CONTROL_GAP);
         Rect::new(x, CONTROL_TOP, x + CONTROL_WIDTH, CONTROL_TOP + CONTROL_HEIGHT)
     }
-
     fn toolbar_action(&self, point: Point) -> Option<CanvasAction> {
         if !self.editable { return None; }
-        let index = (0..4).find(|i| self.control_rect(*i).contains(point))?;
+        let index = (0..5).find(|i| self.control_rect(*i).contains(point))?;
         match index {
             0 => {
                 let x = ((self.size.width / 2.0 - self.origin.x) / self.zoom).round() as i64;
@@ -44,17 +45,16 @@ impl CanvasPage {
             1 if self.undo => Some(CanvasAction::Undo),
             2 if self.redo => Some(CanvasAction::Redo),
             3 if self.dirty => Some(CanvasAction::Save),
+            4 => self.selected.as_ref().map(|id| CanvasAction::RemoveNode(id.clone())),
             _ => None,
         }
     }
-
     fn node_at(&self, position: Point) -> Option<usize> {
         if !self.editable { return None; }
         self.board.cards.iter().enumerate().rev()
             .find(|(_, card)| card.kind == Kind::Text && self.rect(card.rect).contains(position))
             .map(|(i, _)| i)
     }
-
     pub(super) fn pointer(&mut self, ctx: &mut EventCtx<'_>, event: &PointerEvent) {
         match event {
             PointerEvent::Down(down) if down.button.is_none_or(|b| b == PointerButton::Primary) => {
@@ -65,7 +65,7 @@ impl CanvasPage {
                     return;
                 }
                 // Disabled toolbar buttons must never start card dragging.
-                if self.editable && (0..4).any(|i| self.control_rect(i).contains(p)) {
+                if self.editable && (0..5).any(|i| self.control_rect(i).contains(p)) {
                     ctx.set_handled();
                     return;
                 }
@@ -76,7 +76,10 @@ impl CanvasPage {
                     ctx.set_handled();
                     return;
                 }
-                self.drag = match self.node_at(p) {
+                let hit = self.node_at(p);
+                self.selected = hit.map(|index| self.board.cards[index].id.clone());
+                ctx.request_paint_only();
+                self.drag = match hit {
                     Some(index) => Some(CanvasDrag::Node {
                         index, from: p, original: self.board.cards[index].rect,
                     }),
@@ -142,12 +145,11 @@ impl CanvasPage {
             _ => {}
         }
     }
-
     pub(super) fn paint_controls(&mut self, ctx: &mut PaintCtx<'_>, painter: &mut Painter<'_>) {
         let tm = theme::current();
-        for (i, label) in ["+ Text", "Undo", "Redo", "Save"].into_iter().enumerate() {
+        for (i, label) in ["+ Text", "Undo", "Redo", "Save", "Delete"].into_iter().enumerate() {
             let rect = self.control_rect(i);
-            let enabled = match i { 1 => self.undo, 2 => self.redo, 3 => self.dirty, _ => true };
+            let enabled = match i { 1 => self.undo, 2 => self.redo, 3 => self.dirty, 4 => self.selected.is_some(), _ => true };
             let shape = RoundedRect::from_rect(rect, 6.0);
             painter.fill(shape, tm.bg_surface).draw();
             painter.stroke(&shape, &Stroke::new(1.0), tm.border_subtle).draw();
@@ -157,13 +159,11 @@ impl CanvasPage {
             render_text(painter, Affine::translate((left, rect.y0 + 7.0)), layout, &[color.into()], true);
         }
     }
-
     #[cfg(test)]
     pub(crate) fn card_center(&self, id: &str) -> Option<Point> {
         let card = self.board.cards.iter().find(|c| c.id == id)?;
         Some(self.rect(card.rect).center())
     }
-
     #[cfg(test)]
     pub(crate) fn toolbar_center(&self, index: usize) -> Point {
         self.control_rect(index).center()

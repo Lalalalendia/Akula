@@ -233,3 +233,57 @@ fn canvas_workspace_switch_keeps_dirty_file_and_clears_clean_sessions() {
     assert!(h.app.canvas_view_id().is_none(), "previous vault must not retain Canvas handles");
     assert_eq!(fs::read_to_string(&board).unwrap(), external);
 }
+
+#[test]
+fn canvas_click_selection_delete_undo_redo_keep_other_links_and_vendor_fields() {
+    let mut h = Harness::new();
+    let board = h.vault.path().join("delete.canvas");
+    let raw = r#"{"nodes":[{"id":"a","type":"text","x":20,"y":25,"width":160,"height":90,"text":"remove me","vendor":{"note":true}},{"id":"b","type":"text","x":280,"y":170,"width":160,"height":90,"text":"keep"},{"id":"group","type":"group","x":0,"y":0,"width":490,"height":300,"label":"group"}],"edges":[{"id":"lost","fromNode":"a","toNode":"b"},{"id":"kept","fromNode":"b","toNode":"group"}],"plugin":{"opaque":"keep"}}"#;
+    fs::write(&board, raw).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+    let original = fs::read(&board).unwrap();
+    canvas_control(&mut h, 4);
+    assert_eq!(fs::read(&board).unwrap(), original, "delete with no selection must not write");
+    let at = canvas_card(&h, "a");
+    h.click(at.0, at.1);
+    canvas_control(&mut h, 4);
+    let deleted = canvas_disk(&board);
+    let nodes = deleted["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2);
+    assert!(nodes.iter().all(|node| node["id"].as_str() != Some("a")));
+    assert_eq!(deleted["edges"].as_array().unwrap().len(), 1);
+    assert_eq!(deleted["edges"][0]["id"], "kept");
+    assert_eq!(deleted["plugin"]["opaque"], "keep");
+    assert!(!h.app.canvas_dirty_active(), "File Gate must persist the deletion");
+    canvas_control(&mut h, 1);
+    let original_json: serde_json::Value = serde_json::from_str(raw).unwrap();
+    assert_eq!(canvas_disk(&board), original_json, "one Undo restores node and dependent edge");
+    canvas_control(&mut h, 2);
+    assert_eq!(canvas_disk(&board), deleted, "Redo removes the same node and edge");
+    assert!(h.app.open(&mut h.root, h.vault.path().join("a.md")));
+    assert!(h.app.open(&mut h.root, board.clone()));
+    assert_eq!(canvas_disk(&board), deleted);
+}
+
+#[test]
+fn canvas_delete_on_external_conflict_preserves_file_and_local_undo_history() {
+    let mut h = Harness::new();
+    let board = h.vault.path().join("delete-conflict.canvas");
+    fs::write(&board, r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":200,"height":100,"text":"original"}],"edges":[]}"#).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+    let at = canvas_card(&h, "a");
+    h.click(at.0, at.1);
+    let external = r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":200,"height":100,"text":"external"}],"vendor":{"external":true}}"#;
+    fs::write(&board, external).unwrap();
+    canvas_control(&mut h, 4);
+    assert!(h.app.canvas_dirty_active());
+    assert_eq!(fs::read_to_string(&board).unwrap(), external);
+    let active = h.app.tabs.active_id();
+    h.app.close_active_tab(&mut h.root);
+    assert_eq!(h.app.tabs.active_id(), active, "unsaved conflict must prevent closing");
+    canvas_control(&mut h, 1);
+    assert!(!h.app.canvas_dirty_active());
+    assert_eq!(fs::read_to_string(&board).unwrap(), external);
+}
