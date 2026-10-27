@@ -266,8 +266,8 @@ mod tests {
 
     #[test]
     fn large_fixture_parity() {
-        let books = books_fixture(100_000);
-        assert_agree(&books, imperative(&books));
+        let (books, expected, _) = books_fixture(100_000, 2);
+        assert_agree(&books, expected);
     }
 
     #[test]
