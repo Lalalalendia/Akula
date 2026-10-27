@@ -227,7 +227,7 @@ mod tests {
         let mut renderer = crate::render::Renderer::new(2);
         renderer.render(&layers, WIDTH as u16, HEIGHT as u16, 1.0, theme::background()).unwrap();
         let pixels = renderer.frame_pixels();
-        let x = guide.center().x.round() as usize;
+        let x = guide.center().x.floor() as usize;
         let reference = x.saturating_sub(6);
         let from = (guide.y0 + 1.0).ceil().max(0.0) as usize;
         let to = (guide.y1 - 1.0).floor().min(HEIGHT as f64) as usize;
