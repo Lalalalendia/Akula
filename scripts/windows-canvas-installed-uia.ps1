@@ -7,7 +7,8 @@ param(
     [switch]$Editable,
     [switch]$IncludeDelete,
     [switch]$IncludeResize,
-    [switch]$IncludeConnect
+    [switch]$IncludeConnect,
+    [switch]$IncludeGroup
 )
 $ErrorActionPreference = 'Stop'
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
@@ -25,6 +26,7 @@ if ([System.IO.Path]::GetFullPath($ExePath) -ne [System.IO.Path]::GetFullPath($i
 if ($IncludeDelete -and !$Editable) { throw 'Canvas Delete acceptance requires Editable mode' }
 if ($IncludeResize -and !$Editable) { throw 'Canvas Resize acceptance requires Editable mode' }
 if ($IncludeConnect -and !$Editable) { throw 'Canvas Connect acceptance requires Editable mode' }
+if ($IncludeGroup -and (!$Editable -or !$IncludeDelete)) { throw 'Canvas group acceptance requires Editable and Delete modes' }
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes -ErrorAction Stop
 
 . (Join-Path $PSScriptRoot 'windows-beta-gui-input.ps1')
@@ -131,7 +133,7 @@ function Invoke-CanvasToolbar {
     $scale = [double]$dpi / 96.0
     # Indices 0..2: original toolbar. 4: lower-row Delete. 5:
     # verified synthetic first-card center using CanvasPage::fit.
-    if ($Index -notin @(0, 1, 2, 4, 5, 6, 7)) { throw 'Non-whitelisted Canvas click target' }
+    if ($Index -notin @(0, 1, 2, 4, 5, 6, 7, 8)) { throw 'Non-whitelisted Canvas click target' }
     $w = $CanvasBounds.Width / $scale
     $h = $CanvasBounds.Height / $scale
     $localX = [Math]::Max(0.0, $w - 317.0) + 36.0 + $Index * 77.0
@@ -150,6 +152,10 @@ function Invoke-CanvasToolbar {
     } elseif ($Index -eq 6) {
         # Second toolbar row: Connect button to the left of Delete.
         $localX = [Math]::Max(0.0, $w - 163.0) + 36.0
+        $localY = 62.0
+    } elseif ($Index -eq 8) {
+        # Third button on second toolbar row: Add Group.
+        $localX = [Math]::Max(0.0, $w - 240.0) + 36.0
         $localY = 62.0
     } elseif ($Index -eq 7) {
         # The synthetic new text card is created at fitted board center
@@ -459,6 +465,35 @@ foreach ($test in $checks) {
                 }
                 $expectedHash = (Get-FileHash -LiteralPath $test.Path -Algorithm SHA256).Hash
                 Write-Host 'AKULA_WINDOWS_CANVAS_DELETE_PASS selected=1 delete=1 undo=1 redo=1 linked_edge=1 file_gate=1'
+            }
+
+            if ($IncludeGroup) {
+                # After Delete+Redo the fixture has three nodes and no edges.
+                # Group is inserted at index zero, behind all prior cards.
+                Invoke-CanvasToolbar -Index 8 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $grouped = Wait-CanvasNodeCount -Path $test.Path -Count 4 -Process $proc
+                $addedGroup = $grouped.nodes[0]
+                if ($addedGroup.type -ne 'group' -or $addedGroup.label -ne 'New group' -or
+                    $addedGroup.width -ne 420 -or $addedGroup.height -ne 260 -or
+                    @($grouped.edges).Count -ne 0 -or $grouped.nodes[1].id -ne 'group' -or
+                    $grouped.nodes[2].id -ne 'second' -or $grouped.vendor.opaque -ne 'preserve') {
+                    throw 'Installed Canvas Add Group changed existing nodes or extensions'
+                }
+                $groupId = [string]$addedGroup.id
+                if ([string]::IsNullOrWhiteSpace($groupId)) { throw 'Canvas group has no ID' }
+                Invoke-CanvasToolbar -Index 1 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $groupUndo = Wait-CanvasNodeCount -Path $test.Path -Count 3 -Process $proc
+                if ($groupUndo.nodes[0].id -ne 'group' -or $groupUndo.vendor.opaque -ne 'preserve') {
+                    throw 'Canvas group Undo lost existing nodes or vendor JSON'
+                }
+                Invoke-CanvasToolbar -Index 2 -Process $proc -CanvasBounds $bounds -WindowBounds $windowBounds
+                $groupRedo = Wait-CanvasNodeCount -Path $test.Path -Count 4 -Process $proc
+                if ($groupRedo.nodes[0].id -ne $groupId -or $groupRedo.nodes[0].type -ne 'group' -or
+                    $groupRedo.vendor.opaque -ne 'preserve') {
+                    throw 'Canvas group Redo did not preserve identity or vendor JSON'
+                }
+                $expectedHash = (Get-FileHash -LiteralPath $test.Path -Algorithm SHA256).Hash
+                Write-Host 'AKULA_WINDOWS_CANVAS_GROUP_PASS create=1 background_order=1 undo=1 redo=1 file_gate=1'
             }
 
         }
