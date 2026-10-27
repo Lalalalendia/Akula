@@ -61,10 +61,10 @@ mod tests {
             assert!(validate(alpha).is_err());
             let mut painter = Painter::new(32, 32, crate::render::paint::settings(0));
             painter.begin(0, 0, 32, 32);
-            painter.push_group(
-                masonry::imaging::GroupRef::new()
-                    .with_composite(Composite::new(Default::default(), alpha)),
-            );
+            let group = masonry::imaging::GroupRef::new()
+                .with_composite(Composite { blend: Default::default(), alpha });
+            assert_eq!(group.composite.alpha.to_bits(), alpha.to_bits());
+            painter.push_group(group);
             assert!(matches!(painter.finish(), Err(PaintError::GeometryBudget(_))),
                 "untrusted group opacity {alpha:?} reached Vello");
         }
