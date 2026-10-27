@@ -23,7 +23,6 @@ use crate::ui::editor::TextAction;
 use super::{document::Document, markdown::Fonts};
 use super::history::History;
 use crate::ui::theme;
-
 mod api;
 mod build;
 mod caret;
@@ -64,3 +63,4 @@ mod widget_events;
 mod widget_impl;
 mod widget_layout;
 mod widget_paint;
+mod range_paint;
