@@ -16,7 +16,6 @@ impl Document {
         let keep = self.kept();
         let mut line = self.line_height();
         let mut changed = false;
-        // Test-only counters; ordinary editor builds do not profile layouts.
         #[cfg(test)]
         let tracing = aq_trace::enabled();
         #[cfg(test)]
@@ -83,23 +82,14 @@ impl Document {
                             line = laid.height();
                         }
                         wanted.extend(laid.decor.links.iter().filter(|l| l.wiki).map(|l| l.target.trim().to_owned()));
-                        if near {
-                            self.laid.insert(i, laid);
-                        }
+                        if near { self.laid.insert(i, laid); }
                     }
                 }
             }
         }
         self.line = line;
         #[cfg(test)]
-        if tracing {
-            aq_trace::counter("akula: paragraph built", built as f64);
-            aq_trace::counter("akula: paragraph reused", reused as f64);
-            aq_trace::counter("akula: paragraph skipped", skipped as f64);
-            aq_trace::counter("akula: paragraph rebroken", rebroken as f64);
-            aq_trace::counter("akula: paragraph shape micros", shape_time.as_secs_f64() * 1e6);
-            aq_trace::counter("akula: paragraph rebreak micros", rebreak_time.as_secs_f64() * 1e6);
-        }
+        near_bench::record_trace(built, reused, skipped, rebroken, shape_time, rebreak_time, tracing);
         changed
     }
 }

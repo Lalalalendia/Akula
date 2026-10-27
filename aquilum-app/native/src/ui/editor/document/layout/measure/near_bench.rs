@@ -14,6 +14,25 @@ pub(super) fn eager_reused_near() -> bool {
     EAGER_REUSED_NEAR.with(Cell::get)
 }
 
+pub(super) fn record_trace(
+    built: usize,
+    reused: usize,
+    skipped: usize,
+    rebroken: usize,
+    shape_time: std::time::Duration,
+    rebreak_time: std::time::Duration,
+    tracing: bool,
+) {
+    if tracing {
+        aq_trace::counter("akula: paragraph built", built as f64);
+        aq_trace::counter("akula: paragraph reused", reused as f64);
+        aq_trace::counter("akula: paragraph skipped", skipped as f64);
+        aq_trace::counter("akula: paragraph rebroken", rebroken as f64);
+        aq_trace::counter("akula: paragraph shape micros", shape_time.as_secs_f64() * 1e6);
+        aq_trace::counter("akula: paragraph rebreak micros", rebreak_time.as_secs_f64() * 1e6);
+    }
+}
+
 fn with_reference<T>(eager: bool, run: impl FnOnce() -> T) -> T {
     struct Reset(bool);
     impl Drop for Reset {

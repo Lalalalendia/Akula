@@ -3,7 +3,6 @@ name: Native editor reused-layout Fenwick A/B
 on:
   pull_request:
     paths:
-      - 'aquilum-app/native/src/ui/editor/document/layout/measure.rs'
       - 'aquilum-app/native/src/ui/editor/document/layout/measure/near_bench.rs'
       - '.github/workflows/native-editor-near-reuse-ab.yml'
   workflow_dispatch:
