@@ -45,7 +45,6 @@ mod touchpad;
 #[cfg(not(target_os = "windows"))]
 mod touchpad {
     pub struct Touchpad;
-
     impl Touchpad {
         pub fn attach(_: &dyn winit::window::Window) -> Option<Self> {
             None

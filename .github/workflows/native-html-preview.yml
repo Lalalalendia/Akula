@@ -2,7 +2,10 @@ name: HTML native preview pilot
 on:
   pull_request:
     paths:
-      - 'aquilum-app/native/**'
+      - 'aquilum-app/native/src/html_preview.rs'
+      - 'aquilum-app/native/src/app/tabs/open/html.rs'
+      - 'aquilum-app/native/src/ui/file_tree/model/load/html.rs'
+      - 'aquilum-app/native/tests/fixtures/html/**'
       - 'aquilum-app/Cargo.lock'
       - '.github/workflows/native-html-preview.yml'
   workflow_dispatch:
