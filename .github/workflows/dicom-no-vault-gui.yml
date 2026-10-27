@@ -2,7 +2,7 @@ name: DICOM no-vault Windows GUI smoke (non-release)
 on:
   push:
     branches:
-      - 'feat/dicom-readonly-preview-20261026'
+      - main
     paths:
       - '.github/workflows/dicom-no-vault-gui.yml'
       - 'aquilum-app/native/src/dicom.rs'
@@ -149,12 +149,14 @@ jobs:
             $key = switch ($vk) {
               0x27 { '{RIGHT}' }
               0x25 { '{LEFT}' }
+              0x22 { '{PGDN}' }
+              0x21 { '{PGUP}' }
               default { throw "Unexpected DICOM test virtual key $vk" }
             }
             [System.Windows.Forms.SendKeys]::SendWait($key)
             Write-Host "AKULA_DICOM_GUI_KEY_SENT vk=$vk focused=1"
           }
-          function Wait-DicomSlice([IntPtr]$hwnd, [string]$slice, [bool]$readError = $false) {
+          function Wait-DicomSlice([IntPtr]$hwnd, [string]$slice, [bool]$readError = $false, [string]$series = '') {
             $last = @()
             for ($attempt = 0; $attempt -lt 40; $attempt++) {
               Start-Sleep -Milliseconds 250
@@ -163,6 +165,7 @@ jobs:
               $last = @($nodes | ForEach-Object { $_.Current.Name } | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
               $matching = @($last | Where-Object {
                 $_ -like "*DICOM*серия*срез $slice*" -and
+                ([string]::IsNullOrEmpty($series) -or $_ -like "*серия $series,*") -and
                 (($readError -and $_ -like '*ошибка чтения*') -or
                  (!$readError -and $_ -notlike '*ошибка чтения*'))
               })
@@ -171,8 +174,18 @@ jobs:
             $last | Out-File -FilePath "shots\dicom-navigation-failure.txt" -Encoding utf8
             throw "DICOM GUI did not reach slice $slice (readError=$readError)"
           }
-          foreach ($kind in @('study.zip', 'loose_folder')) {
-            $source = (Resolve-Path "scripts/dicom-native-smoke/fixture/$kind").Path
+          # The root fixture has a DICOMDIR plus extensionless referenced
+          # images, like a medical CD/DVD. Test it after ZIP and loose-folder
+          # cases because its temporary disconnect moves the entire fixture.
+          foreach ($kind in @('study.zip', 'loose_folder', 'dicomdir_root', 'multiseries_root')) {
+            $source = if ($kind -eq 'dicomdir_root') {
+              (Resolve-Path 'scripts/dicom-native-smoke/fixture').Path
+            } else {
+              (Resolve-Path "scripts/dicom-native-smoke/fixture/$kind").Path
+            }
+            if ($kind -eq 'dicomdir_root' -and !(Test-Path (Join-Path $source 'DICOMDIR'))) {
+              throw 'Synthetic medical-disc root is missing DICOMDIR'
+            }
             $data = Join-Path $env:RUNNER_TEMP "akula-dicom-open-$($kind.Replace('.', '-'))"
             New-Item -ItemType Directory -Force -Path $data | Out-Null
             $before = if ($kind -eq 'study.zip') { (Get-FileHash $source -Algorithm SHA256).Hash } else { $null }
@@ -222,6 +235,17 @@ jobs:
               Send-DicomKey $handle 0x27 # Retry after reconnect: 2/3 -> 3/3
               $null = Wait-DicomSlice $handle '3/3'
               Write-Host "AKULA_DICOM_GUI_MEDIA_RECOVERY_PASS source=$kind recovered_slice=3/3"
+              if ($kind -eq 'multiseries_root') {
+                # Explicitly check series index and slice reset on both directions.
+                $null = Wait-DicomSlice $handle '3/3' $false '1/2'
+                Send-DicomKey $handle 0x22 # VK_NEXT: series 1/2 -> 2/2, slice resets to 1/3
+                $null = Wait-DicomSlice $handle '1/3' $false '2/2'
+                Send-DicomKey $handle 0x27 # In second series: slice 1/3 -> 2/3
+                $null = Wait-DicomSlice $handle '2/3' $false '2/2'
+                Send-DicomKey $handle 0x21 # VK_PRIOR: series 2/2 -> 1/2, reset to 1/3
+                $null = Wait-DicomSlice $handle '1/3' $false '1/2'
+                Write-Host "AKULA_DICOM_GUI_SERIES_PASS source=$kind sequence=1-2-1 reset=1/3"
+              }
               if ($before -and (Get-FileHash $source -Algorithm SHA256).Hash -ne $before) { throw "Source archive modified: $kind" }
             } finally {
               $process.Refresh()
