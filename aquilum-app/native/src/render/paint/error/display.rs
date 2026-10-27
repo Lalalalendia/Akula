@@ -5,7 +5,7 @@ impl std::fmt::Display for PaintError {
         match self {
             PaintError::Unbalanced(what) => write!(f, "несбалансированная сцена: {what}"),
             PaintError::FilterBudget(reason) => write!(f, "неподдерживаемая геометрия фильтра: {reason}"),
-            PaintError::GeometryBudget(reason) => write!(f, "неподдерживаемая геометрия пути: {reason}"),
+            PaintError::GeometryBudget(reason) => write!(f, "неподдерживаемая геометрия: {reason}"),
             PaintError::ViewportBudget(reason) => write!(f, "неподдерживаемый размер кадра: {reason}"),
         }
     }
