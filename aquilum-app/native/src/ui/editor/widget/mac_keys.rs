@@ -10,6 +10,14 @@ impl TextEditor {
         }
     }
 
+    pub(super) fn backspace_with_command(&mut self, command: Option<Command>) {
+        if command == Some(Command::LineDeleteBackward) {
+            self.delete_to_line_start();
+        } else {
+            self.delete(false, command == Some(Command::DeleteWord));
+        }
+    }
+
     pub(super) fn delete_to_line_start(&mut self) {
         let range = self.selection();
         if !range.is_empty() {
