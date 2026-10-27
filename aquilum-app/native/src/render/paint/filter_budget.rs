@@ -7,6 +7,7 @@ use masonry::kurbo::Affine;
 
 use super::{Painter, convert, error::PaintError};
 mod nested;
+mod color_guard;
 pub(super) use nested::FilterBudgetStack;
 
 /// Total permitted filtered-layer working set (~384 MiB at 4 bytes/pixel).
@@ -38,16 +39,17 @@ fn validate(filters: &[Filter], transform: Affine, width: u16, height: u16) -> R
     let mut total_pixels = 0.0;
     for filter in filters {
         let valid_values = match *filter {
-            Filter::Flood { .. } => true,
+            Filter::Flood { color } => color_guard::valid(&color),
             Filter::Offset { dx, dy } => [dx, dy].iter().all(|x| x.is_finite()),
             Filter::Blur { std_deviation_x, std_deviation_y } => {
                 [std_deviation_x, std_deviation_y]
                     .iter().all(|x| x.is_finite() && *x >= 0.0)
             }
-            Filter::DropShadow { dx, dy, std_deviation_x, std_deviation_y, .. } => {
+            Filter::DropShadow { dx, dy, std_deviation_x, std_deviation_y, color } => {
                 [dx, dy, std_deviation_x, std_deviation_y]
                     .iter().all(|x| x.is_finite())
                     && std_deviation_x >= 0.0 && std_deviation_y >= 0.0
+                    && color_guard::valid(&color)
             }
         };
         if !valid_values {
@@ -66,9 +68,7 @@ fn validate(filters: &[Filter], transform: Affine, width: u16, height: u16) -> R
             return Err(invalid());
         }
 
-        // Include the source expansion as well as the output expansion: Vello
-        // shifts input geometry before allocating the filter image. Counting
-        // only one would underestimate masks and displaced shadows.
+        // Include both output and source expansion in the layer budget.
         let left = (-output.x0).max(-input.x0).max(0.0);
         let top = (-output.y0).max(-input.y0).max(0.0);
         let right = output.x1.max(input.x1).max(0.0);
