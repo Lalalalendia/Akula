@@ -133,7 +133,7 @@ impl PaintSink for Painter {
             }
         }
         if let Err(err) = self.guard_geometry(&draw.shape, draw.transform) { self.set_error_once(err); return; }
-        if let Err(err) = brush_transform::validate(draw.transform, draw.brush_transform) { self.set_error_once(err); return; }
+        if let Err(err) = brush_transform::validate(self.shift * draw.transform, draw.brush_transform) { self.set_error_once(err); return; }
         if let Err(err) = opacity_guard::validate_draw(&draw.brush, draw.composite.alpha) { self.set_error_once(err); return; }
         if let Err(err) = image_guard::validate(&draw.brush) { self.set_error_once(err); return; }
         if self.error.is_some() || convert::invisible(&draw.brush, draw.composite) || self.offscreen(draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape))) {
@@ -174,7 +174,7 @@ impl PaintSink for Painter {
     }
     fn stroke(&mut self, draw: StrokeRef<'_>) {
         if let Err(err) = self.guard_stroke(&draw.shape, draw.transform, &draw.stroke) { self.set_error_once(err); return; }
-        if let Err(err) = brush_transform::validate(draw.transform, draw.brush_transform) { self.set_error_once(err); return; }
+        if let Err(err) = brush_transform::validate(self.shift * draw.transform, draw.brush_transform) { self.set_error_once(err); return; }
         if let Err(err) = opacity_guard::validate_draw(&draw.brush, draw.composite.alpha) { self.set_error_once(err); return; }
         if let Err(err) = image_guard::validate(&draw.brush) { self.set_error_once(err); return; }
         let w = draw.stroke.width.max(1.0) * draw.stroke.miter_limit.max(1.0);
