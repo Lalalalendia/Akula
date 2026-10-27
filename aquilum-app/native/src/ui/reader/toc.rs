@@ -119,7 +119,7 @@ impl ReaderView {
     }
 
     pub(super) fn draw_toc(&mut self, ctx: &mut PaintCtx<'_>, painter: &mut Painter<'_>) {
-        if !self.toc.open || self.toc.rect.width() <= 0.0 || self.toc.rect.height() <= HEADER_HEIGHT { return; }
+        if !self.toc.open || self.toc.rect.width() <= size::SPACE_8 * 2.0 || self.toc.rect.height() <= HEADER_HEIGHT + size::SPACE_8 { return; }
         let tm = theme::current();
         let panel = self.toc.rect;
         let shape = RoundedRect::from_rect(panel, size::RADIUS_XL);
