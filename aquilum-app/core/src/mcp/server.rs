@@ -417,11 +417,11 @@ fn exchange(connection: &mut Connection, endpoint: &Endpoint, slot: &Slot) -> Re
         return Err(Failure::Gone);
     }
     let principal = admit(&head, &endpoint.authentication, endpoint.listen_port)?;
+    connection.mark_authenticated();
     let body = connection.read_body(&head, MAX_BODY_BYTES)?;
     let body = String::from_utf8(body).map_err(|_| refused(400, "Тело запроса не в UTF-8"))?;
     endpoint.answer(&body, principal, connection, head.keeps_alive())
 }
-
 fn admit(
     head: &Head,
     authentication: &AuthenticationMode,
