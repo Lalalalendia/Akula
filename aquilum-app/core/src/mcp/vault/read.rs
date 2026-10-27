@@ -1,7 +1,7 @@
 //! Pin Unix MCP read-only note I/O to held directory descriptors.
 use super::Vault;
 use std::path::Path;
-
+#[cfg(windows)] mod windows;
 impl Vault {
     /// Only MCP read_note / note_outline use this read-only primitive.
     /// A pinned Unix parent prevents a post-preflight symlink swap from
@@ -11,12 +11,10 @@ impl Vault {
         {
             read_unix(self, path)
         }
-        #[cfg(not(unix))]
-        {
-            // This is still a preflight, not race-free Windows containment.
-            self.check_existing_components(path)?;
-            std::fs::read(path).map_err(|error| error.to_string())
-        }
+        #[cfg(windows)]
+        { windows::read_windows(self, path) }
+        #[cfg(not(any(unix, windows)))]
+        { Err("MCP pinned Vault read unsupported on this OS".to_owned()) }
     }
 }
 

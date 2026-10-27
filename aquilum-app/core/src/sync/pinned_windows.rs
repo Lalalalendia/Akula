@@ -101,7 +101,7 @@ pub(super) fn file_identity(file: &File) -> Result<(u32, u64), VaultPortError> {
 }
 
 /// Identity and hard-link count from the same opened HANDLE.
-pub(super) fn file_identity_with_links(file: &File) -> Result<(u32, u64, u32), VaultPortError> {
+pub(crate) fn file_identity_with_links(file: &File) -> Result<(u32, u64, u32), VaultPortError> {
     let mut info = WinByHandleFileInformation::default();
     // SAFETY: file is live, the output struct is fully initialized, and
     // the synchronous Win32 call writes into our valid stack allocation.
@@ -165,7 +165,7 @@ fn reject_reparse(meta: &std::fs::Metadata) -> Result<(), VaultPortError> {
 
 /// Open and retain the selected directory itself. The caller must validate
 /// that this path belongs to the saved host workspace registry.
-pub(super) fn open_root(root: &Path) -> Result<File, VaultPortError> {
+pub(crate) fn open_root(root: &Path) -> Result<File, VaultPortError> {
     let mut options = OpenOptions::new();
     options.read(true);
     options.share_mode(SHARE_ALL);
@@ -200,7 +200,7 @@ pub(super) fn open_root_for_create(root: &Path) -> Result<File, VaultPortError> 
 /// Only ONE already-validated portable name component is accepted.
 /// OBJ_DONT_REPARSE rejects traversal; reparse points and hard links are not
 /// trusted as directories. FILE_CREATE (stage only) refuses any existing name.
-pub(super) fn open_child(
+pub(crate) fn open_child(
     parent: &File,
     name: &str,
     leaf: bool,
