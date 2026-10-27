@@ -83,8 +83,8 @@ impl PaintSink for Painter {
                 ) {
                     Ok(m) => Some(m),
                     Err(err) => {
-                        self.set_error_once(err);
-                        None
+                        self.filter_budget_stack.exit(); self.set_error_once(err);
+                        return;
                     }
                 }
             }
