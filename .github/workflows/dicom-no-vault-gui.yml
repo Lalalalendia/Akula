@@ -171,8 +171,18 @@ jobs:
             $last | Out-File -FilePath "shots\dicom-navigation-failure.txt" -Encoding utf8
             throw "DICOM GUI did not reach slice $slice (readError=$readError)"
           }
-          foreach ($kind in @('study.zip', 'loose_folder')) {
-            $source = (Resolve-Path "scripts/dicom-native-smoke/fixture/$kind").Path
+          # The root fixture has a DICOMDIR plus extensionless referenced
+          # images, like a medical CD/DVD. Test it after ZIP and loose-folder
+          # cases because its temporary disconnect moves the entire fixture.
+          foreach ($kind in @('study.zip', 'loose_folder', 'dicomdir_root')) {
+            $source = if ($kind -eq 'dicomdir_root') {
+              (Resolve-Path 'scripts/dicom-native-smoke/fixture').Path
+            } else {
+              (Resolve-Path "scripts/dicom-native-smoke/fixture/$kind").Path
+            }
+            if ($kind -eq 'dicomdir_root' -and !(Test-Path (Join-Path $source 'DICOMDIR'))) {
+              throw 'Synthetic medical-disc root is missing DICOMDIR'
+            }
             $data = Join-Path $env:RUNNER_TEMP "akula-dicom-open-$($kind.Replace('.', '-'))"
             New-Item -ItemType Directory -Force -Path $data | Out-Null
             $before = if ($kind -eq 'study.zip') { (Get-FileHash $source -Algorithm SHA256).Hash } else { $null }
