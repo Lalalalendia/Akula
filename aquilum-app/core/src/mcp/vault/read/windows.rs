@@ -3,7 +3,6 @@
 use super::super::Vault;
 use crate::sync::pinned_windows::{file_identity_with_links, open_child, open_root};
 use std::fs::File;
-use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 fn open_anchored_root(root: &Path) -> Result<File, String> {
@@ -51,10 +50,7 @@ pub(super) fn read_windows(vault: &Vault, path: &Path) -> Result<Vec<u8>, String
             if links != 1 {
                 return Err("MCP note has multiple hard links".to_owned());
             }
-            let mut opened = file;
-            let mut bytes = Vec::new();
-            opened.read_to_end(&mut bytes).map_err(|error| error.to_string())?;
-            return Ok(bytes);
+            return super::bounded::read(file);
         }
         directory = file;
     }
