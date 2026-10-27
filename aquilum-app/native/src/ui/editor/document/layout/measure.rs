@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod near_bench;
+
 use std::ops::Range;
 
 use masonry::core::{BrushIndex, StyleSet};
@@ -33,6 +36,10 @@ impl Document {
             let (current, no_wrap) = (composing.is_none() && !moved, rebreak && self.fenced_code(i));
             match self.laid.get_mut(i).filter(|_| current) {
                 Some(laid) => {
+                    #[cfg(test)]
+                    if near_bench::eager_reused_near() {
+                        std::hint::black_box(self.placed && self.heights.near(i, keep) || pinned.contains(&i));
+                    }
                     #[cfg(test)]
                     if tracing {
                         reused += 1;
