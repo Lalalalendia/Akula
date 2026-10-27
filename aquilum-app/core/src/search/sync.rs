@@ -5,7 +5,7 @@ use super::tasks;
 use super::index::SearchIndex;
 use super::index_document::{apply_path, apply_prepared, prepare_file, probe, PreparedFile, Probe};
 use super::metadata::{self, FileState, PathKey};
-use super::paths::{is_hidden, is_markdown, is_visible_entry};
+use super::paths::{is_hidden, is_note, is_visible_entry};
 use super::progress::IndexProgress;
 use super::wiki;
 use rusqlite::{params, Connection, Transaction};
@@ -70,7 +70,7 @@ impl IndexSynchronizer {
             if cancelled.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            if !entry.file_type().is_file() || !is_markdown(entry.path()) {
+            if !entry.file_type().is_file() || !is_note(entry.path()) {
                 continue;
             }
             self.progress.scanned_one();
@@ -149,7 +149,7 @@ impl IndexSynchronizer {
         let transaction = self.connection.transaction()?;
         let mut changed = false;
         for path in paths {
-            if !path.starts_with(&self.root) || !is_markdown(&path) || is_hidden(&self.root, &path)
+            if !path.starts_with(&self.root) || !is_note(&path) || is_hidden(&self.root, &path)
             {
                 continue;
             }
