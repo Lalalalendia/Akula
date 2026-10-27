@@ -107,12 +107,16 @@ impl CulledWindings {
     /// Marks if a row was culled early for faster traversal in strip generation.
     #[inline(always)]
     pub fn mark_row_active(&mut self, row_idx: usize) {
-        self.active[row_idx >> Self::WORD_SHIFT] |= 1 << (row_idx & Self::WORD_MASK);
+        if row_idx >= self.coarse.len() { return; }
+        if let Some(word) = self.active.get_mut(row_idx >> Self::WORD_SHIFT) {
+            *word |= 1 << (row_idx & Self::WORD_MASK);
+        }
     }
 
     /// Bulk marks a range of rows as active [`start_row`, `end_row`).
     #[inline(always)]
     pub fn mark_row_range_active(&mut self, start_row: usize, end_row: usize) {
+        let end_row = end_row.min(self.coarse.len()).min(self.active.len() * Self::WORD_BITS);
         if start_row >= end_row {
             return;
         }
@@ -152,6 +156,7 @@ impl CulledWindings {
     where
         F: FnMut(usize),
     {
+        let end = end.min(self.coarse.len()).min(self.active.len() * Self::WORD_BITS);
         if start >= end {
             return;
         }
@@ -1291,6 +1296,10 @@ impl Tiles {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tile/culling_safety_tests.rs"]
+mod culling_safety_tests;
 
 #[cfg(test)]
 mod tests {

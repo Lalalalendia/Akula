@@ -1,29 +1,7 @@
+mod startup;
 use super::*;
 pub fn parse() -> Result<Args, String> {
-    let mut args = Args {
-        vault: None,
-        data_dir: None,
-        size: None,
-        text: String::new(),
-        threads: std::thread::available_parallelism().map_or(2, |n| n.get().clamp(2, 4) as u16),
-        metrics: None,
-        trace: false,
-        paint_flashing: false,
-        focus: false,
-        restore: true,
-        keep_position: false,
-        #[cfg(not(feature = "installed"))]
-        replay: None,
-        open: None,
-        #[cfg(feature = "dicom-preview")]
-        open_dicom: None,
-        #[cfg(not(feature = "installed"))]
-        trace_frames: None,
-        #[cfg(feature = "memory-probe")]
-        memory_probe: None,
-        #[cfg(feature = "memory-probe")]
-        probe_notes: Vec::new(),
-    };
+    let mut args = startup::defaults();
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or_else(|| format!("{flag}: нет значения"));
@@ -65,12 +43,12 @@ pub fn parse() -> Result<Args, String> {
             "--replay-graph" => args.replay = Some((replay::Kind::Graph, value()?.into())),
             #[cfg(not(feature = "installed"))]
             "--replay-focus" => args.replay = Some((replay::Kind::Focus, value()?.into())),
-            other => return Err(format!("неизвестный аргумент {other}")),
+            other => startup::positional(&mut args, other)?,
         }
     }
     #[cfg(feature = "dicom-preview")]
     if args.open.is_some() && args.open_dicom.is_some() {
         return Err("--open и --open-dicom нельзя использовать одновременно".into());
     }
-    Ok(args)
+    startup::finish(args)
 }
