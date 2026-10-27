@@ -106,6 +106,8 @@ impl ReaderView {
                     }
                 }
             }
+            PointerEvent::Move(update) if ctx.local_position(update.current.position).y < self.header => return false,
+            PointerEvent::Up(up) if ctx.local_position(up.state.position).y < self.header => return false,
             PointerEvent::Move(_) | PointerEvent::Leave(_) => {
                 self.set_hover(ctx, None);
                 self.set_quote_hover(ctx, None);
@@ -149,7 +151,7 @@ impl ReaderView {
         });
         let max = self.toc.max_scroll(count);
         if max > 0.0 && rows.height() > 0.0 {
-            let height = (rows.height() * rows.height() / (count as f64 * ROW_HEIGHT)).clamp(size::SPACE_12, rows.height());
+            let height = (rows.height() * rows.height() / (count as f64 * ROW_HEIGHT)).max(size::SPACE_8).min(rows.height());
             let top = rows.y0 + (rows.height() - height) * self.toc.scroll / max;
             painter.fill(Rect::new(rows.x1 - size::SPACE_2, top, rows.x1, top + height), tm.text_secondary.multiply_alpha(0.6)).draw();
         }
