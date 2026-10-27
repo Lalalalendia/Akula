@@ -1,13 +1,13 @@
 mod chord;
+mod aliases;
 mod table;
 #[cfg(test)]
+mod mac_tests;
+#[cfg(test)]
 mod tests;
-
 use masonry::core::keyboard::{Key, Modifiers};
-
 pub use chord::{action, typing};
 use table::BINDINGS;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
     Global,
@@ -20,7 +20,6 @@ pub enum Scope {
     Find,
     Reader,
 }
-
 impl Scope {
     fn title(self) -> &'static str {
         match self {
@@ -78,6 +77,7 @@ pub enum Command {
     ScrollLineDown,
     DeleteWord,
     DeleteWordForward,
+    LineDeleteBackward,
     NextCell,
     PreviousCell,
     CellBelow,
