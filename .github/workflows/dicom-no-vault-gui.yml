@@ -113,6 +113,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'pydicom dependency failed' }
           python scripts/dicom-native-smoke/generate.py scripts/dicom-native-smoke/fixture
           if ($LASTEXITCODE -ne 0) { throw 'synthetic DICOM fixture failed' }
+      - name: Open synthetic DICOMDIR through real folder button and Windows dialog
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/dicom-native-smoke/gui-folder-dialog.ps1 -Executable '.artifacts/cargo-native/release/aquilum-native.exe' -FixtureRoot 'scripts/dicom-native-smoke/fixture'
+          if ($LASTEXITCODE -ne 0) { throw 'DICOM native folder picker test failed' }
+      - name: Open DICOM ZIP through file button and Windows Open dialog
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/dicom-native-smoke/gui-folder-dialog.ps1 -Executable '.artifacts/cargo-native/release/aquilum-native.exe' -FixtureRoot 'scripts/dicom-native-smoke/fixture' -SourceKind File
+          if ($LASTEXITCODE -ne 0) { throw 'DICOM native file picker test failed' }
       - name: Launch real DICOM ZIP and folder with no vault or import
         shell: pwsh
         run: |

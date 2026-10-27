@@ -8,6 +8,7 @@ use masonry::kurbo::Affine;
 use vello_cpu::{Mask, Pixmap, RenderSettings};
 
 use super::{Painter, error::PaintError};
+mod cache_budget;
 mod filter_preflight;
 
 #[derive(Clone)]
@@ -33,6 +34,7 @@ pub fn get_or_render_mask(
         return Ok(entry.mask.clone());
     }
 
+    let keep_cached = cache_budget::prepare(cache, width, height, MASK_CACHE_LIMIT);
     let mut sub = Painter::new(width, height, filter_preflight::settings(scene, settings));
     replay_transformed(scene, &mut sub, transform);
     sub.finish()?;
@@ -42,10 +44,7 @@ pub fn get_or_render_mask(
         MaskMode::Alpha => Mask::new_alpha(&pixmap),
         MaskMode::Luminance => Mask::new_luminance(&pixmap),
     };
-    if cache.len() == MASK_CACHE_LIMIT {
-        cache.pop_front();
-    }
-    cache.push_back(CachedMask { scene: scene.clone(), mode, transform, mask: mask.clone() });
+    if keep_cached { cache.push_back(CachedMask { scene: scene.clone(), mode, transform, mask: mask.clone() }); }
     Ok(mask)
 }
 

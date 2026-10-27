@@ -1,11 +1,11 @@
 mod layout;
 mod navigate;
 mod select;
+mod toc;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 pub(crate) mod epub_acceptance;
-
 use std::collections::HashMap;
 use std::path::Path;
 

@@ -208,13 +208,17 @@ impl DecimationSizer {
     /// Apply a new upscale operation.
     #[inline]
     pub fn upscale(&mut self) -> (u16, u16) {
-        let (target_w, target_h) = self.dim_stack.pop().unwrap();
-        // Clamp because upscale can exceed target on odd dimensions (e.g., 5→3→6 > 5)
-        self.width = (self.width * 2).min(target_w);
-        self.height = (self.height * 2).min(target_h);
+        let Some((target_w, target_h)) = self.dim_stack.pop() else { return self.current() };
+        // Saturate before clamping: ceil(u16::MAX / 2) * 2 overflows u16.
+        self.width = self.width.saturating_mul(2).min(target_w);
+        self.height = self.height.saturating_mul(2).min(target_h);
         (self.width, self.height)
     }
 }
+
+#[cfg(test)]
+#[path = "gaussian_blur/decimation_sizer_tests.rs"]
+mod decimation_sizer_tests;
 
 #[cfg(test)]
 mod tests {

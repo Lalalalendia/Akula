@@ -29,7 +29,7 @@ pub fn panel_label(open: bool) -> &'static str {
 }
 
 pub fn controls_width() -> f64 {
-    if cfg!(target_os = "macos") { 0.0 } else { size::TITLEBAR_CONTROLS_INSET }
+    if crate::host::native_frame() { 0.0 } else { size::TITLEBAR_CONTROLS_INSET }
 }
 
 fn controls_inset(panel_open: bool, panel_from: bool) -> NewWidget<Collapse> {

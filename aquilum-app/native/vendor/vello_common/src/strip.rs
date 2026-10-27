@@ -67,19 +67,19 @@ impl StripFillSegment {
     /// The inclusive start x coordinate in pixels.
     #[inline(always)]
     pub const fn x0(self) -> u16 {
-        self.tile_x0 * Tile::WIDTH
+        self.tile_x0.saturating_mul(Tile::WIDTH)
     }
 
     /// The exclusive end x coordinate in pixels.
     #[inline(always)]
     pub const fn x1(self) -> u16 {
-        self.tile_x1 * Tile::WIDTH
+        self.tile_x1.saturating_mul(Tile::WIDTH)
     }
 
     /// The y coordinate in pixels.
     #[inline(always)]
     pub const fn y(self) -> u16 {
-        self.tile_y * Tile::HEIGHT
+        self.tile_y.saturating_mul(Tile::HEIGHT)
     }
 
     /// Return this segment's rectangle in tile coordinates.
@@ -741,3 +741,7 @@ fn render_impl<S: Simd>(
 
     maybe_emit_sentinel_strip(strip_buf, alpha_buf);
 }
+
+#[cfg(test)]
+#[path = "strip/coordinate_overflow_tests.rs"]
+mod coordinate_overflow_tests;
