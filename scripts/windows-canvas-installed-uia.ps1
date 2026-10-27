@@ -78,7 +78,7 @@ function Wait-CanvasNodeCount {
 
 function Invoke-CanvasToolbar {
     param([int]$Index, [System.Diagnostics.Process]$Process,
-        [System.Windows.Automation.Rect]$CanvasBounds, [System.Windows.Automation.Rect]$WindowBounds)
+        $CanvasBounds, $WindowBounds)
     $hwnd = [IntPtr]$Process.MainWindowHandle
     [AkulaBetaGuiInput]::ShowWindow($hwnd, 9) | Out-Null
     $active = $false
