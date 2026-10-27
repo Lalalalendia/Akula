@@ -109,7 +109,11 @@ jobs:
           cargo test --release --locked -p aquilum-native --bin aquilum-native mask_cache_budget_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native blurred_rounded_shadow_guard_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native opacity_guard_ -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native gradient_input_guard_ -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native brush_transform_guard_ -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native vello_failed_mask_ingress_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native vello_glyph_guard_ -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native nested_filter_work_budget_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native invalid_image_ingress_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native malformed_path_sequence_ -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native filter_geometry_budget_ -- --nocapture --test-threads=1

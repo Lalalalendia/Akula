@@ -32,6 +32,7 @@ pub struct Painter {
     pub(super) error: Option<PaintError>,
     pub(super) clip_depth: u32,
     pub(super) groups: Vec<usize>,
+    pub(super) filter_budget_stack: filter_budget::FilterBudgetStack,
     pub(super) mask_cache: VecDeque<CachedMask>,
     pub(super) frame: Rect,
     pub(super) shift: Affine,
@@ -39,8 +40,7 @@ pub struct Painter {
     pub(super) culled: u32,
     pub(super) seconds: f64,
     pub(super) regions: Vec<Rect>,
-    /// Optional persistent zero-worker Vello context sharing Resources with the
-    /// parallel renderer. Allocated only when the experimental route is enabled.
+    /// Optional zero-worker context, allocated only for the experimental route.
     serial_ctx: Option<RenderContext>,
     serial_active: bool,
     serial_limit_px: Option<u64>,
@@ -62,6 +62,7 @@ impl Painter {
             error: None,
             clip_depth: 0,
             groups: Vec::new(),
+            filter_budget_stack: Default::default(),
             mask_cache: VecDeque::new(),
             frame: Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
             shift: Affine::IDENTITY,
@@ -90,6 +91,7 @@ impl Painter {
         self.resources = Resources::new();
         self.images = convert::Images::default();
         self.mask_cache = VecDeque::new();
+        self.filter_budget_stack.clear();
     }
 
     pub fn width(&self) -> u16 {
@@ -100,9 +102,7 @@ impl Painter {
         self.ctx.height()
     }
 
-    /// Experimental opt-in: retain one serial context next to the existing
-    /// parallel context. Both use the same glyph/image Resources; do not create
-    /// Rayon pools or caches while switching frames. Does nothing for 0 workers.
+    /// Experimental serial route shares Resources with the parallel renderer.
     pub(crate) fn enable_serial_for_single_damage(&mut self, max_serial_pixels: u64) {
         if self.settings.num_threads == 0 || max_serial_pixels == 0 {
             return;
@@ -149,6 +149,7 @@ impl Painter {
         self.error = None;
         self.clip_depth = 0;
         self.groups.clear();
+        self.filter_budget_stack.clear();
         self.culled = 0;
     }
 
@@ -215,7 +216,6 @@ mod adaptive_route_tests {
         painter.route_for_damage(&small);
         assert!(painter.serial_active, "routing must still work after trim");
     }
-
 
     #[test]
     fn zero_worker_renderer_never_allocates_a_companion() {
