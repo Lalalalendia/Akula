@@ -61,10 +61,7 @@ impl Painter {
     pub(super) fn guard_stroke(
         &self, shape: &GeometryRef<'_>, transform: Affine, style: &Stroke,
     ) -> Result<(), PaintError> {
-        if !style.width.is_finite() || style.width < 0.0 || style.width > MAX_DEVICE_COORD
-            || !style.miter_limit.is_finite() || style.miter_limit > 10_000.0 {
-            return Err(invalid());
-        }
+        super::super::stroke_style::validate(style)?;
         guard_geometry(shape, transform)
     }
 
