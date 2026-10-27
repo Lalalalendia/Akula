@@ -69,6 +69,7 @@ impl App {
 
         let op_result = match op {
             CanvasAction::AddText(x, y) => session.add_text("New card", *x, *y).map(|_| true),
+            CanvasAction::AddGroup(x, y) => session.add_group("New group", *x, *y).map(|_| true),
             CanvasAction::MoveNode(node, x, y) => session.move_node(node, *x, *y),
             CanvasAction::ResizeNode(node, w, h) => session.resize_node(node, *w, *h),
             CanvasAction::AddEdge(from, to) => session.add_edge(from, to).map(|_| true),
@@ -90,7 +91,6 @@ impl App {
         });
         true
     }
-
     pub(in crate::app) fn canvas_dirty_active(&self) -> bool {
         self.tabs.active().path.as_ref()
             .and_then(|path| self.canvas.documents.get(path))
