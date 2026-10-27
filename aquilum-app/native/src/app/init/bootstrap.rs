@@ -28,7 +28,7 @@ impl App {
             popup: None,
             typing: None,
             server_probe: settings::server_state::ServerProbeState::default(),
-            graph: graph_page::GraphState::default(),
+            graph: graph_page::GraphState::default(), canvas: canvas::CanvasState::default(),
             transfer: transfer::TransferState::default(),
             suggest_layer: None,
             find: None,

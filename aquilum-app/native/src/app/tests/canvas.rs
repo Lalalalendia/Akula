@@ -70,3 +70,166 @@ fn corrupt_canvas_in_real_tab_is_error_page_and_keeps_original_bytes() {
     let _ = h.root.redraw();
     assert_eq!(fs::read(&path).unwrap(), broken, "error view must never rewrite the file");
 }
+
+
+/// Use the same primary pointer gestures and toolbar clicks as the installed UI.
+fn canvas_local_point(h: &Harness, point: impl FnOnce(&crate::ui::canvas::CanvasPage) -> masonry::kurbo::Point) -> (f64, f64) {
+    let id = h.app.canvas_view_id().expect("native Canvas widget exists");
+    let widget = h.root.get_widget(id).expect("Canvas widget in native root");
+    let top_left = widget.ctx().bounding_box().origin();
+    let local = point(widget.downcast::<crate::ui::canvas::CanvasPage>().unwrap().inner());
+    (top_left.x + local.x, top_left.y + local.y)
+}
+
+/// Deliver a real Down -> Move -> Up pointer sequence through RenderRoot.
+fn canvas_drag(h: &mut Harness, from: (f64, f64), to: (f64, f64)) {
+    h.settle();
+    let mut state = PointerState {
+        position: PhysicalPosition::new(from.0, from.1),
+        count: 1,
+        scale_factor: 1.0,
+        ..PointerState::default()
+    };
+    h.root.handle_pointer_event(PointerEvent::Move(PointerUpdate {
+        pointer: MOUSE, current: state.clone(), coalesced: vec![], predicted: vec![],
+    }));
+    state.buttons.insert(PointerButton::Primary);
+    h.root.handle_pointer_event(PointerEvent::Down(PointerButtonEvent {
+        pointer: MOUSE, button: Some(PointerButton::Primary), state: state.clone(),
+    }));
+    state.position = PhysicalPosition::new(to.0, to.1);
+    h.root.handle_pointer_event(PointerEvent::Move(PointerUpdate {
+        pointer: MOUSE, current: state.clone(), coalesced: vec![], predicted: vec![],
+    }));
+    state.buttons.remove(PointerButton::Primary);
+    h.root.handle_pointer_event(PointerEvent::Up(PointerButtonEvent {
+        pointer: MOUSE, button: Some(PointerButton::Primary), state,
+    }));
+    h.deliver();
+}
+
+fn canvas_control(h: &mut Harness, index: usize) {
+    let at = canvas_local_point(h, |view| view.toolbar_center(index));
+    h.click(at.0, at.1);
+}
+
+fn canvas_card(h: &Harness, id: &str) -> (f64, f64) {
+    canvas_local_point(h, |view| view.card_center(id).expect("visible text card"))
+}
+
+fn canvas_disk(path: &std::path::Path) -> serde_json::Value {
+    aquilum_core::files::structured::StructuredDocument::open(path).unwrap().canvas().unwrap()
+}
+
+#[test]
+fn canvas_real_pointer_move_undo_redo_and_create_auto_save_via_file_gate() {
+    let mut h = Harness::new();
+    let board = h.vault.path().join("editing.canvas");
+    let original = r#"{"nodes":[{"id":"a","type":"text","x":20,"y":30,"width":190,"height":100,"text":"move me","vendor":{"keep":true}}],"edges":[],"plugin":{"root":"keep"}}"#;
+    fs::write(&board, original).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+    assert!(!h.app.canvas_dirty_active());
+
+    let before = canvas_disk(&board);
+    let at = canvas_card(&h, "a");
+    canvas_drag(&mut h, at, (at.0 + 78.0, at.1 + 42.0));
+    assert!(!h.app.canvas_dirty_active(), "pointer release should File Gate save");
+    let moved = canvas_disk(&board);
+    assert_ne!(moved["nodes"][0]["x"], before["nodes"][0]["x"]);
+    assert_ne!(moved["nodes"][0]["y"], before["nodes"][0]["y"]);
+    assert_eq!(moved["plugin"]["root"], "keep");
+    assert_eq!(moved["nodes"][0]["vendor"]["keep"], true);
+
+    canvas_control(&mut h, 1); // Undo
+    assert_eq!(canvas_disk(&board)["nodes"][0]["x"], before["nodes"][0]["x"]);
+    canvas_control(&mut h, 2); // Redo
+    assert_eq!(canvas_disk(&board)["nodes"][0]["x"], moved["nodes"][0]["x"]);
+
+    canvas_control(&mut h, 0); // + Text
+    assert_eq!(canvas_disk(&board)["nodes"].as_array().unwrap().len(), 2);
+    assert!(!h.app.canvas_dirty_active());
+
+    assert!(h.app.open(&mut h.root, h.vault.path().join("a.md")));
+    assert!(h.app.open(&mut h.root, board.clone()));
+    assert!(h.app.open_error_ids.is_none());
+    assert_eq!(canvas_disk(&board)["nodes"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn canvas_external_conflict_keeps_unsaved_edit_and_blocks_tab_close() {
+    let mut h = Harness::new();
+    let board = h.vault.path().join("conflict.canvas");
+    fs::write(&board, r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":200,"height":100,"text":"draft"}]}"#).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+
+    let external = r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":200,"height":100,"text":"external"}],"external":true}"#;
+    fs::write(&board, external).unwrap();
+    let at = canvas_card(&h, "a");
+    canvas_drag(&mut h, at, (at.0 + 70.0, at.1 + 40.0));
+
+    assert!(h.app.canvas_dirty_active(), "File Gate conflict must keep local work");
+    assert_eq!(fs::read_to_string(&board).unwrap(), external, "never overwrite external changes");
+    let active = h.app.tabs.active_id();
+    h.app.close_active_tab(&mut h.root);
+    assert_eq!(h.app.tabs.active_id(), active, "unsaved conflicting Canvas cannot silently close");
+
+    // Undo discards the unsaved move (the disk remains the external source).
+    canvas_control(&mut h, 1);
+    assert!(!h.app.canvas_dirty_active());
+    assert_eq!(fs::read_to_string(&board).unwrap(), external);
+}
+
+#[test]
+fn canvas_cannot_open_outside_vault_or_follow_symlink_outside_it() {
+    let mut h = Harness::new();
+    let outside = tempfile::tempdir().unwrap();
+    let path = outside.path().join("private.canvas");
+    let raw = br#"{"nodes":[],"private":true}"#;
+    fs::write(&path, raw).unwrap();
+
+    assert!(h.app.open(&mut h.root, path.clone()));
+    assert!(h.app.open_error_ids.is_some());
+    assert!(h.app.open_error.as_ref().unwrap().1.contains("outside"));
+    assert_eq!(fs::read(&path).unwrap(), raw);
+
+    #[cfg(unix)]
+    {
+        let symlink = h.vault.path().join("external.canvas");
+        std::os::unix::fs::symlink(&path, &symlink).unwrap();
+        assert!(h.app.open(&mut h.root, symlink));
+        assert!(h.app.open_error_ids.is_some());
+        assert!(h.app.open_error.as_ref().unwrap().1.contains("outside"));
+    }
+}
+
+#[test]
+fn canvas_workspace_switch_keeps_dirty_file_and_clears_clean_sessions() {
+    let mut h = Harness::new();
+    let old_root = h.vault.path().to_path_buf();
+    let other = tempfile::tempdir().unwrap();
+    fs::write(other.path().join("a.md"), "other vault").unwrap();
+    let board = old_root.join("switch.canvas");
+    fs::write(&board, r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":200,"height":100,"text":"draft"}]}"#).unwrap();
+    assert!(h.app.open(&mut h.root, board.clone()));
+    h.settle();
+
+    let external = r#"{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":200,"height":100,"text":"external"}],"external":true}"#;
+    fs::write(&board, external).unwrap();
+    let at = canvas_card(&h, "a");
+    canvas_drag(&mut h, at, (at.0 + 76.0, at.1 + 41.0));
+    assert!(h.app.canvas_dirty_active());
+
+    h.app.switch_workspace(&mut h.root, other.path().to_path_buf());
+    assert_eq!(h.app.tree.root(), Some(old_root.as_path()), "dirty Canvas must block vault switch");
+    assert!(h.app.canvas_dirty_active(), "pending edits must remain recoverable");
+    assert_eq!(fs::read_to_string(&board).unwrap(), external);
+
+    canvas_control(&mut h, 1); // Undo the conflicted move
+    assert!(!h.app.canvas_dirty_active());
+    h.app.switch_workspace(&mut h.root, other.path().to_path_buf());
+    assert_eq!(h.app.tree.root(), Some(other.path()));
+    assert!(h.app.canvas_view_id().is_none(), "previous vault must not retain Canvas handles");
+    assert_eq!(fs::read_to_string(&board).unwrap(), external);
+}
