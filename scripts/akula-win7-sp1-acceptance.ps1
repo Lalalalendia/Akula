@@ -11,6 +11,8 @@ param(
 $ErrorActionPreference = 'Stop'
 if (-not $DisposableVm) { throw 'Use -DisposableVm on a disposable Windows 7 SP1 x64 VM snapshot' }
 $os = Get-WmiObject Win32_OperatingSystem
+# Server 2008 R2 SP1 shares 6.1.7601 with Windows 7 SP1: require client OS.
+if ([int]$os.ProductType -ne 1) { throw 'Win7 SP1 acceptance requires a workstation Windows edition, not Windows Server' }
 if ($os.Version -notmatch '^6\.1\.7601' -or [int]$os.ServicePackMajorVersion -ne 1 -or
     [string]$os.OSArchitecture -notmatch '64') {
     throw 'This test requires Windows 7 SP1 x64 build 7601'
@@ -58,20 +60,30 @@ $privateData = Join-Path $base 'data'
 $shots = Join-Path $base 'screenshots'
 New-Item -ItemType Directory -Force -Path $vault, $privateData, $shots | Out-Null
 $note = Join-Path $vault 'Win7 QA.md'
+# Reconstruct non-ASCII fixture names in memory. UTF-8-no-BOM scripts are
+# decoded as ANSI by Windows PowerShell 2/5; source code must stay ASCII.
+function UnicodeLabel([int[]]$codepoints) {
+    $value = ''
+    foreach ($point in $codepoints) { $value += [char]$point }
+    return $value
+}
 [IO.File]::WriteAllText($note, '# Windows 7 QA' + [Environment]::NewLine + 'Disposable note.')
 # A folder chosen through Akula's ordinary picker must expose these files.
 # They are created before the first GUI launch, not injected via --open.
-$txt = Join-Path $vault 'Новый текстовый документ.txt'
-$upperTxt = Join-Path $vault 'С ПРОБЕЛАМИ.TXT'
-$txtFolder = Join-Path $vault 'Вложенная папка'
+$txt = Join-Path $vault ((UnicodeLabel @(0x041d, 0x043e, 0x0432, 0x044b, 0x0439, 0x0020, 0x0442, 0x0435, 0x043a, 0x0441, 0x0442, 0x043e, 0x0432, 0x044b, 0x0439, 0x0020, 0x0434, 0x043e, 0x043a, 0x0443, 0x043c, 0x0435, 0x043d, 0x0442)) + '.txt')
+$upperTxt = Join-Path $vault ((UnicodeLabel @(0x0421, 0x0020, 0x041f, 0x0420, 0x041e, 0x0411, 0x0415, 0x041b, 0x0410, 0x041c, 0x0418)) + '.TXT')
+$txtFolder = Join-Path $vault ((UnicodeLabel @(0x0412, 0x043b, 0x043e, 0x0436, 0x0435, 0x043d, 0x043d, 0x0430, 0x044f, 0x0020, 0x043f, 0x0430, 0x043f, 0x043a, 0x0430)) + '')
 New-Item -ItemType Directory -Force -Path $txtFolder | Out-Null
-$nestedTxt = Join-Path $txtFolder 'Внутри.txt'
+$nestedTxt = Join-Path $txtFolder ((UnicodeLabel @(0x0412, 0x043d, 0x0443, 0x0442, 0x0440, 0x0438)) + '.txt')
 $utf8 = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList @($false)
 [IO.File]::WriteAllText($txt, 'AKULA_WIN7_TXT_FOLDER_NEEDLE', $utf8)
 [IO.File]::WriteAllText($upperTxt, 'AKULA_WIN7_UPPERCASE_TXT', $utf8)
 [IO.File]::WriteAllText($nestedTxt, 'AKULA_WIN7_NESTED_TXT', $utf8)
 $log = Join-Path $base 'evidence.txt'
 [IO.File]::WriteAllText($log, 'os=Windows 7 SP1 x64' + [Environment]::NewLine +
+    'os_caption=' + $os.Caption + [Environment]::NewLine +
+    'os_product_type=' + $os.ProductType + [Environment]::NewLine +
+    'acceptance_script_sha256=' + (Sha256 $MyInvocation.MyCommand.Path) + [Environment]::NewLine +
     'installer_sha256=' + (Sha256 $Installer) + [Environment]::NewLine)
 function Record([string]$line) { [IO.File]::AppendAllText($log, $line + [Environment]::NewLine) }
 Add-Type -AssemblyName System.Windows.Forms

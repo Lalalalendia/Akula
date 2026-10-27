@@ -11,11 +11,14 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if (-not $DisposableMachine) { throw 'A disposable test machine or VM is required' }
-if ($PSVersionTable.PSVersion.Major -gt 5) { throw 'Use Windows PowerShell, not PowerShell Core' }
+if ($PSVersionTable.PSVersion.Major -lt 2 -or $PSVersionTable.PSVersion.Major -gt 5) { throw 'Use Windows PowerShell 2 through 5, not PowerShell Core' }
 if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA) {
     throw 'Start Windows PowerShell with -Sta to allow foreground clipboard proof'
 }
 $os = Get-WmiObject Win32_OperatingSystem
+# Windows Server 2022 also reports 10.0; Win7 and Server 2008 R2 share 6.1.7601.
+# WMI ProductType=1 is the supported workstation edition, 2/3 are servers.
+if ([int]$os.ProductType -ne 1) { throw 'DESK-15 acceptance requires a workstation Windows edition, not Windows Server' }
 if ([string]$os.OSArchitecture -notmatch '64') { throw 'DESK-15 real-OS test requires x64' }
 $isWin7 = $os.Version -match '^6\.1\.7601' -and [int]$os.ServicePackMajorVersion -eq 1
 $isWinModern = $os.Version -match '^10\.0\.'
@@ -67,6 +70,9 @@ $shadowBase = Join-Path $data 'akula-note-recovery-v1'
 $log = Join-Path $base 'evidence.txt'
 [IO.File]::WriteAllText($log, ('os_version=' + $os.Version + [Environment]::NewLine +
     'os_build=' + $os.BuildNumber + [Environment]::NewLine +
+    'os_caption=' + $os.Caption + [Environment]::NewLine +
+    'os_product_type=' + $os.ProductType + [Environment]::NewLine +
+    'acceptance_script_sha256=' + (Sha256 $MyInvocation.MyCommand.Path) + [Environment]::NewLine +
     'installed_exe_sha256=' + (Sha256 $exe) + [Environment]::NewLine +
     'first_original_sha256=' + $sourceA + [Environment]::NewLine +
     'second_original_sha256=' + $sourceB + [Environment]::NewLine), $utf8)
