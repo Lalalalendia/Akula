@@ -10,6 +10,8 @@ mod cost;
 mod damage_profile;
 mod frames;
 mod note_latency;
+#[cfg(target_os = "linux")]
+mod editor_journey;
 mod parley_tabs;
 mod window_preload;
 #[cfg(feature = "memory-probe")]
