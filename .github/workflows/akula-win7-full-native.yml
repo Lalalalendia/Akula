@@ -96,6 +96,52 @@ jobs:
             Write-Host "DESK15_TRAILING_LINE_FIDELITY_PASS $($case.Path)"
           }
 
+      - name: Validate independent DESK-15 power-cut checkpoint evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Get-Content -LiteralPath 'scripts/akula-desk15-powercut-witness.ps1' -Raw
+          foreach ($name in @('Sha256', 'Checked-ExternalEvidence', 'Check-TrustedCheckpoint')) {
+            $pattern = '(?ms)^function ' + $name + '\([^\r\n]*\) \{\r?\n.*?^\}'
+            $match = [regex]::Match($source, $pattern)
+            if (!$match.Success) { throw "Missing DESK-15 independent checkpoint validator: $name" }
+            . ([scriptblock]::Create($match.Value))
+          }
+          foreach ($token in @('Check-TrustedCheckpoint $guestCheckpoint $TrustedCheckpointPath $root',
+                               'Checked-ExternalEvidence $ExternalCutEvidence $root',
+                               'Power event proof and archived checkpoint must be separate files')) {
+            if (!$source.Contains($token)) { throw "Power-cut Verify can bypass trusted host evidence: $token" }
+          }
+          $root = Join-Path $env:RUNNER_TEMP ('desk15-hostcopy-' + [Guid]::NewGuid().ToString('N'))
+          $trusted = Join-Path $env:RUNNER_TEMP ('desk15-trusted-' + [Guid]::NewGuid().ToString('N'))
+          [void][IO.Directory]::CreateDirectory($root)
+          $guest = Join-Path $root 'checkpoint.txt'
+          $nested = Join-Path $root 'nested\fake-host-copy.txt'
+          [void][IO.Directory]::CreateDirectory((Split-Path -Parent $nested))
+          [IO.File]::WriteAllText($guest,'trial=synthetic')
+          [IO.File]::WriteAllText($trusted,'trial=synthetic')
+          [IO.File]::WriteAllText($nested,'trial=synthetic')
+          function Refuse([scriptblock]$attempt,[string]$caseName) {
+            $rejected = $false
+            try { & $attempt | Out-Null } catch { $rejected = $true }
+            if (!$rejected) { throw "Unsafe DESK-15 trusted evidence accepted: $caseName" }
+          }
+          try {
+            $accepted = Check-TrustedCheckpoint $guest $trusted $root
+            if ($accepted -cne [IO.Path]::GetFullPath($trusted)) {
+              throw 'Valid independent host checkpoint was rejected'
+            }
+            Refuse { Check-TrustedCheckpoint $guest $guest $root } 'guest checkpoint as own archive'
+            Refuse { Check-TrustedCheckpoint $guest $nested $root } 'nested guest file as host archive'
+            [IO.File]::WriteAllText($trusted,'trial=tampered')
+            Refuse { Check-TrustedCheckpoint $guest $trusted $root } 'different archive SHA256'
+            Refuse { Checked-ExternalEvidence $nested $root } 'nested guest path as controller event'
+            Write-Host 'DESK15_TRUSTED_CHECKPOINT_FAIL_CLOSED_PASS'
+          } finally {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $trusted -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Check Win7 SP1 native acceptance harness guard and evidence contract
         shell: pwsh
         run: |
