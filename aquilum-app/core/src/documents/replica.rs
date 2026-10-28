@@ -27,6 +27,15 @@ mod update_guard;
 #[path = "replica_update_decoder.rs"]
 mod update_decoder;
 
+/// Decoder hardening shared with offline Canvas experiments. Not a complete hostile-input sandbox.
+pub(crate) fn checked_decode_update(bytes: &[u8]) -> Result<yrs::Update, ReplicaError> {
+    update_guard::decode(bytes)
+}
+
+pub(crate) fn validate_replica_utf16_edits(source: &str, edits: &[TextEdit]) -> Result<(), ReplicaError> {
+    utf16_boundary::validate_utf16_edits(source, edits)
+}
+
 pub struct Replica {
     doc: Doc,
     text: TextRef,
