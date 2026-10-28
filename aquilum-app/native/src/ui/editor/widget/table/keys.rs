@@ -76,14 +76,4 @@ impl TextEditor {
         true
     }
 
-    pub(in super::super) fn table_text(&mut self, ctx: &mut EventCtx<'_>, text: &str) -> bool {
-        if !self.table.as_ref().is_some_and(|s| s.active.is_some()) {
-            return false;
-        }
-        let Some((session, view)) = self.table_parts() else { return false };
-        let outcome = session.insert(view, text);
-        self.apply(ctx, outcome);
-        ctx.set_handled();
-        true
-    }
 }
