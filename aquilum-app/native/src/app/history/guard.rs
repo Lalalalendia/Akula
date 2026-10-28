@@ -13,7 +13,7 @@ use crate::note::Note;
 
 pub(super) fn flush_clean(note: &mut Note, core: &Arc<Core>, text: &crop::Rope) -> Option<String> {
     note.flush(core, text);
-    note.clean_cache_hash().is_some()
+    note.clean_cache_hash()
 }
 
 impl App {
