@@ -1,5 +1,4 @@
-//! Off-thread, coalesced shadow staging for a future editor integration.
-//! Acknowledges durability only after stage() returned. Does not touch Vault.
+//! Off-thread shadow snapshots; only stage() success acknowledges durability.
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -9,6 +8,8 @@ use crop::Rope;
 use uuid::Uuid;
 
 use super::{checked_relative, clear_after_verified_save, denied, inspect, invalid, retire_superseded, stage};
+#[cfg(test)]
+mod oversized_tests;
 
 struct Context {
     data: PathBuf,
@@ -35,9 +36,7 @@ pub(in crate::note) struct CaptureStatus {
     pub(in crate::note) pending: bool,
 }
 
-/// Intended to be armed once for a note after its File Gate source baseline
-/// is verified, then driven by full Rope snapshots after each editor change.
-/// The production App does not wire this in until recovery UX is available.
+/// Coalesced private snapshots for an opened note.
 pub(in crate::note) struct SnapshotQueue {
     context: Arc<Context>,
     state: Arc<Mutex<State>>,
@@ -70,14 +69,15 @@ impl SnapshotQueue {
         })
     }
 
-    /// Enqueue a persistent Rope copy without serializing on the GUI thread.
-    /// High-frequency edits coalesce while one worker is pending or writing.
-    /// The returned revision is NOT an fsync acknowledgment.
+    /// Returns a revision, not a durability acknowledgment.
     pub(in crate::note) fn request(&self, body: Rope) -> io::Result<u64> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         if state.blocked_by_existing {
             state.failure = Some("unreviewed crash draft is held for recovery".into());
             return Err(denied("unreviewed recovery draft must not be superseded"));
+        }
+        if body.byte_len() > super::MAX_TEXT {
+            return Err(invalid("recovery draft exceeds 16 MiB; save the note to protect the latest edits"));
         }
         let revision = state.next_revision.checked_add(1)
             .ok_or_else(|| invalid("recovery revision counter exhausted"))?;
