@@ -40,6 +40,7 @@ mod tests {
 
     use masonry::app::{RenderRoot, RenderRootOptions, WindowSizePolicy};
     use masonry::core::{Ime, NewWidget, PointerButton, PointerButtonEvent, PointerEvent, PointerId, PointerInfo, PointerState, PointerType, PointerUpdate, TextEvent, WidgetTag};
+    use masonry::core::keyboard::{Code, Key, KeyState, KeyboardEvent, Location, Modifiers};
     use masonry::dpi::{PhysicalPosition, PhysicalSize};
     use masonry::theme::default_property_set;
 
@@ -107,6 +108,17 @@ mod tests {
             root.handle_text_event(TextEvent::Ime(Ime::Preedit(value.into(), Some((at, at)))));
             assert_eq!(text(&root), format!("| a{value} | b |\n| --- | --- |\n| 1 | 2 |\nпосле"));
         }
+        root.handle_text_event(TextEvent::Keyboard(KeyboardEvent {
+            state: KeyState::Down,
+            key: Key::Character("x".into()),
+            code: Code::Unidentified,
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+            repeat: false,
+            is_composing: true,
+        }));
+        assert_eq!(text(&root), "| a候補 | b |\n| --- | --- |\n| 1 | 2 |\nпосле",
+            "an IME preview must suppress echo keyboard events");
         root.handle_text_event(TextEvent::Ime(Ime::Commit("漢字".into())));
         root.handle_text_event(TextEvent::Ime(Ime::Commit("!".into())));
         assert_eq!(text(&root), "| a漢字! | b |\n| --- | --- |\n| 1 | 2 |\nпосле");
