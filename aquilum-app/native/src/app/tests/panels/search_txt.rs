@@ -2,19 +2,26 @@ use super::*;
 
 #[test]
 fn global_search_indexes_txt_content_and_opens_the_exact_utf8_file() {
-    let mut h = Harness::new();
-    let vault = h.vault.path().to_path_buf();
+    // Prepopulate the actual user vault before opening Akula, so the initial
+    // index scan owns both fixtures. Creating them after Harness::new races the
+    // already-started watcher and may miss both writes entirely.
+    let test_vault = crate::test_dir::tempdir();
+    let vault = test_vault.path().to_path_buf();
     let content = "Исходный документ: 東京日記 中文段落 txtbodyuniqueneedle";
-    let txt = h.write_note("東京日記.TXT", content);
+    let txt = vault.join("東京日記.TXT");
+    std::fs::write(&txt, content).unwrap();
+    std::fs::write(vault.join("Control.md"), "Ordinary Markdown control").unwrap();
     let original_bytes = std::fs::read(&txt).unwrap();
+    let mut h = Harness::with(Some(&vault), 1.0);
 
     h.app.start_index();
-    assert!(wait_until(250, 20, || {
+    assert!(wait_until(500, 20, || {
         let state = h.app.workspace.core.search.status(Some(&vault.to_string_lossy()));
         state.state == aquilum_core::search::models::SearchIndexState::Ready
             && !state.updating
             && state.indexed_documents >= 2
-    }), "native search did not index the UTF-8 TXT");
+    }), "native index did not complete for the preexisting TXT and Markdown fixtures: {:?}",
+        h.app.workspace.core.search.status(Some(&vault.to_string_lossy())));
 
     h.app.open_search(&mut h.root);
     h.type_search("txtbodyuniqueneedle");
