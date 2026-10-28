@@ -71,6 +71,7 @@ mod cold_oracle_report;
 mod profile_binding;
 mod path;
 mod pinned_read;
+pub(crate) mod p2p_stage;
 #[cfg(windows)]
 mod filegate_windows_acl;
 #[cfg(windows)]

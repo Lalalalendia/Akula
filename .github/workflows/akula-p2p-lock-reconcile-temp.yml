@@ -1,0 +1,36 @@
+name: P2P temporary Cargo.lock reconciliation (not a release)
+on:
+  push:
+    branches:
+      - integration/p2p-main-reconcile-20261028
+permissions:
+  contents: read
+jobs:
+  cargo-lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve optional Iroh dependencies retaining existing lock
+        working-directory: aquilum-app
+        env:
+          CARGO_NET_RETRY: '2'
+        run: |
+          cargo metadata --format-version 1 > /dev/null
+          cargo metadata --locked --format-version 1 > /dev/null
+      - name: Export public Cargo.lock to log for audited commit
+        run: |
+          python3 - <<'PY'
+          import pathlib, hashlib, base64
+          raw = pathlib.Path('aquilum-app/Cargo.lock').read_bytes()
+          print('AKULA_P2P_LOCK_SHA256=' + hashlib.sha256(raw).hexdigest())
+          print('AKULA_P2P_LOCK_BYTES=' + str(len(raw)))
+          print('AKULA_P2P_LOCK_START')
+          b64 = base64.b64encode(raw).decode('ascii')
+          for i in range(0,len(b64),1024):
+              print('AKULA_P2P_LOCK_CHUNK=' + b64[i:i+1024])
+          print('AKULA_P2P_LOCK_END')
+          PY

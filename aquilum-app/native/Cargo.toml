@@ -27,7 +27,7 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 
 [features]
 # Public install includes read-only Dropbox authorization; cloud writes remain disabled.
-installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
+installed = ["dropbox-readonly-preview", "server-readonly-preflight", "p2p-native-receive-beta"]
 messaging-w4-pilot = []
 memory-probe = []
 # Opt-in experimental local DICOM viewing. Not included in the installed build.
@@ -38,6 +38,10 @@ server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
 p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
 # Opt-in local Iroh public identity UI; uses the same protected peer contacts.
 p2p-device-ui = ["p2p-device-contacts-preview"]
+# User-triggered one-file LAN / opt-in Internet transfer; no background listener.
+p2p-inbox-preview = ["dep:akula-inbox-ledger-lab", "aquilum-core/p2p-inbox-lab"]
+p2p-native-send-beta = ["p2p-inbox-preview", "p2p-device-ui", "dep:akula-staya-integration", "dep:tokio"]
+p2p-native-receive-beta = ["p2p-native-send-beta"]
 # S3-E2E-01: optional read-only dashboard of registered S3 receive claims.
 # Does not expose S3 writes, apply, file mutation or baseline actions.
 s3-e2e01-review-preview = ["aquilum-core/sync-s3"]
@@ -55,8 +59,10 @@ sync-installed-host-witness = ["sync-installed-host", "aquilum-core/sync-install
 sync-installed-host-unix-root-witness = ["sync-installed-host-witness", "aquilum-core/sync-installed-host-unix-root-witness"]
 
 [dependencies]
-tokio = { version = "1", features = ["rt", "time"], optional = true }
+tokio = { version = "1", features = ["rt", "time", "macros"], optional = true }
 aquilum-core = { path = "../core", features = ["host-custody"] }
+akula-inbox-ledger-lab = { path = "../../modules/drop-inbox-ledger", optional = true }
+akula-staya-integration = { path = "../../interop/akula-staya", features = ["p2p-one-file-lan-beta"], optional = true }
 akula-dropbox-connect-lab = { path = "../../modules/dropbox-connect-lab", optional = true }
 akula-dropbox-secret-store = { path = "../../modules/dropbox-secret-store", features = ["system-store"], optional = true }
 akula-dropbox-t0 = { path = "../../modules/dropbox-t0", optional = true }
