@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use crate::app_core::Core;
 use super::{StructuredDocument, StructuredError};
-mod resize; mod edges; mod groups;
+mod resize; mod edges; mod groups; #[cfg(feature = "canvas-crdt-lab")] mod crdt_bridge;
 
 const HISTORY_LIMIT: usize = 64;
 const EDIT_COORD_LIMIT: i64 = 100_000_000;
