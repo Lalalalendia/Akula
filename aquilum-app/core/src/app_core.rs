@@ -554,12 +554,12 @@ impl Core {
         self.mcp.apply(self, &self.settings.get_config().mcp)
     }
 
-    /// Stops background work before the host exits: unsaved edits are written, MCP and the
-    /// watcher stop.
+    /// Stop file and search index workers before starting another session.
     pub fn shutdown(&self) {
         self.documents.flush_all(self);
         self.mcp.shutdown();
         self.watcher.stop();
+        self.search.shutdown();
     }
 
     pub fn known_roots(&self) -> Vec<PathBuf> {

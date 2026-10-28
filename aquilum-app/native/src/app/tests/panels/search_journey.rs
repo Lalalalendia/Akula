@@ -59,12 +59,12 @@ fn first_local_user_journey_create_save_restart_search_and_open() {
     assert_eq!(
         std::fs::read_dir(&vault).unwrap()
             .filter_map(Result::ok)
-            .filter(|entry| entry.path().file_name().is_some_and(|name| name == "Маршрут пользователя.md"))
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(TITLE))
             .count(),
         1,
         "GUI path created a duplicate note"
     );
     eprintln!(
-        "AKULA_FIRST_LOCAL_JOURNEY_PASS=gui_create,save,restart,index,search_snippet,open;source_unchanged=true"
+        "AKULA_FIRST_LOCAL_JOURNEY_PASS=gui_create,save,restart,index,search_body,open;source_unchanged=true"
     );
 }
