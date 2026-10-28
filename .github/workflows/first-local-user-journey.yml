@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/src/app/tests/panels/search.rs'
+      - 'aquilum-app/native/src/app/tests/panels/mod.rs'
+      - 'aquilum-app/native/src/app/tests/panels/search_journey.rs'
       - '.github/workflows/first-local-user-journey.yml'
   workflow_dispatch:
 

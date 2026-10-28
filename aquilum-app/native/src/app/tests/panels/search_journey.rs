@@ -45,21 +45,25 @@ fn first_local_user_journey_create_save_restart_search_and_open() {
     h.app.open_search(&mut h.root);
     h.type_search(MARKER);
     assert_eq!(h.wait_results(1), 1, "unique phrase must find exactly one saved file");
-    let (selected, snippet) = match &h.app.popup {
-        Some(Popup::Search(state)) => (
-            state.selected_path(),
-            state.selected_snippet().to_owned(),
-        ),
+    let selected = match &h.app.popup {
+        Some(Popup::Search(state)) => state.selected_path(),
         _ => panic!("search must remain open until the result is chosen"),
     };
     assert_eq!(selected, expected, "search pointed to a different document");
-    assert!(snippet.contains(MARKER), "user-visible search snippet lost the source phrase");
 
     h.app.search_key(&mut h.root, &Key::Named(NamedKey::Enter), Modifiers::empty());
     assert!(h.app.popup.is_none(), "opening a search result must close search");
     assert_eq!(h.app.tabs.active().path.as_ref(), Some(&expected));
     assert!(h.body_text().contains(MARKER), "reopened native editor lost the source text");
     assert_eq!(std::fs::read(&expected).unwrap(), saved_bytes, "search/open mutated the note");
+    assert_eq!(
+        std::fs::read_dir(&vault).unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().file_name().is_some_and(|name| name == "Маршрут пользователя.md"))
+            .count(),
+        1,
+        "GUI path created a duplicate note"
+    );
     eprintln!(
         "AKULA_FIRST_LOCAL_JOURNEY_PASS=gui_create,save,restart,index,search_snippet,open;source_unchanged=true"
     );

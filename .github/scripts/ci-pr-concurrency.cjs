@@ -340,6 +340,49 @@ function allowedB1b3cMigration(before, after, read) {
   return true;
 }
 
+
+function allowedB1c0Migration(prior, current, read) {
+  // This authorization applies solely to the byte-exact five-owner B1c0 route.
+  const oldHeader="on:\n  workflow_call:\n  pull_request:\n    branches: [main]\n    paths:\n\n      - \"aquilum-app/core/src/server_installer_pinned_release_lab.rs\"\n      - \"aquilum-app/core/src/server_installer_fixed_node_lab.rs\"\n      - \"aquilum-app/core/tests/server_bootstrap_b1c0.rs\"\n      - \".github/workflows/core-server-bootstrap-b1c0-fixed-node.yml\"\n      - \"docs/platforms/AKULA-SERVER-BOOTSTRAP-B1C0.md\"\n  workflow_dispatch:\n";
+  const newHeader="on:\n  workflow_call:\n  workflow_dispatch:\n";
+  const expected=["aquilum-app/core/src/server_installer_pinned_release_lab.rs","aquilum-app/core/src/server_installer_fixed_node_lab.rs","aquilum-app/core/tests/server_bootstrap_b1c0.rs",".github/workflows/core-server-bootstrap-b1c0-fixed-node.yml","docs/platforms/AKULA-SERVER-BOOTSTRAP-B1C0.md"];
+  if(prior.split(oldHeader).length!==2 || current!==prior.replace(oldHeader,newHeader))return false;
+  let routes,app,shared;
+  try {
+    routes=read('.github/scripts/ci-shared-manifest-route.cjs');
+    app=read('.github/workflows/app-checks.yml');
+    shared=read('.github/workflows/ci-shared-manifest-labs.yml');
+  }catch{return false;}
+  if(![routes,app,shared].every(x=>typeof x==='string'))return false;
+  const literal=routes.match(/^  "owned_b1c0_node": (\[[\s\S]*?^  \]),/m)?.[1];
+  let actual;
+  try{actual=JSON.parse(literal);}catch{return false;}
+  if(JSON.stringify(actual)!==JSON.stringify(expected) ||
+     !routes.includes('function ownedRoutes(paths){\n  const changed=new Set(paths);') ||
+     !routes.includes('...ownedRoutes(paths)') ||
+     !routes.includes('module.exports={OWNED_SUITES,ownedRoutes,'))return false;
+  const classify=app.split('  required-tests:\n')[0];
+  const required=app.split('  shared-labs:\n')[1]?.split('  checks:\n')[0]||'';
+  const gatedIf=required.split('    uses: ./.github/workflows/ci-shared-manifest-labs.yml')[0];
+  const gate=app.split('  checks:\n')[1]||'';
+  if(!classify.includes('      owned_b1c0_node: $'+'{{ steps.scope.outputs.owned_b1c0_node }}') ||
+     !classify.includes('node .github/scripts/ci-shared-manifest-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"') ||
+     !gatedIf.includes("needs.classify.outputs.owned_b1c0_node == 'true'") ||
+     !required.includes('      owned_b1c0_node: $'+"{{ needs.classify.outputs.owned_b1c0_node == 'true' }}") ||
+     !gate.includes('    name: Main PR gate') ||
+     !gate.includes('    if: $'+"{{ always() && github.event_name == 'pull_request' }}") ||
+     !gate.includes('    needs: [classify, required-tests, native-frames, shared-labs]') ||
+     !gate.includes("needs.classify.outputs.owned_b1c0_node == 'true'") ||
+     !gate.includes('          ROUTED_SHARED_RESULT: $'+'{{ needs.shared-labs.result }}') ||
+     !gate.includes('if [ "$SHARED_RISKY" = true ]; then') ||
+     !gate.includes('if [ "$ROUTED_SHARED_RESULT" != success ]; then'))return false;
+  if(!shared.includes('      owned_b1c0_node:\n        required: true\n        type: boolean') ||
+     !shared.includes('  route-b1c0-node:\n    name: Impacted shared manifest / b1c0-node\n    if: $'+'{{ inputs.core || inputs.lib || inputs.owned_b1c0_node }}\n    uses: ./.github/workflows/core-server-bootstrap-b1c0-fixed-node.yml') ||
+     !/^    needs: \[[^\n]*route-b1c0-node[^\n]*\]$/m.test(shared) ||
+     !shared.includes('"route-b1c0-node",["core","lib","owned_b1c0_node"]'))return false;
+  return true;
+}
+
 function git(cwd, ...args) {
   return cp.execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 }
@@ -400,7 +443,9 @@ function audit(base, head = 'HEAD', cwd = process.cwd()) {
             (record.path === '.github/workflows/core-server-bootstrap-b1b2b-ubuntu.yml' &&
             allowedB1b2bMigration(before, text, read)) ||
             (record.path === '.github/workflows/core-server-bootstrap-b1b3c-signed-fd.yml' &&
-            allowedB1b3cMigration(before, text, read));
+            allowedB1b3cMigration(before, text, read)) ||
+            (record.path === '.github/workflows/core-server-bootstrap-b1c0-fixed-node.yml' &&
+            allowedB1c0Migration(before, text, read));
           if (!routed) errors.push(record.path + ': removed existing pull_request trigger');
         } else {
           const newer = topBlock(text, 'concurrency');
@@ -445,4 +490,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { topBlock, prEvents, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, allowedTextDeltaMigration, allowedB1b2bMigration, allowedB1b3cMigration, changedWorkflows, audit, main };
+module.exports = { topBlock, prEvents, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, allowedTextDeltaMigration, allowedB1b2bMigration, allowedB1b3cMigration, allowedB1c0Migration, changedWorkflows, audit, main };

@@ -1,5 +1,5 @@
 use super::{title, url};
-use crate::web_agent::web_agent;
+use super::ssrf::public_title_agent;
 use std::io::Read;
 
 const MAX_HEAD_BYTES: usize = 128 * 1024;
@@ -36,7 +36,7 @@ pub fn page_title(raw_url: &str) -> String {
     };
     let fallback = url::hostname_fallback(&address);
 
-    let response = match web_agent("auto-link-title").get(&address).call() {
+    let response = match public_title_agent().get(&address).call() {
         Ok(response) => response,
         Err(_) => return fallback,
     };

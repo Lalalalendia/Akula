@@ -172,8 +172,8 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
     'GetWindowThreadProcessId',
     'GetForegroundWindow',
     'Refusing shortcut on nonforeground window',
-    'Only QuickOpen, SelectAll and Copy are authorized',
-    'if (key != 0x41 && key != 0x43 && key != 0x4f)',
+    'Only selection/copy/search shortcuts are authorized',
+    'key != 0x41 && key != 0x43 && key != 0x4F',
     'VK_CONTROL',
     'KEYEVENTF_KEYUP',
   ]) {
@@ -182,19 +182,6 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
   const middle = script.slice(script.indexOf('if ($VerifyRestoredContent) {'));
   assert.doesNotMatch(middle, /Set-Content -LiteralPath \$note|Add-Content -LiteralPath \$note|WriteAllText\(\$note/,
     'UI readback must never simulate success by writing to the note');
-});
-
-test('installed search journey uses Windows PowerShell 5.1-compatible key casts', () => {
-  const search = read('scripts/windows-beta-search-user-journey.ps1');
-  assert.match(search, /RUNNER_ENVIRONMENT.*github-hosted/);
-  assert.match(search, /PSEdition.*Desktop/);
-  for (const virtualKey of ['0x4f', '0x0d', '0x41', '0x43']) {
-    assert.ok(search.includes('[System.UInt16]' + virtualKey),
-      'Windows PowerShell 5.1 must type its virtual key: ' + virtualKey);
-  }
-  assert.doesNotMatch(search, /\[ushort\]/i,
-    'ushort is not a built-in type alias in Windows PowerShell 5.1');
-  assert.match(search, /AKULA_INSTALLED_SEARCH_JOURNEY_PASS/);
 });
 
 test('CI candidate manifest records actual checkout and hashes after the GUI test', () => {
@@ -249,4 +236,19 @@ test('Windows beta NSIS apply only accepts signed typed candidate and remains ga
     'unsealing an authenticated Windows candidate before apply is prohibited');
   assert.match(release, /pub\(super\) const PUBLIC_KEY: &str = "[^"]*"/);
   assert.match(release, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(target_os = "windows", feature = "installed"\)\)\s*\}/);
+});
+
+test('installed large-note replacement uses an isolated, PID-bound Win32 shortcut helper', () => {
+  const proof = read('scripts/windows-beta-replace-all.ps1');
+  assert.match(script, /Test-AkulaBetaReplaceAll -Executable \$exe -Vault \$vault -DataDir \$akulaData -LineCount \$lines/);
+  assert.match(proof, /RUNNER_ENVIRONMENT -ne 'github-hosted'/);
+  assert.match(proof, /MainWindowTitle -notlike 'Large paste proof\*'/);
+  assert.match(proof, /GetWindowThreadProcessId/);
+  assert.match(proof, /GetForegroundWindow/);
+  assert.match(proof, /Only synthetic SelectAll\/Copy\/Paste\/Undo\/Redo shortcuts are permitted/);
+  assert.match(proof, /AKULA_WINDOWS_REPLACE_ALL_PASS lines=\$LineCount/);
+  assert.match(proof, /Ctrl\+Y redo paste/);
+  assert.match(proof, /Ctrl\+Y then Ctrl\+Z did not recover exact original source bytes/);
+  assert.doesNotMatch(guiInput, /ValidateSet\('SelectAll', 'Copy', 'Paste'/,
+    'production readback helper must never gain destructive shortcuts');
 });

@@ -1,4 +1,5 @@
 mod pass;
+mod viewport_guard;
 
 use masonry::app::{VisualLayerKind, VisualLayerPlan};
 use masonry::imaging::record::{Scene, replay_transformed};
@@ -38,8 +39,7 @@ impl Frame<'_> {
     }
 }
 
-/// Test-only wall-clock breakdown of an actual Akula frame. It is not emitted
-/// in release builds and does not alter rasterizer or damage behavior.
+/// Test-only wall-clock frame stages; excluded from production and damage decisions.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct FrameStages {
@@ -187,8 +187,7 @@ impl Renderer {
         Self::new_with_serial_route(threads, false)
     }
 
-    /// Construct a renderer with an explicitly detected SIMD level for parity/perf
-    /// experiments. Production still uses the conservative paint::settings cap.
+    /// Test-only SIMD parity selector; production uses the conservative paint::settings cap.
     #[cfg(test)]
     pub(crate) fn with_simd_level_for_test(threads: u16, level: vello_cpu::Level) -> Self {
         let mut renderer = Self::new_fixed_for_test(threads);
@@ -258,6 +257,7 @@ impl Renderer {
 
     #[allow(clippy::too_many_arguments)]
     pub fn draw(&mut self, layers: &VisualLayerPlan, width: u16, height: u16, scale: f64, background: Color, full: bool, canvas: &mut dyn Canvas) -> Result<Vec<Area>, PaintError> {
+        viewport_guard::validate(width, height)?;
         self.params = Some((width, height, scale, background));
         if full {
             self.stamps.forget();

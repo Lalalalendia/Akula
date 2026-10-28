@@ -11,7 +11,10 @@ use std::io::{BufRead, Seek};
 use crate::fearless_simd::{Level, dispatch, mask8x16, prelude::*, u8x16, u8x32, u8x64, u16x16};
 use crate::peniko::{ImageAlphaType, color::PremulRgba8};
 use crate::util::{Div255Ext, narrow, unpremultiply, widen};
-
+mod unpremultiply_guard;
+#[cfg(test)]
+#[path = "pixmap/sampling_guard_tests.rs"]
+mod sampling_guard_tests;
 #[cfg(feature = "png")]
 extern crate std;
 
@@ -383,20 +386,18 @@ impl Pixmap {
         }
     }
 
-    /// Sample a pixel from the pixmap.
-    ///
-    /// The pixel data is [premultiplied RGBA8][PremulRgba8].
+    /// Sample a premultiplied RGBA8 pixel. Out-of-bounds reads are transparent.
     #[inline(always)]
     pub fn sample(&self, x: u16, y: u16) -> PremulRgba8 {
+        if x >= self.width || y >= self.height { return PremulRgba8::from_u32(0); }
         let idx = self.width as usize * y as usize + x as usize;
-        self.buf[idx]
+        self.buf.get(idx).copied().unwrap_or(PremulRgba8::from_u32(0))
     }
 
-    /// Sample a pixel from a custom-calculated index. This index should be calculated assuming that
-    /// the data is stored in row-major order.
+    /// Sample a pixel using a custom row-major index.
     #[inline(always)]
     pub fn sample_idx(&self, idx: u32) -> PremulRgba8 {
-        self.buf[idx as usize]
+        self.buf.get(idx as usize).copied().unwrap_or(PremulRgba8::from_u32(0))
     }
 
     /// Set a pixel in the pixmap at the given coordinates.
@@ -419,7 +420,6 @@ impl Pixmap {
         if self.may_have_transparency && alpha_type == ImageAlphaType::Alpha {
             unpremultiply_rgba8(bytemuck::cast_slice_mut(&mut self.buf));
         }
-
         bytemuck::cast_vec(self.buf)
     }
 
@@ -547,10 +547,7 @@ fn rgba_to_rgb_impl<S: Simd>(simd: S, data: &mut Vec<u8>) {
 ///
 /// Returns `true` if at least one pixel is not fully opaque.
 pub fn premultiply_rgba8(data: &mut [u8]) -> bool {
-    // Unfortunately we need to construct a custom level here and cannot use the one
-    // from the Vello CPU / Vello GPU context. This does mean we are not testing
-    // all possible combinations in CI, but the used intrinsics are very simple and
-    // also used in other parts of the pipeline, so risk is very low.
+    // Select the hardware SIMD level without a renderer context.
     let level = Level::try_detect().unwrap_or(Level::baseline());
 
     dispatch!(level, simd => premultiply_rgba8_impl(simd, data))
@@ -571,6 +568,7 @@ fn unpremultiply_rgba8_impl<S: Simd>(simd: S, data: &mut [u8]) -> bool {
     let mut transparency = mask8x16::splat(simd, false);
 
     for chunk in body {
+        unpremultiply_guard::clamp(chunk);
         let [r, g, b, a] = simd.load_four_interleaved_u8x16(chunk);
         transparency |= !a.simd_eq(255);
         let reciprocal = u16x16::from_fn(simd, |lane| unpremultiply::reciprocal(a[lane]));
@@ -583,6 +581,7 @@ fn unpremultiply_rgba8_impl<S: Simd>(simd: S, data: &mut [u8]) -> bool {
 
     let mut may_have_transparency = transparency.any_true();
     for pixel in tail.chunks_exact_mut(4) {
+        unpremultiply_guard::clamp(pixel);
         may_have_transparency |= pixel[3] != 255;
         let reciprocal = unpremultiply::reciprocal(pixel[3]);
         for component in &mut pixel[..3] {

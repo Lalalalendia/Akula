@@ -1,11 +1,11 @@
 use super::*;
-
 impl ReaderView {
     pub fn new(session: Session, settings: Settings, title: String, total: u32, can_quote: bool, active: Option<String>) -> (NewWidget<Self>, ReaderIds) {
         let settings_button = NewWidget::new(IconButton::new(icons::SETTINGS_2, t("reader.settings")));
         let close = NewWidget::new(IconButton::new(icons::X, t("reader.close")));
+        let contents_button = (!session.contents().is_empty()).then(|| NewWidget::new(IconButton::new(icons::PANEL_LEFT, t("reader.contents"))));
         let quote_button = can_quote.then(|| NewWidget::new(TextButton::new(t("reader.quote"), Variant::Primary).size(ButtonSize::S)));
-        let ids = ReaderIds { settings: settings_button.id(), close: close.id(), quote: quote_button.as_ref().map(NewWidget::id) };
+        let ids = ReaderIds { settings: settings_button.id(), close: close.id(), contents: contents_button.as_ref().map(NewWidget::id), quote: quote_button.as_ref().map(NewWidget::id) };
         let view = ReaderView {
             intro: crate::ui::widgets::Intro::new(crate::ui::widgets::NORMAL),
             session,
@@ -16,6 +16,8 @@ impl ReaderView {
             report: true,
             wheel: 0.0,
             settings_button: settings_button.to_pod(),
+            contents_button: contents_button.map(NewWidget::to_pod),
+            toc: toc::Panel::new(),
             close: close.to_pod(),
             popover: None,
             title_line: Line::default(),
@@ -42,7 +44,6 @@ impl ReaderView {
         };
         (NewWidget::new(view), ids)
     }
-
     pub fn set_settings(this: &mut WidgetMut<'_, Self>, settings: Settings) {
         if this.widget.settings != settings {
             this.widget.settings = settings;
@@ -50,16 +51,15 @@ impl ReaderView {
             this.ctx.request_layout();
         }
     }
-
     pub fn set_popover(this: &mut WidgetMut<'_, Self>, popover: Option<NewWidget<dyn Widget>>) {
         if let Some(old) = this.widget.popover.take() {
             this.ctx.remove_child(old);
         }
+        if popover.is_some() { this.widget.toc.open = false; }
         this.widget.popover = popover.map(NewWidget::to_pod);
         this.ctx.children_changed();
         this.ctx.request_layout();
     }
-
     pub fn set_quotes(this: &mut WidgetMut<'_, Self>, quotes: Vec<(String, String)>) {
         this.widget.quotes = quotes;
         this.widget.marks = None;

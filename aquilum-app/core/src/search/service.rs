@@ -1,9 +1,9 @@
 mod lifecycle;
-mod session;
 use super::analysis::graph::GraphSnapshot;
 use super::error::SearchError;
 use super::guest::Guest;
 use super::index::SearchIndex;
+use super::metadata;
 use super::models::{IndexRevision, SearchIndexStatus, SearchResponse};
 use super::paths::{canonical_path, canonical_workspace, same_path};
 use super::progress::IndexProgress;
@@ -27,7 +27,6 @@ pub struct SearchService {
     pub render_lock: Arc<Mutex<()>>,
     pub next_render_epoch: Arc<AtomicU64>,
     next_generation: Arc<AtomicU64>,
-    pub(super) stopped: Arc<AtomicBool>,
 }
 
 pub struct CachedGraph {
@@ -97,8 +96,68 @@ impl SearchService {
             render_lock: Arc::new(Mutex::new(())),
             next_render_epoch: Arc::new(AtomicU64::new(0)),
             next_generation: Arc::new(AtomicU64::new(0)),
-            stopped: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn prepare(&self, workspace: &str) -> Result<SearchIndexStatus, SearchError> {
+        let _guard = self.prepare_lock.lock().map_err(SearchError::task)?;
+        let root = workspace_root(workspace)?;
+        if let Some(status) = self.status_for_root(&root) {
+            return Ok(status);
+        }
+        let opened = match self.take_guest(&root)? {
+            Some(guest) => {
+                guest.visible.store(true, Ordering::Relaxed);
+                guest
+            }
+            None => self.open_index(root, true)?,
+        };
+        let progress = Arc::clone(&opened.progress);
+        let generation = opened.generation;
+        let previous = self.active.write().map_err(SearchError::task)?.replace(opened);
+        if let Some(previous) = previous {
+            previous.stop();
+        }
+        clear_if(&self.analysis_graph, |_| true);
+        clear_if(&self.render_graph, |_| true);
+        let snapshot = progress.snapshot();
+        (self.index_notifier)(IndexRevision {
+            workspace_path: workspace.to_owned(),
+            generation,
+            revision: snapshot.revision,
+        });
+        Ok(snapshot)
+    }
+
+    pub fn open_index(&self, root: PathBuf, visible: bool) -> Result<OpenIndex, SearchError> {
+        fs::create_dir_all(&self.base_directory)?;
+        let key = blake3::hash(root.to_string_lossy().as_bytes()).to_hex();
+        let storage = self.base_directory.join(key.as_str());
+        let generation = self.next_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let index_dir = storage.join(format!("index-v{}", crate::search::ANALYZER_VERSION));
+        let index = Arc::new(SearchIndex::open(&index_dir)?);
+        remove_stale_indexes(&storage, &index_dir);
+        let progress = Arc::new(IndexProgress::new(index.document_count(), generation));
+        let metadata_path = storage.join("documents.sqlite3");
+        drop(metadata::open(&metadata_path)?);
+        let visible = Arc::new(AtomicBool::new(visible));
+        let worker = WorkerHandle::spawn(
+            root.clone(),
+            Arc::clone(&index),
+            metadata_path.clone(),
+            Arc::clone(&progress),
+            generation,
+            self.refresh_notifier(root.clone(), generation, Arc::clone(&visible)),
+        )?;
+        Ok(OpenIndex {
+            root,
+            index,
+            worker,
+            progress,
+            metadata_path,
+            generation,
+            visible,
+        })
     }
 
     fn refresh_notifier(

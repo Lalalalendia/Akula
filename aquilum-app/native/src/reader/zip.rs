@@ -1,5 +1,6 @@
-use std::collections::HashMap; mod limited;
-use std::io::Read;
+use std::collections::HashMap; mod limited; mod aggregate;
+#[cfg(test)] mod security_tests;
+const MAX_LEGACY_READ_BYTES: usize = 64 * 1024 * 1024;
 const END: u32 = 0x0605_4b50;
 const CENTRAL: u32 = 0x0201_4b50;
 const LOCAL: u32 = 0x0403_4b50;
@@ -16,11 +17,11 @@ pub struct Zip {
 }
 
 fn u16_at(data: &[u8], at: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(data.get(at..at + 2)?.try_into().ok()?))
+    Some(u16::from_le_bytes(data.get(at..at.checked_add(2)?)?.try_into().ok()?))
 }
 
 fn u32_at(data: &[u8], at: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?))
+    Some(u32::from_le_bytes(data.get(at..at.checked_add(4)?)?.try_into().ok()?))
 }
 
 impl Zip {
@@ -28,7 +29,7 @@ impl Zip {
         let end = (0..data.len().saturating_sub(21)).rev().take(65_557).find(|&i| u32_at(&data, i) == Some(END))?;
         let count = u16_at(&data, end + 10)? as usize;
         let mut at = u32_at(&data, end + 16)? as usize;
-        let mut entries = HashMap::with_capacity(count);
+        let mut entries = HashMap::with_capacity(count.min(1024));
         for _ in 0..count {
             if u32_at(&data, at)? != CENTRAL {
                 return None;
@@ -40,9 +41,11 @@ impl Zip {
             let extra_len = u16_at(&data, at + 30)? as usize;
             let comment_len = u16_at(&data, at + 32)? as usize;
             let local = u32_at(&data, at + 42)? as usize;
-            let name = String::from_utf8_lossy(data.get(at + 46..at + 46 + name_len)?).into_owned();
+            let name_start = at.checked_add(46)?;
+            let name_end = name_start.checked_add(name_len)?;
+            let name = String::from_utf8_lossy(data.get(name_start..name_end)?).into_owned();
             entries.insert(name, Entry { method, compressed, size, local });
-            at += 46 + name_len + extra_len + comment_len;
+            at = name_end.checked_add(extra_len)?.checked_add(comment_len)?;
         }
         Some(Zip { data, entries })
     }
@@ -52,21 +55,6 @@ impl Zip {
     }
 
     pub fn read(&self, name: &str) -> Option<Vec<u8>> {
-        let entry = self.entries.get(name)?;
-        let at = entry.local;
-        if u32_at(&self.data, at)? != LOCAL {
-            return None;
-        }
-        let start = at + 30 + u16_at(&self.data, at + 26)? as usize + u16_at(&self.data, at + 28)? as usize;
-        let raw = self.data.get(start..start + entry.compressed)?;
-        match entry.method {
-            0 => Some(raw.to_vec()),
-            8 => {
-                let mut out = Vec::with_capacity(entry.size);
-                flate2::read::DeflateDecoder::new(raw).read_to_end(&mut out).ok()?;
-                Some(out)
-            }
-            _ => None,
-        }
+        self.read_limited(name, MAX_LEGACY_READ_BYTES)
     }
 }

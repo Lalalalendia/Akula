@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use super::split_line;
-use super::super::{block, fence, is_key};
+use super::super::{block, is_key};
 
 // Lines borrow the original frontmatter until their value actually changes.
 // Applying a batch must not clone the entire note for every updated field.
@@ -11,12 +11,12 @@ pub fn set_fields(text: &str, updates: &[(&str, String)]) -> Option<String> {
     if updates.is_empty() {
         return Some(text.to_owned());
     }
-    // An injected YAML fence changes where the next sequential edit sees
-    // frontmatter ending. Preserve the former behavior for this rare case.
+    // Metadata fields are single-line. Refuse newlines instead of letting an
+    // injected YAML fence rewrite the note body or subsequent updates.
     if updates.iter().any(|(key, value)| {
-        key.contains('\n') || value.split('\n').skip(1).any(fence)
+        key.trim().is_empty() || key.contains([':', '\r', '\n']) || value.contains(['\r', '\n'])
     }) {
-        return sequential_with_fence(text, updates);
+        return None;
     }
     let block = block(text)?;
     let body = &text[block.body];
@@ -72,32 +72,6 @@ pub fn set_fields(text: &str, updates: &[(&str, String)]) -> Option<String> {
     result.push_str("\n---");
     result.push_str(tail);
     Some(result)
-}
-
-// Rare fallback: a generated fence may change the next update's block boundary.
-fn sequential_with_fence(text: &str, updates: &[(&str, String)]) -> Option<String> {
-    updates.iter().try_fold(text.to_owned(), |current, (key, value)| {
-        let section = block(&current)?;
-        let body = &current[section.body];
-        let mut found = false;
-        let mut lines = Vec::new();
-        if !body.is_empty() {
-            for line in body.split('\n') {
-                if !is_key(split_line(line).0, key) {
-                    lines.push(line.to_owned());
-                    continue;
-                }
-                found = true;
-                if !value.is_empty() {
-                    lines.push(format!("{key}: {value}"));
-                }
-            }
-        }
-        if !found && !value.is_empty() {
-            lines.push(format!("{key}: {value}"));
-        }
-        Some(format!("---\n{}\n---{}", lines.join("\n"), &current[section.end..]))
-    })
 }
 
 // Keep the older single-field behavior exercised by the existing tests.
@@ -167,7 +141,7 @@ mod tests {
             "page_cover_url", "cover_url", "book_file", "PAGE_COVER_URL",
             "cover", "Cover", "tags", "Ключ", "İ", "key", "unknown",
         ];
-        let values = ["", "true", "0", "pattern:weave", "Files/x.epub", "a:b", "[x, y]", "☺", r#" "x" "#, "\nmore"];
+        let values = ["", "true", "0", "pattern:weave", "Files/x.epub", "a:b", "[x, y]", "☺", r#" "x" "#, "more"];
         let mut seed = 0x2026_1022_f00d_u64;
 
         for sample in samples {
@@ -184,25 +158,23 @@ mod tests {
     }
 
     #[test]
-    fn an_embedded_yaml_fence_preserves_sequential_update_boundaries() {
+    fn rejects_multiline_keys_values_and_carriage_return_injections() {
         let initial = "---\ncover: old\n---\nbody";
         let cases = [
             vec![(COVER, "first\n---\ntail".to_owned()), (TYPE, "book".to_owned())],
             vec![(COVER, "first\n--- \t\ntail".to_owned()), (TYPE, "book".to_owned())],
-            vec![(COVER, "first\n---\ntail".to_owned()), (COVER, String::new())],
-            vec![("new\n---", "value".to_owned()), (TYPE, "book".to_owned())],
+            vec![("new\n---", "value".to_owned())],
+            vec![(COVER, "new\r---\rbody".to_owned())],
+            vec![("key\rbroken", "value".to_owned())],
+            vec![("invalid:key", "value".to_owned())],
+            vec![(" ", "value".to_owned())],
+            vec![(COVER, "first\nsecond".to_owned())],
         ];
         for updates in cases {
-            assert_eq!(set_fields(initial, &updates), original_set_fields(initial, &updates));
+            assert_eq!(set_fields(initial, &updates), None, "invalid update must fail closed");
         }
-        let standard = [
-            (COVER, "first\n---\ntail".to_owned()),
-            (TYPE, "book".to_owned()),
-        ];
-        assert_eq!(
-            set_fields(initial, &standard).as_deref(),
-            Some("---\ncover: first\ntype: book\n---\ntail\n---\nbody")
-        );
+        assert_eq!(set_fields(initial, &[(COVER, "valid: value".to_owned())]).unwrap(),
+            "---\ncover: valid: value\n---\nbody");
     }
 
     #[test]

@@ -4,7 +4,7 @@ use aquilum_core::files::gate;
 use aquilum_core::history::Source;
 
 use super::{Change, PAGE_SIZE, diff, page, restore, revert, texts};
-
+mod restore_binding;
 #[test]
 fn diff_marks_added_and_removed_lines() {
     let lines = diff(Some("a\nb\nc"), "a\nB\nc\nd");
@@ -34,7 +34,7 @@ fn restore_and_revert_rewrite_note() {
         .unwrap_or_else(|| panic!("версия с «три»; версий {}", versions.len()));
     assert!(revert(&core, &note, with_three).unwrap());
     assert_eq!(std::fs::read_to_string(&note).unwrap(), "ноль\nодин\nдва\n");
-    assert!(restore(&core, &note, with_three).unwrap());
+    assert!(restore(&core, &note, with_three, &read_file_snapshot_impl(&note).unwrap().hash).unwrap());
     assert_eq!(std::fs::read_to_string(&note).unwrap(), "один\nдва\nтри\n");
     core.shutdown();
 }

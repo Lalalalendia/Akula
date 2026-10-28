@@ -1,16 +1,12 @@
 use super::*;
-
 impl Widget for ReaderView {
     type Action = ReaderAction;
-
     fn on_text_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &TextEvent) {
         self.key_event(ctx, event);
     }
-
     fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
         self.pointer_event(ctx, event);
     }
-
     fn on_anim_frame(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, interval: u64) {
         let mut running = self.intro.advance(interval);
         for zone in &mut self.zones {
@@ -42,6 +38,7 @@ impl Widget for ReaderView {
 
     fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
         ctx.register_child(&mut self.settings_button);
+        if let Some(button) = &mut self.contents_button { ctx.register_child(button); }
         ctx.register_child(&mut self.close);
         if let Some(popover) = &mut self.popover {
             ctx.register_child(popover);
@@ -57,10 +54,12 @@ impl Widget for ReaderView {
 
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, size: Size) {
         self.arrange(ctx, size);
+        self.layout_toc(ctx, size);
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         self.draw(ctx, painter);
+        self.draw_toc(ctx, painter);
     }
 
     fn accessibility_role(&self) -> Role {
@@ -74,6 +73,7 @@ impl Widget for ReaderView {
 
     fn children_ids(&self) -> ChildrenIds {
         let mut ids = vec![self.settings_button.id(), self.close.id()];
+        ids.extend(self.contents_button.as_ref().map(WidgetPod::id));
         ids.extend(self.popover.as_ref().map(WidgetPod::id));
         ids.extend(self.quote_button.as_ref().map(WidgetPod::id));
         ChildrenIds::from_slice(&ids)

@@ -14,6 +14,14 @@ on:
       - '.github/scripts/akula-win7-dumpbin-audit.py'
       - '.github/scripts/akula-win7-dumpbin-audit.test.py'
       - 'scripts/akula-win7-sp1-acceptance.ps1'
+      - 'scripts/akula-desk15-real-windows-acceptance.ps1'
+      - 'scripts/akula-desk15-powercut-witness.ps1'
+      # DESK-15 AppData shadow and guarded File Gate ACK must compile for Win7.
+      - 'aquilum-app/native/src/app/note_recovery.rs'
+      - 'aquilum-app/native/src/note/bridge.rs'
+      - 'aquilum-app/native/src/note/recovery.rs'
+      - 'aquilum-app/native/src/note/recovery/**'
+      - 'scripts/windows-beta-recovery*.ps1'
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -43,7 +51,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           foreach ($file in @('scripts/akula-win7-nsis-candidate.ps1', 'scripts/akula-win7-signed-stage.ps1',
-                              'scripts/akula-win7-sp1-acceptance.ps1')) {
+                              'scripts/akula-win7-sp1-acceptance.ps1',
+                              'scripts/akula-desk15-real-windows-acceptance.ps1',
+                              'scripts/akula-desk15-powercut-witness.ps1')) {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE $file), [ref]$tokens, [ref]$errors) | Out-Null
@@ -55,12 +65,90 @@ jobs:
             if (!$publisher.Contains($token)) { throw "Signed Akula workflow lost required Win7 or trust gate: $token" }
           }
 
+      - name: Reject DESK-15 clipboard false PASS from trailing newline trimming
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cases = @(
+            @{ Path = 'scripts/akula-desk15-real-windows-acceptance.ps1'; Function = 'Normalized' },
+            @{ Path = 'scripts/akula-desk15-powercut-witness.ps1'; Function = 'Normalize' }
+          )
+          foreach ($case in $cases) {
+            $source = Get-Content -LiteralPath $case.Path -Raw
+            if ($source.Contains('.TrimEnd([char]10)')) {
+              throw "DESK15 GUI readback may discard real trailing lines: $($case.Path)"
+            }
+            $pattern = '(?ms)^function ' + $case.Function + '\(\[string\]\$\w+\) \{\r?\n.*?^\}'
+            $match = [regex]::Match($source, $pattern)
+            if (!$match.Success) { throw "Missing normalizer for $($case.Path)" }
+            . ([scriptblock]::Create($match.Value))
+            $name = $case.Function
+            $lf = & $name ('One' + [char]10 + 'Two' + [char]10)
+            $crlf = & $name ('One' + [char]13 + [char]10 + 'Two' + [char]13 + [char]10)
+            if ($lf -cne $crlf) {
+              throw "DESK15 does not normalize Windows clipboard CRLF: $($case.Path)"
+            }
+            $without = & $name ('One' + [char]10 + 'Two')
+            $extra = & $name ('One' + [char]10 + 'Two' + [char]10 + [char]10)
+            if ($lf -ceq $without -or $lf -ceq $extra) {
+              throw "DESK15 silently trims meaningful trailing lines: $($case.Path)"
+            }
+            Write-Host "DESK15_TRAILING_LINE_FIDELITY_PASS $($case.Path)"
+          }
+
+      - name: Validate independent DESK-15 power-cut checkpoint evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Get-Content -LiteralPath 'scripts/akula-desk15-powercut-witness.ps1' -Raw
+          foreach ($name in @('Sha256', 'Checked-ExternalEvidence', 'Check-TrustedCheckpoint')) {
+            $pattern = '(?ms)^function ' + $name + '\([^\r\n]*\) \{\r?\n.*?^\}'
+            $match = [regex]::Match($source, $pattern)
+            if (!$match.Success) { throw "Missing DESK-15 independent checkpoint validator: $name" }
+            . ([scriptblock]::Create($match.Value))
+          }
+          foreach ($token in @('Check-TrustedCheckpoint $guestCheckpoint $TrustedCheckpointPath $root',
+                               'Checked-ExternalEvidence $ExternalCutEvidence $root',
+                               'Power event proof and archived checkpoint must be separate files')) {
+            if (!$source.Contains($token)) { throw "Power-cut Verify can bypass trusted host evidence: $token" }
+          }
+          $root = Join-Path $env:RUNNER_TEMP ('desk15-hostcopy-' + [Guid]::NewGuid().ToString('N'))
+          $trusted = Join-Path $env:RUNNER_TEMP ('desk15-trusted-' + [Guid]::NewGuid().ToString('N'))
+          [void][IO.Directory]::CreateDirectory($root)
+          $guest = Join-Path $root 'checkpoint.txt'
+          $nested = Join-Path $root 'nested\fake-host-copy.txt'
+          [void][IO.Directory]::CreateDirectory((Split-Path -Parent $nested))
+          [IO.File]::WriteAllText($guest,'trial=synthetic')
+          [IO.File]::WriteAllText($trusted,'trial=synthetic')
+          [IO.File]::WriteAllText($nested,'trial=synthetic')
+          function Refuse([scriptblock]$attempt,[string]$caseName) {
+            $rejected = $false
+            try { & $attempt | Out-Null } catch { $rejected = $true }
+            if (!$rejected) { throw "Unsafe DESK-15 trusted evidence accepted: $caseName" }
+          }
+          try {
+            $accepted = Check-TrustedCheckpoint $guest $trusted $root
+            if ($accepted -cne [IO.Path]::GetFullPath($trusted)) {
+              throw 'Valid independent host checkpoint was rejected'
+            }
+            Refuse { Check-TrustedCheckpoint $guest $guest $root } 'guest checkpoint as own archive'
+            Refuse { Check-TrustedCheckpoint $guest $nested $root } 'nested guest file as host archive'
+            [IO.File]::WriteAllText($trusted,'trial=tampered')
+            Refuse { Check-TrustedCheckpoint $guest $trusted $root } 'different archive SHA256'
+            Refuse { Checked-ExternalEvidence $nested $root } 'nested guest path as controller event'
+            Write-Host 'DESK15_TRUSTED_CHECKPOINT_FAIL_CLOSED_PASS'
+          } finally {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $trusted -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Check Win7 SP1 native acceptance harness guard and evidence contract
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $script = Get-Content -LiteralPath 'scripts/akula-win7-sp1-acceptance.ps1' -Raw
           foreach ($required in @('Get-WmiObject Win32_OperatingSystem', 'ServicePackMajorVersion',
+                                   'if ([int]$os.ProductType -ne 1)', 'acceptance_script_sha256=',
                                    'if (-not $DisposableVm)', 'installed_app_and_shiva_hashes=PASS',
                                    'pdf_roundtrip=PASS', 'cover_uncover_20=COMPLETED_REQUIRES_VISUAL_REVIEW',
                                    'Cold-reopened', 'Sha256 $Installer', 'Start-Process -FilePath $Installer')) {
@@ -69,6 +157,71 @@ jobs:
           if ($script -match 'Invoke-WebRequest|Invoke-RestMethod|iex\b|DownloadString') {
             throw 'Win7 acceptance harness must not download or execute network content'
           }
+          # DESK-15 physical acceptance must remain disposable, explicitly
+          # operator-confirmed, and must never claim a real power-cut PASS.
+          $desk15 = Get-Content -LiteralPath 'scripts/akula-desk15-real-windows-acceptance.ps1' -Raw
+          foreach ($required in @('if (-not $DisposableMachine)', 'Get-WmiObject Win32_OperatingSystem',
+                                   'if ([int]$os.ProductType -ne 1)', 'acceptance_script_sha256=',
+                                   'Get-Process -Name', 'Sha256 $exe', 'Wait-Shadow $markerB $app',
+                                   'Check-Acl $shadowB', '$app.Kill()', 'no_auto_overwrite=PASS',
+                                   'restored_second_gui_exact=PASS', 'power_cut=NOT_TESTED',
+                                   'status=PASS_DESK15_REAL_OS_MANUAL_HARD_KILL')) {
+            if (-not $desk15.Contains($required)) { throw "DESK-15 physical acceptance scenario missing: $required" }
+          }
+          if ($desk15 -match 'Invoke-WebRequest|Invoke-RestMethod|iex\b|DownloadString|Get-FileHash|Remove-Item|Stop-Process') {
+            throw 'DESK-15 real-OS acceptance must be Windows PS2-compatible and non-destructive'
+          }
+          $powercut = Get-Content -LiteralPath 'scripts/akula-desk15-powercut-witness.ps1' -Raw
+          foreach ($required in @('if (-not $DisposableMachine)', 'Get-WmiObject Win32_OperatingSystem',
+                                   'if ([int]$os.ProductType -ne 1)', 'boot_ticks=',
+                                   'external_event_proof=PROVIDED_FOR_MANUAL_AUDIT_NOT_INDEPENDENTLY_AUTHENTICATED',
+                                   'No reboot observed', 'source_unchanged_before_restore=PASS',
+                                   'Check-Acl $shadow', 'status=RESTORE_PASS_EXTERNAL_POWER_EVENT_REQUIRES_MANUAL_AUDIT')) {
+            if (-not $powercut.Contains($required)) { throw "DESK-15 powercut witness missing: $required" }
+          }
+          if ($powercut.Contains('Get-Acl -LiteralPath')) { throw 'PowerShell 2.0 has no Get-Acl -LiteralPath' }
+          if ($powercut -match 'Invoke-WebRequest|Invoke-RestMethod|iex\b|DownloadString|Get-FileHash|Remove-Item|Stop-Process|Restart-Computer|Stop-Computer|shutdown\.exe') {
+            throw 'DESK-15 power-cut harness must not control power, fetch code, or delete user data'
+          }
+
+      # A version-only check would mislabel Server 2008 R2 as Win7 SP1,
+      # and Server 2022 as Windows 10/11. Exercise both guards on this hosted
+      # Windows Server 2022 runner, before any test files could be created.
+      - name: Prove real-OS harnesses reject Windows Server editions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $winPs = Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          if (!(Test-Path -LiteralPath $winPs)) { throw 'Windows PowerShell for the negative test is missing' }
+          $missing = Join-Path $env:RUNNER_TEMP 'akula-negative-control-does-not-exist.exe'
+          if (Test-Path -LiteralPath $missing) { throw 'Negative-control fixture unexpectedly exists' }
+          $cases = @(
+            @{ Name = 'WIN7_SP1'; File = 'scripts/akula-win7-sp1-acceptance.ps1';
+               Marker = 'Win7 SP1 acceptance requires a workstation Windows edition';
+               Args = @('-Installer', $missing, '-InstallerAudit', $missing,
+                        '-Provenance', $missing, '-DisposableVm') },
+            @{ Name = 'DESK15'; File = 'scripts/akula-desk15-real-windows-acceptance.ps1';
+               Marker = 'DESK-15 acceptance requires a workstation Windows edition';
+               Args = @('-ExePath', $missing, '-ExpectedSha256', ('0' * 64),
+                        '-DisposableMachine') },
+            @{ Name = 'DESK15_POWERCUT'; File = 'scripts/akula-desk15-powercut-witness.ps1';
+               Marker = 'DESK15 power-cut witness requires a Windows workstation, not Windows Server';
+               Args = @('-Phase', 'Prepare', '-ExePath', $missing,
+                        '-ExpectedSha256', ('0' * 64), '-DisposableMachine') }
+          )
+          foreach ($case in $cases) {
+            $argsList = @('-NoProfile', '-NonInteractive', '-Sta', '-ExecutionPolicy',
+                          'Bypass', '-File', (Join-Path $env:GITHUB_WORKSPACE $case.File)) + $case.Args
+            $output = (& $winPs @argsList 2>&1 | Out-String)
+            if ($LASTEXITCODE -eq 0 -or !$output.Contains($case.Marker)) {
+              throw "Unsafe real-OS acceptance guard: $($case.Name) exited $LASTEXITCODE; $output"
+            }
+            Write-Host "$($case.Name)_SERVER_EDITION_NEGATIVE_PASS"
+          }
+          # The two expected child-process failures leave LASTEXITCODE=1.
+          # Clear it only AFTER both fail-closed assertions passed, otherwise
+          # the GitHub pwsh wrapper incorrectly fails this step.
+          $global:LASTEXITCODE = 0
 
       - name: Verify fail-closed COM import staging decisions
         shell: pwsh
@@ -293,6 +446,8 @@ jobs:
             win7-lab-output/Akula-Win7-LAB-portable.zip
             win7-lab-output/PROVENANCE.txt
             scripts/akula-win7-sp1-acceptance.ps1
+            scripts/akula-desk15-real-windows-acceptance.ps1
+            scripts/akula-desk15-powercut-witness.ps1
             win7-lab-output/pe-audit/full-audit.md
             win7-lab-output/pe-audit/full-audit.json
             dist/Akula_*-setup.exe

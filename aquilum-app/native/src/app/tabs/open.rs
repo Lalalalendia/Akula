@@ -1,5 +1,8 @@
 mod readonly;
+mod open_in;
 mod docx;
+#[cfg(feature = "dicom-preview")]
+mod dicom;
 use std::path::{Path, PathBuf};
 use aquilum_core::search::paths::{is_markdown, is_plain_text};
 use masonry::app::RenderRoot;
@@ -14,7 +17,6 @@ fn is_structured_file(path: &Path) -> bool {
 }
 const MAX_INACTIVE_NOTES: usize = 2;
 const MAX_INACTIVE_BYTES: usize = 8 * 1024 * 1024;
-
 /// Clean text only. A cached Rope is *never* authoritative without comparing
 /// its raw-file BLAKE3 digest against the actual bytes on every reopening.
 pub(in crate::app) struct CachedNote {
@@ -63,6 +65,8 @@ fn record_stage(update: impl FnOnce(&mut TabSwitchStages)) {
 
 impl App {
     pub(in crate::app) fn show_active(&mut self, root: &mut RenderRoot) {
+        #[cfg(feature = "dicom-preview")]
+        dicom::retain_dicom_grants(&mut self.dicom_external_sources, &self.tabs);
         // Closing/renaming a tab also invalidates any cached text associated
         // with its old identity; workspace switches clear the cache outright.
         self.inactive_notes.retain(|entry| {
@@ -126,6 +130,8 @@ impl App {
             self.show_page(root, 0);
             return;
         }
+        #[cfg(feature = "dicom-preview")]
+        if crate::dicom::is_candidate(&path) || self.dicom_external_sources.contains(&path) { return self.show_dicom_tab(root, path); }
         if crate::docx::is_docx_path(&path) { return self.show_docx_tab(root, path); }
         if is_structured_file(&path) {
             self.leave_note();
@@ -160,7 +166,6 @@ impl App {
         self.leave_note();
         #[cfg(test)]
         record_stage(|s| s.leave = started.elapsed());
-
         let read = aq_trace::zone("открытие: чтение файла");
         #[cfg(test)]
         let started = std::time::Instant::now();
@@ -169,7 +174,8 @@ impl App {
         record_stage(|s| s.file_read = started.elapsed());
         drop(read);
         match opened {
-            Ok((note, text)) => {
+            Ok((mut note, text)) => {
+                self.arm_note_recovery(&mut note);
                 self.open_error = None;
                 self.open_error_ids = None;
                 self.text = text;
@@ -201,7 +207,7 @@ impl App {
     pub(in crate::app) fn show_open_error(&mut self, root: &mut RenderRoot, path: &Path, error: &str) {
         self.note = None;
         self.note_ids = None;
-        self.embeds = None;
+        self.embeds = None; self.open_error = Some((path.to_path_buf(), error.to_owned()));
         let (page, ids) = crate::ui::note::open_error_page(path, error);
         self.open_error_ids = Some(ids);
         if let Some(chrome) = &self.chrome {
@@ -313,31 +319,6 @@ impl App {
         self.open_in_with_offset(root, path, new_tab, None)
     }
 
-    pub(crate) fn open_in_with_offset(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool, offset: Option<usize>) -> bool {
-        let image = crate::images::kind(&path.to_string_lossy()) == Some(crate::images::MediaKind::Image);
-        if !image && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) && !crate::docx::is_docx_path(&path) {
-            return false;
-        }
-        // Validate the image before changing tabs or navigation: no paths
-        // outside this vault, symlinks, oversized or corrupt sources.
-        if image && self.tree.root().and_then(|vault| super::super::media::local_image_preview(vault, &path)).is_none() {
-            return false;
-        }
-        if crate::docx::is_docx_path(&path) && self.tree.root().and_then(|v| crate::docx::admit(v, &path).ok()).is_none() { return false; }
-        if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {
-            self.navigation.push(&current);
-        }
-        self.navigation.push(&path);
-        self.pending_reveal = offset;
-        if new_tab {
-            self.tabs.open_new(path);
-        } else {
-            self.tabs.open(path);
-        }
-        self.show_active(root);
-        true
-    }
-
     pub(in crate::app) fn new_tab(&mut self, root: &mut RenderRoot) -> Outcome {
         self.tabs.new_tab();
         self.show_active(root);
@@ -345,6 +326,7 @@ impl App {
     }
 
     pub(in crate::app) fn close_active_tab(&mut self, root: &mut RenderRoot) -> Outcome {
+        if self.canvas_dirty_active() { self.canvas_notify(root, "Canvas has unsaved changes. Save it before closing."); return Outcome::default(); }
         self.tabs.close(self.tabs.active_id());
         self.show_active(root);
         Outcome { title: true, ..Outcome::default() }

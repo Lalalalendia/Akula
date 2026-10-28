@@ -11,7 +11,7 @@ const PANE_ID: &str = "main";
 
 pub struct Session {
     root: PathBuf,
-    workspace_id: Uuid,
+    pub(crate) workspace_id: Uuid,
     epoch: Uuid,
     sequence: i64,
     pub camera: Option<(f64, f64, f64)>,

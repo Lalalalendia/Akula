@@ -1,4 +1,4 @@
-include!("search_journey.rs");
+use super::*;
 
 impl Harness {
     pub(super) fn type_search(&mut self, text: &str) {

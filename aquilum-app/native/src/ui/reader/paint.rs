@@ -11,7 +11,7 @@ impl ReaderView {
         painter.stroke(&Segment::new((0.0, border), (window.width(), border)), &Stroke::new(size::BORDER_1), tm.border_subtle).draw();
 
         let line = Self::line_height();
-        let side = size::SPACE_12 + size::SIZE_32 * 2.0 + size::SPACE_4 + size::SPACE_12;
+        let side = size::SPACE_12 + size::SIZE_32 * 3.0 + size::SPACE_4 * 2.0 + size::SPACE_12;
         let inner = (window.width() - side * 2.0).max(1.0);
         let top = ((self.header - line * 2.0 - size::SPACE_2) / 2.0).round();
         let title = if self.title.is_empty() { t("reader.book") } else { self.title.clone() };
