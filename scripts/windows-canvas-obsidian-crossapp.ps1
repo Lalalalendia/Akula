@@ -139,9 +139,10 @@ function Record([string]$Phase, [hashtable]$Observation, [string]$Shot) {
     [IO.File]::WriteAllText((Join-Path $evidence 'report.json'),
         (ConvertTo-Json $report -Depth 12), [Text.UTF8Encoding]::new($false))
 }
-# Every CLI eval has a unique marker, because concurrent Obsidian CLI output may interleave.
-# We accept only the matching raw console line, not another invocation's => return value.
-$obsidianStateCode = '(function(){const l=app.workspace.activeLeaf;const v=l&&l.view;const c=v&&v.canvas;const r=v&&v.containerEl;const state={viewType:v&&v.getViewType(),path:v&&v.file&&v.file.path,nodes:c&&c.nodes&&c.nodes.size,edges:c&&c.edges&&c.edges.size,domNodes:r&&r.querySelectorAll(".canvas-node").length};const result="__C5_MARKER__"+JSON.stringify(state);console.log(result);return result;})()'
+# Each Obsidian CLI eval returns a uniquely tagged string. The public CLI
+# returns the result of eval, not a guaranteed stream of console.log messages.
+# Accept only this invocation's marker, never a stale or unrelated CLI answer.
+$obsidianStateCode = '(function(){const l=app.workspace.activeLeaf;const v=l&&l.view;const c=v&&v.canvas;const r=v&&v.containerEl;const state={viewType:v&&v.getViewType(),path:v&&v.file&&v.file.path,nodes:c&&c.nodes&&c.nodes.size,edges:c&&c.edges&&c.edges.size,domNodes:r&&r.querySelectorAll(".canvas-node").length};return "__C5_MARKER__"+JSON.stringify(state);})()'
 function Get-ObsidianCanvas([int]$N, [int]$E, [switch]$AlreadyOpen) {
     # Never call 'open' while an operator's Canvas edit could still be saving.
     # For the edited phase, observe the already active native Canvas view.
@@ -150,9 +151,17 @@ function Get-ObsidianCanvas([int]$N, [int]$E, [switch]$AlreadyOpen) {
         $marker = 'AKULA_C5_STATE_' + [Guid]::NewGuid().ToString('N') + ':'
         $code = $obsidianStateCode.Replace('__C5_MARKER__', $marker)
         $out = Invoke-Obsidian -CliArgs @('eval',"code=$code")
-        $matchesForCall = @([regex]::Matches($out, '(?m)^' + [regex]::Escape($marker) + '(\{[^\r\n]*\})\r?$'))
-        if ($matchesForCall.Count -eq 1) {
-            $state = $matchesForCall[0].Groups[1].Value | ConvertFrom-Json
+        $raw = $out.Trim()
+        # Some CLI output serializers quote a returned string as JSON text.
+        # Decode that form once, but never parse unrelated console messages.
+        if ($raw.StartsWith('"') -and $raw.EndsWith('"')) {
+            $decoded = ConvertFrom-Json -InputObject $raw -ErrorAction Stop
+            if ($decoded -isnot [string]) { throw 'Obsidian eval returned a non-string result' }
+            $raw = $decoded
+        }
+        if ($raw.StartsWith($marker, [StringComparison]::Ordinal)) {
+            $jsonResult = $raw.Substring($marker.Length)
+            $state = ConvertFrom-Json -InputObject $jsonResult -ErrorAction Stop
             if ($state.viewType -eq 'canvas' -and $state.path -eq 'reference.canvas' -and
                 $state.nodes -eq $N -and $state.edges -eq $E -and $state.domNodes -eq $N) {
                 return $state
