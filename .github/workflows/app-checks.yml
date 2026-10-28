@@ -337,6 +337,8 @@ jobs:
             aquilum-app/core/src/documents/canvas_crdt_lab.rs \
             aquilum-app/core/src/documents/replica.rs \
             aquilum-app/core/src/documents/mod.rs \
+            aquilum-app/core/src/files/structured/session.rs \
+            aquilum-app/core/src/files/structured/session/crdt_bridge.rs \
             aquilum-app/core/Cargo.toml; then
             echo 'Canvas CRDT lab unchanged'
           else
@@ -346,6 +348,12 @@ jobs:
             grep -Fq 'test result: ok. 6 passed; 0 failed;' \
               "$RUNNER_TEMP/akula-canvas-crdt-lab.log"
             echo 'AKULA_CANVAS_CRDT_LAB_PASS six_offline_tests=1'
+            cargo test --locked -p aquilum-core --lib --features canvas-crdt-lab \
+              files::structured::session::crdt_bridge::tests:: -- --nocapture \
+              2>&1 | tee "$RUNNER_TEMP/akula-canvas-crdt-bridge.log"
+            grep -Fq 'test result: ok. 7 passed; 0 failed;' \
+              "$RUNNER_TEMP/akula-canvas-crdt-bridge.log"
+            echo 'AKULA_CANVAS_CRDT_BRIDGE_PASS seven_session_tests=1'
           fi
 
       - name: Run full Rust workspace and sync-engine tests
