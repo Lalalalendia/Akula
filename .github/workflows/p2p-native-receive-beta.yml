@@ -53,6 +53,7 @@ jobs:
           rustfmt --check --config skip_children=true --edition 2024 aquilum-app/native/src/app/transfer/inbox.rs aquilum-app/native/src/app/transfer/inbox/import.rs aquilum-app/native/src/app/transfer/inbox/tests.rs
           rustfmt --check --config skip_children=true --edition 2024 aquilum-app/native/src/app/transfer/inbox/list.rs aquilum-app/native/src/app/transfer/inbox/import/tests.rs
           rustfmt --check --config skip_children=true --edition 2021 modules/drop-inbox-ledger/src/import_audit.rs
+          rustfmt --check --config skip_children=true --edition 2021 modules/drop-inbox-ledger/src/removal_audit.rs
           rustfmt --check --config skip_children=true --edition 2024 aquilum-app/native/src/ui/transfer/inbox_view.rs aquilum-app/native/src/ui/transfer/inbox_view/render.rs
           rustfmt --check --config skip_children=true --edition 2021 aquilum-app/core/src/sync/p2p_stage.rs aquilum-app/core/src/p2p_inbox_lab/tests.rs
           rustfmt --check --config skip_children=true --edition 2021 aquilum-app/core/src/p2p_inbox_lab/file_gate.rs
@@ -111,6 +112,7 @@ jobs:
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab sync::p2p_stage::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
           cargo test --manifest-path modules/drop-inbox-ledger/Cargo.toml import_audit -- --nocapture
+          cargo test --manifest-path modules/drop-inbox-ledger/Cargo.toml removal_audit -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::file_gate::tests -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta actual_iroh_native_received_inbox_only_roundtrip_without_user_credentials -- --nocapture
       - name: Verify explicit synthetic n0 Internet file to reopened Inbox
