@@ -179,6 +179,7 @@ const OWNED_SUITES=Object.freeze({
     ".github/scripts/windows-beta-identity.test.cjs",
     "scripts/test-windows-beta.ps1",
     "scripts/windows-canvas-installed-uia.ps1",
+    "scripts/windows-canvas-obsidian-crossapp.ps1",
     "aquilum-app/core/tests/fixtures/jsoncanvas/official-sample.canvas",
     "scripts/build-windows-update-fixture.ps1",
     "scripts/test-windows-beta-upgrade.ps1",
