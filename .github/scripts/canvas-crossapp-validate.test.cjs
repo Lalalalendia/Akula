@@ -73,10 +73,14 @@ test('C5 Windows collector keeps a single GUI flow and fail-closed disk/CLI guar
     '../../scripts/windows-canvas-obsidian-crossapp.ps1'),'utf8');
   for(const name of [
     'Invoke-Obsidian','Get-ObsidianCanvas','Capture-Obsidian','Get-AkulaCanvas',
-    'Capture-Akula','Wait-CanvasOnDisk','Close-Akula']){
+    'Capture-Akula','Wait-CanvasOnDisk','Close-Akula','Save-ObsidianScreenshot']){
     assert.equal(source.split('function '+name).length-1,1,
       'duplicated or missing PowerShell collector function '+name);
   }
+  assert.match(source,/Save-ObsidianScreenshot \$png/,'capture must decode returned screenshot');
+  assert.match(source,/FromBase64String\(\$value\)/,'decode CLI base64 PNG');
+  assert.match(source,/Obsidian screenshot did not return bounded PNG base64 data/);
+  assert.doesNotMatch(source,/@\('dev:screenshot',\s*"path=/,'absolute CLI output paths are not reliable');
   assert.match(source,/AKULA_C5_STATE_/,'CLI eval must use per-call marker');
   assert.match(source,/StartsWith\(\$marker/,'CLI response must be correlated');
   assert.doesNotMatch(source,/console\.log\(result\)/,'CLI eval result must not depend on console output');
