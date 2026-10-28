@@ -8,8 +8,12 @@ impl InboxPreview {
         let outcome = self.import_rx.as_ref().map(|receiver| receiver.try_recv());
         match outcome {
             Some(Ok(Ok(Some(receipt)))) => {
-                if let Some(row) = self.view.rows.iter_mut()
-                    .find(|row| row.id == receipt.hyphenated().to_string()) {
+                if let Some(row) = self
+                    .view
+                    .rows
+                    .iter_mut()
+                    .find(|row| row.id == receipt.hyphenated().to_string())
+                {
                     row.import_audit_key = Some("transfer.inboxAuditVerified");
                 }
                 self.view.importing = false;
@@ -42,15 +46,11 @@ impl App {
         {
             return false;
         }
-        if !self
-            .transfer
-            .inbox
-            .view
-            .rows
-            .iter()
-            .any(|row| row.id == receipt && row.status_key == "transfer.inboxVerified"
-                && row.import_audit_key.is_none())
-        {
+        if !self.transfer.inbox.view.rows.iter().any(|row| {
+            row.id == receipt
+                && row.status_key == "transfer.inboxVerified"
+                && row.import_audit_key.is_none()
+        }) {
             return false;
         }
         let Ok(id) = Uuid::parse_str(receipt) else {
@@ -119,9 +119,11 @@ fn import_checked_into_vault(
     .map_err(|error| format!("Vault File Gate import refused: {error}"))?;
     let audit = InboxLedger::open(root)
         .map_err(|error| format!("Vault file may exist; Inbox audit unavailable: {error:?}"))?;
-    audit.record_imported(receipt, &destination).map_err(|error| {
-        format!("Vault file may exist; import requires manual review: {error:?}")
-    })?;
+    audit
+        .record_imported(receipt, &destination)
+        .map_err(|error| {
+            format!("Vault file may exist; import requires manual review: {error:?}")
+        })?;
     Ok(destination)
 }
 
