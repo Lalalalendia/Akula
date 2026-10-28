@@ -1,14 +1,14 @@
 use masonry::kurbo::{Axis, Point};
-use masonry::parley::Cursor;
 
 use super::model::{Range2, Table};
-use super::view::{Cell, Hit, Line, Overlay, TableView};
+use super::view::{Hit, Line, Overlay, TableView};
 use crate::ui::scroll::bar::Scrollbar;
 
 mod drag;
 mod edit;
 mod nav;
 mod press;
+mod text;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Drag {
@@ -24,6 +24,7 @@ pub struct Session {
     pub active: Option<(usize, usize)>,
     pub caret: usize,
     pub anchor: usize,
+    pub compose: Option<std::ops::Range<usize>>,
     pub range: Option<Range2>,
     pub range_anchor: Option<(usize, usize)>,
     pub drag: Drag,
@@ -44,13 +45,9 @@ pub enum Outcome {
     Copy(String),
 }
 
-pub(super) fn caret_in(cell: &Cell, value: &str, at: Point) -> usize {
-    value.floor_char_boundary(Cursor::from_point(&cell.layout, at.x as f32, at.y as f32).index())
-}
-
 impl Session {
     pub fn new(start: usize) -> Self {
-        Session { start, active: None, caret: 0, anchor: 0, range: None, range_anchor: None, drag: Drag::None, hover: None, scroll_x: 0.0, line: Line::None, menu_cell: None, bar: Scrollbar::new(Axis::Horizontal) }
+        Session { start, active: None, caret: 0, anchor: 0, compose: None, range: None, range_anchor: None, drag: Drag::None, hover: None, scroll_x: 0.0, line: Line::None, menu_cell: None, bar: Scrollbar::new(Axis::Horizontal) }
     }
 
     pub fn overlay(&self, hovered: bool) -> Overlay {
@@ -63,6 +60,7 @@ impl Session {
         self.range_anchor = None;
         self.caret = caret;
         self.anchor = caret;
+        self.compose = None;
     }
 
     fn activate(&mut self, view: &TableView, r: usize, c: usize, at: Option<Point>) {
@@ -77,6 +75,7 @@ impl Session {
 
     fn select(&mut self, view: &TableView, range: Range2) {
         self.active = None;
+        self.compose = None;
         self.range = Some(view.model.expand(range));
     }
 
