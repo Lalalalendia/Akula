@@ -68,7 +68,7 @@ jobs:
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           key: akula-windows-publisher-candidate
-      - name: Reject signed installed builds without user-invoked P2P
+      - name: Hold unaccepted P2P outside signed installed builds
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -76,10 +76,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installed feature metadata failed' }
           $native = @($metadata.packages | Where-Object { $_.name -eq 'aquilum-native' })
           if ($native.Count -ne 1) { throw 'Native Akula package not uniquely identified' }
-          if (@($native[0].features.installed) -cnotcontains 'p2p-native-receive-beta') {
-            throw 'Signed installed Akula unexpectedly omits user-invoked P2P receiving'
+          $features = @($native[0].features.installed)
+          if (@($features | Where-Object { $_ -match '^p2p-(native|inbox|device)' }).Count -ne 0) {
+            throw 'Internet P2P B1-B5 not accepted: beta features may not ship by default'
           }
-          Write-Host 'AKULA_SIGNED_INSTALLED_P2P_FEATURE_PRESENT=true'
+          Write-Host 'AKULA_SIGNED_INSTALLED_P2P_RELEASE_HOLD=1'
 
       - name: Install pinned NSIS packager
         run: cargo install cargo-packager --version 0.11.8 --locked
