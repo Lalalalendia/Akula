@@ -1,7 +1,9 @@
 //! Verified Inbox UI: explicit local user actions only.
 use super::super::*;
 
-pub(in crate::ui::transfer) fn render(view: &InboxView) -> (NewWidget<Flex>, Vec<(WidgetId, InboxAction)>) {
+pub(in crate::ui::transfer) fn render(
+    view: &InboxView,
+) -> (NewWidget<Flex>, Vec<(WidgetId, InboxAction)>) {
     let mut panel = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch);
     let mut actions = Vec::new();
     if view.loading {
@@ -42,9 +44,8 @@ pub(in crate::ui::transfer) fn render(view: &InboxView) -> (NewWidget<Flex>, Vec
                 entry = entry.with_fixed(save);
                 #[cfg(windows)]
                 {
-                    let import = NewWidget::new(TextButton::new(
-                        t("transfer.inboxImport"), Variant::Ghost,
-                    ));
+                    let import =
+                        NewWidget::new(TextButton::new(t("transfer.inboxImport"), Variant::Ghost));
                     actions.push((import.id(), InboxAction::Import(received.id.clone())));
                     entry = entry.with_fixed(import);
                 }
