@@ -23,7 +23,7 @@ pub(super) fn validate(path: &Path) -> io::Result<()> {
 
 /// The File retains the lock through quota admission, sync and publication.
 /// A timeout fails closed instead of blocking the disk worker forever.
-pub(super) fn acquire(bucket: &Path) -> io::Result<File> {
+pub(in crate::note::recovery) fn acquire(bucket: &Path) -> io::Result<File> {
     let root = bucket.parent().ok_or_else(|| invalid("missing recovery root"))?;
     let path = root.join(FILENAME);
     let mut options = OpenOptions::new();
