@@ -27,7 +27,7 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 
 [features]
 # Public install includes read-only Dropbox authorization; cloud writes remain disabled.
-installed = ["dropbox-readonly-preview", "server-readonly-preflight", "p2p-native-receive-beta"]
+installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
 messaging-w4-pilot = []
 memory-probe = []
 # User-visible Windows read-only SSH verification. No install grant.
@@ -36,7 +36,8 @@ server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
 p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
 # Opt-in local Iroh public identity UI; uses the same protected peer contacts.
 p2p-device-ui = ["p2p-device-contacts-preview"]
-# Explicit one-file P2P: started only by user action. No background listener.
+# QA-only one-file P2P (B1-B5 Internet Inbox gates remain HOLD); NOT in installed.
+# Actions run only on explicit clicks; no background listener.
 p2p-inbox-preview = ["dep:akula-inbox-ledger-lab", "aquilum-core/p2p-inbox-lab"]
 p2p-native-send-beta = ["p2p-inbox-preview", "p2p-device-ui", "dep:akula-staya-integration", "dep:tokio"]
 p2p-native-receive-beta = ["p2p-native-send-beta"]
