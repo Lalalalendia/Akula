@@ -1,11 +1,9 @@
 use masonry::app::RenderRoot;
-
 use super::{App, VersionCommand};
 use crate::history::{self, Version};
 use crate::i18n::t;
 use crate::ui::backlinks::{self, VersionView};
 use crate::ui::widgets::Slot;
-
 impl App {
     pub(in crate::app) fn open_version(&mut self, root: &mut RenderRoot, version: Version) {
         self.opened_versions.insert(self.tabs.active_id(), version);
@@ -13,7 +11,6 @@ impl App {
         self.show_version(root);
         self.render_history(root);
     }
-
     pub(in crate::app) fn show_version(&mut self, root: &mut RenderRoot) -> bool {
         let Some(version) = self.opened_versions.get(&self.tabs.active_id()).cloned() else { return false };
         let Some(path) = self.tabs.active().path.clone() else { return false };
@@ -51,11 +48,14 @@ impl App {
         self.show_page(root, 0);
         self.render_history(root);
     }
-
     pub(super) fn run_version_command(&mut self, root: &mut RenderRoot, version: &Version, command: VersionCommand) {
         let Some(path) = self.tabs.active().path.clone() else { return };
-        if let Some(note) = &mut self.note {
-            note.flush(&self.workspace.core, &self.text);
+        if let Some(note) = &mut self.note
+            && !super::guard::flush_clean(note, &self.workspace.core, &self.text)
+        {
+            self.version_notice = Some(t("history.actionFailed"));
+            self.show_version(root);
+            return;
         }
         let result = match command {
             VersionCommand::Restore => history::restore(&self.workspace.core, &path, version),
