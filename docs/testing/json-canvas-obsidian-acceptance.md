@@ -92,6 +92,59 @@ The evidence directory contains `00-original.canvas`,
 is still mandatory for connection visibility, geometry, text, missing file
 placeholders, and z-order; UIA counts alone are not pixel proof.
 
+
+### Machine evidence is not visual acceptance
+
+At the end of the guided collector, the Node validator prints
+`AKULA_C5_OBSIDIAN_MACHINE_EVIDENCE_PASS` and
+`AKULA_C5_OBSIDIAN_VISUAL_REVIEW_PENDING`. **Neither of these
+markers permits C5 to be marked Cross-app verified.** Hashes, PNG headers
+and DOM/UIA counters do not establish that cards, text, file placeholders,
+edge geometry and layer ordering actually look correct.
+
+Open and inspect **all five PNGs** in the generated evidence directory, and
+review the three saved Canvas files. When the screenshot or file inspection
+finds any problem, record FAIL in Notion and retain the evidence; do not
+write a passing review. After all checks pass, create
+`visual-review.json` *in the evidence directory* with the schema:
+
+```json
+{
+  "reviewer": "name or review identifier",
+  "reviewedAtUtc": "2026-10-28T12:00:00Z",
+  "phases": {
+    "obsidian_initial": { "screenshotSha256": "<copy from report.json>", "visualPass": true },
+    "akula_edited": { "screenshotSha256": "<copy from report.json>", "visualPass": true },
+    "obsidian_reopened": { "screenshotSha256": "<copy from report.json>", "visualPass": true },
+    "obsidian_edited": { "screenshotSha256": "<copy from report.json>", "visualPass": true },
+    "akula_reopened": { "screenshotSha256": "<copy from report.json>", "visualPass": true }
+  },
+  "checks": {
+    "readableText": true,
+    "visibleObjects": true,
+    "visibleConnections": true,
+    "groupLayering": true,
+    "filePlaceholders": true
+  }
+}
+```
+
+The timestamp is an example; replace it with the actual review time. Copy
+each phase's exact screenshot SHA-256 from `report.json`. Never
+write `visualPass: true` or any positive check without inspecting
+the corresponding image.
+
+Rerun:
+
+```powershell
+node scripts/canvas-crossapp-validate.cjs $proof aquilum-app/core/tests/fixtures/jsoncanvas/official-sample.canvas
+```
+
+Only then may the validator emit `AKULA_C5_OBSIDIAN_CROSSAPP_PASS`
+bound to the exact screenshot digests. Human attestation is evidence of a
+review, not independent proof of GUI execution. Keep versions, screenshots,
+source revisions and a reviewer reference in Notion.
+
 The guided GUI process does **not** run in required GitHub CI. The separate
 Node validator unit tests can run without Obsidian and never establish
 two-app compatibility by themselves:
