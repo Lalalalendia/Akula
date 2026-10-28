@@ -22,7 +22,7 @@ mod tests {
     fn a_conflicting_editor_save_blocks_history_restore_before_disk_rewrite() {
         let vault = crate::test_dir::tempdir();
         let data = crate::test_dir::tempdir();
-        let core = Arc::new(Core::open(data.path(), Arc::new(|_| {})));
+        let core = Core::open(data.path(), Arc::new(|_| {}));
         core.ui_state.resolve_workspace(&vault.path().to_string_lossy(), 0).unwrap();
         let path = vault.path().join("history-guard.md");
         std::fs::write(&path, "original").unwrap();
@@ -41,7 +41,7 @@ mod tests {
     fn a_successful_flush_allows_history_operation_without_dropping_text() {
         let vault = crate::test_dir::tempdir();
         let data = crate::test_dir::tempdir();
-        let core = Arc::new(Core::open(data.path(), Arc::new(|_| {})));
+        let core = Core::open(data.path(), Arc::new(|_| {}));
         core.ui_state.resolve_workspace(&vault.path().to_string_lossy(), 0).unwrap();
         let path = vault.path().join("history-ready.md");
         std::fs::write(&path, "original").unwrap();
