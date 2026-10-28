@@ -1,6 +1,5 @@
-//! Staged DESK-15 primitive: integrity-checked, no-overwrite recovery candidates.
-//! NOT wired to note edits or startup yet. The record is not an authenticated
-//! signature and cannot prove zero data loss before its durable-write ACK.
+//! Integrity-checked, no-overwrite DESK-15 recovery candidates.
+//! No zero-loss guarantee before a durable-write acknowledgment.
 #![allow(dead_code)]
 mod queue;
 mod pending;
@@ -204,6 +203,7 @@ pub(super) fn stage(
     }
     let relative = checked_relative(vault, document)?;
     let bucket = folder(data, workspace, true)?.ok_or_else(|| invalid("missing recovery directory"))?;
+    let _quota_lock = quota::acquire(&bucket)?;
     pending::clean_stale(&bucket)?;
     let prefix = format!("{}-", key(&relative));
     // Refuse the 257th revision before writing; preserve older drafts.

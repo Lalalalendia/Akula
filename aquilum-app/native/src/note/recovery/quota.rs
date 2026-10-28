@@ -1,8 +1,8 @@
-//! Conservative AppData snapshot admission, not an OS filesystem quota.
-//! Independent processes can race; a cross-process lock is a separate gate.
+//! Cooperative cross-process admission, not an OS-enforced disk quota.
+mod lock;
+pub(super) use lock::acquire;
 use std::{fs, io, path::Path};
 use uuid::Uuid;
-
 use super::{denied, invalid, reparse};
 
 pub(super) const MAX_WORKSPACE_BYTES: u64 = 128 * 1024 * 1024;
@@ -29,7 +29,6 @@ fn within_budget(local: u64, global: u64, incoming: u64) -> io::Result<()> {
     Ok(())
 }
 
-/// Check published and in-progress records before creating a new pending file.
 /// Refuse excess capacity; never delete existing backups to make room.
 pub(super) fn admit(bucket: &Path, incoming: usize) -> io::Result<()> {
     let root = bucket.parent().ok_or_else(|| invalid("recovery workspace has no parent"))?;
@@ -39,6 +38,7 @@ pub(super) fn admit(bucket: &Path, incoming: usize) -> io::Result<()> {
         let workspace = workspace?;
         let name = workspace.file_name();
         let name = name.to_str().ok_or_else(|| invalid("non-UTF8 recovery workspace"))?;
+        if name == lock::FILENAME { lock::validate(&workspace.path())?; continue; }
         if !Uuid::parse_str(name).is_ok_and(|uuid| uuid.to_string() == name) {
             return Err(denied("unrecognized recovery workspace directory"));
         }
