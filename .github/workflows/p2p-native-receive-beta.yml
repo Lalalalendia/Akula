@@ -5,7 +5,6 @@ on:
     branches:
       - feature/ak-p2p-native-receive-onefile-20261024
       - feature/ak-p2p-installed-main-integration-20261024
-      - integration/p2p-main-reconcile-20261028
     paths:
       - 'interop/akula-staya/**'
       - 'aquilum-app/native/src/app/transfer/**'
