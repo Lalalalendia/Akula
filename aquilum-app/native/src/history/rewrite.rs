@@ -10,6 +10,7 @@ use aquilum_core::history::Source;
 use super::Version;
 #[cfg(test)]
 mod conflict_tests;
+mod exact_hash;
 const WRITE_RETRIES: usize = 3;
 
 pub struct Texts {
@@ -21,10 +22,11 @@ pub fn texts(core: &Core, note: &Path, id: &str) -> Option<Texts> {
     Some(Texts { text: texts.text, previous: texts.previous })
 }
 
-fn rewrite(core: &Core, note: &Path, source: Source, retry_conflicts: bool, next: impl Fn(&str) -> String) -> Result<bool, FileCommandError> {
+fn rewrite(core: &Core, note: &Path, source: Source, retry_conflicts: bool, expected: Option<&str>, next: impl Fn(&str) -> String) -> Result<bool, FileCommandError> {
     let mut conflicts = 0;
     loop {
         let snapshot = read_file_snapshot_impl(note)?;
+        exact_hash::require_expected(expected, &snapshot.hash)?;
         let content = next(&snapshot.content);
         if content == snapshot.content {
             return Ok(false);
@@ -36,15 +38,13 @@ fn rewrite(core: &Core, note: &Path, source: Source, retry_conflicts: bool, next
         }
     }
 }
-
-pub fn restore(core: &Core, note: &Path, version: &Version) -> Result<bool, FileCommandError> {
+pub fn restore(core: &Core, note: &Path, version: &Version, expected_hash: &str) -> Result<bool, FileCommandError> {
     let Some(texts) = texts(core, note, &version.id) else { return Ok(false) };
-    rewrite(core, note, Source::Restore(version.at_ms), false, |_| texts.text.clone())
+    rewrite(core, note, Source::Restore(version.at_ms), false, Some(expected_hash), |_| texts.text.clone())
 }
-
 pub fn revert(core: &Core, note: &Path, version: &Version) -> Result<bool, FileCommandError> {
     let Some(Texts { text, previous: Some(previous) }) = texts(core, note, &version.id) else { return Ok(false) };
-    rewrite(core, note, Source::Revert(version.at_ms), true, |current| {
+    rewrite(core, note, Source::Revert(version.at_ms), true, None, |current| {
         let merged = merge_external_change(&text, &previous, current);
         aquilum_core::documents::merge::apply_edits(current, &merged.edits)
     })
