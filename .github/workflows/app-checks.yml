@@ -337,6 +337,8 @@ jobs:
             aquilum-app/core/src/documents/canvas_crdt_lab.rs \
             aquilum-app/core/src/documents/replica.rs \
             aquilum-app/core/src/documents/mod.rs \
+            aquilum-app/core/src/canvas_p2p_wire_lab.rs \
+            aquilum-app/core/src/lib.rs \
             aquilum-app/core/src/files/structured/session.rs \
             aquilum-app/core/src/files/structured/session/crdt_bridge.rs \
             aquilum-app/core/Cargo.toml; then
@@ -354,6 +356,13 @@ jobs:
             grep -Fq 'test result: ok. 7 passed; 0 failed;' \
               "$RUNNER_TEMP/akula-canvas-crdt-bridge.log"
             echo 'AKULA_CANVAS_CRDT_BRIDGE_PASS seven_session_tests=1'
+            # Lab-only frame ingress contract: no sockets and no Yrs network decoder.
+            cargo test --locked -p aquilum-core --lib --features canvas-p2p-wire-lab \
+              canvas_p2p_wire_lab::tests:: -- --nocapture \
+              2>&1 | tee "$RUNNER_TEMP/akula-canvas-p2p-wire-lab.log"
+            grep -Fq 'test result: ok. 10 passed; 0 failed;' \
+              "$RUNNER_TEMP/akula-canvas-p2p-wire-lab.log"
+            echo 'AKULA_CANVAS_P2P_WIRE_PASS ten_preflight_tests=1'
           fi
 
       - name: Run full Rust workspace and sync-engine tests
