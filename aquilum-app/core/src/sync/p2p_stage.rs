@@ -1,12 +1,14 @@
 #![cfg(all(windows, feature = "p2p-inbox-lab"))]
-// Handle-relative P2P stage inside Core's existing Windows sync custody boundary.
-// The later SQLite/object publication still needs a separate custody check.
+// Pinned P2P stage. SQLite publication still requires independent custody.
 use super::{filegate_windows_acl, pinned_windows, VaultPortError};
 use std::{
     fs::{File, OpenOptions},
     os::windows::fs::{MetadataExt, OpenOptionsExt},
     path::Path,
 };
+
+#[cfg(test)]
+mod delete_lab;
 
 pub(crate) fn create_pinned_p2p_inbox_stage(
     root: &Path,
@@ -22,10 +24,7 @@ pub(crate) fn create_pinned_p2p_inbox_stage(
     Ok((writable, stage))
 }
 
-/// Preserve live NT handles to the fixed receiver root, objects directory
-/// and SQLite leaf while the caller reads or publishes. This is a negative
-/// ACL/identity gate; SQLite's ambient pathname/WAL operations are NOT yet
-/// handle-relative, so this is not a proof against hostile ancestor races.
+/// Pin receiver root, objects and SQLite. Not a hostile-race proof.
 pub(crate) fn pin_p2p_read_snapshot(root: &Path) -> Result<(File, File, File), VaultPortError> {
     const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
     const REPARSE_ATTRIBUTE: u32 = 0x0000_0400;
