@@ -86,8 +86,7 @@ impl InboxLedger {
             return Ok(ImportAuditStatus::NeedsReview);
         };
         match self.removal_status(id)? {
-            RemovalAuditStatus::Available
-                if self.status(id)? == LocalStatus::VerifiedLocal => {}
+            RemovalAuditStatus::Available if self.status(id)? == LocalStatus::VerifiedLocal => {}
             RemovalAuditStatus::Removed => {}
             _ => return Ok(ImportAuditStatus::NeedsReview),
         }
