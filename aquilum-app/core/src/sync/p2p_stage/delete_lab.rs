@@ -40,10 +40,7 @@ fn delete_disposable_fixture(
     expected_bytes: u64,
     expected_hash: [u8; 32],
 ) -> Result<(), VaultPortError> {
-    if id.is_nil()
-        || expected_bytes == 0
-        || expected_bytes > MAX_BYTES
-        || expected_hash == [0; 32]
+    if id.is_nil() || expected_bytes == 0 || expected_bytes > MAX_BYTES || expected_hash == [0; 32]
     {
         return Err(VaultPortError::UnsafePath);
     }
@@ -66,7 +63,9 @@ fn delete_disposable_fixture(
     let mut candidate = opts
         .open(root.join("objects").join(&name))
         .map_err(|e| VaultPortError::Io(e.to_string()))?;
-    let meta = candidate.metadata().map_err(|e| VaultPortError::Io(e.to_string()))?;
+    let meta = candidate
+        .metadata()
+        .map_err(|e| VaultPortError::Io(e.to_string()))?;
     if !meta.is_file()
         || meta.file_attributes() & REPARSE_ATTRIBUTE != 0
         || meta.len() != expected_bytes
@@ -78,11 +77,15 @@ fn delete_disposable_fixture(
     let mut hasher = blake3::Hasher::new();
     let mut block = [0u8; 64 * 1024];
     loop {
-        let n = candidate.read(&mut block).map_err(|e| VaultPortError::Io(e.to_string()))?;
+        let n = candidate
+            .read(&mut block)
+            .map_err(|e| VaultPortError::Io(e.to_string()))?;
         if n == 0 {
             break;
         }
-        total = total.checked_add(n as u64).ok_or(VaultPortError::FileChanged)?;
+        total = total
+            .checked_add(n as u64)
+            .ok_or(VaultPortError::FileChanged)?;
         if total > expected_bytes {
             return Err(VaultPortError::FileChanged);
         }
@@ -90,7 +93,10 @@ fn delete_disposable_fixture(
     }
     if total != expected_bytes
         || *hasher.finalize().as_bytes() != expected_hash
-        || candidate.metadata().map_err(|e| VaultPortError::Io(e.to_string()))?.len()
+        || candidate
+            .metadata()
+            .map_err(|e| VaultPortError::Io(e.to_string()))?
+            .len()
             != expected_bytes
         || pinned_windows::file_identity_with_links(&candidate)? != identity
     {
@@ -110,7 +116,9 @@ fn delete_disposable_fixture(
         )
     };
     if ok == 0 {
-        return Err(VaultPortError::Io(std::io::Error::last_os_error().to_string()));
+        return Err(VaultPortError::Io(
+            std::io::Error::last_os_error().to_string(),
+        ));
     }
     drop(candidate);
     // Verify absence using the pinned objects HANDLE. Delete-pending and any
@@ -138,18 +146,27 @@ mod tests {
         let (_temp, root) = fixture();
         let id = Uuid::new_v4();
         let bytes = b"checked fixture";
-        let leaf = root.join("objects").join(format!("{}.blob", id.hyphenated()));
+        let leaf = root
+            .join("objects")
+            .join(format!("{}.blob", id.hyphenated()));
         let other = root.join("objects").join("unrelated");
         fs::write(&leaf, bytes).unwrap();
         fs::write(&other, b"retain").unwrap();
         assert!(delete_disposable_fixture(
-            &root, Uuid::new_v4(), bytes.len() as u64,
+            &root,
+            Uuid::new_v4(),
+            bytes.len() as u64,
             *blake3::hash(bytes).as_bytes(),
-        ).is_err());
+        )
+        .is_err());
         assert_eq!(fs::read(&leaf).unwrap(), bytes);
         delete_disposable_fixture(
-            &root, id, bytes.len() as u64, *blake3::hash(bytes).as_bytes(),
-        ).unwrap();
+            &root,
+            id,
+            bytes.len() as u64,
+            *blake3::hash(bytes).as_bytes(),
+        )
+        .unwrap();
         assert!(!leaf.exists());
         assert_eq!(fs::read(&other).unwrap(), b"retain");
     }
@@ -159,17 +176,27 @@ mod tests {
         let (_temp, root) = fixture();
         let id = Uuid::new_v4();
         let bytes = b"still owned";
-        let leaf = root.join("objects").join(format!("{}.blob", id.hyphenated()));
+        let leaf = root
+            .join("objects")
+            .join(format!("{}.blob", id.hyphenated()));
         fs::write(&leaf, bytes).unwrap();
         assert!(delete_disposable_fixture(&root, id, bytes.len() as u64, [9; 32]).is_err());
         assert!(delete_disposable_fixture(
-            &root, id, bytes.len() as u64 + 1, *blake3::hash(bytes).as_bytes(),
-        ).is_err());
+            &root,
+            id,
+            bytes.len() as u64 + 1,
+            *blake3::hash(bytes).as_bytes(),
+        )
+        .is_err());
         let alias = root.join("objects").join("hard-link");
         fs::hard_link(&leaf, &alias).unwrap();
         assert!(delete_disposable_fixture(
-            &root, id, bytes.len() as u64, *blake3::hash(bytes).as_bytes(),
-        ).is_err());
+            &root,
+            id,
+            bytes.len() as u64,
+            *blake3::hash(bytes).as_bytes(),
+        )
+        .is_err());
         assert_eq!(fs::read(&leaf).unwrap(), bytes);
         assert_eq!(fs::read(&alias).unwrap(), bytes);
     }
