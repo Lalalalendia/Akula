@@ -315,8 +315,9 @@ try {
     }
     Close-Akula $akulaProc; $akulaProc=$null
     & node $validator $evidence $pinned
-    if ($LASTEXITCODE -ne 0) { throw 'Strict cross-app evidence validation FAILED' }
+    if ($LASTEXITCODE -ne 0) { throw 'Strict cross-app machine evidence validation FAILED' }
     Write-Host ('C5_EVIDENCE_DIR '+$evidence)
+    Write-Warning 'C5 machine evidence is collected; inspect all five PNGs and create visual-review.json before cross-app acceptance.'
 } finally {
     if ($null -ne $akulaProc) {
         # Fail closed; do not kill an application containing unsaved user state.
