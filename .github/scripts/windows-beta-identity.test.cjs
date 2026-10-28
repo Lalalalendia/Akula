@@ -172,7 +172,8 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
     'GetWindowThreadProcessId',
     'GetForegroundWindow',
     'Refusing shortcut on nonforeground window',
-    'Only selection/copy shortcuts are authorized',
+    'Only selection/copy/search shortcuts are authorized',
+    'key != 0x41 && key != 0x43 && key != 0x4F',
     'VK_CONTROL',
     'KEYEVENTF_KEYUP',
   ]) {
