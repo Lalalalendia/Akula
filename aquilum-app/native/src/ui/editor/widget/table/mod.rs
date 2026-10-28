@@ -2,6 +2,7 @@ use super::*;
 use crate::ui::editor::embed::View;
 use crate::ui::editor::table::{Command, Outcome, Session, Table, TableView};
 
+mod ime;
 mod keys;
 mod mouse;
 
@@ -98,8 +99,7 @@ impl TextEditor {
         let widget = &mut *this.widget;
         let Some((session, view)) = widget.table_parts() else { return };
         let outcome = session.run(view, command);
-        // Clipboard-only actions must not emit TextAction::Changed, create
-        // undo entries, or notify autosave/history of a fictitious edit.
+        // Clipboard-only actions must not create undo history or notify autosave.
         if let Outcome::Copy(text) = outcome {
             this.ctx.set_clipboard(text);
             return;
