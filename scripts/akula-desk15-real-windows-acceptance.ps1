@@ -111,7 +111,8 @@ if ($LargeDocument) {
 }
 function Record([string]$line) { [IO.File]::AppendAllText($log, $line + [Environment]::NewLine) }
 function Normalized([string]$value) {
-    return ([regex]::Replace($value, '\r\n?', [string][char]10)).TrimEnd([char]10)
+    # Clipboard may use CRLF, but missing or extra trailing newline must fail.
+    return [regex]::Replace($value, '\r\n?', [string][char]10)
 }
 function Prompt-Pass([string]$instruction) {
     Write-Host $instruction

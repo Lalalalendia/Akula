@@ -8,7 +8,8 @@ param(
   [Parameter(Mandatory=$true)][string]$ExpectedSha256,
   [switch]$DisposableMachine,
   [string]$EvidenceDir,
-  [string]$ExternalCutEvidence
+  [string]$ExternalCutEvidence,
+  [string]$TrustedCheckpointPath
 )
 $ErrorActionPreference = 'Stop'
 if (-not $DisposableMachine) { throw 'A disposable QA workstation or VM is required' }
@@ -61,7 +62,8 @@ function Require-Operator([string]$message) {
     }
 }
 function Normalize([string]$text) {
-    return ([regex]::Replace($text,'\r\n?',[string][char]10)).TrimEnd([char]10)
+    # Normalize CRLF/CR to LF only; do not silently discard trailing lines.
+    return [regex]::Replace($text,'\r\n?',[string][char]10)
 }
 function Log([string]$message) {
     [IO.File]::AppendAllText($log,$message+[Environment]::NewLine,$utf8)
@@ -123,6 +125,30 @@ function Wait-Shadow([Diagnostics.Process]$process) {
     }
     throw 'No published shadow for dirty synthetic marker'
 }
+function Checked-ExternalEvidence([string]$path,[string]$trialRoot) {
+    $full = [IO.Path]::GetFullPath($path)
+    $prefix = $trialRoot + [IO.Path]::DirectorySeparatorChar
+    if ([string]::Equals($full,$trialRoot,[StringComparison]::OrdinalIgnoreCase) -or
+        $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'External evidence is inside the guest trial directory'
+    }
+    if (-not [IO.File]::Exists($full)) { throw 'External evidence file is missing' }
+    if (([IO.File]::GetAttributes($full) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'External evidence must be a regular file, not a reparse point'
+    }
+    return $full
+}
+function Check-TrustedCheckpoint([string]$guest,[string]$archive,[string]$trialRoot) {
+    $trusted = Checked-ExternalEvidence $archive $trialRoot
+    if (-not [IO.File]::Exists($guest) -or
+        (([IO.File]::GetAttributes($guest) -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw 'Guest checkpoint is missing or a reparse point'
+    }
+    if ((Sha256 $guest) -cne (Sha256 $trusted)) {
+        throw 'Guest checkpoint differs from independently archived host copy'
+    }
+    return $trusted
+}
 function Manifest([string]$path) {
     $values = @{}
     foreach ($line in [IO.File]::ReadAllLines($path)) {
@@ -142,7 +168,7 @@ function Manifest([string]$path) {
 }
 $root = $null
 if ($Phase -eq 'Prepare') {
-    if ($EvidenceDir -or $ExternalCutEvidence) { throw 'Prepare creates its own evidence directory; do not supply Verify arguments' }
+    if ($EvidenceDir -or $ExternalCutEvidence -or $TrustedCheckpointPath) { throw 'Prepare creates its own evidence directory; do not supply Verify arguments' }
     $root = Join-Path $documents ('Akula-DESK15-POWERCUT-'+[Guid]::NewGuid().ToString('N'))
     if (Test-Path -LiteralPath $root) { throw 'Evidence path unexpectedly exists' }
     $vault = Join-Path $root 'vault'
@@ -214,8 +240,9 @@ if ($Phase -eq 'Prepare') {
         }
     }
 } else {
-    if ([string]::IsNullOrEmpty($EvidenceDir) -or [string]::IsNullOrEmpty($ExternalCutEvidence)) {
-        throw 'Verify requires -EvidenceDir and an external host event evidence file'
+    if ([string]::IsNullOrEmpty($EvidenceDir) -or [string]::IsNullOrEmpty($ExternalCutEvidence) -or
+        [string]::IsNullOrEmpty($TrustedCheckpointPath)) {
+        throw 'Verify requires -EvidenceDir, -ExternalCutEvidence and -TrustedCheckpointPath'
     }
     $root = [IO.Path]::GetFullPath($EvidenceDir)
     if (-not [string]::Equals([IO.Path]::GetDirectoryName($root),$documents,
@@ -231,7 +258,11 @@ if ($Phase -eq 'Prepare') {
     $data = Join-Path $root 'data'
     $note = Join-Path $vault 'PowerCut QA note.md'
     $log = Join-Path $root 'events.txt'
-    $m = Manifest (Join-Path $root 'checkpoint.txt')
+    $guestCheckpoint = Join-Path $root 'checkpoint.txt'
+    $trustedCheckpoint = Check-TrustedCheckpoint $guestCheckpoint $TrustedCheckpointPath $root
+    $m = Manifest $guestCheckpoint
+    Log ('trusted_checkpoint_sha256='+(Sha256 $trustedCheckpoint))
+    Log 'trusted_checkpoint_copy=MATCHES_HOST_ARCHIVE_NOT_INDEPENDENTLY_AUTHENTICATED'
     if ($m['trial'] -cne [IO.Path]::GetFileName($root) -or
         $m['exe_sha256'] -cne (Sha256 $exe) -or
         $m['script_sha256'] -cne (Sha256 $MyInvocation.MyCommand.Path)) {
@@ -247,11 +278,9 @@ if ($Phase -eq 'Prepare') {
         throw 'Published recovery shadow bytes changed after reboot'
     }
     Check-Acl $shadow
-    $proofPath = [IO.Path]::GetFullPath($ExternalCutEvidence)
-    if (-not [IO.File]::Exists($proofPath) -or
-        [string]::Equals([IO.Path]::GetDirectoryName($proofPath),$root,
-                         [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'External host evidence must be supplied separately from guest checkpoint'
+    $proofPath = Checked-ExternalEvidence $ExternalCutEvidence $root
+    if ([string]::Equals($proofPath,$trustedCheckpoint,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Power event proof and archived checkpoint must be separate files'
     }
     $proof = [IO.File]::ReadAllText($proofPath)
     if (-not $proof.Contains($m['trial']) -or
