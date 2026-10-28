@@ -243,7 +243,6 @@ mod tests {
         fixture.service.prepare(&home).unwrap();
         fixture.service.open_guest(&other).unwrap();
         let generation = fixture.generation();
-
         let status = fixture.service.prepare(&other).unwrap();
 
         assert_eq!(status.generation, generation, "индекс не открыт заново");
