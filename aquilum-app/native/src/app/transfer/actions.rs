@@ -50,11 +50,8 @@ impl App {
         }
         #[cfg(feature = "p2p-inbox-preview")]
         if pressed && !refresh {
-            if let Some((_, command)) = dialog
-                .inbox_save_actions
-                .iter()
-                .find(|(button, _)| *button == id)
-            {
+            let hit = dialog.inbox_save_actions.iter().find(|(b, _)| *b == id);
+            if let Some((_, command)) = hit {
                 refresh = match command {
                     transfer_ui::InboxAction::Preview(receipt) => {
                         self.begin_inbox_text_preview(receipt)
@@ -92,7 +89,9 @@ impl App {
                 .find(|(button, _)| *button == id)
             {
                 refresh = match command {
-                    transfer_ui::NativeReceiveAction::Start(peer) => self.begin_native_receive(peer),
+                    transfer_ui::NativeReceiveAction::Start(peer) => {
+                        self.begin_native_receive(peer)
+                    }
                     transfer_ui::NativeReceiveAction::StartInternet(peer) => {
                         self.begin_native_receive_internet(peer)
                     }
