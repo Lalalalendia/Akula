@@ -148,6 +148,44 @@ function Normalize-GuiText {
     return $Value.Replace($cr + $lf, $lf).Replace($cr, $lf).TrimEnd([char]10)
 }
 
+function Wait-InstalledFindCount {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [string[]]$Expected,
+        [string]$Stage
+    )
+    $hwnd = [IntPtr]$Process.MainWindowHandle
+    for ($attempt = 0; $attempt -lt 80; $attempt++) {
+        Start-Sleep -Milliseconds 125
+        $Process.Refresh()
+        if ($Process.HasExited -or $Process.MainWindowHandle -ne $hwnd) {
+            throw 'Installed Akula changed process/window during in-note Find'
+        }
+        try {
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+            $bounds = $root.Current.BoundingRectangle
+            foreach ($name in $Expected) {
+                $condition = [System.Windows.Automation.PropertyCondition]::new(
+                    [System.Windows.Automation.AutomationElement]::NameProperty, $name)
+                $items = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+                for ($i = 0; $i -lt $items.Count; $i++) {
+                    $item = $items.Item($i)
+                    $rect = $item.Current.BoundingRectangle
+                    if ($item.Current.ControlType -eq [System.Windows.Automation.ControlType]::Text -and
+                        !$item.Current.IsOffscreen -and !$rect.IsEmpty -and
+                        $rect.Left -ge $bounds.Left -and $rect.Right -le $bounds.Right -and
+                        $rect.Top -ge $bounds.Top -and $rect.Bottom -le $bounds.Bottom) {
+                        return
+                    }
+                }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] {
+            # Rebuilding the find bar may invalidate a previous UIA element.
+        }
+    }
+    throw "Installed Ctrl+F did not show an expected current-note match counter at $Stage"
+}
+
 try {
     [IO.File]::WriteAllText($txt, $body, ([System.Text.UTF8Encoding]::new($false)))
     $originalHash = (Get-FileHash -LiteralPath $txt -Algorithm SHA256).Hash
@@ -253,6 +291,26 @@ try {
         throw 'Global TXT search/open modified a source document'
     }
     Write-Host 'AKULA_WINDOWS_TXT_SEARCH_UIA_PASS installed=1 ctrl_o=1 cjk_title=1 body_query=1 result_uia=1 enter=1 gui_readback=1 source_sha256_unchanged=1'
+
+    # Ctrl+F searches ONLY this open TXT, while the baseline Markdown note
+    # contains "Existing" and is indexed in the same disposable vault.
+    # This is a real installed app keyboard shortcut, not a native model call.
+    [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $process.Id, [uint16]0x46)
+    Start-Sleep -Milliseconds 150
+    if ([AkulaBetaGuiInput]::GetForegroundWindow() -ne $hwnd) {
+        throw 'Ctrl+F moved focus away from installed Akula'
+    }
+    [AkulaBetaGuiInput]::TypeAsciiKeys($hwnd, $process.Id, $needle)
+    # A single find hit may initially have current ordinal 0 or 1.
+    Wait-InstalledFindCount -Process $process -Expected @('0/1', '1/1') -Stage 'TXT positive query'
+    [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $process.Id, [uint16]0x41)
+    [AkulaBetaGuiInput]::TypeAsciiKeys($hwnd, $process.Id, 'existing')
+    Wait-InstalledFindCount -Process $process -Expected @('0/0') -Stage 'Markdown-only negative query'
+    if ((Get-FileHash -LiteralPath $txt -Algorithm SHA256).Hash -ne $originalHash -or
+        (Get-FileHash -LiteralPath $baseline -Algorithm SHA256).Hash -ne $baselineHash) {
+        throw 'Installed Ctrl+F modified a synthetic source document'
+    }
+    Write-Host 'AKULA_WINDOWS_TXT_FIND_SCOPE_PASS installed=1 ctrl_f=1 current_txt=1 local_positive=1 markdown_only_negative=1 source_sha256_unchanged=1'
 } finally {
     if ($null -ne $process) {
         $process.Refresh()
