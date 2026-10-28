@@ -332,14 +332,20 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if git diff --quiet "$BASE_SHA" HEAD -- \
+          # This job runs from aquilum-app/; resolve changed paths from repo root.
+          if git -C .. diff --quiet "$BASE_SHA" HEAD -- \
             aquilum-app/core/src/documents/canvas_crdt_lab.rs \
             aquilum-app/core/src/documents/replica.rs \
             aquilum-app/core/src/documents/mod.rs \
             aquilum-app/core/Cargo.toml; then
             echo 'Canvas CRDT lab unchanged'
           else
-            cargo test --locked -p aquilum-core --features canvas-crdt-lab canvas_crdt_lab
+            cargo test --locked -p aquilum-core --lib --features canvas-crdt-lab \
+              documents::replica::canvas_crdt_lab::tests:: -- --nocapture \
+              2>&1 | tee "$RUNNER_TEMP/akula-canvas-crdt-lab.log"
+            grep -Fq 'test result: ok. 6 passed; 0 failed;' \
+              "$RUNNER_TEMP/akula-canvas-crdt-lab.log"
+            echo 'AKULA_CANVAS_CRDT_LAB_PASS six_offline_tests=1'
           fi
 
       - name: Run full Rust workspace and sync-engine tests
