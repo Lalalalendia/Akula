@@ -4,9 +4,7 @@ use yrs::updates::encoder::Encode;
 use yrs::{
     Doc, GetString, IndexedSequence, OffsetKind, Options, ReadTxn, StateVector, Text, TextRef, Transact,
 };
-
 const TEXT_NAME: &str = "codemirror";
-
 #[derive(Debug)]
 pub struct ReplicaError(String);
 
@@ -15,7 +13,6 @@ impl fmt::Display for ReplicaError {
         formatter.write_str(&self.0)
     }
 }
-
 fn failure(error: impl fmt::Display) -> ReplicaError {
     ReplicaError(error.to_string())
 }
@@ -26,7 +23,6 @@ mod utf16_boundary;
 mod update_guard;
 #[path = "replica_update_decoder.rs"]
 mod update_decoder;
-
 pub struct Replica {
     doc: Doc,
     text: TextRef,
@@ -103,6 +99,10 @@ impl Replica {
         self.doc.transact().encode_state_as_update_v1(&StateVector::default())
     }
 }
+
+#[cfg(feature = "canvas-crdt-lab")]
+#[path = "canvas_crdt_lab.rs"]
+pub mod canvas_crdt_lab;
 
 #[cfg(test)]
 #[path = "replica_tests.rs"]

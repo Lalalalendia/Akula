@@ -9,6 +9,8 @@ workspace = ".."
 
 [features]
 default = []
+# Offline two-replica JSON Canvas research only: no transport, File Gate or native UI.
+canvas-crdt-lab = []
 # Opt-in pure messaging state machine; no network, storage, UI or workers.
 messaging-core-lab = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
