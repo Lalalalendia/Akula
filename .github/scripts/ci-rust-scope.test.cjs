@@ -426,6 +426,7 @@ test('every standalone Rust module has a protected CI owner and executable Cargo
     'bootstrap-b1a':'core-server-bootstrap-b1a-release.yml',
     'bootstrap-b1b0':'core-server-bootstrap-b1b0-staging.yml',
     'node-catalog':'node-catalog-isolated.yml',
+    'drop-inbox-ledger':'p2p-one-file-beta.yml',
     'dropbox-t0':'dropbox-t0-isolated.yml',
     'dropbox-auth-lab':'dropbox-t0-isolated.yml',
     'dropbox-secret-store':'dropbox-t0-isolated.yml',
