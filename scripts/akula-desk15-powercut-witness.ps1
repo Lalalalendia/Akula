@@ -136,6 +136,15 @@ function Checked-ExternalEvidence([string]$path,[string]$trialRoot) {
     if (([IO.File]::GetAttributes($full) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw 'External evidence must be a regular file, not a reparse point'
     }
+    # GetFullPath is lexical. Reject junctions/symlinks in ALL parents: an
+    # outside-looking path must not resolve back into the disposable QA trial.
+    $parent = [IO.Path]::GetDirectoryName($full)
+    while (-not [string]::IsNullOrEmpty($parent)) {
+        if (([IO.File]::GetAttributes($parent) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'External evidence path traverses a linked/reparse directory'
+        }
+        $parent = [IO.Path]::GetDirectoryName($parent)
+    }
     return $full
 }
 function Check-TrustedCheckpoint([string]$guest,[string]$archive,[string]$trialRoot) {
