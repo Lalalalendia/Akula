@@ -11,7 +11,7 @@ use crate::history::Version;
 use crate::i18n::t;
 use crate::note::Note;
 
-pub(super) fn flush_clean(note: &mut Note, core: &Arc<Core>, text: &crop::Rope) -> bool {
+pub(super) fn flush_clean(note: &mut Note, core: &Arc<Core>, text: &crop::Rope) -> Option<String> {
     note.flush(core, text);
     note.clean_cache_hash().is_some()
 }
@@ -46,7 +46,7 @@ mod tests {
         std::fs::write(&path, "external edit").unwrap();
         let unsaved = crop::Rope::from("new editor text");
 
-        assert!(!flush_clean(&mut note, &core, &unsaved));
+        assert!(flush_clean(&mut note, &core, &unsaved).is_none());
         assert!(note.save_error.is_some(), "save conflict must remain visible");
         assert_eq!(std::fs::read_to_string(path).unwrap(), "external edit");
         core.shutdown();
@@ -64,7 +64,7 @@ mod tests {
         note.edit(Duration::ZERO);
         let latest = crop::Rope::from("saved editor text");
 
-        assert!(flush_clean(&mut note, &core, &latest));
+        assert!(flush_clean(&mut note, &core, &latest).is_some());
         assert_eq!(std::fs::read_to_string(path).unwrap(), "saved editor text");
         core.shutdown();
     }
