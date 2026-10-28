@@ -56,7 +56,9 @@ impl App {
                 .find(|(button, _)| *button == id)
             {
                 refresh = match command {
-                    transfer_ui::InboxAction::Preview(receipt) => self.begin_inbox_text_preview(receipt),
+                    transfer_ui::InboxAction::Preview(receipt) => {
+                        self.begin_inbox_text_preview(receipt)
+                    }
                     transfer_ui::InboxAction::SaveCopy(receipt) => self.begin_inbox_save(receipt),
                     #[cfg(windows)]
                     transfer_ui::InboxAction::Import(receipt) => self.begin_inbox_import(receipt),
@@ -90,9 +92,7 @@ impl App {
                 .find(|(button, _)| *button == id)
             {
                 refresh = match command {
-                    transfer_ui::NativeReceiveAction::Start(peer) => {
-                        self.begin_native_receive(peer)
-                    }
+                    transfer_ui::NativeReceiveAction::Start(peer) => self.begin_native_receive(peer),
                     transfer_ui::NativeReceiveAction::StartInternet(peer) => {
                         self.begin_native_receive_internet(peer)
                     }
