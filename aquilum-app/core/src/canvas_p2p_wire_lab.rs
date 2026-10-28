@@ -317,7 +317,8 @@ mod tests {
             signature: [0; 64],
         };
         claim.devices.sort_by_key(|d| d.device_id);
-        claim.signature.copy_from_slice(key.sign(&claim.canonical_claim().unwrap()).as_ref());
+        let signature = key.sign(&claim.canonical_claim().unwrap());
+        claim.signature.copy_from_slice(signature.as_ref());
         let pin = IndependentlyPinnedOwner {
             vault_id: vault,
             owner_public_key: key.public_key().as_ref().try_into().unwrap(),
