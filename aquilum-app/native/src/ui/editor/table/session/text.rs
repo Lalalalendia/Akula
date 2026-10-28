@@ -33,7 +33,7 @@ impl Session {
     pub fn preedit(&mut self, view: &TableView, text: &str, cursor: Option<(usize, usize)>) -> Outcome {
         let normalized = text.replace(['\r', '\n', '\t'], " ");
         let outcome = self.insert(view, &normalized);
-        if !matches!(outcome, Outcome::Write(_)) {
+        if !matches!(&outcome, Outcome::Write(_)) {
             return outcome;
         }
         let start = self.caret.saturating_sub(normalized.len());
