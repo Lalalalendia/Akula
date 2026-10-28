@@ -68,6 +68,7 @@ pub enum LocalBoardConsent {
 /// The caller must freshly obtain this scoped decision from local consent.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LocalBoardPolicy {
+    pub vault: VaultId,
     pub board: DocumentId,
     pub sender_device: DeviceId,
     pub consent: LocalBoardConsent,
@@ -188,7 +189,8 @@ impl OfflineFrameGate {
             self.sender,
             self.receiver,
         )?;
-        if local_board_policy.board != self.board
+        if local_board_policy.vault != self.vault
+            || local_board_policy.board != self.board
             || local_board_policy.sender_device != self.sender.device_id
             || local_board_policy.consent != LocalBoardConsent::Editor
         {
@@ -349,6 +351,7 @@ mod tests {
 
     fn policy(f: &Fixture, consent: LocalBoardConsent) -> LocalBoardPolicy {
         LocalBoardPolicy {
+            vault: f.vault,
             board: f.board,
             sender_device: f.sender.device_id,
             consent,
@@ -450,6 +453,11 @@ mod tests {
         assert_eq!(g.inspect_update(&wire, f.sender, &f.roster, policy(&f, LocalBoardConsent::Viewer)),
             Err(FrameError::NoEditorConsent));
         assert_eq!(g.inspect_update(&wire, f.sender, &f.roster, policy(&f, LocalBoardConsent::Revoked)),
+            Err(FrameError::NoEditorConsent));
+        let wrong_vault_policy = LocalBoardPolicy {
+            vault: VaultId::new(), ..policy(&f, LocalBoardConsent::Editor)
+        };
+        assert_eq!(g.inspect_update(&wire, f.sender, &f.roster, wrong_vault_policy),
             Err(FrameError::NoEditorConsent));
         let other_board_policy = LocalBoardPolicy {
             board: DocumentId::new(), ..policy(&f, LocalBoardConsent::Editor)
