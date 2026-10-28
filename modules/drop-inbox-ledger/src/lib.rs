@@ -1,19 +1,19 @@
 #![forbid(unsafe_code)]
 //! Local, provider-neutral receipt ledger for a future Akula Received Inbox.
-//!
 //! This crate does not trust cloud metadata, authenticate senders, decrypt files,
 //! transport bytes, create user files, change the Vault, or issue sender ACKs.
 //! A caller MUST separately authenticate the sender, recipient, transfer ID,
 //! size and BLAKE3 commitment before constructing `ExpectedTransfer`.
-//!
 //! The file writer (currently `p2p_inbox_lab::save_verified_stage_as_new`)
 //! must create a no-replace, verified file at `object_path` before `confirm`.
 //! This ledger never creates, renames, replaces or removes Inbox objects.
-//!
 //! `VerifiedLocal` means the DB record AND a freshly opened local file match.
 //! It is not a signed remote delivery ACK or proof against power loss. The
 //! higher-level host must handle OS-owned root custody, ACLs, Windows reparse
 //! points, installation, backup, and crash/power-loss acceptance separately.
+
+mod import_audit;
+pub use import_audit::ImportAuditStatus;
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::{
