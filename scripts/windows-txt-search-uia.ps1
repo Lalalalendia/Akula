@@ -58,6 +58,89 @@ function Focus-InstalledAkula {
     throw 'Cannot dispatch OS keys without foreground Akula'
 }
 
+function Focus-TxtBodyEditor {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [string]$ExpectedNeedle
+    )
+    # Ctrl+O can leave the keyboard on the dismissed search field even after
+    # the window title changes. Resolve the installed body using native UIA.
+    $hwnd = Focus-InstalledAkula -Process $Process
+    $bounds = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+    if ($null -eq $bounds) { throw 'Installed TXT has no UIA root after search' }
+    $condition = [System.Windows.Automation.OrCondition]::new(
+        [System.Windows.Automation.Condition[]]@(
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                [System.Windows.Automation.ControlType]::Edit),
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                [System.Windows.Automation.ControlType]::Document)))
+    $selected = $null
+    $observed = 0
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        Start-Sleep -Milliseconds 100
+        try {
+            $items = $bounds.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+            $matching = @()
+            $candidates = @()
+            $win = $bounds.Current.BoundingRectangle
+            for ($i = 0; $i -lt $items.Count; $i++) {
+                $item = $items.Item($i)
+                $rect = $item.Current.BoundingRectangle
+                if (!$item.Current.IsEnabled -or !$item.Current.IsKeyboardFocusable -or
+                    $item.Current.IsOffscreen -or $rect.IsEmpty -or
+                    $rect.Width -lt 160 -or $rect.Height -lt 10 -or
+                    $rect.Left -lt $win.Left -or $rect.Right -gt $win.Right -or
+                    $rect.Top -lt $win.Top -or $rect.Bottom -gt $win.Bottom) { continue }
+                $candidates += $item
+                $pattern = $null
+                if ($item.TryGetCurrentPattern(
+                    [System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
+                    $value = ([System.Windows.Automation.ValuePattern]$pattern).Current.Value
+                    if ($null -ne $value -and $value.Contains($ExpectedNeedle)) {
+                        $matching += $item
+                    }
+                }
+            }
+            if ($matching.Count -gt 1) {
+                throw 'Multiple installed TXT editors match the unique synthetic body marker'
+            }
+            if ($matching.Count -eq 1) {
+                $selected = $matching[0]
+            } elseif ($candidates.Count -ge 2) {
+                # Only as a fallback if the platform does not expose UIA Value:
+                # final clipboard comparison still requires the exact TXT body.
+                $ordered = @($candidates | Sort-Object { $_.Current.BoundingRectangle.Top })
+                $selected = $ordered[$ordered.Count - 1]
+            }
+            $observed = $candidates.Count
+            if ($null -ne $selected) { break }
+        } catch [System.Windows.Automation.ElementNotAvailableException] {
+            $selected = $null
+        }
+    }
+    if ($null -eq $selected) {
+        throw "Installed TXT body not identified by Windows UIA: visible_editors=$observed"
+    }
+    $selected.SetFocus()
+    for ($i = 0; $i -lt 25; $i++) {
+        Start-Sleep -Milliseconds 100
+        try {
+            if ($selected.Current.HasKeyboardFocus) {
+                if ([AkulaBetaGuiInput]::GetForegroundWindow() -ne $hwnd) {
+                    throw 'TXT UIA focus moved outside installed Akula'
+                }
+                Write-Host 'AKULA_WINDOWS_TXT_EDITOR_FOCUS_PASS uia=1 keyboard_focus=1'
+                return
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] {
+            throw 'TXT body UIA element disappeared after attempting to focus'
+        }
+    }
+    throw 'Installed TXT body UIA element did not gain keyboard focus'
+}
+
 function Normalize-GuiText {
     param([string]$Value)
     $cr = [string][char]13
@@ -140,7 +223,9 @@ try {
     }
     if (!$opened) { throw 'Enter did not open the exact CJK TXT search result' }
 
-    # Read actual installed editor model through the Windows clipboard.
+    # Explicitly focus the verified installed TXT body before Ctrl+A/C.
+    # A changed title alone does not prove editor focus after closing Ctrl+O.
+    Focus-TxtBodyEditor -Process $process -ExpectedNeedle $needle
     $hwnd = Focus-InstalledAkula -Process $process
     $sentinel = 'TXT_UIA_CLIPBOARD_UNCHANGED_' + [guid]::NewGuid().ToString('N')
     Set-Clipboard -Value $sentinel -ErrorAction Stop
@@ -158,7 +243,10 @@ try {
         }
     }
     if ($null -eq $copied -or (Normalize-GuiText $copied) -cne (Normalize-GuiText $body)) {
-        throw 'Installed TXT editor clipboard differs from the exact UTF-8 fixture'
+        # Only synthetic fixture metadata; never print clipboard contents.
+        $observedLength = if ($null -eq $copied) { -1 } else { (Normalize-GuiText $copied).Length }
+        $markerPresent = ($null -ne $copied -and $copied.Contains($needle))
+        throw "Installed TXT editor clipboard differs from fixture: expected_length=$((Normalize-GuiText $body).Length) observed_length=$observedLength unique_marker_present=$markerPresent"
     }
     if ((Get-FileHash -LiteralPath $txt -Algorithm SHA256).Hash -ne $originalHash -or
         (Get-FileHash -LiteralPath $baseline -Algorithm SHA256).Hash -ne $baselineHash) {
