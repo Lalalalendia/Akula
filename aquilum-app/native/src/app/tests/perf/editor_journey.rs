@@ -51,12 +51,13 @@ fn run(lines: usize) {
         .expect("initial editor CPU frame");
     let first_frame_ms = ms(start.elapsed());
 
-    // A scrollbar jump loads a different part of a virtualized document.
-    // Exclude the warm frame from the steady-state scroll distribution.
+    // Public production ScrollArea API; set_fraction exists only under
+    // memory-probe. Jump far enough to load a new virtual document window.
+    // The pixel estimate is deliberately not treated as an exact 50% offset.
     let scroll = h.app.note_ids.as_ref().expect("editor is open").scroll.clone();
     let start = Instant::now();
     scroll.edit(&mut h.root, |mut area| {
-        crate::ui::scroll::ScrollArea::set_fraction(&mut area, 0.5);
+        crate::ui::scroll::ScrollArea::set_offset(&mut area, lines as f64 * 16.0);
     });
     h.deliver();
     let (layers, _) = h.root.redraw();
