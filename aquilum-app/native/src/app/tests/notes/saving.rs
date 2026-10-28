@@ -51,7 +51,9 @@ fn oversized_recovery_warning_is_visible_before_save_and_clears_after_file_gate_
     assert!(h.app.open(&mut h.root, path.clone()));
     assert!(h.app.save_error_ids.is_none());
 
-    let draft = "x".repeat(16 * 1024 * 1024 + 1);
+    let line = format!("{}\n", "x".repeat(191));
+    let draft = line.repeat(90_000);
+    assert!(draft.len() > 16 * 1024 * 1024);
     h.app.commit_text(&mut h.root, crop::Rope::from(draft.clone()));
     assert!(h.app.note.as_ref().unwrap().save_error.as_ref().is_some_and(|error| error.contains("16 MiB")));
     assert!(h.app.save_error_ids.is_some(), "over-limit warning must be visible without polling or fsync");
