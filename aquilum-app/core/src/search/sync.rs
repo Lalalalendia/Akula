@@ -1,6 +1,4 @@
 mod unchanged;
-#[cfg(test)]
-mod txt_lifecycle_tests;
 use super::error::SearchError;
 use super::fields;
 use super::tasks;

@@ -1,4 +1,4 @@
-use super::IndexSynchronizer;
+use super::super::sync::IndexSynchronizer;
 use crate::search::index::SearchIndex;
 use crate::search::progress::IndexProgress;
 use crate::search::query::Request;
