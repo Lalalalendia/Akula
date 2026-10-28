@@ -141,10 +141,10 @@ public static class AkulaBetaGuiInput {
     }
 
     // Native OS keyboard chords for read-only GUI model acceptance after
-    // restart. Only Ctrl+A (select all) and Ctrl+C (copy) are allowed.
+    // restart. Only Ctrl+A (select all), Ctrl+C (copy) and Ctrl+O (search) are allowed.
     public static void PressCtrlShortcut(IntPtr hwnd, int expectedPid, ushort key) {
-        if (key != 0x41 && key != 0x43)
-            throw new InvalidOperationException("Only selection/copy shortcuts are authorized");
+        if (key != 0x41 && key != 0x43 && key != 0x4F)
+            throw new InvalidOperationException("Only selection/copy/search shortcuts are authorized");
         if (hwnd == IntPtr.Zero || Marshal.SizeOf(typeof(Input)) != 40)
             throw new InvalidOperationException("Unexpected Windows shortcut window/input layout");
         uint owner;
