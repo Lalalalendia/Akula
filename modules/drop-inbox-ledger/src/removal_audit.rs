@@ -12,7 +12,8 @@ pub enum RemovalAuditStatus {
 impl InboxLedger {
     /// Local user intent only. Future OS deletion must commit this first.
     pub fn request_removal(&self, id: Uuid) -> Result<(), LedgerError> {
-        if id.is_nil() || self.status(id)? != LocalStatus::VerifiedLocal
+        if id.is_nil()
+            || self.status(id)? != LocalStatus::VerifiedLocal
             || self.removal_status(id)? != RemovalAuditStatus::Available
         {
             return Err(LedgerError::InvalidLocalObject);
@@ -70,27 +71,31 @@ impl InboxLedger {
             Err(e) if e.kind() == io::ErrorKind::NotFound && state == 1 => {
                 Ok(RemovalAuditStatus::Removed)
             }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                Ok(RemovalAuditStatus::NeedsReview)
-            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(RemovalAuditStatus::NeedsReview),
             Err(e) => Err(e.into()),
         }
     }
 
     fn removal_row(&self, id: Uuid) -> Result<Option<i64>, LedgerError> {
-        let exists: Option<i64> = self.db.query_row(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='removal_inbox'",
-            [],
-            |row| row.get(0),
-        ).optional()?;
+        let exists: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='removal_inbox'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
         if exists.is_none() {
             return Ok(None);
         }
-        let state: Option<i64> = self.db.query_row(
-            "SELECT state FROM removal_inbox WHERE transfer_id = ?1",
-            [id.to_string()],
-            |row| row.get(0),
-        ).optional()?;
+        let state: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT state FROM removal_inbox WHERE transfer_id = ?1",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
         if state.is_some_and(|v| !matches!(v, 0 | 1)) {
             return Err(LedgerError::CorruptDatabaseRecord);
         }
@@ -127,22 +132,40 @@ mod tests {
         f.sync_all().unwrap();
         drop(f);
         ledger.confirm(&intent).unwrap();
-        assert_eq!(ledger.removal_status(intent.id).unwrap(), RemovalAuditStatus::Available);
+        assert_eq!(
+            ledger.removal_status(intent.id).unwrap(),
+            RemovalAuditStatus::Available
+        );
         ledger.request_removal(intent.id).unwrap();
-        assert_eq!(ledger.removal_status(intent.id).unwrap(), RemovalAuditStatus::Requested);
+        assert_eq!(
+            ledger.removal_status(intent.id).unwrap(),
+            RemovalAuditStatus::Requested
+        );
         assert!(ledger.open_verified_file(intent.id).is_err());
         assert!(ledger.finish_removal(intent.id).is_err());
         assert_eq!(fs::read(ledger.object_path(intent.id)).unwrap(), bytes);
         drop(ledger);
         let reader = InboxLedger::open_existing(&root).unwrap().unwrap();
-        assert_eq!(reader.removal_status(intent.id).unwrap(), RemovalAuditStatus::Requested);
+        assert_eq!(
+            reader.removal_status(intent.id).unwrap(),
+            RemovalAuditStatus::Requested
+        );
         drop(reader);
         let ledger = InboxLedger::open(&root).unwrap();
         fs::remove_file(ledger.object_path(intent.id)).unwrap();
-        assert_eq!(ledger.removal_status(intent.id).unwrap(), RemovalAuditStatus::NeedsReview);
+        assert_eq!(
+            ledger.removal_status(intent.id).unwrap(),
+            RemovalAuditStatus::NeedsReview
+        );
         ledger.finish_removal(intent.id).unwrap();
-        assert_eq!(ledger.removal_status(intent.id).unwrap(), RemovalAuditStatus::Removed);
+        assert_eq!(
+            ledger.removal_status(intent.id).unwrap(),
+            RemovalAuditStatus::Removed
+        );
         fs::write(ledger.object_path(intent.id), b"wrong").unwrap();
-        assert_eq!(ledger.removal_status(intent.id).unwrap(), RemovalAuditStatus::NeedsReview);
+        assert_eq!(
+            ledger.removal_status(intent.id).unwrap(),
+            RemovalAuditStatus::NeedsReview
+        );
     }
 }
