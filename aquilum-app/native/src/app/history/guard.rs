@@ -4,12 +4,27 @@
 use std::sync::Arc;
 
 use aquilum_core::Core;
+use masonry::app::RenderRoot;
 
+use super::App;
+use crate::history::Version;
+use crate::i18n::t;
 use crate::note::Note;
 
 pub(super) fn flush_clean(note: &mut Note, core: &Arc<Core>, text: &crop::Rope) -> bool {
     note.flush(core, text);
     note.clean_cache_hash().is_some()
+}
+
+impl App {
+    pub(super) fn report_failed_history_flush(&mut self, root: &mut RenderRoot, version: &Version) {
+        let opened = self.opened_versions.get(&self.tabs.active_id()).map(|v| v.id.as_str());
+        if opened != Some(version.id.as_str()) {
+            self.open_version(root, version.clone());
+        }
+        self.version_notice = Some(t("history.actionFailed"));
+        self.show_version(root);
+    }
 }
 
 #[cfg(test)]
