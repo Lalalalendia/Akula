@@ -15,8 +15,8 @@ use yrs::{
     StateVector, Text, TextPrelim, Transact,
 };
 
-use super::merge::TextEdit;
-use super::replica::{checked_decode_update, validate_replica_utf16_edits};
+use crate::documents::merge::TextEdit;
+use super::{update_guard, utf16_boundary};
 
 const MAX_NODES: usize = 2_000;
 const MAX_UPDATE_BYTES: usize = 4 * 1024 * 1024;
@@ -131,7 +131,7 @@ impl CanvasCrdtLab {
         if bytes.len() > MAX_UPDATE_BYTES {
             return Err("Canvas CRDT update exceeds the laboratory size limit".into());
         }
-        let update = checked_decode_update(bytes).map_err(|e| e.to_string())?;
+        let update = update_guard::decode(bytes).map_err(|e| e.to_string())?;
         self.doc.transact_mut_with("canvas-remote")
             .apply_update(update).map_err(|e| e.to_string())
     }
@@ -169,7 +169,7 @@ impl CanvasCrdtLab {
         else {
             return Err("Canvas text field is not Y.Text".into());
         };
-        validate_replica_utf16_edits(&text.get_string(&txn), edits)
+        utf16_boundary::validate_utf16_edits(&text.get_string(&txn), edits)
             .map_err(|e| e.to_string())?;
         for edit in edits.iter().rev() {
             if edit.to > edit.from {
