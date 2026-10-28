@@ -5,6 +5,7 @@ on:
     branches:
       - feature/ak-p2p-native-receive-onefile-20261024
       - feature/ak-p2p-installed-main-integration-20261024
+      - integration/p2p-main-reconcile-20261028
     paths:
       - 'interop/akula-staya/**'
       - 'aquilum-app/native/src/app/transfer/**'
@@ -58,23 +59,36 @@ jobs:
         run: |
           cargo metadata --manifest-path aquilum-app/Cargo.toml --locked --format-version 1 > /dev/null
           git diff --exit-code -- aquilum-app/Cargo.lock
-      - name: Prove Windows installed feature graph excludes vulnerable optional S3 signer
+      - name: Prove signed installed P2P HOLD and opt-in Windows security graphs
         shell: bash
         run: |
-          # Security diagnostic only; does not waive the full RustSec release gate.
+          # Diagnostic only: it never waives full RustSec or signed publisher gates.
           set -euo pipefail
           cargo tree --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --target x86_64-pc-windows-msvc --edges normal,build --format '{p}' > "$RUNNER_TEMP/akula-installed-tree.txt"
-          for required in 'akula-staya-integration v' 'akula-inbox-ledger-lab v' 'akula-dropbox-connect-lab v'; do
-            if ! grep -Fq "$required" "$RUNNER_TEMP/akula-installed-tree.txt"; then
-              echo "::error::Expected installed dependency missing: $required"
+          if ! grep -Fq 'akula-dropbox-connect-lab v' "$RUNNER_TEMP/akula-installed-tree.txt"; then
+            echo '::error::Read-only installed Dropbox dependency missing'
+            exit 1
+          fi
+          for forbidden in 'akula-staya-integration v' 'akula-inbox-ledger-lab v'; do
+            if grep -Fq "$forbidden" "$RUNNER_TEMP/akula-installed-tree.txt"; then
+              echo "::error::Unaccepted P2P reached the signed installed graph: $forbidden"
               exit 1
             fi
           done
-          if grep -Eq 'crypto-bigint v0[.][0-6][.]' "$RUNNER_TEMP/akula-installed-tree.txt"; then
-            echo '::error::Vulnerable crypto-bigint is reachable in normal installed Windows feature graph'
-            exit 1
-          fi
-          echo 'Windows installed feature graph: P2P+Inbox+Dropbox present; vulnerable crypto-bigint 0.x absent. Full lockfile RustSec audit remains blocking.' >> "$GITHUB_STEP_SUMMARY"
+          cargo tree --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed,p2p-native-receive-beta --target x86_64-pc-windows-msvc --edges normal,build --format '{p}' > "$RUNNER_TEMP/akula-optin-p2p-tree.txt"
+          for required in 'akula-staya-integration v' 'akula-inbox-ledger-lab v' 'akula-dropbox-connect-lab v'; do
+            if ! grep -Fq "$required" "$RUNNER_TEMP/akula-optin-p2p-tree.txt"; then
+              echo "::error::Explicit P2P QA dependency missing: $required"
+              exit 1
+            fi
+          done
+          for tree in "$RUNNER_TEMP/akula-installed-tree.txt" "$RUNNER_TEMP/akula-optin-p2p-tree.txt"; do
+            if grep -Eq 'crypto-bigint v0[.][0-6][.]' "$tree"; then
+              echo "::error::Vulnerable crypto-bigint reaches Windows feature graph: $tree"
+              exit 1
+            fi
+          done
+          echo 'Windows installed: Dropbox only, P2P excluded. Opt-in QA: P2P+Inbox+Dropbox present, crypto-bigint 0.0-0.6 absent. Full RustSec gate remains blocking.' >> "$GITHUB_STEP_SUMMARY"
       - name: Check shared real QUIC receiver and Inbox tests
         shell: bash
         run: |

@@ -27,7 +27,7 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 
 [features]
 # Public install includes read-only Dropbox authorization; cloud writes remain disabled.
-installed = ["dropbox-readonly-preview", "server-readonly-preflight", "p2p-native-receive-beta"]
+installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
 messaging-w4-pilot = []
 memory-probe = []
 # Opt-in experimental local DICOM viewing. Not included in the installed build.

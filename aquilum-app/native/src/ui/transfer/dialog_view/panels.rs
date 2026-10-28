@@ -6,7 +6,7 @@ pub(super) struct SectionActions {
     #[cfg(feature = "p2p-device-ui")]
     pub(super) peer_controls: Option<PeerControls>,
     #[cfg(feature = "p2p-inbox-preview")]
-    pub(super) inbox_save_actions: Vec<(WidgetId, String)>,
+    pub(super) inbox_save_actions: Vec<(WidgetId, InboxAction)>,
     #[cfg(feature = "p2p-native-send-beta")]
     pub(super) native_send_actions: Vec<(WidgetId, NativeSendAction)>,
     #[cfg(feature = "p2p-native-receive-beta")]

@@ -95,7 +95,11 @@
     "inboxSaving": "Saving a verified copy…",
     "inboxSaved": "Copy saved as a separate new file.",
     "inboxSaveFailed": "Could not save copy. Inbox object and existing files were not replaced.",
-    "inboxUnknown": "Unknown"
+    "inboxUnknown": "Unknown",
+    "inboxPreview": "Preview text",
+    "inboxPreviewWorking": "Verifying text preview…",
+    "inboxPreviewUnsupported": "Preview supports small text files up to 4 KiB only. You can save a copy.",
+    "inboxPreviewFailed": "Could not safely verify the file for preview."
   },
   "editor": {
     "resetUiStateWarning": "The reset forgets open tabs, the list of knowledge bases, home pages and book reading positions; notes, history and settings stay.",

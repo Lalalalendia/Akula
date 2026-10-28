@@ -8,6 +8,7 @@ use akula_inbox_ledger_lab::{InboxLedger, LocalStatus, user_inbox_root};
 use aquilum_core::p2p_inbox_lab::save_verified_stage_as_new;
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -22,12 +23,16 @@ pub(super) struct InboxPreview {
     pub(super) view: InboxView,
     rx: Option<Receiver<Result<InboxView, String>>>,
     save_rx: Option<Receiver<Result<bool, String>>>,
+    preview_rx: Option<Receiver<Result<Option<String>, String>>>,
 }
 
 impl InboxPreview {
     fn begin(&mut self, receiver: Receiver<Result<InboxView, String>>) {
         self.rx = Some(receiver);
+        self.preview_rx = None;
         self.view.loading = true;
+        self.view.previewing = false;
+        self.view.preview = None;
         self.view.error = None;
     }
 
@@ -37,6 +42,8 @@ impl InboxPreview {
         match next {
             Some(Ok(Ok(mut view))) => {
                 view.exporting = self.view.exporting;
+                view.previewing = self.view.previewing;
+                view.preview = self.view.preview.clone();
                 view.notice_key = self.view.notice_key;
                 self.view = view;
                 self.rx = None;
@@ -81,6 +88,32 @@ impl InboxPreview {
             }
             _ => {}
         }
+        let previewed = self.preview_rx.as_ref().map(|receiver| receiver.try_recv());
+        match previewed {
+            Some(Ok(Ok(Some(text)))) => {
+                if let Some(id) = self.view.preview.as_ref().map(|(id, _)| id.clone()) {
+                    self.view.preview = Some((id, text));
+                }
+                self.view.previewing = false;
+                self.preview_rx = None;
+                changed = true;
+            }
+            Some(Ok(Ok(None))) => {
+                self.view.preview = None;
+                self.view.notice_key = Some("transfer.inboxPreviewUnsupported");
+                self.view.previewing = false;
+                self.preview_rx = None;
+                changed = true;
+            }
+            Some(Ok(Err(_))) | Some(Err(TryRecvError::Disconnected)) => {
+                self.view.preview = None;
+                self.view.notice_key = Some("transfer.inboxPreviewFailed");
+                self.view.previewing = false;
+                self.preview_rx = None;
+                changed = true;
+            }
+            _ => {}
+        }
         changed
     }
 }
@@ -99,10 +132,13 @@ impl App {
         });
     }
 
-    /// A displayed UUID is only a selector, never a filename or permission.
-    /// No stale, pending, tampered or duplicate-busy row may start Save Copy.
-    pub(super) fn begin_inbox_save(&mut self, receipt: &str) -> bool {
-        if self.transfer.inbox.view.exporting || self.transfer.inbox.view.loading {
+    /// The preview is user-triggered. A displayed UUID is only a selector,
+    /// never a filename, path or authorization to read arbitrary files.
+    pub(super) fn begin_inbox_text_preview(&mut self, receipt: &str) -> bool {
+        if self.transfer.inbox.view.loading
+            || self.transfer.inbox.view.exporting
+            || self.transfer.inbox.view.previewing
+        {
             return false;
         }
         if !self
@@ -118,7 +154,48 @@ impl App {
         let Ok(id) = Uuid::parse_str(receipt) else {
             return false;
         };
-        // User-chosen exports must not bypass File Gate into known Vaults.
+        let (tx, rx) = mpsc::channel();
+        self.transfer.inbox.preview_rx = Some(rx);
+        self.transfer.inbox.view.preview = Some((receipt.to_owned(), String::new()));
+        self.transfer.inbox.view.previewing = true;
+        self.transfer.inbox.view.notice_key = None;
+        let wake = Arc::clone(&self.workspace.wake);
+        thread::spawn(move || {
+            let result = user_inbox_root()
+                .map_err(|error| format!("inbox root: {error:?}"))
+                .and_then(|root| read_checked_text_preview(&root, id));
+            if tx.send(result).is_ok() {
+                wake();
+            }
+        });
+        true
+    }
+
+    /// A displayed UUID is only a selector, never a filename or permission.
+    /// No stale, pending, tampered or duplicate-busy row may start Save Copy.
+    pub(super) fn begin_inbox_save(&mut self, receipt: &str) -> bool {
+        if self.transfer.inbox.view.exporting
+            || self.transfer.inbox.view.loading
+            || self.transfer.inbox.view.previewing
+        {
+            return false;
+        }
+        if !self
+            .transfer
+            .inbox
+            .view
+            .rows
+            .iter()
+            .any(|item| item.id == receipt && item.status_key == "transfer.inboxVerified")
+        {
+            return false;
+        }
+        let Ok(id) = Uuid::parse_str(receipt) else {
+            return false;
+        };
+        // A user may select an arbitrary path in the system dialog. The
+        // receiver must refuse protected application data and known Vaults:
+        // that is a File Gate operation, not a manual Inbox export.
         let known = match self.workspace.core.ui_state.list_workspaces() {
             Ok(known) => known,
             Err(_) => {
@@ -197,8 +274,49 @@ fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
         loading: false,
         error: None,
         exporting: false,
+        previewing: false,
+        preview: None,
         notice_key: None,
     })
+}
+
+/// A deliberately narrow in-app text preview: only checked files up to 4 KiB.
+/// Never execute remote bytes, launch handlers, use a sender path or write Vault.
+fn read_checked_text_preview(root: &Path, id: Uuid) -> Result<Option<String>, String> {
+    const MAX_TEXT_BYTES: u64 = 4 * 1024;
+    #[cfg(windows)]
+    let _pinned = aquilum_core::p2p_inbox_lab::pin_windows_inbox_read(root)
+        .map_err(|error| format!("Windows Inbox read custody refused: {error:?}"))?;
+    let ledger = InboxLedger::open_existing(root)
+        .map_err(|error| format!("open checked Inbox: {error:?}"))?
+        .ok_or("Inbox does not exist")?;
+    let (mut pinned, intent) = ledger
+        .open_verified_file(id)
+        .map_err(|error| format!("checked preview refused: {error:?}"))?;
+    if intent.bytes > MAX_TEXT_BYTES {
+        return Ok(None);
+    }
+    let mut bytes = Vec::with_capacity(intent.bytes as usize);
+    (&mut pinned)
+        .take(MAX_TEXT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 != intent.bytes
+        || pinned.metadata().map_err(|error| error.to_string())?.len() != intent.bytes
+        || *blake3::hash(&bytes).as_bytes() != intent.blake3
+    {
+        return Err("Inbox file changed during preview".into());
+    }
+    if bytes.contains(&0) {
+        return Ok(None);
+    }
+    let Ok(text) = String::from_utf8(bytes) else {
+        return Ok(None);
+    };
+    if text.chars().any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t')) {
+        return Ok(None);
+    }
+    Ok(Some(text))
 }
 
 fn save_checked_copy(
@@ -216,7 +334,8 @@ fn save_checked_copy(
         .map_err(|error| format!("destination parent custody: {error:?}"))?;
     let canonical_parent =
         fs::canonicalize(parent).map_err(|error| format!("destination parent: {error}"))?;
-    // Protected roots are checked under pinned no-rename ancestor handles.
+    // This is a best-effort fixed-root gate, not a proof against hostile
+    // ancestor substitution after this check. Release requires handle custody.
     for protected in std::iter::once(root).chain(protected_roots.iter().map(PathBuf::as_path)) {
         if let Ok(canonical) = fs::canonicalize(protected) {
             if canonical_parent.starts_with(&canonical) {
@@ -286,6 +405,10 @@ mod tests {
         let model = read_checked_inbox(&inbox_root).unwrap();
         assert_eq!(model.total, 1);
         assert_eq!(model.rows[0].status_key, "transfer.inboxVerified");
+        assert_eq!(
+            read_checked_text_preview(&inbox_root, file.id).unwrap().as_deref(),
+            Some("read-only native UI physical receipt")
+        );
 
         let export_dir = dir.path().join("external-exports");
         fs::create_dir(&export_dir).unwrap();
@@ -300,9 +423,42 @@ mod tests {
         let model = read_checked_inbox(&inbox_root).unwrap();
         assert_eq!(model.total, 1);
         assert_eq!(model.rows[0].status_key, "transfer.inboxReview");
+        assert!(read_checked_text_preview(&inbox_root, file.id).is_err());
         let refused = export_dir.join("never-created.bin");
         assert!(save_checked_copy(&inbox_root, file.id, &refused, &[]).is_err());
         assert!(!refused.exists());
+    }
+
+    #[test]
+    fn text_preview_fail_closed_for_oversized_and_binary_receipts() {
+        let dir = tempfile::tempdir().unwrap();
+        let inbox = dir.path().join("received-inbox");
+        let mut ledger = InboxLedger::open(&inbox).unwrap();
+        for bytes in [vec![b'x'; 4097], vec![b'a', 0, b'b'], vec![0xff, 0xfe]] {
+            let intent = ExpectedTransfer {
+                id: Uuid::new_v4(),
+                sender_key: [31; 32],
+                recipient_key: [32; 32],
+                source: Transport::P2p,
+                bytes: bytes.len() as u64,
+                blake3: *blake3::hash(&bytes).as_bytes(),
+            };
+            assert_eq!(ledger.reserve(&intent).unwrap(), LocalStatus::Pending);
+            let mut output = fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(ledger.object_path(intent.id))
+                .unwrap();
+            output.write_all(&bytes).unwrap();
+            output.sync_all().unwrap();
+            drop(output);
+            assert_eq!(ledger.confirm(&intent).unwrap(), LocalStatus::VerifiedLocal);
+            assert!(read_checked_text_preview(&inbox, intent.id).unwrap().is_none());
+            assert_eq!(ledger.status(intent.id).unwrap(), LocalStatus::VerifiedLocal);
+        }
+        let visible = read_checked_inbox(&inbox).unwrap();
+        assert_eq!(visible.total, 3);
+        assert!(visible.rows.iter().all(|row| row.status_key == "transfer.inboxVerified"));
     }
 
     #[test]
