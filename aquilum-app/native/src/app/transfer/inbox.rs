@@ -324,7 +324,10 @@ fn read_checked_text_preview(root: &Path, id: Uuid) -> Result<Option<String>, St
     let Ok(text) = String::from_utf8(bytes) else {
         return Ok(None);
     };
-    if text.chars().any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t')) {
+    if text
+        .chars()
+        .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
+    {
         return Ok(None);
     }
     Ok(Some(text))

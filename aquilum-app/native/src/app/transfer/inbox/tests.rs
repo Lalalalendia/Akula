@@ -42,7 +42,9 @@ fn native_projection_reports_verified_and_corrupt_bytes() {
     assert_eq!(model.total, 1);
     assert_eq!(model.rows[0].status_key, "transfer.inboxVerified");
     assert_eq!(
-        read_checked_text_preview(&inbox_root, file.id).unwrap().as_deref(),
+        read_checked_text_preview(&inbox_root, file.id)
+            .unwrap()
+            .as_deref(),
         Some("read-only native UI physical receipt")
     );
 
@@ -89,12 +91,24 @@ fn text_preview_fail_closed_for_oversized_and_binary_receipts() {
         output.sync_all().unwrap();
         drop(output);
         assert_eq!(ledger.confirm(&intent).unwrap(), LocalStatus::VerifiedLocal);
-        assert!(read_checked_text_preview(&inbox, intent.id).unwrap().is_none());
-        assert_eq!(ledger.status(intent.id).unwrap(), LocalStatus::VerifiedLocal);
+        assert!(
+            read_checked_text_preview(&inbox, intent.id)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            ledger.status(intent.id).unwrap(),
+            LocalStatus::VerifiedLocal
+        );
     }
     let visible = read_checked_inbox(&inbox).unwrap();
     assert_eq!(visible.total, 3);
-    assert!(visible.rows.iter().all(|row| row.status_key == "transfer.inboxVerified"));
+    assert!(
+        visible
+            .rows
+            .iter()
+            .all(|row| row.status_key == "transfer.inboxVerified")
+    );
 }
 
 #[test]

@@ -38,9 +38,14 @@ impl App {
         {
             return false;
         }
-        if !self.transfer.inbox.view.rows.iter().any(|row| {
-            row.id == receipt && row.status_key == "transfer.inboxVerified"
-        }) {
+        if !self
+            .transfer
+            .inbox
+            .view
+            .rows
+            .iter()
+            .any(|row| row.id == receipt && row.status_key == "transfer.inboxVerified")
+        {
             return false;
         }
         let Ok(id) = Uuid::parse_str(receipt) else {
@@ -119,7 +124,9 @@ mod tests {
             fs::create_dir(path).unwrap();
         }
         let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
-        core.ui_state.resolve_workspace(vault.to_str().unwrap(), 1).unwrap();
+        core.ui_state
+            .resolve_workspace(vault.to_str().unwrap(), 1)
+            .unwrap();
         let mut ledger = InboxLedger::open(&inbox).unwrap();
         let bytes = b"verified inbox content";
         let receipt = ExpectedTransfer {
@@ -132,11 +139,18 @@ mod tests {
         };
         assert_eq!(ledger.reserve(&receipt).unwrap(), LocalStatus::Pending);
         let object = ledger.object_path(receipt.id);
-        let mut writer = fs::OpenOptions::new().create_new(true).write(true).open(&object).unwrap();
+        let mut writer = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&object)
+            .unwrap();
         writer.write_all(bytes).unwrap();
         writer.sync_all().unwrap();
         drop(writer);
-        assert_eq!(ledger.confirm(&receipt).unwrap(), LocalStatus::VerifiedLocal);
+        assert_eq!(
+            ledger.confirm(&receipt).unwrap(),
+            LocalStatus::VerifiedLocal
+        );
         drop(ledger);
         let imported = import_checked_into_vault(&core, &inbox, receipt.id, &vault).unwrap();
         assert_eq!(fs::read(&imported).unwrap(), bytes);
