@@ -86,6 +86,12 @@ missing real Obsidian Desktop process. It never deletes or resets a vault.
    and connection, both applications' additions, five GUI observations,
    screenshots, versions and SHA-256 values. Missing evidence fails closed.
 
+The collector uses the **official `obsidian dev:screenshot` Base64 PNG return** and
+validates/decodes it directly into the external evidence directory. It does
+not assume that Obsidian accepts an absolute `path=` target; the output is
+bounded, checked for a PNG header and then bound to its SHA-256. This matches
+[the Obsidian CLI developer command reference](https://obsidian.md/help/cli).
+
 The evidence directory contains `00-original.canvas`,
 `01-akula.canvas`, `02-obsidian.canvas`,
 `report.json`, and five PNG screenshots. Human review of images
