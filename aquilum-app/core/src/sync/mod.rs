@@ -1,5 +1,4 @@
-//! Inert sync contracts, types and deterministic fake provider.
-//! Local history is not distributed; File Gate protects dirty editor buffers.
+//! Local-only sync contracts and fake provider; File Gate protects dirty editors, no distributed history.
 mod core_scan;
 mod dag;
 mod delta;

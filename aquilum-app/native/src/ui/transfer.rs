@@ -1,5 +1,4 @@
-//! Transfer preparation UI. No transport or file authorization is exposed here.
-//! Rows are in-memory drafts, never a claim that data was sent or verified.
+//! Transfer UI: in-memory drafts, not proof of send/verify; no implied transport or file access.
 
 use aquilum_core::sync::DeviceId;
 use masonry::accesskit::Role;
