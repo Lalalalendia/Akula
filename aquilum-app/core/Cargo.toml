@@ -13,6 +13,8 @@ default = []
 canvas-crdt-lab = []
 # Opt-in pure messaging state machine; no network, storage, UI or workers.
 messaging-core-lab = []
+# W4 signed receipt and durable local journal (opt-in, no remote trust).
+messaging-w4-lab = ["messaging-core-lab"]
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
 # Opt-in verified receiver staged-file create-new, no Vault apply.

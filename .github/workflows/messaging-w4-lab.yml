@@ -1,0 +1,45 @@
+name: Akula WOW W4 receipt and SQLite outbox lab
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/messaging/w4/**'
+      - 'docs/messaging/AK-MSG-CORE-01BC-W4.md'
+      - '.github/workflows/messaging-w4-lab.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/messaging/w4/**'
+      - 'aquilum-app/core/Cargo.toml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-msg-w4-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  signed-w4:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          cache-workspace-crates: true
+          save-if: false
+      - name: Run real Ed25519 and persistent journal tests
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features messaging-w4-lab 'messaging::' -- --nocapture
+      - name: Check base core build without messaging
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --no-default-features
+      - name: Validate Rust formatting
+        run: rustfmt --edition 2021 --check aquilum-app/core/src/messaging/mod.rs
