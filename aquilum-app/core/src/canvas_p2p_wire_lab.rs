@@ -15,7 +15,7 @@
 
 use crate::p2p_offer_lab::PeerBinding;
 use crate::sync::device_roster_lab::{RosterStatus, VerifiedRosterObservation};
-use crate::sync::{DocumentId, VaultId};
+use crate::sync::{DeviceId, DocumentId, VaultId};
 
 pub const VERSION: u8 = 1;
 pub const MAX_UPDATE_BYTES: usize = 256 * 1024;
@@ -62,6 +62,15 @@ pub enum LocalBoardConsent {
     Editor,
     Viewer,
     Revoked,
+}
+
+/// A local owner-policy input, NOT authority conveyed by any wire field.
+/// The caller must freshly obtain this scoped decision from local consent.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocalBoardPolicy {
+    pub board: DocumentId,
+    pub sender_device: DeviceId,
+    pub consent: LocalBoardConsent,
 }
 
 /// A single bound, in-memory, ordered update stream. Every new authenticated
@@ -161,7 +170,7 @@ impl OfflineFrameGate {
         wire: &'a [u8],
         authenticated_sender: PeerBinding,
         fresh_roster: &VerifiedRosterObservation,
-        local_board_consent: LocalBoardConsent,
+        local_board_policy: LocalBoardPolicy,
     ) -> Result<&'a [u8], FrameError> {
         if wire.len() < HEADER_BYTES + 1 {
             return Err(FrameError::InvalidFrame);
@@ -179,7 +188,10 @@ impl OfflineFrameGate {
             self.sender,
             self.receiver,
         )?;
-        if local_board_consent != LocalBoardConsent::Editor {
+        if local_board_policy.board != self.board
+            || local_board_policy.sender_device != self.sender.device_id
+            || local_board_policy.consent != LocalBoardConsent::Editor
+        {
             return Err(FrameError::NoEditorConsent);
         }
         if &wire[..8] != MAGIC || wire[8] != VERSION || wire[9] != UPDATE_KIND {
@@ -334,12 +346,20 @@ mod tests {
         OfflineFrameGate::new(f.vault, f.board, f.sender, f.receiver, [7; 16], &f.roster).unwrap()
     }
 
+    fn policy(f: &Fixture, consent: LocalBoardConsent) -> LocalBoardPolicy {
+        LocalBoardPolicy {
+            board: f.board,
+            sender_device: f.sender.device_id,
+            consent,
+        }
+    }
+
     fn allow<'a>(
         g: &mut OfflineFrameGate,
         wire: &'a [u8],
         f: &Fixture,
     ) -> Result<&'a [u8], FrameError> {
-        g.inspect_update(wire, f.sender, &f.roster, LocalBoardConsent::Editor)
+        g.inspect_update(wire, f.sender, &f.roster, policy(f, LocalBoardConsent::Editor))
     }
 
     #[test]
@@ -398,7 +418,7 @@ mod tests {
         let mut g = gate(&f);
         let wire = g.encode_update(1, &[1]).unwrap();
         let wrong = PeerBinding { endpoint_id: [55; 32], ..f.sender };
-        assert_eq!(g.inspect_update(&wire, wrong, &f.roster, LocalBoardConsent::Editor),
+        assert_eq!(g.inspect_update(&wire, wrong, &f.roster, policy(&f, LocalBoardConsent::Editor)),
             Err(FrameError::WrongIdentity));
         let mut swapped = wire.clone();
         swapped[OFF_SENDER_ENDPOINT] ^= 1;
@@ -413,11 +433,21 @@ mod tests {
         let mut g = gate(&f);
         let wire = g.encode_update(1, &[1]).unwrap();
         let revoked = signed_roster(f.vault, f.sender, f.receiver, 7, RosterStatus::Revoked);
-        assert_eq!(g.inspect_update(&wire, f.sender, &revoked, LocalBoardConsent::Editor),
+        assert_eq!(g.inspect_update(&wire, f.sender, &revoked, policy(&f, LocalBoardConsent::Editor)),
             Err(FrameError::Revoked));
-        assert_eq!(g.inspect_update(&wire, f.sender, &f.roster, LocalBoardConsent::Viewer),
+        assert_eq!(g.inspect_update(&wire, f.sender, &f.roster, policy(&f, LocalBoardConsent::Viewer)),
             Err(FrameError::NoEditorConsent));
-        assert_eq!(g.inspect_update(&wire, f.sender, &f.roster, LocalBoardConsent::Revoked),
+        assert_eq!(g.inspect_update(&wire, f.sender, &f.roster, policy(&f, LocalBoardConsent::Revoked)),
+            Err(FrameError::NoEditorConsent));
+        let other_board_policy = LocalBoardPolicy {
+            board: DocumentId::new(), ..policy(&f, LocalBoardConsent::Editor)
+        };
+        assert_eq!(g.inspect_update(&wire, f.sender, &f.roster, other_board_policy),
+            Err(FrameError::NoEditorConsent));
+        let other_peer_policy = LocalBoardPolicy {
+            sender_device: DeviceId::new(), ..policy(&f, LocalBoardConsent::Editor)
+        };
+        assert_eq!(g.inspect_update(&wire, f.sender, &f.roster, other_peer_policy),
             Err(FrameError::NoEditorConsent));
         assert_eq!(g.expected_sequence(), 1);
         assert_eq!(allow(&mut g, &wire, &f).unwrap(), &[1]);
@@ -429,12 +459,12 @@ mod tests {
         let mut g = gate(&f);
         let wire = g.encode_update(1, &[2]).unwrap();
         let updated_roster = signed_roster(f.vault, f.sender, f.receiver, 8, RosterStatus::RecordedOnly);
-        assert_eq!(g.inspect_update(&wire, f.sender, &updated_roster, LocalBoardConsent::Editor),
+        assert_eq!(g.inspect_update(&wire, f.sender, &updated_roster, policy(&f, LocalBoardConsent::Editor)),
             Err(FrameError::StaleRoster));
         let mut new_gate = OfflineFrameGate::new(
             f.vault, f.board, f.sender, f.receiver, [9; 16], &updated_roster
         ).unwrap();
-        assert_eq!(new_gate.inspect_update(&wire, f.sender, &updated_roster, LocalBoardConsent::Editor),
+        assert_eq!(new_gate.inspect_update(&wire, f.sender, &updated_roster, policy(&f, LocalBoardConsent::Editor)),
             Err(FrameError::WrongScope));
         assert_eq!(g.expected_sequence(), 1);
     }
