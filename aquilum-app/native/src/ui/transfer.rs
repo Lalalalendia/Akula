@@ -17,9 +17,9 @@ use super::widgets::{IconButton, TextButton, Variant};
 use crate::i18n::{t, t_with};
 
 mod types;
-pub use types::{InboxRow, InboxView, QueueAction, QueueRow, TransferDialog, TransferExtras};
 #[cfg(feature = "p2p-inbox-preview")]
 pub use types::InboxAction;
+pub use types::{InboxRow, InboxView, QueueAction, QueueRow, TransferDialog, TransferExtras};
 #[cfg(feature = "p2p-native-receive-beta")]
 pub use types::{NativeReceiveAction, NativeReceiveView};
 #[cfg(feature = "p2p-native-send-beta")]
