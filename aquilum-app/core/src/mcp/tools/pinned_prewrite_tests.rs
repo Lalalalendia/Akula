@@ -7,7 +7,7 @@ use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-fn setup() -> (tempfile::TempDir, Core, Vault, PathBuf) {
+fn setup() -> (tempfile::TempDir, Arc<Core>, Vault, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("vault");
     let app = dir.path().join("app");
