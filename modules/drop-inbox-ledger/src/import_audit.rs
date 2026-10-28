@@ -256,6 +256,35 @@ mod tests {
     }
 
     #[test]
+    fn verified_vault_copy_survives_explicit_inbox_removal() {
+        let (_dir, mut ledger, intent, bytes, target) = fixture();
+        ledger.confirm(&intent).unwrap();
+        fs::write(&target, &bytes).unwrap();
+        ledger.record_imported(intent.id, &target).unwrap();
+        assert_eq!(
+            ledger.import_status(intent.id).unwrap(),
+            ImportAuditStatus::Verified
+        );
+        ledger.request_removal(intent.id).unwrap();
+        assert_eq!(
+            ledger.import_status(intent.id).unwrap(),
+            ImportAuditStatus::NeedsReview
+        );
+        fs::remove_file(ledger.object_path(intent.id)).unwrap();
+        ledger.finish_removal(intent.id).unwrap();
+        assert_eq!(
+            ledger.import_status(intent.id).unwrap(),
+            ImportAuditStatus::Verified
+        );
+        assert_eq!(fs::read(&target).unwrap(), bytes);
+        fs::write(&target, b"tampered after removal").unwrap();
+        assert_eq!(
+            ledger.import_status(intent.id).unwrap(),
+            ImportAuditStatus::NeedsReview
+        );
+    }
+
+    #[test]
     fn import_audit_does_not_claim_missing_or_tampered_files() {
         let (_dir, mut ledger, intent, bytes, target) = fixture();
         ledger.confirm(&intent).unwrap();
