@@ -1,4 +1,3 @@
-//! File transfer view models and feature-gated action data.
 use super::*;
 
 #[derive(Clone, Debug)]
@@ -20,6 +19,8 @@ pub enum QueueAction {
 pub enum InboxAction {
     Preview(String),
     SaveCopy(String),
+    #[cfg(windows)]
+    Import(String),
 }
 
 #[cfg(feature = "p2p-native-send-beta")]
@@ -38,14 +39,13 @@ pub enum NativeReceiveAction {
     Cancel,
 }
 
-/// Read-only view model; only the opt-in receiver-side worker populates rows.
-/// Display labels never become filesystem paths.
 #[derive(Clone, Debug)]
 pub struct InboxRow {
     pub id: String,
     pub bytes: u64,
     pub sender: String,
     pub status_key: &'static str,
+    pub import_audit_key: Option<&'static str>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -55,6 +55,7 @@ pub struct InboxView {
     pub loading: bool,
     pub error: Option<String>,
     pub exporting: bool,
+    pub importing: bool,
     pub previewing: bool,
     pub preview: Option<(String, String)>,
     pub notice_key: Option<&'static str>,
@@ -79,8 +80,7 @@ pub struct NativeReceiveView {
     pub message: Option<String>,
 }
 
-/// One typed, feature-gated bundle avoids passing different positional
-/// arguments from every independent P2P/W4 feature combination.
+/// Typed, feature-gated transfer bundle.
 #[derive(Default)]
 pub struct TransferExtras<'a> {
     pub identity: Option<&'a IdentityView>,

@@ -3,8 +3,6 @@
 //! This optional manual P2P inbox path is deliberately NOT Akula Vault sync,
 //! File Gate application or an ACK. The caller must independently trust the
 //! expected root and size from an approved OfferSession. This code checks the
-//! actual opened stage bytes again and NEVER replaces an existing destination.
-//! No server, transport, UI action or unattended write is started here.
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -13,6 +11,8 @@ use std::{
 };
 use uuid::Uuid;
 
+#[cfg(feature = "p2p-inbox-lab")]
+pub mod file_gate;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]

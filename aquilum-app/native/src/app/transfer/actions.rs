@@ -50,16 +50,15 @@ impl App {
         }
         #[cfg(feature = "p2p-inbox-preview")]
         if pressed && !refresh {
-            if let Some((_, command)) = dialog
-                .inbox_save_actions
-                .iter()
-                .find(|(button, _)| *button == id)
-            {
+            let hit = dialog.inbox_save_actions.iter().find(|(b, _)| *b == id);
+            if let Some((_, command)) = hit {
                 refresh = match command {
                     transfer_ui::InboxAction::Preview(receipt) => {
                         self.begin_inbox_text_preview(receipt)
                     }
                     transfer_ui::InboxAction::SaveCopy(receipt) => self.begin_inbox_save(receipt),
+                    #[cfg(windows)]
+                    transfer_ui::InboxAction::Import(receipt) => self.begin_inbox_import(receipt),
                 };
             }
         }

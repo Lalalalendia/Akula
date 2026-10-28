@@ -1,0 +1,69 @@
+name: P2P B3 isolated Inbox to Vault File Gate acceptance (not release)
+on:
+  push:
+    branches:
+      - integration/p2p-b3-filegate-20261029
+    paths:
+      - 'aquilum-app/core/src/p2p_inbox_lab/**'
+      - 'aquilum-app/core/src/p2p_inbox_lab.rs'
+      - 'aquilum-app/core/src/files/gate/mod.rs'
+      - 'aquilum-app/native/src/app/transfer/**'
+      - 'aquilum-app/native/src/ui/transfer/**'
+      - 'aquilum-app/native/assets/locales/**'
+      - 'modules/drop-inbox-ledger/**'
+      - '.github/workflows/p2p-b3-isolated-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p2p-b3-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ledger-and-core:
+    name: Ledger and Core File Gate on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Verify no dependency resolution changes
+        shell: bash
+        run: |
+          cargo metadata --manifest-path aquilum-app/Cargo.toml --locked --format-version 1 > /dev/null
+          git diff --exit-code -- aquilum-app/Cargo.lock
+      - name: Format and test verified receipt, import and removal audits
+        shell: bash
+        run: |
+          cargo fmt --manifest-path modules/drop-inbox-ledger/Cargo.toml -- --check
+          cargo test --manifest-path modules/drop-inbox-ledger/Cargo.toml -- --nocapture
+      - name: Run Core Inbox File Gate tests (Linux fail-closed / Windows real)
+        shell: bash
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::file_gate::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
+      - name: Confirm unaccepted P2P excluded from signed installed graph
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo tree --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --target x86_64-pc-windows-msvc --edges normal,build --format '{p}' > "$RUNNER_TEMP/installed.txt"
+          if grep -Eq '^(akula-inbox-ledger-lab|akula-staya-integration) v' "$RUNNER_TEMP/installed.txt"; then
+            echo "::error::Unaccepted P2P leaked into signed installed dependencies"
+            exit 1
+          fi
+      - name: Compile and test opt-in Native Inbox to Vault UI on Windows only
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::inbox::import::tests -- --nocapture
+          echo 'AKULA_P2P_B3_WINDOWS_QA_PASS installed_default_off=1 copy_only=1'
