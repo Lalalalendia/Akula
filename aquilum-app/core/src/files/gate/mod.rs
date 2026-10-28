@@ -2,6 +2,8 @@ mod interprocess_lock;
 mod moves;
 mod trash;
 mod write;
+#[cfg(feature = "p2p-inbox-lab")]
+pub use crate::p2p_inbox_lab::file_gate::import_verified_inbox_as_new;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -14,14 +16,12 @@ pub(crate) use write::{
     write_checked_history_with_prewrite, write_checked_history_with_prewrite_verified,
     CheckedHistoryError,
 };
-
 use super::attachments::forget_attachments_if_touched;
 use crate::app_core::{Core, CoreEvent};
 use crate::history::NoteWrite;
 use crate::history::service::{HistoryMoveFailure, HistorySaveFailure};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Relocation {
