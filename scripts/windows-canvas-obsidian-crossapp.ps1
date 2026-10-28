@@ -142,8 +142,10 @@ function Record([string]$Phase, [hashtable]$Observation, [string]$Shot) {
 # Every CLI eval has a unique marker, because concurrent Obsidian CLI output may interleave.
 # We accept only the matching raw console line, not another invocation's => return value.
 $obsidianStateCode = '(function(){const l=app.workspace.activeLeaf;const v=l&&l.view;const c=v&&v.canvas;const r=v&&v.containerEl;const state={viewType:v&&v.getViewType(),path:v&&v.file&&v.file.path,nodes:c&&c.nodes&&c.nodes.size,edges:c&&c.edges&&c.edges.size,domNodes:r&&r.querySelectorAll(".canvas-node").length};const result="__C5_MARKER__"+JSON.stringify(state);console.log(result);return result;})()'
-function Get-ObsidianCanvas([int]$N, [int]$E) {
-    $null = Invoke-Obsidian -CliArgs @('open','path=reference.canvas')
+function Get-ObsidianCanvas([int]$N, [int]$E, [switch]$AlreadyOpen) {
+    # Never call 'open' while an operator's Canvas edit could still be saving.
+    # For the edited phase, observe the already active native Canvas view.
+    if (!$AlreadyOpen) { $null = Invoke-Obsidian -CliArgs @('open','path=reference.canvas') }
     for($i=0;$i -lt 30;$i++) {
         $marker = 'AKULA_C5_STATE_' + [Guid]::NewGuid().ToString('N') + ':'
         $code = $obsidianStateCode.Replace('__C5_MARKER__', $marker)
@@ -160,8 +162,8 @@ function Get-ObsidianCanvas([int]$N, [int]$E) {
     }
     throw "Real Obsidian Canvas DOM/runtime failed to show $N nodes and $E edges"
 }
-function Capture-Obsidian([string]$Phase, [int]$N, [int]$E) {
-    $state = Get-ObsidianCanvas $N $E
+function Capture-Obsidian([string]$Phase, [int]$N, [int]$E, [switch]$AlreadyOpen) {
+    $state = Get-ObsidianCanvas $N $E -AlreadyOpen:$AlreadyOpen
     $png = Join-Path $evidence ($Phase+'.png')
     $null = Invoke-Obsidian -CliArgs @('dev:screenshot',"path=$png")
     Record $Phase @{app='obsidian';nodes=$N;edges=$E;viewType=$state.viewType;
@@ -263,7 +265,7 @@ try {
         throw 'Obsidian reopening Akula edit rewrote source bytes'
     }
     Read-Host 'In Obsidian GUI, add ONE group, ONE text card, ONE new edge to it; wait for save, press Enter'
-    Capture-Obsidian 'obsidian_edited' 8 2
+    Capture-Obsidian 'obsidian_edited' 8 2 -AlreadyOpen
     Copy-Item -LiteralPath $reference -Destination (Join-Path $evidence '02-obsidian.canvas')
     Close-ObsidianCanvas
     $akulaProc = Start-AkulaCanvas
