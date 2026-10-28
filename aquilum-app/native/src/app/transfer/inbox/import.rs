@@ -30,7 +30,7 @@ impl InboxPreview {
 }
 
 impl App {
-    pub(super) fn begin_inbox_import(&mut self, receipt: &str) -> bool {
+    pub(in crate::app::transfer) fn begin_inbox_import(&mut self, receipt: &str) -> bool {
         if self.transfer.inbox.view.loading
             || self.transfer.inbox.view.exporting
             || self.transfer.inbox.view.importing
