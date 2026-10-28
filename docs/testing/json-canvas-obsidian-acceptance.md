@@ -38,3 +38,67 @@ published JSON Canvas reference fixture but **do not establish Obsidian GUI comp
 
 **Do not mark C5 complete** until actual two-way application execution has evidence.
 Test only disposable copies; the procedure is not a production data migration.
+
+## Reproducible two-app evidence collector (interactive Windows 10/11)
+
+This is a guided **real GUI acceptance procedure**, not a completed CI run.
+Obsidian CLI needs the 1.12.7+ installer and must be enabled in Obsidian
+Settings > General. It must connect to a running Obsidian Desktop; Obsidian
+Headless is not equivalent to a Canvas view.
+
+From a repository checkout with Windows PowerShell 5.1, Node.js and installed
+Akula, prepare a genuinely new disposable vault:
+
+```powershell
+$vault = Join-Path $env:TEMP "akula-c5-$(Get-Date -Format yyyyMMddHHmmss)"
+powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File scripts/windows-canvas-obsidian-crossapp.ps1 -Mode Prepare -VaultPath $vault
+```
+
+Register this exact folder as a vault in Obsidian, turn on CLI, and keep
+Obsidian running. Locate the official `Obsidian.com` beside
+`Obsidian.exe` (path varies by installation). Start the collector
+with a new evidence directory *outside* the vault:
+
+```powershell
+$cli = Join-Path $env:LOCALAPPDATA "Programs\Obsidian\Obsidian.com"
+$proof = Join-Path $env:TEMP "akula-c5-proof-$(Get-Date -Format yyyyMMddHHmmss)"
+powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File scripts/windows-canvas-obsidian-crossapp.ps1 -Mode Run -VaultPath $vault -ObsidianCli $cli -ObsidianVaultName (Split-Path $vault -Leaf) -EvidenceDir $proof
+```
+
+The collector refuses a non-disposable vault, a symlinked source, a wrong
+Obsidian vault, an existing output folder, a missing installed Akula or a
+missing real Obsidian Desktop process. It never deletes or resets a vault.
+
+1. Obsidian opens `reference.canvas`: inspect five objects and one
+   edge. The script checks the native Canvas view and DOM, captures a GUI
+   screenshot and verifies opening did not rewrite the original SHA-256.
+2. It closes that Obsidian view and launches **installed Akula** on the same
+   file. In Akula, click `+ Text` exactly once and wait for File Gate
+   to persist the new node. The script checks UIA counts, saves the new file
+   and captures a screenshot.
+3. Obsidian opens Akula's six-node revision. In **Obsidian's GUI**, add one
+   group, one text card, and one new edge touching the new card, then wait
+   for save. The script captures that real Canvas view and revision.
+4. Installed Akula opens the final eight-node/two-edge revision. The script
+   records UIA and screenshot evidence, and rejects a read-only rewrite.
+5. The independent Node validator compares three saved Canvas files,
+   unchanged original IDs, field contents, relative layer order, file paths
+   and connection, both applications' additions, five GUI observations,
+   screenshots, versions and SHA-256 values. Missing evidence fails closed.
+
+The evidence directory contains `00-original.canvas`,
+`01-akula.canvas`, `02-obsidian.canvas`,
+`report.json`, and five PNG screenshots. Human review of images
+is still mandatory for connection visibility, geometry, text, missing file
+placeholders, and z-order; UIA counts alone are not pixel proof.
+
+The guided GUI process does **not** run in required GitHub CI. The separate
+Node validator unit tests can run without Obsidian and never establish
+two-app compatibility by themselves:
+
+```bash
+node --test .github/scripts/canvas-crossapp-validate.test.cjs
+```
+
+Windows 7 physical Akula acceptance remains a different requirement;
+an Obsidian Windows 10/11 run does not prove Windows 7 compatibility.
