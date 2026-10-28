@@ -59,9 +59,16 @@ mod unix {
             Mode::empty())?;
         let file = File::from(fd);
         let meta = file.metadata()?;
-        if !meta.is_file() || meta.nlink() != 1 {
+        if !meta.is_file() || meta.nlink() > 1 {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
                 "MCP Vault reads require single-link regular files"));
+        }
+        if meta.nlink() == 0 {
+            // File Gate atomically replaces a note with rename. A reader can
+            // open the old inode just before it is unlinked, without ever
+            // following a hardlink or symlink. Retry the pinned parent path.
+            return Err(std::io::Error::new(std::io::ErrorKind::WouldBlock,
+                "MCP note was replaced during pinned open"));
         }
         Ok(file)
     }
@@ -82,9 +89,21 @@ mod unix {
                 return Err("Non-normal component in MCP note path".to_owned());
             };
             if parts.peek().is_none() {
-                let file = open_regular(&directory, name)
-                    .map_err(|error| error.to_string())?;
-                return super::bounded::read(file);
+                // Retry only the transient unlinked-inode race caused by
+                // File Gate's atomic replace. Hardlinks, symlinks, non-files
+                // and other I/O errors remain fail-closed.
+                for attempt in 0..16 {
+                    match open_regular(&directory, name) {
+                        Ok(file) => return super::bounded::read(file),
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+                            && attempt < 15 =>
+                        {
+                            std::thread::yield_now();
+                        }
+                        Err(error) => return Err(error.to_string()),
+                    }
+                }
+                unreachable!("bounded pinned-open attempts must return");
             }
             directory = open_dir(&directory, name).map_err(|error| error.to_string())?;
         }
@@ -121,6 +140,29 @@ mod unix {
             fs::hard_link(outside.path().join("secret.md"), vault.root.join("hardlink.md")).unwrap();
             assert!(read_unix(&vault, &vault.root.join("hardlink.md")).is_err());
             assert!(read_unix(&vault, &vault.root.join("../other.md")).is_err());
+        }
+
+        #[test]
+        fn unlinked_atomic_replacement_is_not_mistaken_for_a_hardlink() {
+            let (_dir, vault) = fixture();
+            let note = vault.root.join("Проекты/Глава.md");
+            let root_fd = open_root(&vault.root).unwrap();
+            let parent = open_dir(&root_fd, OsStr::new("Проекты")).unwrap();
+            let old_handle = open_regular(&parent, OsStr::new("Глава.md")).unwrap();
+            let replacement = vault.root.join("Проекты/replacement.tmp");
+            fs::write(&replacement, "новая версия").unwrap();
+            fs::rename(&replacement, &note).unwrap();
+
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(old_handle.metadata().unwrap().nlink(), 0);
+            assert_eq!(
+                read_unix(&vault, &note).unwrap(),
+                "новая версия".as_bytes()
+            );
+            let outside = tempfile::tempdir().unwrap();
+            fs::write(outside.path().join("secret.md"), b"secret").unwrap();
+            fs::hard_link(outside.path().join("secret.md"), vault.root.join("Проекты/hard.md")).unwrap();
+            assert!(read_unix(&vault, &vault.root.join("Проекты/hard.md")).is_err());
         }
 
         #[test]
