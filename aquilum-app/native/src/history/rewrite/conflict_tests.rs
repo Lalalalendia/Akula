@@ -18,7 +18,7 @@ fn restore_rejects_a_concurrent_disk_edit_without_overwriting_it() {
     fs::write(&note, "newer user content").unwrap();
 
     let attempts = Cell::new(0);
-    let result = rewrite(&core, &note, Source::Restore(1), false, |current| {
+    let result = rewrite(&core, &note, Source::Restore(1), false, None, |current| {
         attempts.set(attempts.get() + 1);
         assert_eq!(current, "newer user content");
         fs::write(&note, "concurrent external change").unwrap();
@@ -41,7 +41,7 @@ fn revert_still_recomputes_against_a_fresh_snapshot_on_conflict() {
     fs::write(&note, "initial").unwrap();
 
     let attempts = Cell::new(0);
-    let result = rewrite(&core, &note, Source::Revert(1), true, |current| {
+    let result = rewrite(&core, &note, Source::Revert(1), true, None, |current| {
         let prior = attempts.get();
         attempts.set(prior + 1);
         if prior == 0 {
