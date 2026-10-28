@@ -98,13 +98,16 @@ $log = Join-Path $base 'evidence.txt'
     'installed_exe_sha256=' + (Sha256 $exe) + [Environment]::NewLine +
     'first_original_sha256=' + $sourceA + [Environment]::NewLine +
     'second_original_sha256=' + $sourceB + [Environment]::NewLine), $utf8)
+$expectedLargeSha256 = $null
 if ($LargeDocument) {
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        $expectedLargeSha256 = ([BitConverter]::ToString($hasher.ComputeHash($utf8.GetBytes($draftB)))).Replace('-', '').ToLowerInvariant()
+    } finally { $hasher.Dispose() }
     [IO.File]::AppendAllText($log,
         ('large_fixture_lines=100000' + [Environment]::NewLine +
          'large_fixture_utf8_bytes=' + $utf8.GetByteCount($initialB) + [Environment]::NewLine +
-         'large_expected_draft_sha256=' +
-         ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($utf8.GetBytes($draftB)))).Replace('-', '').ToLowerInvariant() +
-         [Environment]::NewLine))
+         'large_expected_draft_sha256=' + $expectedLargeSha256 + [Environment]::NewLine))
 }
 function Record([string]$line) { [IO.File]::AppendAllText($log, $line + [Environment]::NewLine) }
 function Normalized([string]$value) {
@@ -247,7 +250,12 @@ try {
         throw 'Real GUI clipboard readback differs from the exact recovered file'
     }
     Record 'restored_second_gui_exact=PASS'
-    if ($LargeDocument) { Record 'large_100k_unicode_gui_and_file_sha256_exact=PASS' }
+    if ($LargeDocument) {
+        if ((Sha256 $second) -cne $expectedLargeSha256) {
+            throw 'Restored 100k-line file bytes differ from the pre-crash expected SHA256'
+        }
+        Record ('large_100k_unicode_gui_and_file_sha256_exact=PASS sha256=' + $expectedLargeSha256)
+    }
     Record 'power_cut=NOT_TESTED'
     Record 'status=PASS_DESK15_REAL_OS_MANUAL_HARD_KILL'
     $passed = $true
