@@ -23,7 +23,7 @@ fn oversized_shadow_is_rejected_before_revision_or_disk_work() {
     let too_large = Rope::from("x".repeat(super::super::MAX_TEXT + 1));
 
     let error = queue.request(too_large).unwrap_err();
-    assert!(error.to_string().contains("16 MiB"));
+    assert!(error.to_string().contains("24 MiB"));
     let status = queue.status();
     assert!(!status.pending, "over-limit draft must not enter the worker queue");
     assert!(status.durable_revision.is_none(), "no false durability ACK");
