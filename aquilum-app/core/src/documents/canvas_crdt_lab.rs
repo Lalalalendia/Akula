@@ -221,7 +221,8 @@ impl CanvasCrdtLab {
                 fields.insert("text".into(), Value::String(text.get_string(&txn)));
             }
             let order = match child.get(&txn, "order") {
-                Some(Out::Any(Any::Number(order))) if order.is_finite() => order,
+                Some(Out::Any(Any::Number(order))) => order.as_f64()
+                    .filter(|value| value.is_finite()).ok_or("invalid Canvas node order")?,
                 _ => return Err("invalid Canvas node order".into()),
             };
             ordered.push((order, id.to_owned(), node));
