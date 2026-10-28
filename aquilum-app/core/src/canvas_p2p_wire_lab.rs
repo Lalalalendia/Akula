@@ -421,6 +421,17 @@ mod tests {
         let wrong = PeerBinding { endpoint_id: [55; 32], ..f.sender };
         assert_eq!(g.inspect_update(&wire, wrong, &f.roster, policy(&f, LocalBoardConsent::Editor)),
             Err(FrameError::WrongIdentity));
+        let unknown = PeerBinding {
+            device_id: DeviceId::new(), endpoint_id: [66; 32],
+        };
+        assert!(matches!(OfflineFrameGate::new(
+            f.vault, f.board, unknown, f.receiver, [7; 16], &f.roster
+        ), Err(FrameError::UnknownPeer)));
+        let mut wrong_pin = f.sender;
+        wrong_pin.endpoint_id = [66; 32];
+        assert!(matches!(OfflineFrameGate::new(
+            f.vault, f.board, wrong_pin, f.receiver, [7; 16], &f.roster
+        ), Err(FrameError::WrongIdentity)));
         let mut swapped = wire.clone();
         swapped[OFF_SENDER_ENDPOINT] ^= 1;
         assert_eq!(allow(&mut g, &swapped, &f), Err(FrameError::WrongIdentity));
