@@ -20,7 +20,12 @@ pub(in crate::ui::transfer) fn render(
         for received in &view.rows {
             let label = format!("{} · {}", received.id, display_size(received.bytes));
             let detail = match received.import_audit_key {
-                Some(key) => format!("{} · {} · {}", received.sender, t(received.status_key), t(key)),
+                Some(key) => format!(
+                    "{} · {} · {}",
+                    received.sender,
+                    t(received.status_key),
+                    t(key)
+                ),
                 None => format!("{} · {}", received.sender, t(received.status_key)),
             };
             let labels = NewWidget::new(
@@ -49,7 +54,8 @@ pub(in crate::ui::transfer) fn render(
                 {
                     if received.import_audit_key.is_none() {
                         let import = NewWidget::new(TextButton::new(
-                            t("transfer.inboxImport"), Variant::Ghost,
+                            t("transfer.inboxImport"),
+                            Variant::Ghost,
                         ));
                         actions.push((import.id(), InboxAction::Import(received.id.clone())));
                         entry = entry.with_fixed(import);
