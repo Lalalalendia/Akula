@@ -322,6 +322,26 @@ jobs:
           cargo test -p aquilum-core --locked
           cargo test -p aquilum-core --features sync-engine --locked
 
+      # The lab is default-OFF. Only changes to its source/feature boundary
+      # compile and exercise the opt-in code, using the existing required runner.
+      - name: Validate offline Canvas CRDT lab when modified
+        if: needs.classify.outputs.mode != 'none'
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/core/src/documents/canvas_crdt_lab.rs \
+            aquilum-app/core/src/documents/replica.rs \
+            aquilum-app/core/src/documents/mod.rs \
+            aquilum-app/core/Cargo.toml; then
+            echo 'Canvas CRDT lab unchanged'
+          else
+            cargo test --locked -p aquilum-core --features canvas-crdt-lab canvas_crdt_lab
+          fi
+
       - name: Run full Rust workspace and sync-engine tests
         if: needs.classify.outputs.mode == 'workspace'
         working-directory: aquilum-app
