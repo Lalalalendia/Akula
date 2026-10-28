@@ -325,5 +325,4 @@ mod tests {
         );
         assert_eq!(fs::read(ledger.object_path(intent.id)).unwrap(), bytes);
     }
-
 }
