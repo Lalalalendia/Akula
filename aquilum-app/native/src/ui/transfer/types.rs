@@ -15,6 +15,13 @@ pub enum QueueAction {
     Remove,
 }
 
+#[cfg(feature = "p2p-inbox-preview")]
+#[derive(Clone, Debug)]
+pub enum InboxAction {
+    Preview(String),
+    SaveCopy(String),
+}
+
 #[cfg(feature = "p2p-native-send-beta")]
 #[derive(Clone, Debug)]
 pub enum NativeSendAction {
@@ -48,6 +55,8 @@ pub struct InboxView {
     pub loading: bool,
     pub error: Option<String>,
     pub exporting: bool,
+    pub previewing: bool,
+    pub preview: Option<(String, String)>,
     pub notice_key: Option<&'static str>,
 }
 
@@ -99,7 +108,7 @@ pub struct TransferDialog {
     #[cfg(feature = "p2p-device-ui")]
     pub peer_controls: Option<PeerControls>,
     #[cfg(feature = "p2p-inbox-preview")]
-    pub inbox_save_actions: Vec<(WidgetId, String)>,
+    pub inbox_save_actions: Vec<(WidgetId, InboxAction)>,
     #[cfg(feature = "p2p-native-send-beta")]
     pub native_send_actions: Vec<(WidgetId, NativeSendAction)>,
     #[cfg(feature = "p2p-native-receive-beta")]

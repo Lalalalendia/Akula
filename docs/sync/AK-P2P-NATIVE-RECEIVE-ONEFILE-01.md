@@ -130,3 +130,25 @@ unchanged. The stacked PR chain must enter protected main, CI must pass,
 and the normal owner-approved signed release must publish a newer version.
 No bypass of signature, Windows path-custody or updater integrity checks.
 Peer confirmation is local-only, not a durable delivery ACK.
+
+
+## 28 October — integrated branch: safety hold and local text preview
+
+The installed P2P integration Draft PR #694 is still in release HOLD. Until
+physical Internet Beta gates B1-B5 are independently accepted, the ordinary
+signed `installed` feature explicitly excludes `p2p-native-receive-beta`.
+The pinned signed-candidate workflow refuses shipping the P2P beta through
+that feature. Explicit opt-in QA builds can continue exercising the same
+transport; this is **not** proof of a signed, released, two-PC flow.
+
+The existing receiver-side preview from stacked PR #691 has been integrated
+into this branch without removing the Windows pinned Inbox read/export guards.
+An explicit VerifiedLocal row now offers a 4-KiB bounded UTF-8 text preview,
+with a fresh opened-descriptor byte-length/BLAKE3 recheck. Oversized, binary,
+NUL-containing and altered receipts never render arbitrary data. Preview is
+in-process UI text, not a system file handler or executable.
+
+**Remaining B3 HOLD:** `Save Copy` outside the Vault is not `Import to my
+Vault`. File Gate one-click import, safe Inbox deletion, imported-state
+retention and the real two-device WAN acceptance remain unimplemented.
+Do not relabel a successful preview or test build as B3/B5 PASS.
