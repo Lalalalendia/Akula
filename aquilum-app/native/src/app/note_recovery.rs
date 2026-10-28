@@ -36,13 +36,13 @@ impl App {
         });
     }
 
-    pub(super) fn capture_note_recovery(&mut self) {
+    pub(super) fn capture_note_recovery(&mut self) -> bool {
         if let Some(note)=&mut self.note && let Err(error)=note.snapshot_unsaved(&self.text) {
             report!("shadow staging rejected: {error}");
             note.save_error=Some(format!("Recovery backup failed: {error}"));
-        }
+            true
+        } else { false }
     }
-
     pub(super) fn poll_note_recovery(&mut self, root: &mut RenderRoot) {
         while let Ok(message)=self.recovery.rx.try_recv(){self.recovery.deferred.push_back(message);}
         if let Some(error)=self.note.as_ref().and_then(Note::shadow_error)

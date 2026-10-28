@@ -13,7 +13,7 @@ impl App {
         // Cloning its persistent rope avoids replaying every edit on a second
         // large rope and keeps the persisted text identical to the visible text.
         self.adopt_body(root);
-        self.queue_save();
+        self.queue_save(root);
         self.refresh_hero(root);
         self.metadata_changed(root, had);
     }
@@ -30,18 +30,18 @@ impl App {
     pub(in crate::app) fn commit_text(&mut self, root: &mut RenderRoot, text: crop::Rope) {
         let had = frontmatter::end_of(&self.text).is_some();
         self.text = text;
-        self.queue_save();
+        self.queue_save(root);
         self.metadata_changed(root, had);
         self.sync_body(root);
         self.refresh_hero(root);
     }
 
-    fn queue_save(&mut self) {
+    fn queue_save(&mut self, root: &mut RenderRoot) {
         if let Some(note) = &mut self.note {
             let debounce = self.workspace.core.settings.get_config().editor.save_debounce_ms;
             note.edit(Duration::from_millis(u64::from(debounce)));
         }
-        self.capture_note_recovery();
+        if self.capture_note_recovery() { self.refresh_save_error(root); }
     }
 
     fn metadata_changed(&mut self, root: &mut RenderRoot, had: bool) {
