@@ -50,7 +50,7 @@ fn revert_still_recomputes_against_a_fresh_snapshot_on_conflict() {
         format!("{current} + reverted")
     });
 
-    assert!(matches!(result, Ok(true)), "{result:?}");
+    assert!(matches!(&result, Ok(true)), "{result:?}");
     assert_eq!(attempts.get(), 2, "Revert must reconsider fresh disk content");
     assert_eq!(fs::read_to_string(&note).unwrap(), "external addition + reverted");
     core.shutdown();
