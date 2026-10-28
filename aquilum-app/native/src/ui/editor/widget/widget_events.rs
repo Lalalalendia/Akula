@@ -1,4 +1,4 @@
-use masonry::core::{EventCtx, Ime, PointerButton, PointerButtonEvent, PointerEvent, PointerUpdate, PropertiesMut, TextEvent, UpdateCtx};
+use masonry::core::{EventCtx, PointerButton, PointerButtonEvent, PointerEvent, PointerUpdate, PropertiesMut, TextEvent, UpdateCtx};
 use super::Kind;
 use super::paste;
 use super::TextEditor;
