@@ -61,7 +61,8 @@ mod tests {
             |_| {},
             options,
         );
-        root.focus_on(Some(root.get_widget_with_tag(TAG).expect("editor").id()));
+        let id = root.get_widget_with_tag(TAG).expect("editor").id();
+        root.focus_on(Some(id));
         let _ = root.redraw();
         root
     }
