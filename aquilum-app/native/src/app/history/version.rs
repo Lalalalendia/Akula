@@ -75,8 +75,7 @@ impl App {
             }
             Err(error) => {
                 report!("история: {error:?}");
-                self.version_notice = Some(t("history.actionFailed"));
-                self.show_version(root);
+                self.report_failed_history_flush(root, version);
             }
         }
     }
