@@ -8,13 +8,10 @@ const path=require('node:path');
 const clone=x=>JSON.parse(JSON.stringify(x));
 const ids=['754a8ef995f366bc','8132d4d894c80022','7efdbbe0c4742315','59e896bc8da20699','0ba565e7f30e0652'];
 function stages(){
-  const source={nodes:[
-    {id:ids[0],type:'group',x:-300,y:-460,width:610,height:200,label:'JSON Canvas'},
-    {id:ids[1],type:'file',file:'readme.md',x:-280,y:-200,width:570,height:560,color:'6'},
-    {id:ids[2],type:'file',file:'_site/logo.svg',x:-280,y:-440,width:217,height:80},
-    {id:ids[3],type:'text',text:'Learn more',x:40,y:-440,width:250,height:160},
-    {id:ids[4],type:'file',file:'spec/1.0.md',x:360,y:-400,width:400,height:400}],
-    edges:[{id:'6fa11ab87f90b8af',fromNode:ids[2],fromSide:'right',toNode:ids[3],toSide:'left'}]};
+  // Use the exact upstream fixture already pinned in #860, not a synthetic lookalike.
+  const source=JSON.parse(fs.readFileSync(path.join(__dirname,
+    '../../aquilum-app/core/tests/fixtures/jsoncanvas/official-sample.canvas'),'utf8'));
+  assert.deepEqual(source.nodes.map(n=>n.id),ids);
   const akula=clone(source);
   akula.nodes.push({id:'akula-new',type:'text',text:'New text',x:0,y:0,width:240,height:120});
   const obsidian=clone(akula);
