@@ -3,7 +3,7 @@ use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use crate::app_core::Core;
 use crate::search::paths::{markdown_files, relative_slash_path, strip_root};
-mod read;
+mod read; // Pinned nofollow reads also enforce the 8 MiB note budget.
 const SIMILAR_LIMIT: usize = 5;
 
 #[derive(Clone)]

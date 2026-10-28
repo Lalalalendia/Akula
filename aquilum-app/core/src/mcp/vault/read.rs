@@ -2,6 +2,7 @@
 use super::Vault;
 use std::path::Path;
 #[cfg(windows)] mod windows;
+mod bounded;
 impl Vault {
     /// Only MCP read_note / note_outline use this read-only primitive.
     /// A pinned Unix parent prevents a post-preflight symlink swap from
@@ -17,14 +18,14 @@ impl Vault {
         { Err("MCP pinned Vault read unsupported on this OS".to_owned()) }
     }
 }
-
 #[cfg(unix)]
 mod unix {
     use super::{Path, Vault};
     use rustix::fs::{openat, Mode, OFlags};
     use std::ffi::OsStr;
     use std::fs::File;
-    use std::io::{Read, Result as IoResult};
+    use std::io::Result as IoResult;
+    use std::os::unix::fs::MetadataExt;
     use std::path::Component;
 
     fn open_dir(parent: &File, component: &OsStr) -> IoResult<File> {
@@ -33,7 +34,6 @@ mod unix {
             Mode::empty())?;
         Ok(File::from(fd))
     }
-
     fn open_root(root: &Path) -> IoResult<File> {
         if !root.is_absolute() {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput,
@@ -52,16 +52,16 @@ mod unix {
         }
         Ok(dir)
     }
-
     fn open_regular(parent: &File, component: &OsStr) -> IoResult<File> {
         // NONBLOCK prevents a FIFO/device from hanging before type checking.
         let fd = openat(parent, component,
             OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
             Mode::empty())?;
         let file = File::from(fd);
-        if !file.metadata()?.is_file() {
+        let meta = file.metadata()?;
+        if !meta.is_file() || meta.nlink() != 1 {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
-                "MCP Vault reads require regular files"));
+                "MCP Vault reads require single-link regular files"));
         }
         Ok(file)
     }
@@ -82,11 +82,9 @@ mod unix {
                 return Err("Non-normal component in MCP note path".to_owned());
             };
             if parts.peek().is_none() {
-                let mut file = open_regular(&directory, name)
+                let file = open_regular(&directory, name)
                     .map_err(|error| error.to_string())?;
-                let mut bytes = Vec::new();
-                file.read_to_end(&mut bytes).map_err(|error| error.to_string())?;
-                return Ok(bytes);
+                return super::bounded::read(file);
             }
             directory = open_dir(&directory, name).map_err(|error| error.to_string())?;
         }
@@ -120,6 +118,8 @@ mod unix {
             assert!(read_unix(&vault, &vault.root.join("Проекты/Escape.md")).is_err());
             symlink(outside.path(), vault.root.join("External")).unwrap();
             assert!(read_unix(&vault, &vault.root.join("External/secret.md")).is_err());
+            fs::hard_link(outside.path().join("secret.md"), vault.root.join("hardlink.md")).unwrap();
+            assert!(read_unix(&vault, &vault.root.join("hardlink.md")).is_err());
             assert!(read_unix(&vault, &vault.root.join("../other.md")).is_err());
         }
 
