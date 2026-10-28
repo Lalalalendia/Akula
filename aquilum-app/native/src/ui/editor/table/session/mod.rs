@@ -9,6 +9,7 @@ mod edit;
 mod nav;
 mod press;
 mod text;
+use self::text::caret_in;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Drag {
