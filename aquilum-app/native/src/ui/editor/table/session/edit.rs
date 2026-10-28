@@ -29,16 +29,6 @@ impl Session {
         Outcome::Write(model)
     }
 
-    pub fn insert(&mut self, view: &TableView, text: &str) -> Outcome {
-        let text = text.replace(['\r', '\n', '\t'], " ");
-        self.edit(view, |value, caret, anchor| {
-            let (a, b) = ((*caret).min(*anchor), (*caret).max(*anchor));
-            value.replace_range(a..b, &text);
-            *caret = a + text.len();
-            *anchor = *caret;
-        })
-    }
-
     pub fn delete(&mut self, view: &TableView, forward: bool, word: bool) -> Outcome {
         if self.caret == self.anchor {
             self.step(view, forward, word, true);
