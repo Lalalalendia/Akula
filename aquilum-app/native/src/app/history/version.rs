@@ -50,14 +50,14 @@ impl App {
     }
     pub(super) fn run_version_command(&mut self, root: &mut RenderRoot, version: &Version, command: VersionCommand) {
         let Some(path) = self.tabs.active().path.clone() else { return };
-        if let Some(note) = &mut self.note
-            && !super::guard::flush_clean(note, &self.workspace.core, &self.text)
-        {
+        let expected = self.note.as_mut().filter(|note| note.is(&path))
+            .and_then(|note| super::guard::flush_clean(note, &self.workspace.core, &self.text));
+        let Some(expected_hash) = expected else {
             self.report_failed_history_flush(root, version);
             return;
-        }
+        };
         let result = match command {
-            VersionCommand::Restore => history::restore(&self.workspace.core, &path, version),
+            VersionCommand::Restore => history::restore(&self.workspace.core, &path, version, &expected_hash),
             VersionCommand::Revert => history::revert(&self.workspace.core, &path, version),
             VersionCommand::Rename => return,
         };
