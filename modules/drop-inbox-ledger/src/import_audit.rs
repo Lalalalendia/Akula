@@ -57,20 +57,26 @@ impl InboxLedger {
     /// On every read, recheck both original Inbox and copied Vault bytes.
     /// Deletion or external modification becomes NeedsReview without data loss.
     pub fn import_status(&self, id: Uuid) -> Result<ImportAuditStatus, LedgerError> {
-        let exists: Option<i64> = self.db.query_row(
-            "SELECT 1 FROM sqlite_master
+        let exists: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT 1 FROM sqlite_master
              WHERE type = 'table' AND name = 'imported_inbox'",
-            [],
-            |row| row.get(0),
-        ).optional()?;
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
         if exists.is_none() {
             return Ok(ImportAuditStatus::NotRecorded);
         }
-        let path: Option<String> = self.db.query_row(
-            "SELECT destination FROM imported_inbox WHERE transfer_id = ?1",
-            [id.to_string()],
-            |row| row.get(0),
-        ).optional()?;
+        let path: Option<String> = self
+            .db
+            .query_row(
+                "SELECT destination FROM imported_inbox WHERE transfer_id = ?1",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
         let Some(path) = path else {
             return Ok(ImportAuditStatus::NotRecorded);
         };
@@ -95,12 +101,17 @@ fn checked_destination(
     id: Uuid,
     path: &Path,
 ) -> Result<PathBuf, LedgerError> {
-    if id.is_nil() || !path.is_absolute()
+    if id.is_nil()
+        || !path.is_absolute()
         || path.file_name() != Some(std::ffi::OsStr::new(&format!("received-{id}.bin")))
     {
         return Err(LedgerError::InvalidLocalObject);
     }
-    let inbox = ledger.objects.parent().ok_or(LedgerError::UnsafeRoot)?.canonicalize()?;
+    let inbox = ledger
+        .objects
+        .parent()
+        .ok_or(LedgerError::UnsafeRoot)?
+        .canonicalize()?;
     let target = path.canonicalize()?;
     if target.starts_with(inbox) {
         return Err(LedgerError::InvalidLocalObject);
@@ -129,13 +140,16 @@ fn verified_target(path: &Path, expected: &ExpectedTransfer) -> Result<bool, Led
         if n == 0 {
             break;
         }
-        total = total.checked_add(n as u64).ok_or(LedgerError::InvalidLocalObject)?;
+        total = total
+            .checked_add(n as u64)
+            .ok_or(LedgerError::InvalidLocalObject)?;
         if total > expected.bytes {
             return Ok(false);
         }
         digest.update(&block[..n]);
     }
-    Ok(total == expected.bytes && target.metadata()?.len() == expected.bytes
+    Ok(total == expected.bytes
+        && target.metadata()?.len() == expected.bytes
         && *digest.finalize().as_bytes() == expected.blake3)
 }
 
@@ -144,7 +158,13 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn fixture() -> (tempfile::TempDir, InboxLedger, ExpectedTransfer, Vec<u8>, PathBuf) {
+    fn fixture() -> (
+        tempfile::TempDir,
+        InboxLedger,
+        ExpectedTransfer,
+        Vec<u8>,
+        PathBuf,
+    ) {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("inbox");
         let vault = dir.path().join("registered-vault");
@@ -160,8 +180,11 @@ mod tests {
             blake3: *blake3::hash(&bytes).as_bytes(),
         };
         ledger.reserve(&intent).unwrap();
-        let mut f = fs::OpenOptions::new().write(true).create_new(true)
-            .open(ledger.object_path(intent.id)).unwrap();
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(ledger.object_path(intent.id))
+            .unwrap();
         f.write_all(&bytes).unwrap();
         f.sync_all().unwrap();
         drop(f);
@@ -172,7 +195,10 @@ mod tests {
     #[test]
     fn import_audit_survives_reopen_and_detects_external_change() {
         let (dir, mut ledger, intent, bytes, target) = fixture();
-        assert_eq!(ledger.import_status(intent.id).unwrap(), ImportAuditStatus::NotRecorded);
+        assert_eq!(
+            ledger.import_status(intent.id).unwrap(),
+            ImportAuditStatus::NotRecorded
+        );
         assert!(matches!(
             ledger.record_imported(intent.id, &target),
             Err(LedgerError::InvalidLocalObject)
@@ -180,13 +206,27 @@ mod tests {
         assert_eq!(ledger.confirm(&intent).unwrap(), LocalStatus::VerifiedLocal);
         fs::write(&target, &bytes).unwrap();
         ledger.record_imported(intent.id, &target).unwrap();
-        assert_eq!(ledger.import_status(intent.id).unwrap(), ImportAuditStatus::Verified);
+        assert_eq!(
+            ledger.import_status(intent.id).unwrap(),
+            ImportAuditStatus::Verified
+        );
         drop(ledger);
-        let reader = InboxLedger::open_existing(&dir.path().join("inbox")).unwrap().unwrap();
-        assert_eq!(reader.import_status(intent.id).unwrap(), ImportAuditStatus::Verified);
+        let reader = InboxLedger::open_existing(&dir.path().join("inbox"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            reader.import_status(intent.id).unwrap(),
+            ImportAuditStatus::Verified
+        );
         fs::write(&target, b"externally edited").unwrap();
-        assert_eq!(reader.import_status(intent.id).unwrap(), ImportAuditStatus::NeedsReview);
-        assert_eq!(reader.status(intent.id).unwrap(), LocalStatus::VerifiedLocal);
+        assert_eq!(
+            reader.import_status(intent.id).unwrap(),
+            ImportAuditStatus::NeedsReview
+        );
+        assert_eq!(
+            reader.status(intent.id).unwrap(),
+            LocalStatus::VerifiedLocal
+        );
     }
 
     #[test]
@@ -204,7 +244,10 @@ mod tests {
             ledger.record_imported(intent.id, &second),
             Err(LedgerError::ConflictingIntent)
         ));
-        assert_eq!(ledger.import_status(intent.id).unwrap(), ImportAuditStatus::Verified);
+        assert_eq!(
+            ledger.import_status(intent.id).unwrap(),
+            ImportAuditStatus::Verified
+        );
         assert_eq!(fs::read(ledger.object_path(intent.id)).unwrap(), bytes);
     }
 
@@ -215,9 +258,15 @@ mod tests {
         fs::write(&target, &bytes).unwrap();
         ledger.record_imported(intent.id, &target).unwrap();
         fs::remove_file(&target).unwrap();
-        assert_eq!(ledger.import_status(intent.id).unwrap(), ImportAuditStatus::NeedsReview);
+        assert_eq!(
+            ledger.import_status(intent.id).unwrap(),
+            ImportAuditStatus::NeedsReview
+        );
         fs::write(&target, &bytes).unwrap();
         fs::write(ledger.object_path(intent.id), b"untrusted").unwrap();
-        assert_eq!(ledger.import_status(intent.id).unwrap(), ImportAuditStatus::NeedsReview);
+        assert_eq!(
+            ledger.import_status(intent.id).unwrap(),
+            ImportAuditStatus::NeedsReview
+        );
     }
 }
