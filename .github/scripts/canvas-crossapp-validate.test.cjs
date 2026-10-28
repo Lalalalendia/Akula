@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {validateDocumentStages,validateEvidence,hash}=require('../../scripts/canvas-crossapp-validate.cjs');
+const {validateDocumentStages,validateEvidence,validateVisualReview,hash}=require('../../scripts/canvas-crossapp-validate.cjs');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
@@ -88,4 +88,37 @@ test('C5 Windows collector keeps a single GUI flow and fail-closed disk/CLI guar
   assert.match(source,/Reference canvas is not pristine/);
   assert.match(source,/Strict cross-app evidence validation FAILED/);
   assert.ok(source.trimEnd().endsWith('}'),'collector ends at the sole main try/finally');
+});
+
+
+test('C5 emits cross-app completion only after SHA-bound five-screenshot human review',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'akula-c5-review-'));
+  try{
+    const phases=['obsidian_initial','akula_edited','obsidian_reopened','obsidian_edited','akula_reopened'];
+    const report={observations:Object.fromEntries(phases.map((name,i)=>[name,{screenshotSha256:(i+1).toString(16).repeat(64)}]))};
+    assert.equal(validateVisualReview(dir,report),null,'absence of human review is not acceptance');
+    const review={
+      reviewer:'GUI acceptance operator',
+      reviewedAtUtc:'2026-10-28T12:00:00Z',
+      phases:Object.fromEntries(phases.map((name,i)=>[name,{
+        screenshotSha256:(i+1).toString(16).repeat(64),visualPass:true
+      }])),
+      checks:{readableText:true,visibleObjects:true,visibleConnections:true,
+        groupLayering:true,filePlaceholders:true}
+    };
+    const file=path.join(dir,'visual-review.json');
+    fs.writeFileSync(file,JSON.stringify(review));
+    assert.equal(validateVisualReview(dir,report).reviewer,'GUI acceptance operator');
+    review.phases.obsidian_reopened.screenshotSha256='0'.repeat(64);
+    fs.writeFileSync(file,JSON.stringify(review));
+    assert.throws(()=>validateVisualReview(dir,report),/different screenshot/,'stale visual review refused');
+    review.phases.obsidian_reopened.screenshotSha256='3'.repeat(64);
+    review.checks.visibleConnections=false;
+    fs.writeFileSync(file,JSON.stringify(review));
+    assert.throws(()=>validateVisualReview(dir,report),/visual acceptance missing visibleConnections/);
+    review.checks.visibleConnections=true;
+    delete review.phases.akula_reopened;
+    fs.writeFileSync(file,JSON.stringify(review));
+    assert.throws(()=>validateVisualReview(dir,report),/visual review phases incomplete/);
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
