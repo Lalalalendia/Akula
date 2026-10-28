@@ -22,6 +22,7 @@ on:
     branches:
       - main
     paths:
+      - 'modules/drop-inbox-ledger/**'
       - 'interop/akula-staya/**'
       - '.github/workflows/p2p-one-file-beta.yml'
   workflow_dispatch:
