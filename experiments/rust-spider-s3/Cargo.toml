@@ -1,0 +1,17 @@
+[package]
+name = "rust-spider-s3-trial"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Keep this proof-of-concept separate from a parent's Cargo workspace.
+[workspace]
+
+[dependencies]
+anyhow = "1"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1"
+hex = "0.4"
+sha2 = "0.10"
+spider = { version = "=2.53.9", default-features = false, features = ["sync", "reqwest_rustls_tls"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
