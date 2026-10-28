@@ -86,7 +86,8 @@ test('C5 Windows collector keeps a single GUI flow and fail-closed disk/CLI guar
   assert.match(source,/Wait-CanvasOnDisk 8 2/);
   assert.match(source,/AKULA-C5-DISPOSABLE-ONLY/);
   assert.match(source,/Reference canvas is not pristine/);
-  assert.match(source,/Strict cross-app evidence validation FAILED/);
+  assert.match(source,/Strict cross-app machine evidence validation FAILED/);
+  assert.match(source,/visual-review\.json before cross-app acceptance/);
   assert.ok(source.trimEnd().endsWith('}'),'collector ends at the sole main try/finally');
 });
 
