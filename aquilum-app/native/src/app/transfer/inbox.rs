@@ -3,8 +3,8 @@
 //! An export rehashes the same pinned file descriptor at click time.
 
 use super::super::App;
-use crate::ui::transfer::{InboxRow, InboxView};
-use akula_inbox_ledger_lab::{InboxLedger, LocalStatus, user_inbox_root};
+use crate::ui::transfer::InboxView;
+use akula_inbox_ledger_lab::{InboxLedger, user_inbox_root};
 use aquilum_core::p2p_inbox_lab::save_verified_stage_as_new;
 use std::{
     fs,
@@ -19,6 +19,8 @@ use std::{
 use uuid::Uuid;
 #[cfg(windows)]
 mod import;
+mod list;
+use list::read_checked_inbox;
 
 #[derive(Default)]
 pub(super) struct InboxPreview {
@@ -26,7 +28,7 @@ pub(super) struct InboxPreview {
     rx: Option<Receiver<Result<InboxView, String>>>,
     save_rx: Option<Receiver<Result<bool, String>>>,
     #[cfg(windows)]
-    import_rx: Option<Receiver<Result<bool, String>>>,
+    import_rx: Option<Receiver<Result<Option<Uuid>, String>>>,
     preview_rx: Option<Receiver<Result<Option<String>, String>>>,
 }
 
@@ -241,54 +243,6 @@ impl App {
         });
         true
     }
-}
-
-fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
-    let Some(ledger) =
-        InboxLedger::open_existing(root).map_err(|error| format!("read-only ledger: {error:?}"))?
-    else {
-        return Ok(InboxView::default());
-    };
-    #[cfg(windows)]
-    let _pinned = aquilum_core::p2p_inbox_lab::pin_windows_inbox_read(root)
-        .map_err(|error| format!("Windows Inbox read custody refused: {error:?}"))?;
-    let total = ledger
-        .count()
-        .map_err(|error| format!("count inbox: {error:?}"))?;
-    let rows = ledger
-        .list_recent(24)
-        .map_err(|error| format!("check recent received files: {error:?}"))?
-        .into_iter()
-        .map(|(file, status)| {
-            let id = file.id.hyphenated().to_string();
-            let sender: String = file.sender_key[..6]
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect();
-            InboxRow {
-                id,
-                bytes: file.bytes,
-                sender,
-                status_key: match status {
-                    LocalStatus::VerifiedLocal => "transfer.inboxVerified",
-                    LocalStatus::Pending => "transfer.inboxPending",
-                    LocalStatus::NeedsReview => "transfer.inboxReview",
-                    LocalStatus::Unknown => "transfer.inboxUnknown",
-                },
-            }
-        })
-        .collect();
-    Ok(InboxView {
-        rows,
-        total,
-        loading: false,
-        error: None,
-        exporting: false,
-        importing: false,
-        previewing: false,
-        preview: None,
-        notice_key: None,
-    })
 }
 
 /// A deliberately narrow in-app text preview: only checked files up to 4 KiB.

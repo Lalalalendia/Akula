@@ -45,6 +45,7 @@ pub struct InboxRow {
     pub bytes: u64,
     pub sender: String,
     pub status_key: &'static str,
+    pub import_audit_key: Option<&'static str>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -79,8 +80,7 @@ pub struct NativeReceiveView {
     pub message: Option<String>,
 }
 
-/// One typed, feature-gated bundle avoids passing different positional
-/// arguments from every independent P2P/W4 feature combination.
+/// Typed, feature-gated transfer bundle.
 #[derive(Default)]
 pub struct TransferExtras<'a> {
     pub identity: Option<&'a IdentityView>,
