@@ -287,6 +287,11 @@ if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
 }
 Assert-LegacyUntouched
 
+# Server 2022 installed-GUI 100k Unicode crash/Restore; not a Win7 runtime claim.
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-beta-recovery-large.ps1') -ExePath $exe
+if ($LASTEXITCODE -ne 0) { throw "Installed 100k-line crash recovery failed: PowerShell exit $LASTEXITCODE" }
+Assert-LegacyUntouched
+
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
 if (!(Test-Path $uninstall)) { throw 'Akula uninstaller missing' }
 $removed = Start-Process $uninstall -ArgumentList '/S' -Wait -PassThru
