@@ -126,6 +126,35 @@ $report = @{
 New-Item -ItemType Directory -Path $evidence -Force | Out-Null
 Copy-Item -LiteralPath $reference -Destination (Join-Path $evidence '00-original.canvas')
 function Sha([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
+# The UIA/DOM model can show an in-memory edit BEFORE either application's
+# asynchronous save reaches disk. Require a stable, parseable on-disk revision.
+function Wait-CanvasOnDisk([int]$NodeCount, [int]$EdgeCount) {
+    $priorHash = $null
+    $stableCount = 0
+    for ($attempt = 0; $attempt -lt 120; $attempt++) {
+        try {
+            $jsonText = [IO.File]::ReadAllText($reference)
+            $board = ConvertFrom-Json -InputObject $jsonText -ErrorAction Stop
+            if ($null -ne $board.nodes -and $null -ne $board.edges -and
+                @($board.nodes).Count -eq $NodeCount -and
+                @($board.edges).Count -eq $EdgeCount) {
+                $currentHash = Sha $reference
+                if ($currentHash -eq $priorHash) { $stableCount++ }
+                else { $stableCount = 1; $priorHash = $currentHash }
+                if ($stableCount -ge 3) { return }
+            } else {
+                $stableCount = 0
+                $priorHash = $null
+            }
+        } catch {
+            # A writer may temporarily expose a partial revision. Never edit it.
+            $stableCount = 0
+            $priorHash = $null
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    throw "Canvas file never reached a stable saved $NodeCount-node/$EdgeCount-edge revision"
+}
 function Record([string]$Phase, [hashtable]$Observation, [string]$Shot) {
     if (!(Test-Path -LiteralPath $Shot -PathType Leaf)) { throw ('GUI screenshot missing: '+$Shot) }
     $bytes = [IO.File]::ReadAllBytes($Shot)
@@ -266,6 +295,7 @@ try {
     $akulaProc = Start-AkulaCanvas
     $null = Get-AkulaCanvas $akulaProc 5 1
     Read-Host 'In installed Akula, click + Text ONCE; wait for save, then press Enter'
+    Wait-CanvasOnDisk 6 1
     Capture-Akula 'akula_edited' $akulaProc 6 1
     Copy-Item -LiteralPath $reference -Destination (Join-Path $evidence '01-akula.canvas')
     Close-Akula $akulaProc; $akulaProc=$null
@@ -274,6 +304,7 @@ try {
         throw 'Obsidian reopening Akula edit rewrote source bytes'
     }
     Read-Host 'In Obsidian GUI, add ONE group, ONE text card, ONE new edge to it; wait for save, press Enter'
+    Wait-CanvasOnDisk 8 2
     Capture-Obsidian 'obsidian_edited' 8 2 -AlreadyOpen
     Copy-Item -LiteralPath $reference -Destination (Join-Path $evidence '02-obsidian.canvas')
     Close-ObsidianCanvas
