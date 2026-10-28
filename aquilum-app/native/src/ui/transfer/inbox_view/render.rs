@@ -1,7 +1,7 @@
 //! Verified Inbox UI: explicit local user actions only.
 use super::super::*;
 
-pub(super) fn render(view: &InboxView) -> (NewWidget<Flex>, Vec<(WidgetId, InboxAction)>) {
+pub(in crate::ui::transfer) fn render(view: &InboxView) -> (NewWidget<Flex>, Vec<(WidgetId, InboxAction)>) {
     let mut panel = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch);
     let mut actions = Vec::new();
     if view.loading {
