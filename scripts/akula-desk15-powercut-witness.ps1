@@ -61,7 +61,8 @@ function Require-Operator([string]$message) {
     }
 }
 function Normalize([string]$text) {
-    return ([regex]::Replace($text,'\r\n?',[string][char]10)).TrimEnd([char]10)
+    # Normalize CRLF/CR to LF only; do not silently discard trailing lines.
+    return [regex]::Replace($text,'\r\n?',[string][char]10)
 }
 function Log([string]$message) {
     [IO.File]::AppendAllText($log,$message+[Environment]::NewLine,$utf8)
