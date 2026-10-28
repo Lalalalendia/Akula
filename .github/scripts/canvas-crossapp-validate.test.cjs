@@ -66,3 +66,26 @@ test('C5 requires GUI observations, PNG hashes, correct runtime counts and pinne
     assert.throws(()=>validateEvidence(dir,source,akula,obsidian,Buffer.from('not official'),report),/reference bytes must be exactly pinned/);
   }finally{fs.rmSync(dir,{force:true,recursive:true});}
 });
+
+
+test('C5 Windows collector keeps a single GUI flow and fail-closed disk/CLI guards',()=>{
+  const source=fs.readFileSync(path.join(__dirname,
+    '../../scripts/windows-canvas-obsidian-crossapp.ps1'),'utf8');
+  for(const name of [
+    'Invoke-Obsidian','Get-ObsidianCanvas','Capture-Obsidian','Get-AkulaCanvas',
+    'Capture-Akula','Wait-CanvasOnDisk','Close-Akula']){
+    assert.equal(source.split('function '+name).length-1,1,
+      'duplicated or missing PowerShell collector function '+name);
+  }
+  assert.match(source,/AKULA_C5_STATE_/,'CLI eval must use per-call marker');
+  assert.match(source,/StartsWith\(\$marker/,'CLI response must be correlated');
+  assert.doesNotMatch(source,/console\.log\(result\)/,'CLI eval result must not depend on console output');
+  assert.match(source,/if \(!\$AlreadyOpen\)/,'do not reopen Obsidian during operator edit');
+  assert.match(source,/Capture-Obsidian 'obsidian_edited' 8 2 -AlreadyOpen/);
+  assert.match(source,/Wait-CanvasOnDisk 6 1/);
+  assert.match(source,/Wait-CanvasOnDisk 8 2/);
+  assert.match(source,/AKULA-C5-DISPOSABLE-ONLY/);
+  assert.match(source,/Reference canvas is not pristine/);
+  assert.match(source,/Strict cross-app evidence validation FAILED/);
+  assert.ok(source.trimEnd().endsWith('}'),'collector ends at the sole main try/finally');
+});
