@@ -18,7 +18,6 @@ impl Vault {
         { Err("MCP pinned Vault read unsupported on this OS".to_owned()) }
     }
 }
-
 #[cfg(unix)]
 mod unix {
     use super::{Path, Vault};
@@ -35,7 +34,6 @@ mod unix {
             Mode::empty())?;
         Ok(File::from(fd))
     }
-
     fn open_root(root: &Path) -> IoResult<File> {
         if !root.is_absolute() {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput,
@@ -54,7 +52,6 @@ mod unix {
         }
         Ok(dir)
     }
-
     fn open_regular(parent: &File, component: &OsStr) -> IoResult<File> {
         // NONBLOCK prevents a FIFO/device from hanging before type checking.
         let fd = openat(parent, component,
