@@ -8,20 +8,20 @@ use aquilum_core::files::gate;
 use aquilum_core::history::Source;
 
 use super::Version;
-
+#[cfg(test)]
+mod conflict_tests;
 const WRITE_RETRIES: usize = 3;
 
 pub struct Texts {
     pub text: String,
     pub previous: Option<String>,
 }
-
 pub fn texts(core: &Core, note: &Path, id: &str) -> Option<Texts> {
     let texts = core.history.version(&|| core.known_roots(), note, Some(id))?;
     Some(Texts { text: texts.text, previous: texts.previous })
 }
 
-fn rewrite(core: &Core, note: &Path, source: Source, next: impl Fn(&str) -> String) -> Result<bool, FileCommandError> {
+fn rewrite(core: &Core, note: &Path, source: Source, retry_conflicts: bool, next: impl Fn(&str) -> String) -> Result<bool, FileCommandError> {
     let mut conflicts = 0;
     loop {
         let snapshot = read_file_snapshot_impl(note)?;
@@ -31,7 +31,7 @@ fn rewrite(core: &Core, note: &Path, source: Source, next: impl Fn(&str) -> Stri
         }
         match gate::write(core, note, &content, Some(&snapshot.hash), source, None) {
             Ok(_) => return Ok(true),
-            Err(FileCommandError::Conflict { .. }) if conflicts < WRITE_RETRIES => conflicts += 1,
+            Err(FileCommandError::Conflict { .. }) if retry_conflicts && conflicts < WRITE_RETRIES => conflicts += 1,
             Err(error) => return Err(error),
         }
     }
@@ -39,12 +39,12 @@ fn rewrite(core: &Core, note: &Path, source: Source, next: impl Fn(&str) -> Stri
 
 pub fn restore(core: &Core, note: &Path, version: &Version) -> Result<bool, FileCommandError> {
     let Some(texts) = texts(core, note, &version.id) else { return Ok(false) };
-    rewrite(core, note, Source::Restore(version.at_ms), |_| texts.text.clone())
+    rewrite(core, note, Source::Restore(version.at_ms), false, |_| texts.text.clone())
 }
 
 pub fn revert(core: &Core, note: &Path, version: &Version) -> Result<bool, FileCommandError> {
     let Some(Texts { text, previous: Some(previous) }) = texts(core, note, &version.id) else { return Ok(false) };
-    rewrite(core, note, Source::Revert(version.at_ms), |current| {
+    rewrite(core, note, Source::Revert(version.at_ms), true, |current| {
         let merged = merge_external_change(&text, &previous, current);
         aquilum_core::documents::merge::apply_edits(current, &merged.edits)
     })
