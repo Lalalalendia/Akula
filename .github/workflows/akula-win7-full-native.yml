@@ -65,6 +65,37 @@ jobs:
             if (!$publisher.Contains($token)) { throw "Signed Akula workflow lost required Win7 or trust gate: $token" }
           }
 
+      - name: Reject DESK-15 clipboard false PASS from trailing newline trimming
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cases = @(
+            @{ Path = 'scripts/akula-desk15-real-windows-acceptance.ps1'; Function = 'Normalized' },
+            @{ Path = 'scripts/akula-desk15-powercut-witness.ps1'; Function = 'Normalize' }
+          )
+          foreach ($case in $cases) {
+            $source = Get-Content -LiteralPath $case.Path -Raw
+            if ($source.Contains('.TrimEnd([char]10)')) {
+              throw "DESK15 GUI readback may discard real trailing lines: $($case.Path)"
+            }
+            $pattern = '(?ms)^function ' + $case.Function + '\(\[string\]\$\w+\) \{\r?\n.*?^\}'
+            $match = [regex]::Match($source, $pattern)
+            if (!$match.Success) { throw "Missing normalizer for $($case.Path)" }
+            . ([scriptblock]::Create($match.Value))
+            $name = $case.Function
+            $lf = & $name ('One' + [char]10 + 'Two' + [char]10)
+            $crlf = & $name ('One' + [char]13 + [char]10 + 'Two' + [char]13 + [char]10)
+            if ($lf -cne $crlf) {
+              throw "DESK15 does not normalize Windows clipboard CRLF: $($case.Path)"
+            }
+            $without = & $name ('One' + [char]10 + 'Two')
+            $extra = & $name ('One' + [char]10 + 'Two' + [char]10 + [char]10)
+            if ($lf -ceq $without -or $lf -ceq $extra) {
+              throw "DESK15 silently trims meaningful trailing lines: $($case.Path)"
+            }
+            Write-Host "DESK15_TRAILING_LINE_FIDELITY_PASS $($case.Path)"
+          }
+
       - name: Check Win7 SP1 native acceptance harness guard and evidence contract
         shell: pwsh
         run: |
