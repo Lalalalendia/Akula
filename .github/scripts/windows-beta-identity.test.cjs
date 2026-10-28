@@ -173,7 +173,7 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
     'GetForegroundWindow',
     'Refusing shortcut on nonforeground window',
     'Only selection/copy/search shortcuts are authorized',
-    'key != 0x41 && key != 0x43 && key != 0x4F',
+    'key != 0x41 && key != 0x43 && key != 0x4F && key != 0x46',
     'VK_CONTROL',
     'KEYEVENTF_KEYUP',
   ]) {
@@ -182,6 +182,21 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
   const middle = script.slice(script.indexOf('if ($VerifyRestoredContent) {'));
   assert.doesNotMatch(middle, /Set-Content -LiteralPath \$note|Add-Content -LiteralPath \$note|WriteAllText\(\$note/,
     'UI readback must never simulate success by writing to the note');
+});
+
+test('installed DESK-10 Ctrl+F checks only the open TXT while Markdown is separate', () => {
+  const script = read('scripts/windows-txt-search-uia.ps1');
+  for (const token of [
+    'AKULA_WINDOWS_TXT_SEARCH_UIA_PASS',
+    'AKULA_WINDOWS_TXT_FIND_SCOPE_PASS',
+    'Wait-InstalledFindCount',
+    "Expected @('0/1', '1/1')",
+    "Expected @('0/0')",
+    '[uint16]0x46',
+    'source_sha256_unchanged=1',
+  ]) {
+    assert.ok(script.includes(token), 'missing installed current-note search evidence: ' + token);
+  }
 });
 
 test('CI candidate manifest records actual checkout and hashes after the GUI test', () => {
