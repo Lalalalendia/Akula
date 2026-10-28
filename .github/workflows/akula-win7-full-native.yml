@@ -102,6 +102,7 @@ jobs:
                                    'Check-Acl $shadow', 'status=RESTORE_PASS_EXTERNAL_POWER_EVENT_REQUIRES_MANUAL_AUDIT')) {
             if (-not $powercut.Contains($required)) { throw "DESK-15 powercut witness missing: $required" }
           }
+          if ($powercut.Contains('Get-Acl -LiteralPath')) { throw 'PowerShell 2.0 has no Get-Acl -LiteralPath' }
           if ($powercut -match 'Invoke-WebRequest|Invoke-RestMethod|iex\b|DownloadString|Get-FileHash|Remove-Item|Stop-Process|Restart-Computer|Stop-Computer|shutdown\.exe') {
             throw 'DESK-15 power-cut harness must not control power, fetch code, or delete user data'
           }

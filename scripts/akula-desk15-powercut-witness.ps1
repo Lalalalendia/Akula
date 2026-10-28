@@ -70,7 +70,7 @@ function Find-Shadow([string]$key) {
     $root = Join-Path $data 'akula-note-recovery-v1'
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { return $null }
     $found = @()
-    foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -Filter '*.shadow' -ErrorAction SilentlyContinue)) {
+    foreach ($file in @(Get-ChildItem -Path $root -Recurse -Filter '*.shadow' -ErrorAction SilentlyContinue)) {
         if ($file.PSIsContainer) { continue }
         if ([IO.File]::ReadAllText($file.FullName).Contains($key)) { $found += $file.FullName }
     }
@@ -83,7 +83,7 @@ function Check-Acl([string]$shadow) {
     $owner = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $allowed = @($owner,'S-1-5-18','S-1-5-32-544')
     foreach ($path in @($root,(Split-Path -Parent $shadow),$shadow)) {
-        $acl = Get-Acl -LiteralPath $path
+        $acl = Get-Acl -Path $path
         if ($null -eq $acl) { throw 'Recovery ACL missing' }
         if ($path -ne $shadow -and -not $acl.AreAccessRulesProtected) { throw 'Recovery directory has inherited ACL' }
         $actualOwner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
