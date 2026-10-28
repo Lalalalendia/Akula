@@ -20,7 +20,8 @@ pub(super) fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
         .map_err(|error| format!("check recent received files: {error:?}"))?
         .into_iter()
         .map(|(file, status)| -> Result<InboxRow, String> {
-            let imported = ledger.import_status(file.id)
+            let imported = ledger
+                .import_status(file.id)
                 .map_err(|error| format!("Inbox import audit: {error:?}"))?;
             let id = file.id.hyphenated().to_string();
             let sender: String = file.sender_key[..6]
@@ -57,4 +58,3 @@ pub(super) fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
         notice_key: None,
     })
 }
-

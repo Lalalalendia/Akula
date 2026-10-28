@@ -53,13 +53,18 @@ fn verified_receipt_import_creates_new_file_only() {
     assert_eq!(fs::read(&imported).unwrap(), bytes);
     assert_eq!(fs::read(&object).unwrap(), bytes);
     let reader = InboxLedger::open_existing(&inbox).unwrap().unwrap();
-    assert_eq!(reader.import_status(receipt.id).unwrap(), ImportAuditStatus::Verified);
+    assert_eq!(
+        reader.import_status(receipt.id).unwrap(),
+        ImportAuditStatus::Verified
+    );
     fs::write(&object, b"corrupted").unwrap();
-    assert_eq!(reader.import_status(receipt.id).unwrap(), ImportAuditStatus::NeedsReview);
+    assert_eq!(
+        reader.import_status(receipt.id).unwrap(),
+        ImportAuditStatus::NeedsReview
+    );
     assert_eq!(
         read_checked_inbox(&inbox).unwrap().rows[0].import_audit_key,
         Some("transfer.inboxAuditReview")
     );
     assert!(import_checked_into_vault(&core, &inbox, receipt.id, &vault).is_err());
 }
-
