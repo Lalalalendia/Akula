@@ -59,9 +59,7 @@ impl App {
                     transfer_ui::InboxAction::Preview(receipt) => {
                         self.begin_inbox_text_preview(receipt)
                     }
-                    transfer_ui::InboxAction::SaveCopy(receipt) => {
-                        self.begin_inbox_save(receipt)
-                    }
+                    transfer_ui::InboxAction::SaveCopy(receipt) => self.begin_inbox_save(receipt),
                 };
             }
         }
