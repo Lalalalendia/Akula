@@ -66,7 +66,7 @@ function Normalize-GuiText {
 }
 
 try {
-    [IO.File]::WriteAllText($txt, $body, (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($txt, $body, ([System.Text.UTF8Encoding]::new($false)))
     $originalHash = (Get-FileHash -LiteralPath $txt -Algorithm SHA256).Hash
     $args = ('--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f
         $VaultPath, $DataDir, $baseline)
@@ -98,7 +98,7 @@ try {
 
     # Search ResultCard is an AccessKit ListBoxOption, distinct from the
     # always-visible file-tree TreeItem with the same CJK filename.
-    $byName = New-Object System.Windows.Automation.PropertyCondition(
+    $byName = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::NameProperty, $stem)
     $found = $false
     for ($i = 0; $i -lt 180; $i++) {
