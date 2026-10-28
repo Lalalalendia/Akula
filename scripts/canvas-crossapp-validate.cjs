@@ -122,6 +122,31 @@ function validateEvidence(dir,sourceBytes,akulaBytes,obsidianBytes,refBytes,repo
     }
   }
 }
+// Machine-readable GUI presence is necessary, not a visual review.
+// An optional human attestation is bound to the exact five screenshot hashes.
+// Without it the CLI emits MACHINE_EVIDENCE_PASS, never CROSSAPP_PASS.
+function validateVisualReview(evidenceDir,report) {
+  const file=path.join(path.resolve(evidenceDir),'visual-review.json');
+  if(!fs.existsSync(file))return null;
+  const review=json(file);
+  assert.ok(review && typeof review==='object'&&!Array.isArray(review),'visual review must be object');
+  assert.ok(typeof review.reviewer==='string'&&review.reviewer.trim().length>=3,'visual reviewer missing');
+  assert.ok(typeof review.reviewedAtUtc==='string'&&!Number.isNaN(Date.parse(review.reviewedAtUtc)),'visual review timestamp missing');
+  assert.ok(review.phases&&typeof review.phases==='object'&&!Array.isArray(review.phases),'visual phase reviews missing');
+  assert.deepEqual(Object.keys(review.phases).sort(),PHASES.map(x=>x[0]).sort(),'visual review phases incomplete');
+  for(const [phase] of PHASES){
+    const item=review.phases[phase];
+    assert.ok(item&&typeof item==='object'&&!Array.isArray(item),'missing review '+phase);
+    assert.equal(item.screenshotSha256?.toLowerCase(),report.observations[phase].screenshotSha256.toLowerCase(),
+      'review bound to a different screenshot '+phase);
+    assert.equal(item.visualPass,true,'screenshot not visually accepted '+phase);
+  }
+  for(const key of ['readableText','visibleObjects','visibleConnections','groupLayering','filePlaceholders']){
+    assert.equal(review.checks?.[key],true,'visual acceptance missing '+key);
+  }
+  return {reviewer:review.reviewer,reviewedAtUtc:review.reviewedAtUtc};
+}
+
 function validateFiles(evidenceDir,pinnedPath) {
   const root=path.resolve(evidenceDir);
   const sourceBytes=load(path.join(root,'00-original.canvas'));
@@ -141,7 +166,11 @@ if(require.main===module){
   try{
     if(process.argv.length!==4) throw Error('usage: node scripts/canvas-crossapp-validate.cjs <evidence-dir> <pinned-fixture>');
     const proof=validateFiles(process.argv[2],process.argv[3]);
-    process.stdout.write('AKULA_C5_OBSIDIAN_CROSSAPP_PASS '+JSON.stringify(proof)+'\n');
+    const report=json(path.join(path.resolve(process.argv[2]),'report.json'));
+    const visual=validateVisualReview(process.argv[2],report);
+    if(visual)process.stdout.write('AKULA_C5_OBSIDIAN_CROSSAPP_PASS '+JSON.stringify({...proof,visual})+'\n');
+    else process.stdout.write('AKULA_C5_OBSIDIAN_MACHINE_EVIDENCE_PASS '+JSON.stringify(proof)+'\n'+
+      'AKULA_C5_OBSIDIAN_VISUAL_REVIEW_PENDING add a SHA-bound visual-review.json after inspecting all five PNGs\n');
   }catch(e){console.error('AKULA_C5_OBSIDIAN_CROSSAPP_FAIL '+e.message);process.exitCode=1;}
 }
-module.exports={hash,validateDocumentStages,validateEvidence,validateFiles};
+module.exports={hash,validateDocumentStages,validateEvidence,validateFiles,validateVisualReview};
