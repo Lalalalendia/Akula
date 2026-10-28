@@ -27,11 +27,11 @@ impl InboxLedger {
                 state INTEGER NOT NULL CHECK(state IN (0, 1))
             );",
         )?;
-        self.db.execute(
+        let inserted = self.db.execute(
             "INSERT OR IGNORE INTO removal_inbox (transfer_id, state) VALUES (?1, 0)",
             [id.to_string()],
         )?;
-        if self.removal_status(id)? != RemovalAuditStatus::Requested {
+        if inserted != 1 || self.removal_status(id)? != RemovalAuditStatus::Requested {
             return Err(LedgerError::ConflictingIntent);
         }
         Ok(())
@@ -40,18 +40,22 @@ impl InboxLedger {
     /// Does not remove files. The OS-scoped worker must have already removed
     /// the exact pinned object; a crash between steps remains NeedsReview.
     pub fn finish_removal(&self, id: Uuid) -> Result<(), LedgerError> {
-        if !matches!(self.removal_row(id)?, Some(0) | Some(1)) {
-            return Err(LedgerError::UnknownTransfer);
+        if self.removal_row(id)? != Some(0) {
+            return Err(LedgerError::ConflictingIntent);
         }
         match fs::symlink_metadata(self.object_path(id)) {
             Ok(_) => return Err(LedgerError::InvalidLocalObject),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),
         }
-        self.db.execute(
-            "UPDATE removal_inbox SET state = 1 WHERE transfer_id = ?1",
+        let committed = self.db.execute(
+            "UPDATE removal_inbox SET state = 1
+             WHERE transfer_id = ?1 AND state = 0",
             [id.to_string()],
         )?;
+        if committed != 1 {
+            return Err(LedgerError::ConflictingIntent);
+        }
         Ok(())
     }
 
@@ -137,6 +141,7 @@ mod tests {
             RemovalAuditStatus::Available
         );
         ledger.request_removal(intent.id).unwrap();
+        assert!(ledger.request_removal(intent.id).is_err());
         assert_eq!(
             ledger.removal_status(intent.id).unwrap(),
             RemovalAuditStatus::Requested
@@ -158,6 +163,7 @@ mod tests {
             RemovalAuditStatus::NeedsReview
         );
         ledger.finish_removal(intent.id).unwrap();
+        assert!(ledger.finish_removal(intent.id).is_err());
         assert_eq!(
             ledger.removal_status(intent.id).unwrap(),
             RemovalAuditStatus::Removed
