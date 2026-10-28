@@ -200,10 +200,36 @@ function Get-ObsidianCanvas([int]$N, [int]$E, [switch]$AlreadyOpen) {
     }
     throw "Real Obsidian Canvas DOM/runtime failed to show $N nodes and $E edges"
 }
+# Official Obsidian CLI dev:screenshot returns base64 PNG. Decode it ourselves
+# into the evidence folder: do not assume CLI will accept an absolute output path.
+function Save-ObsidianScreenshot([string]$OutputFile) {
+    if (Test-Path -LiteralPath $OutputFile) { throw 'Refusing overwrite of an existing Obsidian screenshot' }
+    $value = (Invoke-Obsidian -CliArgs @('dev:screenshot')).Trim()
+    if ($value.StartsWith('"') -and $value.EndsWith('"')) {
+        $value = ConvertFrom-Json -InputObject $value -ErrorAction Stop
+        if ($value -isnot [string]) { throw 'Obsidian screenshot returned non-string JSON' }
+    }
+    if ($value.StartsWith('data:image/png;base64,', [StringComparison]::OrdinalIgnoreCase)) {
+        $value = $value.Substring('data:image/png;base64,'.Length)
+    }
+    $value = $value.Replace("`r", '').Replace("`n", '')
+    if ($value.Length -lt 1400 -or $value.Length -gt 33554432 -or
+        $value -cnotmatch '^[A-Za-z0-9+/]+={0,2}$') {
+        throw 'Obsidian screenshot did not return bounded PNG base64 data'
+    }
+    try { $bytes = [Convert]::FromBase64String($value) }
+    catch { throw 'Obsidian screenshot base64 decode failed' }
+    if ($bytes.Length -le 1024 -or
+        [BitConverter]::ToString($bytes[0..7]) -ne '89-50-4E-47-0D-0A-1A-0A') {
+        throw 'Obsidian screenshot is not a plausible PNG'
+    }
+    [IO.File]::WriteAllBytes($OutputFile, $bytes)
+}
+
 function Capture-Obsidian([string]$Phase, [int]$N, [int]$E, [switch]$AlreadyOpen) {
     $state = Get-ObsidianCanvas $N $E -AlreadyOpen:$AlreadyOpen
     $png = Join-Path $evidence ($Phase+'.png')
-    $null = Invoke-Obsidian -CliArgs @('dev:screenshot',"path=$png")
+    Save-ObsidianScreenshot $png
     Record $Phase @{app='obsidian';nodes=$N;edges=$E;viewType=$state.viewType;
         path=$state.path;domNodes=[int]$state.domNodes} $png
     Write-Host ("C5_OBSIDIAN_GUI_OBSERVED phase=$Phase nodes=$N edges=$E")
