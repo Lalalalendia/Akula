@@ -11,10 +11,10 @@ use std::{
 };
 use uuid::Uuid;
 
-#[cfg(windows)]
-mod windows;
 #[cfg(feature = "p2p-inbox-lab")]
 pub mod file_gate;
+#[cfg(windows)]
+mod windows;
 #[cfg(windows)]
 pub use windows::{
     create_pinned_windows_inbox_stage, pin_windows_export_parent, pin_windows_inbox_read,
