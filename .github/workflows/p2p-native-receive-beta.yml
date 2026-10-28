@@ -50,6 +50,8 @@ jobs:
           rustfmt --check --config skip_children=true --edition 2024 aquilum-app/native/src/app/transfer.rs aquilum-app/native/src/app/transfer/dialog.rs aquilum-app/native/src/ui/transfer.rs aquilum-app/native/src/ui/transfer/dialog_view.rs
           # Check the new leaf modules without reformatting unrelated legacy W4 code.
           rustfmt --check --config skip_children=true --edition 2024 aquilum-app/native/src/app/transfer/actions.rs aquilum-app/native/src/app/transfer/dialog/context.rs aquilum-app/native/src/ui/transfer/types.rs aquilum-app/native/src/ui/transfer/dialog_view/panels.rs
+          rustfmt --check --config skip_children=true --edition 2024 aquilum-app/native/src/app/transfer/inbox.rs aquilum-app/native/src/app/transfer/inbox/import.rs aquilum-app/native/src/app/transfer/inbox/tests.rs
+          rustfmt --check --config skip_children=true --edition 2024 aquilum-app/native/src/ui/transfer/inbox_view.rs aquilum-app/native/src/ui/transfer/inbox_view/render.rs
           rustfmt --check --config skip_children=true --edition 2021 aquilum-app/core/src/sync/p2p_stage.rs aquilum-app/core/src/p2p_inbox_lab/tests.rs
           rustfmt --check --config skip_children=true --edition 2021 aquilum-app/core/src/p2p_inbox_lab/file_gate.rs
           # Modern main keeps this non-sync feature test inline, not in a separate file.
@@ -122,6 +124,7 @@ jobs:
           cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed app::transfer::native_receive::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::native_receive::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::inbox::import::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::transfer::native_receive_view::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::transfer::native_send_view::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::peer_pair::tests -- --nocapture
