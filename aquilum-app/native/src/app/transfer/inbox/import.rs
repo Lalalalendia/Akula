@@ -7,13 +7,17 @@ impl InboxPreview {
     pub(super) fn poll_import_result(&mut self, changed: &mut bool) {
         let outcome = self.import_rx.as_ref().map(|receiver| receiver.try_recv());
         match outcome {
-            Some(Ok(Ok(true))) => {
+            Some(Ok(Ok(Some(receipt)))) => {
+                if let Some(row) = self.view.rows.iter_mut()
+                    .find(|row| row.id == receipt.hyphenated().to_string()) {
+                    row.import_audit_key = Some("transfer.inboxAuditVerified");
+                }
                 self.view.importing = false;
                 self.view.notice_key = Some("transfer.inboxImported");
                 self.import_rx = None;
                 *changed = true;
             }
-            Some(Ok(Ok(false))) => {
+            Some(Ok(Ok(None))) => {
                 self.view.importing = false;
                 self.import_rx = None;
                 *changed = true;
@@ -44,7 +48,8 @@ impl App {
             .view
             .rows
             .iter()
-            .any(|row| row.id == receipt && row.status_key == "transfer.inboxVerified")
+            .any(|row| row.id == receipt && row.status_key == "transfer.inboxVerified"
+                && row.import_audit_key.is_none())
         {
             return false;
         }
@@ -62,11 +67,11 @@ impl App {
             // folder chooser cannot grant writes to an arbitrary directory.
             let chosen = rfd::FileDialog::new().pick_folder();
             let result = match chosen {
-                None => Ok(false),
+                None => Ok(None),
                 Some(vault_root) => user_inbox_root()
                     .map_err(|error| format!("Inbox root: {error:?}"))
                     .and_then(|root| import_checked_into_vault(&core, &root, id, &vault_root))
-                    .map(|_| true),
+                    .map(|_| Some(id)),
             };
             if tx.send(result).is_ok() {
                 wake();

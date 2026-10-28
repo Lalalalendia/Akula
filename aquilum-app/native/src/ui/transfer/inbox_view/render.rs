@@ -19,7 +19,10 @@ pub(in crate::ui::transfer) fn render(
         )));
         for received in &view.rows {
             let label = format!("{} · {}", received.id, display_size(received.bytes));
-            let detail = format!("{} · {}", received.sender, t(received.status_key));
+            let detail = match received.import_audit_key {
+                Some(key) => format!("{} · {} · {}", received.sender, t(received.status_key), t(key)),
+                None => format!("{} · {}", received.sender, t(received.status_key)),
+            };
             let labels = NewWidget::new(
                 Flex::column()
                     .cross_axis_alignment(CrossAxisAlignment::Stretch)
@@ -44,10 +47,13 @@ pub(in crate::ui::transfer) fn render(
                 entry = entry.with_fixed(save);
                 #[cfg(windows)]
                 {
-                    let import =
-                        NewWidget::new(TextButton::new(t("transfer.inboxImport"), Variant::Ghost));
-                    actions.push((import.id(), InboxAction::Import(received.id.clone())));
-                    entry = entry.with_fixed(import);
+                    if received.import_audit_key.is_none() {
+                        let import = NewWidget::new(TextButton::new(
+                            t("transfer.inboxImport"), Variant::Ghost,
+                        ));
+                        actions.push((import.id(), InboxAction::Import(received.id.clone())));
+                        entry = entry.with_fixed(import);
+                    }
                 }
             }
             panel = panel.with_fixed(
