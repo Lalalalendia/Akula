@@ -1,0 +1,197 @@
+name: Game2D native lab
+on:
+  pull_request:
+    paths:
+      - 'modules/native-2d-lab/**'
+      - 'modules/native-2d-window-lab/**'
+      - 'modules/native-tetris-lab/**'
+      - '.github/workflows/game2d-native-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel obsolete PR-head laboratory runs; never affect other PRs or manual checks.
+# Prefix with workflow identity to avoid collisions with mandatory Application checks.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  game2d:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format laboratory sources in runner
+        run: cargo fmt --manifest-path modules/native-2d-lab/Cargo.toml
+      - name: Unit tests
+        run: cargo test --manifest-path modules/native-2d-lab/Cargo.toml
+      - name: Release simulation and raster probe
+        run: cargo run --release --manifest-path modules/native-2d-lab/Cargo.toml -- 1200 game2d-last-frame.ppm
+      - name: Upload raster witness
+        uses: actions/upload-artifact@v4
+        with:
+          name: game2d-${{ matrix.os }}-frame
+          path: game2d-last-frame.ppm
+
+  tetris:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format lab in disposable runner
+        run: cargo fmt --manifest-path modules/native-tetris-lab/Cargo.toml
+      - name: Game rules and raster unit tests
+        run: cargo test --manifest-path modules/native-tetris-lab/Cargo.toml
+      - name: Release deterministic falling-block probe
+        run: cargo run --release --manifest-path modules/native-tetris-lab/Cargo.toml -- 1200 tetris-last-frame.ppm
+      - name: Upload falling-block raster
+        uses: actions/upload-artifact@v4
+        with:
+          name: tetris-${{ matrix.os }}-frame
+          path: tetris-last-frame.ppm
+
+  window:
+    # This is the real Akula Output/Canvas code, not a second rendering backend.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: modules/native-2d-window-lab
+          key: game2d-window-lab
+      - name: Linux GUI and media dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth libxkbcommon-x11-0 imagemagick
+      - name: Build separate 2D window lab
+        run: |
+          cargo fmt --manifest-path modules/native-2d-window-lab/Cargo.toml
+          cargo build --manifest-path modules/native-2d-window-lab/Cargo.toml
+      - name: Linux actual window raster and present
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          xvfb-run -a bash -c '
+            modules/native-2d-window-lab/target/debug/akula-game2d-window-lab --frames 240 > game2d-window.log 2>&1 &
+            pid=$!
+            sleep 1
+            import -window root game2d-window.png || true
+            wait "$pid"
+          '
+          cat game2d-window.log
+          grep 'output_present=PASS' game2d-window.log
+          test -f game2d-window.png
+          # A saved PNG alone is not proof that the game was displayed.
+          scene_pixels=$(convert game2d-window.png -format %c histogram:info:- | awk 'tolower($0) ~ /#172335/ {gsub(":", "", $1); print $1; exit}')
+          test "${scene_pixels:-0}" -ge 1000 || { echo "Breakout background not present in screenshot"; exit 1; }
+      - name: Linux Tetris window raster and present
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          xvfb-run -a bash -c '
+            modules/native-2d-window-lab/target/debug/akula-game2d-window-lab --game tetris --frames 240 > tetris-window.log 2>&1 &
+            pid=$!
+            sleep 1
+            import -window root tetris-window.png || true
+            wait "$pid"
+          '
+          cat tetris-window.log
+          grep 'game=Tetris ' tetris-window.log
+          grep 'output_present=PASS' tetris-window.log
+          test -f tetris-window.png
+          filled=$(convert tetris-window.png -format %c histogram:info:- | awk 'tolower($0) ~ /#1b2a40/ {gsub(":", "", $1); print $1; exit}')
+          test "${filled:-0}" -ge 1000 || { echo "Falling-block board not visible"; exit 1; }
+      - name: Windows actual window raster and present
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path 'modules/native-2d-window-lab/target/debug/akula-game2d-window-lab.exe'
+          $p = Start-Process -FilePath $exe -ArgumentList @('--frames','240') -PassThru -RedirectStandardOutput game2d-window.log -RedirectStandardError game2d-window.err
+          Start-Sleep -Seconds 1
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+          $bmp.Save('game2d-window.png')
+          $scenePixels = 0
+          for ($y = 0; $y -lt $bmp.Height; $y += 10) {
+            for ($x = 0; $x -lt $bmp.Width; $x += 10) {
+              $color = $bmp.GetPixel($x, $y)
+              if ($color.R -eq 23 -and $color.G -eq 35 -and $color.B -eq 53) { $scenePixels++ }
+            }
+          }
+          $bmp.Dispose()
+          if ($scenePixels -lt 100) { throw 'Screenshot does not show game scene pixels' }
+          if (-not $p.WaitForExit(60000)) {
+            Stop-Process -Id $p.Id -Force
+            throw 'Window test did not exit'
+          }
+          Get-Content game2d-window.log
+          Get-Content game2d-window.err
+          if ($p.ExitCode -ne 0) { throw "Window exited $($p.ExitCode)" }
+          if (-not (Select-String -Path game2d-window.log -Pattern 'output_present=PASS' -Quiet)) { throw 'No successful present witness' }
+      - name: Windows Tetris window raster and present
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path 'modules/native-2d-window-lab/target/debug/akula-game2d-window-lab.exe'
+          $p = Start-Process -FilePath $exe -ArgumentList @('--game','tetris','--frames','240') -PassThru -RedirectStandardOutput tetris-window.log -RedirectStandardError tetris-window.err
+          Start-Sleep -Seconds 1
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+          $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+          $graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+          $graphics.Dispose()
+          $bmp.Save('tetris-window.png')
+          $pixels = 0
+          for ($y = 0; $y -lt $bmp.Height; $y += 10) {
+            for ($x = 0; $x -lt $bmp.Width; $x += 10) {
+              $v = $bmp.GetPixel($x, $y)
+              if ($v.R -eq 27 -and $v.G -eq 42 -and $v.B -eq 64) { $pixels++ }
+            }
+          }
+          $bmp.Dispose()
+          if (-not $p.WaitForExit(60000)) {
+            Stop-Process -Id $p.Id -Force
+            throw 'Tetris window did not exit'
+          }
+          Get-Content tetris-window.log
+          Get-Content tetris-window.err
+          if ($p.ExitCode -ne 0) { throw "Tetris window exited $($p.ExitCode)" }
+          if ($pixels -lt 50) { throw 'Tetris board missing from screenshot' }
+          if (-not (Select-String -Path tetris-window.log -Pattern 'game=Tetris .*output_present=PASS' -Quiet)) { throw 'No successful Tetris present witness' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: game2d-window-${{ matrix.os }}
+          path: |
+            game2d-window.png
+            game2d-window.log
+            game2d-window.err
+            tetris-window.png
+            tetris-window.log
+            tetris-window.err
