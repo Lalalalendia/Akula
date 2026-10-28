@@ -364,7 +364,8 @@ mod tests {
         let zero = g.encode_update(0, &[0]);
         assert_eq!(zero, Err(FrameError::TooLarge));
         assert_eq!(g.expected_sequence(), 2);
-        assert_eq!(allow(&mut g, &g.encode_update(2, &[1]).unwrap(), &f).unwrap(), &[1]);
+        let two = g.encode_update(2, &[1]).unwrap();
+        assert_eq!(allow(&mut g, &two, &f).unwrap(), &[1]);
     }
 
     #[test]
