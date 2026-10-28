@@ -4,10 +4,10 @@ mod autostart;
 mod app;
 mod cover;
 mod poster;
-mod graph;
-mod reader;
+mod graph; mod reader;
 mod video;
-mod dates;
+mod dates; mod docx;
+#[cfg(feature = "dicom-preview")] mod dicom;
 mod disk;
 mod file_ops;
 mod fling;
@@ -22,7 +22,6 @@ mod host;
 mod metrics;
 #[cfg(feature = "memory-probe")]
 mod memory_probe;
-
 #[cfg(feature = "memory-probe")]
 #[global_allocator]
 static ALLOCATOR: memory_probe::Counting = memory_probe::Counting;

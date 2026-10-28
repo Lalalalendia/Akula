@@ -35,6 +35,7 @@ printf 'upstream state' > /tmp/user/.local/share/com.dmitriy.aquilum-app/keep
 before="$(sha256sum /usr/bin/aquilum-app /usr/share/applications/Aquilum.desktop /tmp/user/.local/share/com.dmitriy.aquilum-app/keep)"
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends "$1" xvfb openbox wmctrl
+dpkg-query -W -f='${Status}' xdg-desktop-portal | grep -Fxq 'install ok installed'
 dpkg-query -W akula | grep -q '^akula'
 test -x /usr/bin/akula-app
 grep -q '^Exec=akula-app$' /usr/share/applications/Akula.desktop
@@ -85,6 +86,7 @@ printf 'upstream binary' > /usr/bin/aquilum-app
 printf 'upstream desktop' > /usr/share/applications/Aquilum.desktop
 before="$(sha256sum /usr/bin/aquilum-app /usr/share/applications/Aquilum.desktop)"
 dnf install -y -q "$1"
+rpm -q xdg-desktop-portal >/dev/null
 rpm -q akula >/dev/null
 test -x /usr/bin/akula-app
 grep -q '^Exec=akula-app$' /usr/share/applications/Akula.desktop

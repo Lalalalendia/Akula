@@ -41,6 +41,14 @@ jobs:
       installed_owner_owned: ${{ steps.scope.outputs.installed_owner_owned }}
       native_manifest_risky: ${{ steps.scope.outputs.native_manifest_risky }}
       owned_host_custody: ${{ steps.scope.outputs.owned_host_custody }}
+      owned_b1b4b_witness: ${{ steps.scope.outputs.owned_b1b4b_witness }}
+      owned_b1c0_node: ${{ steps.scope.outputs.owned_b1c0_node }}
+      owned_b1b4b1_ipc: ${{ steps.scope.outputs.owned_b1b4b1_ipc }}
+      owned_b1b3c_fd: ${{ steps.scope.outputs.owned_b1b3c_fd }}
+      owned_b1d0_opt: ${{ steps.scope.outputs.owned_b1d0_opt }}
+      owned_b1b2b_vm: ${{ steps.scope.outputs.owned_b1b2b_vm }}
+      owned_b1c1_vm: ${{ steps.scope.outputs.owned_b1c1_vm }}
+      owned_b0c_ssh: ${{ steps.scope.outputs.owned_b0c_ssh }}
       owned_sync_protection: ${{ steps.scope.outputs.owned_sync_protection }}
       owned_text_delta: ${{ steps.scope.outputs.owned_text_delta }}
       owned_appimage: ${{ steps.scope.outputs.owned_appimage }}
@@ -49,6 +57,9 @@ jobs:
       owned_pinned_read: ${{ steps.scope.outputs.owned_pinned_read }}
       owned_s3_reservation: ${{ steps.scope.outputs.owned_s3_reservation }}
       owned_s3_minio: ${{ steps.scope.outputs.owned_s3_minio }}
+      text_delta_module_required: ${{ steps.scope.outputs.text_delta_module_required }}
+      text_delta_pack_fast_path: ${{ steps.scope.outputs.text_delta_pack_fast_path }}
+      text_delta_pack_boundary_changed: ${{ steps.scope.outputs.text_delta_pack_boundary_changed }}
       updater_security_required: ${{ steps.scope.outputs.updater_security_required }}
     steps:
       - uses: actions/checkout@v7
@@ -128,7 +139,7 @@ jobs:
           node .github/scripts/ci-pr-concurrency.cjs --base="$BASE_SHA" --head=HEAD
           node --test .github/scripts/ci-rust-scope.test.cjs
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
-          node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
+          node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs .github/scripts/canvas-crossapp-validate.test.cjs
           node .github/scripts/ci-shared-manifest-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
           # Respect the former perf path filter; ordinary CI-only / docs changes never launch benchmarks.
           if git diff --quiet "$BASE_SHA" HEAD -- \
@@ -228,7 +239,20 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
 
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true'
+        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true' || needs.classify.outputs.text_delta_module_required == 'true'
+
+
+      # Text Delta is outside the Cargo workspace. Tests execute in the existing
+      # mandatory runner and therefore block Main PR gate without another workflow.
+      - name: Require standalone Text Delta wire and hostile-input tests
+        if: needs.classify.outputs.text_delta_module_required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path modules/text-delta-codec/Cargo.toml -- --nocapture
+          grep -Fx '[workspace]' modules/text-delta-codec/Cargo.toml
+          ! grep -q 'aquilum-core' modules/text-delta-codec/Cargo.toml
+          test -f aquilum-app/core/src/sync/text_delta_codec.rs
 
       - name: Security-test macOS updater TAR parser on Linux too
         if: needs.classify.outputs.updater_security_required == 'true'
@@ -297,6 +321,40 @@ jobs:
           set -euo pipefail
           cargo test -p aquilum-core --locked
           cargo test -p aquilum-core --features sync-engine --locked
+
+      # The lab is default-OFF. Only changes to its source/feature boundary
+      # compile and exercise the opt-in code, using the existing required runner.
+      - name: Validate offline Canvas CRDT lab when modified
+        if: needs.classify.outputs.mode != 'none'
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # This job runs from aquilum-app/; resolve changed paths from repo root.
+          if git -C .. diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/core/src/documents/canvas_crdt_lab.rs \
+            aquilum-app/core/src/documents/replica.rs \
+            aquilum-app/core/src/documents/mod.rs \
+            aquilum-app/core/src/files/structured/session.rs \
+            aquilum-app/core/src/files/structured/session/crdt_bridge.rs \
+            aquilum-app/core/Cargo.toml; then
+            echo 'Canvas CRDT lab unchanged'
+          else
+            cargo test --locked -p aquilum-core --lib --features canvas-crdt-lab \
+              documents::replica::canvas_crdt_lab::tests:: -- --nocapture \
+              2>&1 | tee "$RUNNER_TEMP/akula-canvas-crdt-lab.log"
+            grep -Fq 'test result: ok. 6 passed; 0 failed;' \
+              "$RUNNER_TEMP/akula-canvas-crdt-lab.log"
+            echo 'AKULA_CANVAS_CRDT_LAB_PASS six_offline_tests=1'
+            cargo test --locked -p aquilum-core --lib --features canvas-crdt-lab \
+              files::structured::session::crdt_bridge::tests:: -- --nocapture \
+              2>&1 | tee "$RUNNER_TEMP/akula-canvas-crdt-bridge.log"
+            grep -Fq 'test result: ok. 7 passed; 0 failed;' \
+              "$RUNNER_TEMP/akula-canvas-crdt-bridge.log"
+            echo 'AKULA_CANVAS_CRDT_BRIDGE_PASS seven_session_tests=1'
+          fi
 
       - name: Run full Rust workspace and sync-engine tests
         if: needs.classify.outputs.mode == 'workspace'
@@ -582,7 +640,7 @@ jobs:
   shared-labs:
     name: Required shared-manifest OS/security route
     needs: classify
-    if: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
+    if: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_b1b4b_witness == 'true' || needs.classify.outputs.owned_b1c0_node == 'true' || needs.classify.outputs.owned_b1b4b1_ipc == 'true' || needs.classify.outputs.owned_b1b3c_fd == 'true' || needs.classify.outputs.owned_b1d0_opt == 'true' || needs.classify.outputs.owned_b1b2b_vm == 'true' || needs.classify.outputs.owned_b1c1_vm == 'true' || needs.classify.outputs.owned_b0c_ssh == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
     uses: ./.github/workflows/ci-shared-manifest-labs.yml
     with:
       core: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
@@ -592,8 +650,19 @@ jobs:
       root: ${{ needs.classify.outputs.shared_root_cargo_risky == 'true' }}
       native: ${{ needs.classify.outputs.native_manifest_risky == 'true' }}
       owned_host_custody: ${{ needs.classify.outputs.owned_host_custody == 'true' }}
+      owned_b1b4b_witness: ${{ needs.classify.outputs.owned_b1b4b_witness == 'true' }}
+      owned_b1c0_node: ${{ needs.classify.outputs.owned_b1c0_node == 'true' }}
+      owned_b1b4b1_ipc: ${{ needs.classify.outputs.owned_b1b4b1_ipc == 'true' }}
+      owned_b1b3c_fd: ${{ needs.classify.outputs.owned_b1b3c_fd == 'true' }}
+      owned_b1d0_opt: ${{ needs.classify.outputs.owned_b1d0_opt == 'true' }}
+      owned_b1b2b_vm: ${{ needs.classify.outputs.owned_b1b2b_vm == 'true' }}
+      owned_b1c1_vm: ${{ needs.classify.outputs.owned_b1c1_vm == 'true' }}
+      owned_b0c_ssh: ${{ needs.classify.outputs.owned_b0c_ssh == 'true' }}
       owned_sync_protection: ${{ needs.classify.outputs.owned_sync_protection == 'true' }}
       owned_text_delta: ${{ needs.classify.outputs.owned_text_delta == 'true' }}
+      text_delta_module_required: ${{ needs.classify.outputs.text_delta_module_required == 'true' }}
+      text_delta_pack_fast_path: ${{ needs.classify.outputs.text_delta_pack_fast_path == 'true' }}
+      text_delta_pack_boundary_changed: ${{ needs.classify.outputs.text_delta_pack_boundary_changed == 'true' }}
       owned_appimage: ${{ needs.classify.outputs.owned_appimage == 'true' }}
       owned_windows_beta: ${{ needs.classify.outputs.owned_windows_beta == 'true' }}
       owned_linux_beta: ${{ needs.classify.outputs.owned_linux_beta == 'true' }}
@@ -617,7 +686,7 @@ jobs:
           REQUIRED_RESULT: ${{ needs.required-tests.result }}
           FRAMES_RESULT: ${{ needs.native-frames.result }}
           TEST_SCOPE: ${{ needs.classify.outputs.mode }}
-          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
+          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_b1b4b_witness == 'true' || needs.classify.outputs.owned_b1c0_node == 'true' || needs.classify.outputs.owned_b1b4b1_ipc == 'true' || needs.classify.outputs.owned_b1b3c_fd == 'true' || needs.classify.outputs.owned_b1d0_opt == 'true' || needs.classify.outputs.owned_b1b2b_vm == 'true' || needs.classify.outputs.owned_b1c1_vm == 'true' || needs.classify.outputs.owned_b0c_ssh == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
           ROUTED_SHARED_RESULT: ${{ needs.shared-labs.result }}
         run: |
           set -euo pipefail

@@ -1,4 +1,10 @@
 {
+  "dicom": {
+    "openFolder": "DICOM: open folder without import",
+    "openFile": "DICOM: open ZIP or file",
+    "openCurrentFolder": "DICOM: view this folder without import",
+    "openCurrentFile": "Open DICOM without import"
+  },
   "transfer": {
     "title": "File transfers",
     "close": "Close transfers",
@@ -85,15 +91,15 @@
     "inboxVerified": "Verified locally",
     "inboxPending": "Pending confirmation",
     "inboxReview": "Needs review",
-    "inboxPreview": "Preview text",
-    "inboxPreviewWorking": "Verifying text preview…",
-    "inboxPreviewUnsupported": "Preview supports small text files up to 4 KiB only. You can save a copy.",
-    "inboxPreviewFailed": "Could not safely verify the file for preview.",
     "inboxSaveCopy": "Save copy",
     "inboxSaving": "Saving a verified copy…",
     "inboxSaved": "Copy saved as a separate new file.",
     "inboxSaveFailed": "Could not save copy. Inbox object and existing files were not replaced.",
-    "inboxUnknown": "Unknown"
+    "inboxUnknown": "Unknown",
+    "inboxPreview": "Preview text",
+    "inboxPreviewWorking": "Verifying text preview…",
+    "inboxPreviewUnsupported": "Preview supports small text files up to 4 KiB only. You can save a copy.",
+    "inboxPreviewFailed": "Could not safely verify the file for preview."
   },
   "editor": {
     "resetUiStateWarning": "The reset forgets open tabs, the list of knowledge bases, home pages and book reading positions; notes, history and settings stay.",
@@ -301,6 +307,7 @@
       "probing": "Checking SSH and server compatibility…",
       "verifiedReadOnly": "Server verified · Node not installed",
       "unsupported": "Server is not suitable for installing Node",
+      "adminAuthorizationRequired": "SSH verified · administrator authorization required for installation",
       "verificationFailed": "Could not verify server or its host key",
       "observedFacts": "Server information",
       "observedFactsHint": "Collected after authenticated SSH key exchange",
@@ -835,6 +842,7 @@
     "title": "Reader",
     "book": "Book",
     "settings": "Reading settings",
+    "contents": "Table of contents",
     "closeSettings": "Close the reading settings",
     "close": "Close",
     "back": "Back",
@@ -936,6 +944,7 @@
     "forgetPending": "Removing…",
     "listFailed": "Could not read the list of knowledge bases: {{reason}}",
     "closeActive": "Close knowledge base",
-    "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning."
+    "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning.",
+    "switchSaveFailed": "Could not switch folders because a note was not saved. The current folder stays open. Check the editor warning."
   }
 }

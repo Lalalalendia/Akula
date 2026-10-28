@@ -39,7 +39,7 @@ impl Document {
         }
         let (base, end) = self.loaded_range();
         if range.start >= base && range.end <= end {
-            self.splice(range, insert);
+            self.replace_loaded(range, insert);
             return;
         }
         let delta = insert.len() as isize - range.len() as isize;
@@ -57,7 +57,7 @@ impl Document {
         self.rescan_from(range.start);
     }
 
-    fn splice(&mut self, range: Range<usize>, insert: &str) {
+    pub(super) fn splice(&mut self, range: Range<usize>, insert: &str) {
         let window = self.loaded_range();
         let exit = self.blocks.state(self.lines.count() - 1);
         let first = self.at_offset(range.start);

@@ -222,6 +222,10 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Installed real Windows PDF pointer path; separate from native Rust harness.
+$canvasScript = Join-Path $PSScriptRoot 'windows-canvas-installed-uia.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $canvasScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -Editable -IncludeDelete -IncludeResize -IncludeConnect -IncludeGroup
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula Canvas UIA smoke failed: PowerShell exit $LASTEXITCODE" }
+
 $pdfPointerScript = Join-Path $PSScriptRoot 'windows-pdf-os-pointer.ps1'
 & $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf
 if ($LASTEXITCODE -ne 0) {
@@ -246,6 +250,46 @@ $clipboardSentinel = 'AKULA_CLIPBOARD_POISON_' + [Guid]::NewGuid().ToString('N')
 Set-Clipboard -Value $clipboardSentinel -ErrorAction Stop
 Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
+Assert-LegacyUntouched
+
+# Installed NSIS + foreground OS keyboard regression for the 30k and 100k
+# whole-note replacement path. Test-only vault, never developer/user files.
+. (Join-Path $PSScriptRoot 'windows-beta-replace-all.ps1')
+foreach ($lines in @(30000,100000)) {
+  Test-AkulaBetaReplaceAll -Executable $exe -Vault $vault -DataDir $akulaData -LineCount $lines
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'Large-document acceptance changed the original smoke-test note'
+}
+Assert-LegacyUntouched
+
+# DESK-15 installed-app recovery in a fresh disposable vault/data directory.
+$recoveryScript = Join-Path $PSScriptRoot 'windows-beta-recovery.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $recoveryScript -ExePath $exe
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula hard-kill recovery acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'DESK-15 isolated acceptance changed the original beta smoke note'
+}
+Assert-LegacyUntouched
+
+# Exercise the separate two-tab path through the installed Windows GUI:
+# Ctrl+Shift+pointer click, detached File Gate ACK cleanup, and a second
+# unsaved tab recovered after a hard process kill.
+$recoveryTabs = Join-Path $PSScriptRoot 'windows-beta-recovery-tabs.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $recoveryTabs -ExePath $exe
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula two-tab hard-kill recovery failed: PowerShell exit $LASTEXITCODE"
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'DESK-15 two-tab test changed original beta source'
+}
+Assert-LegacyUntouched
+
+# Server 2022 installed-GUI 100k Unicode crash/Restore; not a Win7 runtime claim.
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-beta-recovery-large.ps1') -ExePath $exe
+if ($LASTEXITCODE -ne 0) { throw "Installed 100k-line crash recovery failed: PowerShell exit $LASTEXITCODE" }
 Assert-LegacyUntouched
 
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'

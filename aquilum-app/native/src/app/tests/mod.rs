@@ -1,5 +1,7 @@
+mod canvas;
 mod damage;
 mod dialogs;
+mod docx;
 mod external;
 mod folder_colors;
 mod graph;
@@ -26,11 +28,9 @@ mod text_files;
 mod tree_pins;
 mod tree_toolbar;
 mod wide;
-mod wiki;
+mod wiki; mod user_scenarios; mod scenario_course_engineering; mod scenario_research_writing; mod scenario_games_projects_trip;
 
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use aquilum_core::settings::models::AppConfig;
 use masonry::app::{RenderRoot, RenderRootOptions, RenderRootSignal, WindowSizePolicy};

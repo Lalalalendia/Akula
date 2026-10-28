@@ -1,6 +1,6 @@
 [package]
 name = "aquilum-native"
-version = "0.3.13"
+version = "0.3.17"
 description = "Aquilum native UI (Masonry on winit + vello_cpu), no WebView"
 authors = ["Dmitriy Chaplinskiy"]
 license = "AGPL-3.0-only"
@@ -30,14 +30,15 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
 messaging-w4-pilot = []
 memory-probe = []
+# Opt-in experimental local DICOM viewing. Not included in the installed build.
+dicom-preview = ["dep:dicom-core", "dep:dicom-object", "dep:dicom-pixeldata", "dep:zip"]
 # User-visible Windows read-only SSH verification. No install grant.
 server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
 p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
 # Opt-in local Iroh public identity UI; uses the same protected peer contacts.
 p2p-device-ui = ["p2p-device-contacts-preview"]
-# QA-only one-file P2P (B1-B5 Internet Inbox gates remain HOLD); NOT in installed.
-# Actions run only on explicit clicks; no background listener.
+# User-triggered one-file LAN / opt-in Internet transfer; no background listener.
 p2p-inbox-preview = ["dep:akula-inbox-ledger-lab", "aquilum-core/p2p-inbox-lab"]
 p2p-native-send-beta = ["p2p-inbox-preview", "p2p-device-ui", "dep:akula-staya-integration", "dep:tokio"]
 p2p-native-receive-beta = ["p2p-native-send-beta"]
@@ -76,6 +77,13 @@ arboard = { version = "3", default-features = false, features = ["image-data", "
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Pinned after upstream #844: crates.io 0.10.0 incorrectly decodes 8-bit monochrome RLE.
+# All three packages share the same exact source revision.
+dicom-core = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
+dicom-object = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
+dicom-pixeldata = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", features = ["image"], optional = true }
+# ZIP is read directly by a bounded ZIP reader; nothing is unpacked to the vault.
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"], optional = true }
 uuid = { version = "1.23.5", features = ["v4"] }
 rfd = "0.16"
 pulldown-cmark = { version = "0.13", default-features = false }
@@ -101,7 +109,8 @@ aq_trace = { path = "vendor/aq_trace" }
 crop = { version = "0.4", features = ["utf16-metric", "graphemes"] }
 blake3 = { version = "1.8.5", features = ["rayon"] }
 
-[target.'cfg(not(target_os = "windows"))'.dependencies]
+# Keep the software output available in the SAME executable for Win7 fallback.
+[target.'cfg(any(not(target_os = "windows"), target_os = "windows"))'.dependencies]
 softbuffer = "0.4.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -1,15 +1,16 @@
 use super::*;
+mod open_sources;
 
 impl Host {
     pub(super) fn create_window(&mut self, event_loop: &dyn ActiveEventLoop) {
         let attributes = WindowAttributes::default()
             .with_title(if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" })
-            .with_decorations(NATIVE_FRAME)
+            .with_decorations(native_frame())
             .with_visible(false)
             .with_window_icon(window_icon());
         #[cfg(target_os = "windows")]
         let attributes = attributes.with_platform_attributes(Box::new(
-            winit::platform::windows::WindowAttributesWindows::default().with_undecorated_shadow(true).with_class_name(crate::instance::WINDOW_CLASS),
+            winit::platform::windows::WindowAttributesWindows::default().with_undecorated_shadow(!native_frame()).with_class_name(crate::instance::WINDOW_CLASS),
         ));
         let attributes = match self.args.size {
             Some(size) => attributes.with_surface_size(size),
@@ -50,13 +51,7 @@ impl Host {
             Err(err) => report(&format!("вывод кадра: {err}")),
         }
         self.touchpad = crate::touchpad::Touchpad::attach(&*window);
-        if let Some(note) = self.args.open.clone() {
-            // The session title was set before processing --open. Refresh it
-            // only after the requested document has actually become active.
-            if self.app.open(&mut root, note) {
-                window.set_title(&self.app.title());
-            }
-        }
+        self.open_requested_sources(&mut root, window.as_ref());
         if self.args.focus {
             root.focus_on(self.app.editor_id());
         }

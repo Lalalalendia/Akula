@@ -125,15 +125,63 @@ test('signed Windows beta may publish only after manually approved independent v
   assert.match(publish, /--latest/);
 });
 
+test('every next signed Windows release verifies actual published Akula NSIS upgrade', () => {
+  const wf = file('.github/workflows/akula-windows-signed-candidate.yml');
+  const script = file('scripts/test-windows-signed-next-version-upgrade.ps1');
+  const build = wf.split('\n  independent-verification:\n')[0];
+  assert.match(build, /Test actual latest published Akula to next signed NSIS upgrade/);
+  assert.match(build, /run: \.\/scripts\/test-windows-signed-next-version-upgrade\.ps1/);
+  assert.match(build, /AKULA_SIGNED_NEXT_CANDIDATE_DISPOSABLE: '1'/);
+  assert.doesNotMatch(build, /inputs\.release_version == '0\.3\.14'/);
+  assert.match(script, /RUNNER_ENVIRONMENT -cne 'github-hosted'/);
+  assert.match(script, /GITHUB_REF -cne 'refs\/heads\/main'/);
+  assert.match(script, /AKULA_SIGNED_NEXT_CANDIDATE_DISPOSABLE -cne '1'/);
+  assert.match(script, /releases\/latest/);
+  assert.match(script, /scripts\/akula-version\.cjs assert-newer/);
+  assert.match(script, /browser_download_url/);
+  assert.match(script, /Get-FileHash/);
+  assert.match(script, /'\/S','\/R','\/UPDATE','\/ARGS'/);
+  assert.match(script, /Assert-Preserved/);
+  assert.match(script, /shiva-pdf-preview\.exe/);
+  assert.match(script, /AKULA_SIGNED_NEXT_UPGRADE_PASS/);
+});
+
+
 // One signed Akula update is installed over the previous version. S3 is a
 // user-invoked feature of that same executable, not a second release channel.
 test('single published Akula installer includes opt-in S3 feature', () => {
   const signed = file('.github/workflows/akula-windows-signed-candidate.yml');
   const active = signed.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
-  assert.match(active,
-    /^\s*cargo build --release --locked -p aquilum-native --features installed,s3-pair-beta\s*$/m,
-    'the signed update must compile the S3 feature into the ordinary Akula EXE');
+  assert.match(active, /scripts\/akula-win7-signed-stage\.ps1/);
+  assert.match(file('scripts/akula-win7-signed-stage.ps1'),
+    /cargo \+nightly build[^\n]*--features installed,s3-pair-beta[^\n]*--target \$target[^\n]*-Z build-std=std,panic_abort/,
+    'the one signed EXE must include opt-in S3 and use the audited Windows 7 target');
+  assert.match(file('scripts/akula-win7-signed-stage.ps1'),
+    /\$env:RUSTFLAGS = '--cfg windows_slim_errors -C target-feature=\+crt-static'/,
+    'the protected Win7 signed candidate must not require a separately installed UCRT/VC runtime');
+  assert.match(file('scripts/akula-win7-signed-stage.ps1'),
+    /external_crt_imported_dlls/,
+    'the signed candidate must reject dynamic UCRT/VC runtime imports');
+
   assert.match(active, /scripts\/test-windows-beta\.ps1/);
   assert.match(active, /--title "Akula v\$\{version\}" --latest/);
   assert.doesNotMatch(active, /--features installed,s3-pair-beta\s+--bin\s+different-app/);
+});
+
+
+test('signed Win7/10/11 Akula release fails closed while P2P beta lacks B1-B5 acceptance', () => {
+  const signed = file('.github/workflows/akula-windows-signed-candidate.yml');
+  const native = file('aquilum-app/native/Cargo.toml');
+  const installed = native.match(/^installed = \[([^\n]+)\]$/m);
+  assert.ok(installed, 'Native installed Cargo feature must be explicit');
+  assert.doesNotMatch(installed[1], /p2p-(?:native|inbox|device)/,
+    'unaccepted P2P cannot enter signed installed feature');
+  assert.match(native, /^p2p-native-receive-beta = /m,
+    'the independent QA-only transfer feature must still exist');
+  assert.match(signed, /Hold unaccepted P2P outside signed installed builds/);
+  assert.match(signed, /cargo metadata --manifest-path aquilum-app\/Cargo\.toml --locked --no-deps --format-version 1/);
+  assert.match(signed, /features\.installed/);
+  assert.match(signed, /p2p-\(native\|inbox\|device\)/);
+  assert.match(signed, /AKULA_SIGNED_INSTALLED_P2P_RELEASE_HOLD=1/);
+  assert.match(signed, /scripts\/akula-win7-signed-stage\.ps1/);
 });

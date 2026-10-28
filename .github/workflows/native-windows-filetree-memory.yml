@@ -1,0 +1,131 @@
+name: Akula B2-B3 Windows FileTree memory pilot (diagnostic)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/benchmarks/native_windows_filetree_memory.py'
+      - 'aquilum-app/native/src/ui/file_tree/scan/worker.rs'
+      - 'aquilum-app/native/src/ui/file_tree/scan/worker/benchmark.rs'
+      - 'aquilum-app/native/src/ui/file_tree/scan/worker/tests.rs'
+      - '.github/workflows/native-windows-filetree-memory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  b2b3:
+    name: Win32 flat/nested 1k-10k-50k file tree and metadata memory
+    runs-on: windows-2025
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-memory-pilot-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verify Python syntax and synthetic corpus isolation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'Win32 runner is required' }
+          git rev-parse HEAD
+          python -m py_compile scripts/benchmarks/native_windows_memory_pilot.py scripts/benchmarks/native_windows_filetree_memory.py scripts/benchmarks/native_mipmap_window_ab.py scripts/benchmarks/native_scroll_window_ab.py
+          if ($LASTEXITCODE -ne 0) { throw 'Python syntax failed' }
+          python scripts/benchmarks/native_windows_filetree_memory.py --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Fixture test failed' }
+          python -c "import sys,os;sys.path.insert(0,'scripts/benchmarks');from native_windows_memory_pilot import sample;x=sample(os.getpid());assert x['private_bytes']>0 and x['working_set_bytes']>0"
+          if ($LASTEXITCODE -ne 0) { throw 'Process counters are unavailable' }
+      - name: Build regular installed-feature Release (no memory-probe, no replay)
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native --features installed
+          if ($LASTEXITCODE -ne 0) { throw 'Installed-feature release build failed' }
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $binary)) { throw 'Missing Akula.exe test binary' }
+          Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Assert FileTree count scan coalescing and fresh counts on Win32 Release
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --release --locked -p aquilum-native --features installed ui::file_tree::scan::worker::tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'FileTree count-scan freshness or burst test failed' }
+      - name: FileTree scan-burst paired CPU and IO A/B (Windows Release diagnostic only)
+        working-directory: aquilum-app
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'windows-filetree-countscan-ab.log'
+          cargo test --release --locked -p aquilum-native --features installed benchmark_filetree_countscan_cpu_io_abba -- --ignored --nocapture | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { throw 'CountScan A/B benchmark parity or process test failed' }
+          if (!(Select-String -Path $log -Pattern 'FILETREE_COUNTSCAN_AB' -Quiet)) { throw 'No CountScan A/B data' }
+      - name: Publish scan-burst A/B before long 18-process matrix
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-filetree-countscan-ab-${{ github.sha }}
+          path: windows-filetree-countscan-ab.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Paired FileTree startup saved-sort A/B (release, diagnostic only)
+        shell: pwsh
+        working-directory: aquilum-app
+        timeout-minutes: 25
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'windows-filetree-startup-ab.log'
+          cargo test --release --locked -p aquilum-native --features installed benchmark_filetree_saved_sort_abba -- --ignored --nocapture | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { throw 'FileTree startup A/B correctness or diagnostics failed' }
+          if (!(Select-String -Path $log -Pattern 'FILETREE_STARTUP_SORT_AB' -Quiet)) { throw 'Missing A/B measurement lines' }
+      - name: Publish FileTree A/B before long 18-process matrix
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-filetree-saved-sort-ab-${{ github.sha }}
+          path: windows-filetree-startup-ab.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Run B2/B3 synthetic flat-vs-nested 1k/10k/50k cold-warm full matrix
+        shell: pwsh
+        timeout-minutes: 65
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'windows-filetree-memory'
+          $env:AKULA_PROBE_SOURCE_HEAD = (git rev-parse HEAD).Trim()
+          python scripts/benchmarks/native_windows_filetree_memory.py --binary $binary --out $out
+          if ($LASTEXITCODE -ne 0) { throw 'B2/B3 pilot failed: no performance or memory PASS claim' }
+          $report = Join-Path $out 'summary.md'
+          if (!(Test-Path -LiteralPath $report)) { throw 'B2/B3 report missing' }
+          Get-Content $report | Out-File -Append -Encoding utf8 -FilePath $env:GITHUB_STEP_SUMMARY
+      - name: Archive counts, HWND, memory, index progress and errors
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-b2-b3-tree-memory-${{ github.sha }}
+          path: |
+            windows-filetree-memory/environment.json
+            windows-filetree-memory/results.json
+            windows-filetree-memory/summary.md
+            windows-filetree-memory/runs/**/samples.csv
+            windows-filetree-memory/runs/**/witness.json
+            windows-filetree-memory/runs/**/process.log
+          if-no-files-found: warn
+          retention-days: 14

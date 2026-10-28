@@ -32,7 +32,7 @@ pub struct EditorFont {
 
 macro_rules! symbols {
     ($stack:literal) => {
-        concat!($stack, ", \"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", \"Segoe UI Symbol\", \"Cambria Math\", \"Apple Symbols\", \"STIX Two Math\", \"Noto Sans Math\", \"Noto Sans Symbols 2\", \"DejaVu Sans\"")
+        concat!($stack, ", \"Microsoft YaHei\", \"Microsoft JhengHei\", \"Yu Gothic\", \"Malgun Gothic\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"PingFang SC\", \"PingFang TC\", \"Hiragino Sans\", \"Apple SD Gothic Neo\", \"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", \"Segoe UI Symbol\", \"Cambria Math\", \"Apple Symbols\", \"STIX Two Math\", \"Noto Sans Math\", \"Noto Sans Symbols 2\", \"DejaVu Sans\"")
     };
 }
 

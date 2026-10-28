@@ -1,6 +1,6 @@
 mod actions;
 mod commands;
-mod book;
+mod book; mod canvas;
 mod core_events; #[cfg(feature = "dropbox-readonly-preview")] mod dropbox_preview;
 mod embeds;
 mod file_menu;
@@ -13,10 +13,9 @@ mod init;
 mod lifecycle;
 mod media;
 mod pdf_preview;
-mod note_page;
+mod note_page; mod note_recovery;
 mod panel;
-#[cfg(feature = "memory-probe")]
-mod probe;
+#[cfg(feature = "memory-probe")] mod probe;
 mod reader;
 mod root_ui;
 mod search;
@@ -26,12 +25,10 @@ mod templates;
 mod transfer;
 mod widths;
 mod workspaces;
-#[cfg(test)]
-mod tests;
-use std::collections::HashMap;
+#[cfg(test)] mod tests;
+use std::{collections::HashMap, path::{Path, PathBuf}, sync::Arc};
+#[cfg(feature = "dicom-preview")] use std::collections::HashSet;
 use crate::ui::editor::TextEditor;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 use aquilum_core::CoreEvent;
@@ -77,6 +74,7 @@ enum Popup {
     Templates(templates::TemplatesState),
     Workspaces(workspaces::WorkspacesState),
     Transfers(crate::ui::transfer::TransferDialog),
+    Recovery(note_recovery::RecoveryPrompt),
 }
 #[derive(Default)]
 pub struct Outcome {
@@ -102,16 +100,18 @@ pub struct App {
     workspace: Workspace,
     #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview,
     tree: FileTree,
+    #[cfg(feature = "dicom-preview")] dicom_external_sources: HashSet<PathBuf>,
     chrome: Option<Chrome>,
     interface: Interface,
     popup: Option<Popup>,
     typing: Option<(crate::ui::settings::schema::Setter, String, usize)>,
     server_probe: settings::server_state::ServerProbeState,
-    graph: graph_page::GraphState,
+    graph: graph_page::GraphState, canvas: canvas::CanvasState,
     transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,
     find: Option<crate::ui::find::FindBar>,
     note: Option<Note>,
+    recovery: note_recovery::RecoveryUi,
     text: crop::Rope,
     // At most two clean, hash-verified Rope snapshots from inactive tabs.
     inactive_notes: Vec<tabs::open::CachedNote>,

@@ -1,7 +1,7 @@
 use super::*;
 use std::path::Path;
 impl App {
-    pub(super) fn apply(&mut self, setter: Setter, value: Value) -> Effect {
+    pub(in crate::app) fn apply(&mut self, setter: Setter, value: Value) -> Effect {
         match setter {
             Setter::Scale => {
                 let Value::Number(percent) = value else { return Effect::None };

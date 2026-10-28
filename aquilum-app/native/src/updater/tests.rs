@@ -60,3 +60,56 @@ fn installed_windows_apply_cannot_accept_unsigned_bytes() {
     assert!(result.is_err(), "unsigned bytes must never produce an installer");
     assert_eq!(channel_ready(), cfg!(feature = "installed"));
 }
+
+#[test]
+fn concurrent_update_claims_allow_exactly_one_worker() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Barrier;
+
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let wake_count = Arc::clone(&wakes);
+    let updater = Updater::new(Arc::new(move || {
+        wake_count.fetch_add(1, Ordering::SeqCst);
+    }));
+    let barrier = Arc::new(Barrier::new(17));
+    let mut workers = Vec::new();
+    for _ in 0..16 {
+        let updater = updater.clone();
+        let barrier = Arc::clone(&barrier);
+        workers.push(std::thread::spawn(move || {
+            barrier.wait();
+            updater.try_start()
+        }));
+    }
+    barrier.wait();
+    let claims = workers.into_iter().map(|worker| worker.join().unwrap()).filter(|claimed| *claimed).count();
+    assert_eq!(claims, 1, "concurrent calls must not create multiple update workers");
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+    assert_eq!(updater.status(), Status::Checking);
+    assert!(!updater.try_start(), "busy updater may not be claimed again");
+}
+
+#[test]
+fn atomic_update_claim_retries_terminal_states_but_preserves_busy_states() {
+    let updater = Updater::new(Arc::new(|| {}));
+    for terminal in [
+        Status::Idle,
+        Status::Latest,
+        Status::Available("0.3.20".into()),
+        Status::Failed("temporary network error".into()),
+    ] {
+        updater.set(terminal);
+        assert!(updater.try_start(), "terminal update state must allow a new operation");
+        assert_eq!(updater.status(), Status::Checking);
+    }
+    for busy in [
+        Status::Checking,
+        Status::Downloading { version: "0.3.20".into(), done: 1, total: Some(100) },
+        Status::Ready("0.3.20".into()),
+        Status::Installing,
+    ] {
+        updater.set(busy.clone());
+        assert!(!updater.try_start(), "busy update state must reject a second operation");
+        assert_eq!(updater.status(), busy);
+    }
+}

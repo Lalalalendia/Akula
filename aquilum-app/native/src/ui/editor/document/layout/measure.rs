@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod near_bench;
+
 use std::ops::Range;
 
 use masonry::core::{BrushIndex, StyleSet};
@@ -13,8 +16,6 @@ impl Document {
         let keep = self.kept();
         let mut line = self.line_height();
         let mut changed = false;
-        // These counters are compiled only into test binaries; the ordinary
-        // editor does not spend time profiling individual paragraph layouts.
         #[cfg(test)]
         let tracing = aq_trace::enabled();
         #[cfg(test)]
@@ -28,13 +29,16 @@ impl Document {
             fresh
         });
         for i in indices {
-            let near = self.placed && self.heights.near(i, keep) || pinned.contains(&i);
             let range = self.span(i);
             let composing = compose.filter(|(at, _)| range.contains(at) || *at == range.end);
             let moved = self.markdown.is_some() && self.local_caret(i, caret) != self.laid.get(i).map_or(&PLAIN, |laid| &laid.decor).caret;
-            let current = composing.is_none() && !moved;
+            let (current, no_wrap) = (composing.is_none() && !moved, rebreak && self.fenced_code(i));
             match self.laid.get_mut(i).filter(|_| current) {
                 Some(laid) => {
+                    #[cfg(test)]
+                    if near_bench::eager_reused_near() {
+                        std::hint::black_box(self.placed && self.heights.near(i, keep) || pinned.contains(&i));
+                    }
                     #[cfg(test)]
                     if tracing {
                         reused += 1;
@@ -42,7 +46,8 @@ impl Document {
                     if rebreak {
                         #[cfg(test)]
                         let begun = tracing.then(std::time::Instant::now);
-                        laid.layout.break_all_lines(self.width.map(|w| (w - laid.decor.inset as f32).max(0.0)));
+                        let width = self.width.map(|w| (w - laid.decor.inset as f32).max(0.0));
+                        laid.layout.break_all_lines(if no_wrap { None } else { width });
                         laid.layout.align(Alignment::Start, AlignmentOptions::default());
                         self.heights.set_text(i, laid.height());
                         #[cfg(test)]
@@ -52,46 +57,39 @@ impl Document {
                         }
                     }
                 }
-                None if current && !near => {
-                    #[cfg(test)]
-                    if tracing {
-                        skipped += 1;
-                    }
-                    if stale.is_some_and(|stale| stale.contains(&i)) {
-                        let height = self.estimate(i, line);
-                        changed |= self.heights.set_text(i, height);
-                    }
-                }
                 None => {
-                    #[cfg(test)]
-                    let begun = tracing.then(std::time::Instant::now);
-                    let laid = self.lay(i, fcx, lcx, styles, composing, caret);
-                    #[cfg(test)]
-                    if let Some(begun) = begun {
-                        built += 1;
-                        shape_time += begun.elapsed();
-                    }
-                    changed |= self.heights.set_text(i, laid.height());
-                    if *self.blocks.get(i) == Block::Text && laid.layout.len() == 1 {
-                        line = laid.height();
-                    }
-                    wanted.extend(laid.decor.links.iter().filter(|l| l.wiki).map(|l| l.target.trim().to_owned()));
-                    if near {
-                        self.laid.insert(i, laid);
+                    let near = self.placed && self.heights.near(i, keep) || pinned.contains(&i);
+                    if current && !near {
+                        #[cfg(test)]
+                        if tracing {
+                            skipped += 1;
+                        }
+                        if stale.is_some_and(|stale| stale.contains(&i)) {
+                            let height = self.estimate(i, line);
+                            changed |= self.heights.set_text(i, height);
+                        }
+                    } else {
+                        #[cfg(test)]
+                        let begun = tracing.then(std::time::Instant::now);
+                        let laid = self.lay(i, fcx, lcx, styles, composing, caret);
+                        #[cfg(test)]
+                        if let Some(begun) = begun {
+                            built += 1;
+                            shape_time += begun.elapsed();
+                        }
+                        changed |= self.heights.set_text(i, laid.height());
+                        if *self.blocks.get(i) == Block::Text && laid.layout.len() == 1 {
+                            line = laid.height();
+                        }
+                        wanted.extend(laid.decor.links.iter().filter(|l| l.wiki).map(|l| l.target.trim().to_owned()));
+                        if near { self.laid.insert(i, laid); }
                     }
                 }
             }
         }
         self.line = line;
         #[cfg(test)]
-        if tracing {
-            aq_trace::counter("akula: paragraph built", built as f64);
-            aq_trace::counter("akula: paragraph reused", reused as f64);
-            aq_trace::counter("akula: paragraph skipped", skipped as f64);
-            aq_trace::counter("akula: paragraph rebroken", rebroken as f64);
-            aq_trace::counter("akula: paragraph shape micros", shape_time.as_secs_f64() * 1e6);
-            aq_trace::counter("akula: paragraph rebreak micros", rebreak_time.as_secs_f64() * 1e6);
-        }
+        near_bench::record_trace(built, reused, skipped, rebroken, shape_time, rebreak_time, tracing);
         changed
     }
 }

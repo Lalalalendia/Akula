@@ -71,16 +71,16 @@ mod cold_oracle_report;
 mod profile_binding;
 mod path;
 mod pinned_read;
+pub(crate) mod p2p_stage;
 #[cfg(windows)]
 mod filegate_windows_acl;
 #[cfg(windows)]
-mod pinned_windows;
-pub(crate) mod p2p_stage;
+pub(crate) mod pinned_windows;
 mod protocol;
 mod provider;
 mod s3;
-mod s3_manifest;
-mod s3_pack_index;
+#[cfg(any(feature = "sync-s3", feature = "sync-s3-pack-lab"))] #[path = "s3_transport/pack_probe.rs"] mod s3_pack_probe;
+mod s3_manifest; mod s3_pack_index;
 mod s3_manifest_delta;
 mod s3_coord_v2;
 #[cfg(feature = "sync-s3")]
@@ -206,4 +206,9 @@ pub const SYNC_ENGINE_FEATURE_ENABLED: bool = cfg!(feature = "sync-engine");
 /// Local custody checks can compile without an S3 SDK or sync scheduler.
 pub const HOST_CUSTODY_FEATURE_ENABLED: bool = cfg!(feature = "host-custody");
 #[cfg(all(test, not(feature = "sync-engine")))]
-mod disabled_tests;
+mod disabled_tests {
+    #[test]
+    fn compiled_contracts_do_not_enable_cloud_sync_by_default() {
+        assert!(!super::SYNC_ENGINE_FEATURE_ENABLED);
+    }
+}
