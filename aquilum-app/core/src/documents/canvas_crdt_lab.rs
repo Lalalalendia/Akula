@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{
-    Any, Doc, GetString, Map, MapPrelim, MapRef, OffsetKind, Options, Out, ReadTxn,
+    Any, ClientID, Doc, GetString, Map, MapPrelim, MapRef, OffsetKind, Options, Out, ReadTxn,
     StateVector, Text, TextPrelim, Transact,
 };
 
@@ -33,7 +33,7 @@ pub struct CanvasCrdtLab {
 }
 
 impl CanvasCrdtLab {
-    pub fn new(client_id: u64) -> Self {
+    pub fn new(client_id: ClientID) -> Self {
         let doc = Doc::with_options(Options {
             client_id,
             offset_kind: OffsetKind::Utf16,
@@ -46,7 +46,7 @@ impl CanvasCrdtLab {
 
     /// Seed once from the validated local document. Other replicas must receive
     /// this state as a Yrs update; importing the same JSON twice creates conflicts.
-    pub fn seeded(client_id: u64, source: &Value) -> Result<Self, String> {
+    pub fn seeded(client_id: ClientID, source: &Value) -> Result<Self, String> {
         if !source.is_object() {
             return Err("JSON Canvas root must be an object".into());
         }
@@ -283,8 +283,8 @@ mod tests {
 
     fn seed() -> (CanvasCrdtLab, CanvasCrdtLab) {
         let original: Value = serde_json::from_str(OFFICIAL).unwrap();
-        let first = CanvasCrdtLab::seeded(101, &original).unwrap();
-        let second = CanvasCrdtLab::new(202);
+        let first = CanvasCrdtLab::seeded(ClientID::new(101), &original).unwrap();
+        let second = CanvasCrdtLab::new(ClientID::new(202));
         second.apply_remote_update(&first.state()).unwrap();
         (first, second)
     }
@@ -302,9 +302,9 @@ mod tests {
         let mut original: Value = serde_json::from_str(OFFICIAL).unwrap();
         original["nodes"][3]["custom.vendor"] = json!({"keep": ["all", 3]});
         original["root-extension"] = json!(true);
-        let replica = CanvasCrdtLab::seeded(21, &original).unwrap();
+        let replica = CanvasCrdtLab::seeded(ClientID::new(21), &original).unwrap();
         assert_eq!(replica.snapshot().unwrap(), original);
-        let peer = CanvasCrdtLab::new(22);
+        let peer = CanvasCrdtLab::new(ClientID::new(22));
         peer.apply_remote_update(&replica.state()).unwrap();
         assert_eq!(peer.snapshot().unwrap(), original);
     }
@@ -358,7 +358,7 @@ mod tests {
             }],
             "edges": []
         });
-        let replica = CanvasCrdtLab::seeded(1, &source).unwrap();
+        let replica = CanvasCrdtLab::seeded(ClientID::new(1), &source).unwrap();
         assert!(replica.edit_text("t", &[TextEdit {
             from: 2, to: 2, insert: "x".into(),
         }]).is_err());
@@ -369,14 +369,14 @@ mod tests {
 
     #[test]
     fn invalid_seeds_are_rejected_without_loading_files() {
-        assert!(CanvasCrdtLab::seeded(1, &json!({"nodes":{}})).is_err());
-        assert!(CanvasCrdtLab::seeded(1, &json!({
+        assert!(CanvasCrdtLab::seeded(ClientID::new(1), &json!({"nodes":{}})).is_err());
+        assert!(CanvasCrdtLab::seeded(ClientID::new(1), &json!({
             "nodes": [
                 {"id":"x","x":0,"y":0,"width":10,"height":10},
                 {"id":"x","x":1,"y":1,"width":10,"height":10}
             ]
         })).is_err());
-        assert!(CanvasCrdtLab::seeded(1, &json!({
+        assert!(CanvasCrdtLab::seeded(ClientID::new(1), &json!({
             "nodes":[{"id":"x","x":0,"y":0,"width":-1,"height":10}]
         })).is_err());
     }
