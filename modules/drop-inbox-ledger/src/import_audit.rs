@@ -15,7 +15,9 @@ impl InboxLedger {
     /// Rehash both the original receipt and destination before committing.
     pub fn record_imported(&self, id: Uuid, destination: &Path) -> Result<(), LedgerError> {
         let original = self.get(id)?.ok_or(LedgerError::UnknownTransfer)?;
-        if self.status(id)? != LocalStatus::VerifiedLocal {
+        if self.status(id)? != LocalStatus::VerifiedLocal
+            || self.removal_status(id)? != RemovalAuditStatus::Available
+        {
             return Err(LedgerError::InvalidLocalObject);
         }
         let target = checked_destination(self, id, destination)?;
@@ -83,8 +85,11 @@ impl InboxLedger {
         let Some(original) = self.get(id)? else {
             return Ok(ImportAuditStatus::NeedsReview);
         };
-        if self.status(id)? != LocalStatus::VerifiedLocal {
-            return Ok(ImportAuditStatus::NeedsReview);
+        match self.removal_status(id)? {
+            RemovalAuditStatus::Available
+                if self.status(id)? == LocalStatus::VerifiedLocal => {}
+            RemovalAuditStatus::Removed => {}
+            _ => return Ok(ImportAuditStatus::NeedsReview),
         }
         let target = Path::new(&path);
         if checked_destination(self, id, target).is_err()
