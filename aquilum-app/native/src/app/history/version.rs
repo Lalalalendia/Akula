@@ -53,8 +53,7 @@ impl App {
         if let Some(note) = &mut self.note
             && !super::guard::flush_clean(note, &self.workspace.core, &self.text)
         {
-            self.version_notice = Some(t("history.actionFailed"));
-            self.show_version(root);
+            self.report_failed_history_flush(root, version);
             return;
         }
         let result = match command {
