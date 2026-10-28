@@ -1,9 +1,10 @@
-//! Staged DESK-15 primitive: integrity-checked, no-overwrite recovery candidates.
-//! NOT wired to note edits or startup yet. The record is not an authenticated
-//! signature and cannot prove zero data loss before its durable-write ACK.
+//! Integrity-checked, no-overwrite DESK-15 recovery candidates.
+//! No zero-loss guarantee before a durable-write acknowledgment.
 #![allow(dead_code)]
 mod queue;
 mod pending;
+mod quota;
+#[cfg(test)] mod large_tests;
 #[cfg(target_os = "windows")]
 mod acl;
 pub(super) use queue::{CaptureStatus, SnapshotQueue};
@@ -16,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 const MAGIC: &[u8] = b"AKULA-NOTE-SHADOW-V1";
-const MAX_TEXT: usize = 16 * 1024 * 1024;
+const MAX_TEXT: usize = 24 * 1024 * 1024;
 const MAX_WIRE: usize = 48 * 1024 * 1024;
 const MAX_RECORDS: usize = 256;
 
@@ -187,8 +188,7 @@ fn read_bounded(path: &Path) -> io::Result<Vec<u8>> {
 }
 
 /// Stage an immutable snapshot in private AppData; never touch the document.
-/// A successful return means the snapshot file was synced and linked without
-/// overwriting another revision. Parent-dir power-loss durability is separate.
+/// Durability ACK follows sync and NO-REPLACE publication, not mere enqueue.
 pub(super) fn stage(
     data: &Path,
     vault: &Path,
@@ -203,10 +203,10 @@ pub(super) fn stage(
     }
     let relative = checked_relative(vault, document)?;
     let bucket = folder(data, workspace, true)?.ok_or_else(|| invalid("missing recovery directory"))?;
+    let _quota_lock = quota::acquire(&bucket)?;
     pending::clean_stale(&bucket)?;
     let prefix = format!("{}-", key(&relative));
-    // Admission happens BEFORE writing the new snapshot. Without this guard,
-    // the 257th draft makes inspect() fail and strands every older backup.
+    // Refuse the 257th revision before writing; preserve older drafts.
     let existing = records(&bucket, &prefix)?;
     if existing.len() >= MAX_RECORDS {
         return Err(denied("too many unsaved snapshot revisions; manual review required"));
@@ -228,6 +228,7 @@ pub(super) fn stage(
         body: body.to_owned(),
     };
     let bytes = wire(&image)?;
+    quota::admit(&bucket, bytes.len())?;
     let pending = bucket.join(format!(".{}.pending", Uuid::new_v4()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -243,8 +244,7 @@ pub(super) fn stage(
         let _ = fs::remove_file(&pending);
         return Err(error);
     }
-    // A hard link creates the final name atomically with NO-REPLACE semantics,
-    // unlike POSIX rename, which silently overwrites an existing record.
+    // Publish with NO-REPLACE hard-link semantics.
     let published = fs::hard_link(&pending, &target);
     let _ = fs::remove_file(&pending);
     match published {

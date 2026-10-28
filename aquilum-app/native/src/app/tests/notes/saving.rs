@@ -52,10 +52,10 @@ fn oversized_recovery_warning_is_visible_before_save_and_clears_after_file_gate_
     assert!(h.app.save_error_ids.is_none());
 
     let line = format!("{}\n", "x".repeat(191));
-    let draft = line.repeat(90_000);
-    assert!(draft.len() > 16 * 1024 * 1024);
+    let draft = line.repeat(140_000);
+    assert!(draft.len() > 24 * 1024 * 1024);
     h.app.commit_text(&mut h.root, crop::Rope::from(draft.clone()));
-    assert!(h.app.note.as_ref().unwrap().save_error.as_ref().is_some_and(|error| error.contains("16 MiB")));
+    assert!(h.app.note.as_ref().unwrap().save_error.as_ref().is_some_and(|error| error.contains("24 MiB")));
     assert!(h.app.save_error_ids.is_some(), "over-limit warning must be visible without polling or fsync");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "original disk contents");
 

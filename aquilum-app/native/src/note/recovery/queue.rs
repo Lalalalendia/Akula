@@ -77,7 +77,7 @@ impl SnapshotQueue {
             return Err(denied("unreviewed recovery draft must not be superseded"));
         }
         if body.byte_len() > super::MAX_TEXT {
-            return Err(invalid("recovery draft exceeds 16 MiB; save the note to protect the latest edits"));
+            return Err(invalid("recovery draft exceeds 24 MiB; save the note to protect the latest edits"));
         }
         let revision = state.next_revision.checked_add(1)
             .ok_or_else(|| invalid("recovery revision counter exhausted"))?;

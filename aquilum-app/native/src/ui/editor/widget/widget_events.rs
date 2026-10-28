@@ -1,4 +1,4 @@
-use masonry::core::{EventCtx, Ime, PointerButton, PointerButtonEvent, PointerEvent, PointerUpdate, PropertiesMut, TextEvent, UpdateCtx};
+use masonry::core::{EventCtx, PointerButton, PointerButtonEvent, PointerEvent, PointerUpdate, PropertiesMut, TextEvent, UpdateCtx};
 use super::Kind;
 use super::paste;
 use super::TextEditor;
@@ -163,7 +163,7 @@ impl TextEditor {
                     self.keyboard(ctx, key);
                 }
             }
-            TextEvent::Ime(Ime::Commit(text)) if self.table_text(ctx, text) => {}
+            TextEvent::Ime(ime) if self.table_ime(ctx, ime) => {}
             TextEvent::Ime(ime) => self.ime(ctx, ime),
             TextEvent::ClipboardPaste(text) if self.table_text(ctx, text) => {}
             TextEvent::ClipboardPaste(text) => {

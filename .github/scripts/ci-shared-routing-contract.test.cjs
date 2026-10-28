@@ -471,10 +471,11 @@ test('Windows beta standalone and mixed source owners require exactly one signed
   assert.match(body,/^  workflow_dispatch:\n    inputs:\n      ref:\n/m,'manual candidate with ref stays active');
   assert.match(body,/^        default: main$/m);
   assert.doesNotMatch(body,/^  pull_request:/m);
-  assert.equal(r.OWNED_SUITES.owned_windows_beta.length,12,'preserve 10 former paths and two Canvas installed-smoke owners');
+  assert.equal(r.OWNED_SUITES.owned_windows_beta.length,13,'preserve 10 former paths, official Canvas, and C5 two-app witness owner');
   const owned=['.github/workflows/windows-beta.yml',
     '.github/scripts/windows-beta-identity.test.cjs',
     'scripts/test-windows-beta.ps1','scripts/windows-canvas-installed-uia.ps1',
+    'scripts/windows-canvas-obsidian-crossapp.ps1',
     'aquilum-app/core/tests/fixtures/jsoncanvas/official-sample.canvas',
     'scripts/build-windows-update-fixture.ps1',
     'scripts/test-windows-beta-upgrade.ps1','scripts/windows-beta-gui-input.ps1',
@@ -488,6 +489,7 @@ test('Windows beta standalone and mixed source owners require exactly one signed
   // Changes to the installed Canvas UIA script or to the official fixture
   // must run the actual Windows installer, not pass only Rust/Native CI.
   assert.equal(r.assess({paths:['scripts/windows-canvas-installed-uia.ps1']}).owned_windows_beta,true);
+  assert.equal(r.assess({paths:['scripts/windows-canvas-obsidian-crossapp.ps1']}).owned_windows_beta,true);
   assert.equal(r.assess({paths:['aquilum-app/core/tests/fixtures/jsoncanvas/official-sample.canvas']}).owned_windows_beta,true);
   assert.equal(r.assess({paths:['docs/testing/json-canvas-obsidian-acceptance.md']}).owned_windows_beta,false);
   assert.equal(r.assess({paths:['README.md']}).owned_windows_beta,false);
