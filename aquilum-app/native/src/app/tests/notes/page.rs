@@ -137,7 +137,9 @@ fn utf16_txt_in_vault_opens_readonly_without_reencoding_or_save() {
     std::fs::write(&path, &bytes).unwrap();
     h.app.tree.paths_changed(&mut h.root, std::slice::from_ref(&path));
     assert!(h.app.tree.names().iter().any(|name| name == "Старый текст.TXT"));
-    assert!(h.app.open(&mut h.root, path.clone()));
+    let row = h.app.tree.row_id("Старый текст.TXT").expect("TXT must be visible in the vault");
+    let center = h.root.get_widget(row).unwrap().ctx().bounding_box().center();
+    h.click(center.x, center.y);
     assert!(h.app.open_error.is_none(), "UTF-16 TXT must not display a failed-open page");
     assert!(h.app.note.is_none(), "legacy text must not accidentally enter the UTF-8 save path");
     assert!(h.app.note_ids.is_none(), "the preview must have no editable note widget");
