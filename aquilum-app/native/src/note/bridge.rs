@@ -44,6 +44,13 @@ impl Note {
         Ok(())
     }
 
+    /// The rename operation may have rewritten wiki-links inside this note.
+    /// Accept the resulting File Gate hash before rearming its recovery queue:
+    /// otherwise a subsequent save would falsely conflict with our own move.
+    pub(crate) fn accept_verified_rename_hash(&mut self, hash: &str) {
+        *self.hash.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = hash.to_owned();
+    }
+
     /// After a successful file/folder move, capture new crash drafts under the
     /// confirmed destination path. The new queue is constructed before replacing
     /// the old one, so a failed rebind remains visible to the caller.
