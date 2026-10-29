@@ -9,6 +9,8 @@ on:
     paths:
       - 'interop/akula-staya/**'
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
+      - 'aquilum-app/core/src/voice_jitter_lab.rs'
+      - 'aquilum-app/core/src/call_signaling_lab.rs'
       - '.github/workflows/p2p-akula-staya-real.yml'
   workflow_dispatch:
 
@@ -49,6 +51,49 @@ jobs:
       - name: Compile and test actual Akula and Staya queue linkage
         shell: bash
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features sender-arm-lab,p2p-live-identity --lib -- --nocapture
+      # CALL-01: two real, independent OS processes; synthetic call control only.
+      # Includes End, closed-on-transport-loss and fresh-ID-on-reconnect cases.
+      - name: AK-CALL-01 two-process authenticated Iroh signaling and reconnect
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path interop/akula-staya/Cargo.toml \
+            --features call-quic-lab --test call_quic_two_process -- --nocapture \
+            2>&1 | tee "$RUNNER_TEMP/akula-call01-quic.log"
+          grep -Fq 'test result: ok. 2 passed; 0 failed;' "$RUNNER_TEMP/akula-call01-quic.log"
+          grep -Fq 'AKULA_CALL_REAL_QUIC_TWO_PROCESS_PASS fresh_call=1 transport_loss=0' "$RUNNER_TEMP/akula-call01-quic.log"
+          grep -Fq 'AKULA_CALL_REAL_QUIC_TWO_PROCESS_PASS fresh_call=1 transport_loss=1' "$RUNNER_TEMP/akula-call01-quic.log"
+      # Real bundled libopus over the default-OFF Akula jitter wire, on BOTH OS.
+      # Pure synthetic PCM; no device, recording, calls transport or permissions.
+      - name: AK-CALL-02 real Opus encode-decode and packet-loss PLC laboratory
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path interop/akula-staya/Cargo.toml \
+            --features call-voice-codec-lab --test call_voice_opus_codec \
+            -- --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-call-voice-codec.log"
+          grep -Fq 'test result: ok. 7 passed; 0 failed;' \
+            "$RUNNER_TEMP/akula-call-voice-codec.log"
+          echo 'AKULA_CALL_VOICE_OPUS_CODEC_PASS seven_real_codec_tests=1'
+      # GENUINE two-process Iroh QUIC/TLS, separately pinned TEST keys,
+      # with libopus both directions and wrong-call/revoke negatives.
+      # Reliable QUIC stream is a compatibility smoke, NOT real-time QoS.
+      - name: AK-CALL-02 independent OS processes transmit synthetic Opus
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path interop/akula-staya/Cargo.toml \
+            --features call-voice-quic-lab --test call_voice_quic_two_process \
+            -- --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-call-voice-quic.log"
+          grep -Fq 'test result: ok. 3 passed; 0 failed;' \
+            "$RUNNER_TEMP/akula-call-voice-quic.log"
+          grep -Fq 'AKULA_CALL_VOICE_TWO_PROCESS_PASS actual_quic=1 actual_libopus=1 negative=0' \
+            "$RUNNER_TEMP/akula-call-voice-quic.log"
+          grep -Fq 'AKULA_CALL_VOICE_TWO_PROCESS_PASS actual_quic=1 actual_libopus=1 negative=1' \
+            "$RUNNER_TEMP/akula-call-voice-quic.log"
+          grep -Fq 'AKULA_CALL_VOICE_DATAGRAM_TWO_PROCESS_PASS actual_quic=1 actual_libopus=1' \
+            "$RUNNER_TEMP/akula-call-voice-quic.log"
+          echo 'AKULA_CALL_VOICE_LIVE_QUIC_TEST_PASS three_os_process_scenarios=1'
       - name: Rust formatting for exact opt-in inbox Core
         shell: bash
         run: rustfmt --edition 2021 --check aquilum-app/core/src/p2p_inbox_lab.rs
@@ -59,7 +104,7 @@ jobs:
         shell: bash
         env:
           AKULA_P2P_OS_PIN_CI: '1'
-        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity --test live_identity -- --nocapture
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features call-live-identity-lab --test live_identity -- --nocapture
       - name: Compile opt-in OS-protected real LAN QUIC probe
         shell: bash
         run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features os-pinned-lan-probe --bin akula-p2p-lan
