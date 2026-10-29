@@ -7,9 +7,11 @@ mod imported;
 pub mod model;
 mod parts;
 mod pinned;
+mod persistence;
 mod pins;
 mod row;
 mod scan;
+mod scroll_ops;
 mod store;
 #[cfg(test)]
 mod testing;
@@ -99,20 +101,6 @@ impl FileTree {
         tree
     }
 
-    pub fn sort(&self) -> Sort {
-        self.model.sort()
-    }
-
-    pub fn set_sort(&mut self, root: &mut RenderRoot, sort: Sort) {
-        if !self.model.set_sort(sort) {
-            return;
-        }
-        if let Some(workspace) = self.model.root().map(Path::to_path_buf) {
-            self.store.set_sort(&workspace, sort);
-        }
-        self.refresh(root);
-    }
-
     pub fn root(&self) -> Option<&Path> {
         self.model.root()
     }
@@ -148,25 +136,4 @@ impl FileTree {
         self.refresh(root);
     }
 
-    pub fn color(&self, path: &Path) -> Option<&'static str> {
-        self.model.color(path)
-    }
-
-    pub fn set_color(&mut self, root: &mut RenderRoot, folders: &[PathBuf], color: Option<&'static str>) {
-        self.model.set_color(folders, color);
-        self.save_colors();
-        self.refresh(root);
-    }
-
-    fn save_colors(&mut self) {
-        if let Some(root) = self.model.root().map(Path::to_path_buf) {
-            self.store.set_colors(&root, &self.model.color_entries());
-        }
-    }
-
-    fn save_expanded(&mut self) {
-        if let Some(root) = self.model.root().map(Path::to_path_buf) {
-            self.store.set(&root, &self.model.expanded_paths());
-        }
-    }
 }

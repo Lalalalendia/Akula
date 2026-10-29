@@ -11,7 +11,7 @@ use super::pinned::Pinned;
 use super::pins::pins;
 use super::parts::{empty_state, rename_field, toolbar};
 use super::row::TreeRow;
-use super::{FileTree, MARGIN, SPAN, step};
+use super::{FileTree, SPAN, step};
 use crate::ui::editor::TextEditor;
 use crate::ui::handle::Handle;
 use crate::ui::scroll::ScrollArea;
@@ -122,39 +122,4 @@ impl FileTree {
         self.update_pins(root);
     }
 
-    pub(super) fn first_near(offset: f64) -> usize {
-        ((offset / step()) as usize).saturating_sub(MARGIN)
-    }
-
-    pub(super) fn show_rows_from(&mut self, root: &mut RenderRoot, offset: f64) {
-        let visible = (offset / step()) as usize;
-        let first = Self::first_near(offset);
-        if visible < self.first || first.abs_diff(self.first) > MARGIN / 2 {
-            self.first = first;
-            self.refresh(root);
-        }
-    }
-
-    pub(super) fn show_row(&mut self, root: &mut RenderRoot, index: Option<usize>) {
-        if let Some(index) = index
-            && !(self.first..self.first + SPAN - MARGIN).contains(&index)
-        {
-            self.first = index.saturating_sub(MARGIN);
-        }
-        self.refresh(root);
-        if let Some(index) = index {
-            self.scroll_to(root, index);
-        }
-    }
-
-    fn scroll_to(&mut self, root: &mut RenderRoot, index: usize) {
-        let top = index as f64 * step();
-        let bottom = top + step() - size::SPACE_2;
-        if let Some(offset) = self.scroll.and_then(|scroll| scroll.edit(root, |mut scroll| {
-            ScrollArea::reveal(&mut scroll, top, bottom);
-            scroll.widget.offset()
-        })) {
-            self.offset = offset;
-        }
-    }
 }
