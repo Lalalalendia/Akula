@@ -124,3 +124,59 @@ fn pdf_export_keeps_what_the_editor_shows() {
     }
     assert!(pdf.starts_with(b"%PDF"), "не PDF");
 }
+
+
+#[test]
+fn renaming_an_edited_note_commits_its_text_before_moving_the_file() {
+    let mut h = Harness::new();
+    let from = h.vault.path().join("a.md");
+    let to = h.vault.path().join("After.md");
+    h.app.open(&mut h.root, from.clone());
+    h.app.commit_text(&mut h.root, crop::Rope::from("текст до переименования"));
+
+    h.app.rename_file(&mut h.root, from.clone(), to.clone());
+
+    assert!(!from.exists(), "old name should disappear after a successful rename");
+    assert_eq!(std::fs::read_to_string(&to).unwrap(), "текст до переименования");
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&to)));
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(to.as_path()));
+    assert!(h.app.open_error.is_none(), "the renamed note must stay open");
+}
+
+#[test]
+fn failed_rename_never_switches_the_active_note_or_tab_to_an_unavailable_file() {
+    let mut h = Harness::new();
+    let from = h.vault.path().join("a.md");
+    let to = h.vault.path().join("Taken.md");
+    h.app.open(&mut h.root, from.clone());
+    std::fs::write(&to, "чужой текст").unwrap();
+
+    h.app.rename_file(&mut h.root, from.clone(), to.clone());
+
+    assert_eq!(std::fs::read_to_string(&from).unwrap(), "текст");
+    assert_eq!(std::fs::read_to_string(&to).unwrap(), "чужой текст");
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&from)));
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(from.as_path()));
+    assert!(h.app.open_error.is_none(), "failed rename must not strand the tab on an error page");
+    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })), "failure reason must be visible");
+}
+
+#[test]
+fn failed_sidebar_rename_does_not_patch_the_tree_before_the_file_moves() {
+    use crate::ui::editor::TextAction;
+    let mut h = Harness::new();
+    let from = h.vault.path().join("a.md");
+    let taken = h.vault.path().join("Taken.md");
+    std::fs::write(&taken, "другая заметка").unwrap();
+    h.app.tree.paths_changed(&mut h.root, std::slice::from_ref(&taken));
+    h.app.open(&mut h.root, from.clone());
+    h.app.tree.start_rename(&mut h.root, from.clone());
+    let field = h.app.tree.rename_field().expect("sidebar rename input");
+
+    h.act(field, TextAction::Entered("Taken".to_owned()));
+
+    assert!(from.exists(), "source file must remain after a rejected rename");
+    assert!(h.app.tree.row_id("a").is_some(), "old sidebar row must remain");
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&from)));
+    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
+}
