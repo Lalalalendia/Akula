@@ -63,11 +63,13 @@ extern "system" {
 /// Open one leaf relative to the already pinned objects directory; no path
 /// traversal, create, truncate or replace authority. Deny write/delete sharing.
 pub(super) fn open_delete_candidate(parent: &File, leaf: &str) -> Result<File, VaultPortError> {
-    if leaf.is_empty()
-        || leaf == "."
-        || leaf == ".."
-        || leaf.chars().any(|c| matches!(c, '/' | '\\' | ':' | '\0'))
-    {
+    // Only locally generated, canonical UUID blob names are valid inputs.
+    // Refuse unrelated real files even if a future caller supplies a bad name.
+    let valid = leaf
+        .strip_suffix(".blob")
+        .and_then(|stem| uuid::Uuid::parse_str(stem).ok())
+        .is_some_and(|id| !id.is_nil() && format!("{}.blob", id.hyphenated()) == leaf);
+    if !valid {
         return Err(VaultPortError::UnsafePath);
     }
     let mut wide: Vec<u16> = leaf.encode_utf16().collect();
@@ -133,12 +135,16 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let parent = temp.path().join("objects");
         fs::create_dir(&parent).unwrap();
-        fs::create_dir(parent.join("nested")).unwrap();
+        let directory = format!("{}.blob", uuid::Uuid::new_v4().hyphenated());
+        fs::create_dir(parent.join(&directory)).unwrap();
+        fs::write(parent.join("unrelated.txt"), b"keep").unwrap();
         let opened = super::super::pinned_windows::open_root(&parent).unwrap();
         for name in ["", ".", "..", "../escape", "a\\b", "C:evil"] {
             assert!(open_delete_candidate(&opened, name).is_err());
         }
         assert!(open_delete_candidate(&opened, "missing.blob").is_err());
-        assert!(open_delete_candidate(&opened, "nested").is_err());
+        assert!(open_delete_candidate(&opened, "unrelated.txt").is_err());
+        assert!(open_delete_candidate(&opened, &directory).is_err());
+        assert_eq!(fs::read(parent.join("unrelated.txt")).unwrap(), b"keep");
     }
 }
