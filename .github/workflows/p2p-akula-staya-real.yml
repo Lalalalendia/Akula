@@ -65,7 +65,7 @@ jobs:
         shell: bash
         env:
           AKULA_P2P_OS_PIN_CI: '1'
-        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity --test live_identity -- --nocapture
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features call-live-identity-lab --test live_identity -- --nocapture
       - name: Compile opt-in OS-protected real LAN QUIC probe
         shell: bash
         run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features os-pinned-lan-probe --bin akula-p2p-lan
