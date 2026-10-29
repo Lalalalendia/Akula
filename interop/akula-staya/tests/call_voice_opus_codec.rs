@@ -242,8 +242,7 @@ fn run_impaired_playout(loss_percent: usize, jitter: ArtificialJitter) {
         let wire = sender.encode_frame(&pcm_frame(tick)).unwrap();
         // Exactly 0/1/3/5 lost per 100 ticks. The first frame is retained,
         // fixing the initial playout epoch independently of packet jitter.
-        let dropped_here =
-            (tick + 1) * loss_percent / 100 > tick * loss_percent / 100;
+        let dropped_here = (tick + 1) * loss_percent / 100 > tick * loss_percent / 100;
         if dropped_here {
             dropped += 1;
             continue;
@@ -316,10 +315,16 @@ fn run_impaired_playout(loss_percent: usize, jitter: ArtificialJitter) {
     assert!(concealed >= dropped);
     assert!(receiver.metrics().peak_buffered_ticks <= 24);
     if jitter == ArtificialJitter::WithinStartup {
-        assert_eq!(concealed, dropped, "bounded jitter must not lose extra audio");
+        assert_eq!(
+            concealed, dropped,
+            "bounded jitter must not lose extra audio"
+        );
         assert_eq!(refused_late, 0);
     } else {
-        assert!(refused_late > 0, "95 ms artificially late frames must be discarded");
+        assert!(
+            refused_late > 0,
+            "95 ms artificially late frames must be discarded"
+        );
         assert!(concealed > dropped);
     }
     eprintln!(
