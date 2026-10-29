@@ -12,6 +12,10 @@ use uuid::Uuid;
 
 pub mod journal;
 
+// Non-shipping issuance is compiled only with the separately opted-in OS key.
+#[cfg(feature = "p2p-device-identity")]
+pub mod issuance;
+
 const MAGIC: &[u8; 8] = b"AKP2RCP2";
 const VERSION: u16 = 2;
 const BODY_BYTES: usize = 235;
