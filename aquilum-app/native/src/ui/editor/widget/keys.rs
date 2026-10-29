@@ -180,7 +180,13 @@ impl TextEditor {
         if edited {
             self.update_suggest(ctx.widget_id());
         }
-        self.doc.invalidate(self.focus);
+        // Invalidate the visual preedit origin as well as the live caret.
+        // They differ for forward and multiline selections.
+        let at = self.selection().start;
+        self.doc.invalidate(at);
+        if at != self.focus {
+            self.doc.invalidate(self.focus);
+        }
         ctx.set_handled();
         if edited {
             self.changed(ctx);

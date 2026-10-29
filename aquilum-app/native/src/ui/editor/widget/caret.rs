@@ -42,8 +42,16 @@ impl TextEditor {
     }
 
     pub(super) fn caret(&self) -> Rect {
-        let compose = self.compose.as_ref().and_then(|(_, cursor)| *cursor).map_or(0, |(start, _)| start);
-        self.caret_at(self.focus, compose, self.affinity)
+        let Some((text, cursor)) = &self.compose else {
+            return self.caret_at(self.focus, 0, self.affinity);
+        };
+        // The provisional IME text visually replaces the selection at its
+        // beginning. Clamp OS-supplied cursor offsets to UTF-8 boundaries.
+        let mut offset = cursor.map_or(0, |(start, _)| start.min(text.len()));
+        while !text.is_char_boundary(offset) {
+            offset -= 1;
+        }
+        self.caret_at(self.selection().start, offset, Affinity::Downstream)
     }
 
     pub(super) fn caret_at(&self, offset: usize, compose: usize, affinity: Affinity) -> Rect {
@@ -241,3 +249,7 @@ mod folded_hit_tests {
         check_folded_edges(&with_tail, prefix.len() + 1);
     }
 }
+
+#[cfg(test)]
+#[path = "caret_tests.rs"]
+mod ime_preview_tests;
