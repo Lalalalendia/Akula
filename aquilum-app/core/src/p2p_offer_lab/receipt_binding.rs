@@ -5,6 +5,8 @@
 use super::{OfferError, OfferSession, PeerBinding, Phase};
 use uuid::Uuid;
 
+pub mod signed;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ObservedLocalReceipt {
     pub receipt_id: Uuid,
