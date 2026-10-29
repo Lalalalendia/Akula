@@ -141,6 +141,10 @@ jobs:
           grep -F 'test app::transfer::offer_consent::tests::forged_peer_or_multiple_files_never_show_accept ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
           grep -F 'test app::transfer::offer_consent::tests::old_revision_cancel_and_duplicate_press_never_create_a_reply ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
           grep -F 'test app::tests::offer_consent::modal_accept_comes_only_from_explicit_button_press_and_consumes_once ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::accepted_ui_reply_binds_once_to_unchanged_offer_and_live_peers ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::forged_offer_preflight_fails_before_os_peer_pin_lookup ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::bad_peer_pin_identifier_cannot_use_accepted_ui_reply ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::declined_ui_reply_cannot_become_an_acceptance ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
           echo 'AKULA_P2P_NATIVE_OFFER_CONSENT_UI_QA_PASS non_authorizing=1'
 
   one-file-interop:

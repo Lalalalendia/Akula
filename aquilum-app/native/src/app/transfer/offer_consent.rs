@@ -3,6 +3,7 @@
 //! A UI reply is not a signed receipt, OS-owned journal, File Gate grant or
 //! proof of an independently authenticated live QUIC session.
 use crate::ui::transfer::{OfferConsentAction, OfferConsentView};
+use aquilum_core::p2p_device_identity::{IdentityError, peer_pin};
 use aquilum_core::p2p_offer_lab::{DecisionAction, DecisionV1, OfferError, OfferV1, PeerBinding};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,11 +19,87 @@ struct Pending {
 /// and validate the durable sender-half and pinned Inbox facts before signing.
 pub(in crate::app) struct UiReply {
     decision: DecisionV1,
+    offer: OfferV1,
+    sender: PeerBinding,
+    receiver: PeerBinding,
+}
+
+/// Internal-only, non-cloneable result of matching a user gesture against
+/// unchanged Offer bytes and freshly supplied transport identities.
+/// Still neither an OS-backed consent journal nor a File Gate permission.
+#[allow(dead_code)]
+pub(in crate::app) struct BoundUiAccept {
+    decision: DecisionV1,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::app) enum UiConsentError {
+    Declined,
+    ChangedOffer,
+    WrongPeer,
+    ChangedDecision,
+    ClockUnavailable,
+    Identity(IdentityError),
+    Offer(OfferError),
 }
 
 impl UiReply {
+    #[cfg(test)]
     pub(in crate::app) fn decision(&self) -> &DecisionV1 {
         &self.decision
+    }
+
+    /// Consume an actual Native gesture exactly once and revalidate it against
+    /// the live peer bindings supplied by a future authenticated QUIC caller.
+    /// Never derive these peers from JSON, mDNS or a clipboard invitation.
+    #[allow(dead_code)]
+    pub(in crate::app) fn bind_once(
+        self,
+        received_offer: &OfferV1,
+        live_sender: PeerBinding,
+        local_receiver: PeerBinding,
+        selected_sender_full_id: &str,
+    ) -> Result<BoundUiAccept, UiConsentError> {
+        let now = OfferConsentUi::now_unix().ok_or(UiConsentError::ClockUnavailable)?;
+        // Reject a changed decision, offer or live peer BEFORE OS access.
+        let accepted = self.bind_once_at(received_offer, live_sender, local_receiver, now)?;
+        // Fresh OS state matters: confirmed on click is not confirmed on use.
+        peer_pin::require_pinned_remote(selected_sender_full_id, &live_sender.endpoint_id)
+            .map_err(UiConsentError::Identity)?;
+        Ok(accepted)
+    }
+
+    fn bind_once_at(
+        self,
+        received_offer: &OfferV1,
+        live_sender: PeerBinding,
+        local_receiver: PeerBinding,
+        now: u64,
+    ) -> Result<BoundUiAccept, UiConsentError> {
+        if self.decision.action != DecisionAction::Accept {
+            return Err(UiConsentError::Declined);
+        }
+        if self.offer != *received_offer {
+            return Err(UiConsentError::ChangedOffer);
+        }
+        if self.sender != live_sender || self.receiver != local_receiver {
+            return Err(UiConsentError::WrongPeer);
+        }
+        let expected = received_offer
+            .receiver_decision(
+                DecisionAction::Accept,
+                vec![0],
+                now,
+                live_sender,
+                local_receiver,
+            )
+            .map_err(UiConsentError::Offer)?;
+        if self.decision != expected {
+            return Err(UiConsentError::ChangedDecision);
+        }
+        Ok(BoundUiAccept {
+            decision: self.decision,
+        })
     }
 }
 
@@ -113,9 +190,16 @@ impl OfferConsentUi {
                 )
                 .ok()
         });
-        self.pending = None;
+        let Some(pending) = self.pending.take() else {
+            return false;
+        };
         self.view = None;
-        self.response = decision.map(|decision| UiReply { decision });
+        self.response = decision.map(|decision| UiReply {
+            decision,
+            offer: pending.offer,
+            sender: pending.sender,
+            receiver: pending.receiver,
+        });
         true
     }
 
@@ -237,5 +321,99 @@ mod tests {
         );
         assert!(!ui.respond(OfferConsentAction::Accept(1)));
         assert!(ui.take_response().is_none());
+    }
+
+    fn accepted_reply() -> (OfferV1, UiReply, u64) {
+        let now = OfferConsentUi::now_unix().unwrap();
+        let offer = make_offer(now);
+        let mut ui = OfferConsentUi::default();
+        ui.present_from_authenticated_transport(
+            &offer.encode(now).unwrap(),
+            offer.sender,
+            offer.receiver,
+            now,
+        )
+        .unwrap();
+        let revision = ui.view.as_ref().unwrap().revision;
+        assert!(ui.respond(OfferConsentAction::Accept(revision)));
+        (offer, ui.take_response().unwrap(), now)
+    }
+
+    #[test]
+    fn accepted_ui_reply_binds_once_to_unchanged_offer_and_live_peers() {
+        let (offer, reply, now) = accepted_reply();
+        let bound = reply
+            .bind_once_at(&offer, offer.sender, offer.receiver, now)
+            .unwrap();
+        assert_eq!(bound.decision.action, DecisionAction::Accept);
+        assert_eq!(bound.decision.selected, vec![0]);
+        assert_eq!(bound.decision.offer_id, offer.offer_id);
+        assert_eq!(bound.decision.manifest_commitment, offer.commitment());
+    }
+
+    #[test]
+    fn changed_offer_and_swapped_peer_cannot_consume_ui_reply() {
+        let (offer, reply, now) = accepted_reply();
+        let mut changed = offer.clone();
+        changed.files[0].label = "changed-after-click.txt".into();
+        assert!(matches!(
+            reply.bind_once_at(&changed, offer.sender, offer.receiver, now),
+            Err(UiConsentError::ChangedOffer)
+        ));
+        let (offer, reply, now) = accepted_reply();
+        assert!(matches!(
+            reply.bind_once_at(&offer, offer.receiver, offer.sender, now),
+            Err(UiConsentError::WrongPeer)
+        ));
+    }
+
+    #[test]
+    fn forged_offer_preflight_fails_before_os_peer_pin_lookup() {
+        let (offer, reply, _) = accepted_reply();
+        let mut changed = offer.clone();
+        changed.files[0].bytes += 1;
+        assert!(matches!(
+            reply.bind_once(&changed, offer.sender, offer.receiver, "invalid-id"),
+            Err(UiConsentError::ChangedOffer)
+        ));
+    }
+
+    #[test]
+    fn bad_peer_pin_identifier_cannot_use_accepted_ui_reply() {
+        let (offer, reply, _) = accepted_reply();
+        assert!(matches!(
+            reply.bind_once(&offer, offer.sender, offer.receiver, "invalid-id"),
+            Err(UiConsentError::Identity(IdentityError::InvalidPeerId))
+        ));
+    }
+
+    #[test]
+    fn accepted_ui_reply_expires_before_future_signature() {
+        let (offer, reply, _) = accepted_reply();
+        assert!(matches!(
+            reply.bind_once_at(&offer, offer.sender, offer.receiver, offer.expires_unix),
+            Err(UiConsentError::Offer(OfferError::Expired))
+        ));
+    }
+
+    #[test]
+    fn declined_ui_reply_cannot_become_an_acceptance() {
+        let now = OfferConsentUi::now_unix().unwrap();
+        let offer = make_offer(now);
+        let mut ui = OfferConsentUi::default();
+        ui.present_from_authenticated_transport(
+            &offer.encode(now).unwrap(),
+            offer.sender,
+            offer.receiver,
+            now,
+        )
+        .unwrap();
+        let revision = ui.view.as_ref().unwrap().revision;
+        assert!(ui.respond(OfferConsentAction::Decline(revision)));
+        let reply = ui.take_response().unwrap();
+        assert!(matches!(
+            reply.bind_once_at(&offer, offer.sender, offer.receiver, now),
+            Err(UiConsentError::Declined)
+        ));
     }
 }
