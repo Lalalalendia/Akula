@@ -318,11 +318,9 @@ mod tests {
         let recent_other = ledger.verified_imports_in(&newer_vault).unwrap();
         assert_eq!(recent_other.len(), 8);
         let canonical_other = newer_vault.canonicalize().unwrap();
-        assert!(
-            recent_other
-                .iter()
-                .all(|item| item.parent() == Some(canonical_other.as_path()))
-        );
+        assert!(recent_other
+            .iter()
+            .all(|item| item.parent() == Some(canonical_other.as_path())));
         assert_eq!(fs::read(ledger.object_path(intent.id)).unwrap(), bytes);
     }
 
