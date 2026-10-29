@@ -153,7 +153,9 @@ fn pending_declined_and_unselected_session_cannot_sign() {
             f.offer.receiver,
         )
         .unwrap();
-    declined.resolve(&decline, f.offer.receiver, NOW + 1).unwrap();
+    declined
+        .resolve(&decline, f.offer.receiver, NOW + 1)
+        .unwrap();
     assert!(matches!(
         sign_sender_with_key(
             &f.sender,
@@ -247,8 +249,14 @@ fn wrong_peer_receipt_and_expired_acceptance_fail_closed() {
     substituted.endpoint_id = [42; 32];
     assert!(finish(&f, &half[..SENDER_HALF_BYTES - 1]).is_err());
     assert!(countersign_with_key(
-        &f.receiver, &half, &f.offer, &f.accept, f.offer.sender,
-        substituted, f.observed, NOW + 3,
+        &f.receiver,
+        &half,
+        &f.offer,
+        &f.accept,
+        f.offer.sender,
+        substituted,
+        f.observed,
+        NOW + 3,
     )
     .is_err());
     assert!(matches!(
@@ -257,11 +265,7 @@ fn wrong_peer_receipt_and_expired_acceptance_fail_closed() {
     ));
 }
 
-fn finish_at(
-    f: &Fixture,
-    half: &[u8],
-    now: u64,
-) -> Result<[u8; RECORD_BYTES], IssueError> {
+fn finish_at(f: &Fixture, half: &[u8], now: u64) -> Result<[u8; RECORD_BYTES], IssueError> {
     countersign_with_key(
         &f.receiver,
         half,
