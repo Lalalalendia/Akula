@@ -25,8 +25,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use std::io::{self, Write};
     use std::sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     };
     use std::time::Duration;
 
@@ -49,7 +49,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let device = host.default_output_device().ok_or("No default output device")?;
+    let device = host
+        .default_output_device()
+        .ok_or("No default output device")?;
     let config = device.default_output_config()?;
     if config.sample_format() != cpal::SampleFormat::F32 {
         return Err("This laboratory requires a floating-point default output format".into());
@@ -91,7 +93,10 @@ mod tests {
     fn no_device_access_without_exact_confirmation() {
         assert!(operator_approved("PLAY\r\n"));
         for attempt in ["", "play\n", " PLAY\n", "PLAY \n", "PLAYBACK\n", "yes\n"] {
-            assert!(!operator_approved(attempt), "unexpected confirmation: {attempt:?}");
+            assert!(
+                !operator_approved(attempt),
+                "unexpected confirmation: {attempt:?}"
+            );
         }
     }
 
