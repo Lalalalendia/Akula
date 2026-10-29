@@ -330,3 +330,36 @@ fn physical_enter_key_commits_title_to_real_file_not_just_a_widget_action() {
     assert!(h.app.note.as_ref().is_some_and(|n| n.is(&next)));
     assert!(h.app.open_error.is_none());
 }
+
+#[test]
+fn folder_rename_refuses_to_orphan_inactive_tab_recovery() {
+    let mut h = Harness::new();
+    let folder = h.vault.path().join("Folder");
+    let moved = h.vault.path().join("Renamed");
+    std::fs::create_dir_all(&folder).unwrap();
+    let child = h.write_note("Folder/child.md", "disk child");
+    let other = h.vault.path().join("a.md");
+
+    h.app.open(&mut h.root, child.clone());
+    h.app.note.as_ref().unwrap()
+        .snapshot_unsaved(&crop::Rope::from("unsaved child draft"))
+        .unwrap();
+    crate::disk::wait();
+    h.app.open_in(&mut h.root, other.clone(), true);
+
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&other)));
+    assert!(h.app.tabs.tabs().iter().any(|tab| tab.path.as_deref() == Some(child.as_path())));
+
+    h.app.rename_file(&mut h.root, folder.clone(), moved.clone());
+
+    assert!(folder.is_dir(), "folder with a held inactive draft must not move");
+    assert!(!moved.exists());
+    assert_eq!(std::fs::read_to_string(&child).unwrap(), "disk child");
+    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    let candidate = crate::note::bridge::inspect_for_recovery(
+        h._data.path(), h.vault.path(), workspace, &child,
+    ).unwrap().expect("inactive tab recovery must retain its original identity");
+    assert_eq!(candidate.body.to_string(), "unsaved child draft");
+    assert!(!candidate.already_saved);
+}

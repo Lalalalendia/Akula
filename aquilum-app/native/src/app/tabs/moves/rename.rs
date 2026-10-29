@@ -1,3 +1,4 @@
+mod shadow;
 use super::{App, Path, PathBuf, RenderRoot};
 use crate::app::Popup;
 use crate::i18n::{t, t_with};
@@ -96,16 +97,8 @@ impl App {
             return;
         }
 
-        // A retained crash draft belongs to the old file identity. Moving the
-        // source now would make that backup undiscoverable by normal recovery.
-        let shadow_blocker = self.note.as_ref().filter(|n| n.path.starts_with(&from)).and_then(|note| {
-            let (Some(vault), Some(session)) = (self.tree.root(), self.session.as_ref()) else { return None };
-            match note.has_unreviewed_move_shadow(&self.workspace.data_dir, vault, session.workspace_id) {
-                Ok(true) => Some(t("editor.renameRecoveryHold")),
-                Err(error) => Some(t_with("editor.renameRecoveryCheck", &[("reason", &error.to_string())])),
-                Ok(false) => None,
-            }
-        });
+        // Block moves that would strand an outstanding draft from any open tab.
+        let shadow_blocker = self.rename_shadow_blocker(&from);
         if let Some(reason) = shadow_blocker {
             report!("{} не переименован: {reason}", from.display());
             // The title commit remembers the last destination. Reset it on
