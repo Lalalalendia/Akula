@@ -132,11 +132,12 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let parent = temp.path().join("objects");
         fs::create_dir(&parent).unwrap();
+        fs::create_dir(parent.join("nested")).unwrap();
         let opened = super::super::pinned_windows::open_root(&parent).unwrap();
         for name in ["", ".", "..", "../escape", "a\\b", "C:evil"] {
             assert!(open_delete_candidate(&opened, name).is_err());
         }
         assert!(open_delete_candidate(&opened, "missing.blob").is_err());
-        assert!(open_delete_candidate(&opened, "objects").is_err());
+        assert!(open_delete_candidate(&opened, "nested").is_err());
     }
 }
