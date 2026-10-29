@@ -266,3 +266,9 @@ fn a_quoted_phrase_combines_with_exclusions_without_losing_partial_search() {
     let partial = search(&index, "первый второй");
     assert_eq!(partial.len(), 3, "unquoted OR ranking is unchanged");
 }
+
+// Included from test-only index_tests.rs; no production module growth.
+#[cfg(test)]
+mod txt_lifecycle_tests {
+    include!("sync/txt_lifecycle_tests.rs");
+}
