@@ -18,6 +18,7 @@ on:
       - 'aquilum-app/native/src/ui/transfer/**'
       - 'aquilum-app/native/src/ui/transfer.rs'
       - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/native/src/messaging_w4_pilot.rs'
       - 'aquilum-app/Cargo.lock'
       - 'aquilum-app/native/src/ui/file_tree/**'
       - 'aquilum-app/native/assets/locales/**'
