@@ -356,6 +356,30 @@ jobs:
             echo 'AKULA_CANVAS_CRDT_BRIDGE_PASS seven_session_tests=1'
           fi
 
+      # AK-CALL-02: opaque Opus packet framing, bounded jitter and PLC requests.
+      # No microphone, Opus decoder, device access or QUIC is started here.
+      - name: Validate offline voice jitter when modified
+        if: needs.classify.outputs.mode != 'none'
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if git -C .. diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/core/src/voice_jitter_lab.rs \
+            aquilum-app/core/src/lib.rs \
+            aquilum-app/core/Cargo.toml; then
+            echo 'Voice jitter laboratory unchanged'
+          else
+            cargo test --locked -p aquilum-core --lib --features voice-jitter-lab \
+              voice_jitter_lab::tests:: -- --nocapture \
+              2>&1 | tee "$RUNNER_TEMP/akula-voice-jitter.log"
+            grep -Fq 'test result: ok. 17 passed; 0 failed;' \
+              "$RUNNER_TEMP/akula-voice-jitter.log"
+            echo 'AKULA_CALL_VOICE_LAB_PASS seventeen_offline_tests=1'
+          fi
+
       - name: Run full Rust workspace and sync-engine tests
         if: needs.classify.outputs.mode == 'workspace'
         working-directory: aquilum-app
