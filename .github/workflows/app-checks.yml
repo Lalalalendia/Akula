@@ -375,9 +375,9 @@ jobs:
             cargo test --locked -p aquilum-core --lib --features call-signaling-lab \
               call_signaling_lab::tests:: -- --nocapture \
               2>&1 | tee "$RUNNER_TEMP/akula-call-signal-lab.log"
-            grep -Fq 'test result: ok. 20 passed; 0 failed;' \
+            grep -Fq 'test result: ok. 23 passed; 0 failed;' \
               "$RUNNER_TEMP/akula-call-signal-lab.log"
-            echo 'AKULA_CALL_SIGNAL_LAB_PASS twenty_offline_tests=1'
+            echo 'AKULA_CALL_SIGNAL_LAB_PASS twenty_three_offline_tests=1'
           fi
 
       - name: Run full Rust workspace and sync-engine tests
