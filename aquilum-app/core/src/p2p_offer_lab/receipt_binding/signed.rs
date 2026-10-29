@@ -10,6 +10,8 @@ use crate::sync::DeviceId;
 use ring::signature::{UnparsedPublicKey, ED25519};
 use uuid::Uuid;
 
+pub mod journal;
+
 const MAGIC: &[u8; 8] = b"AKP2RCP2";
 const VERSION: u16 = 2;
 const BODY_BYTES: usize = 235;
@@ -36,6 +38,7 @@ pub struct CheckedColdReceipt {
     receipt_id: Uuid,
     selected_index: u8,
     manifest_commitment: [u8; 32],
+    proof_digest: [u8; 32],
 }
 
 /// A V2 receipt is offer-scoped and cannot reuse the legacy content-only ID.
@@ -48,6 +51,8 @@ pub fn receipt_id_v2(offer: &OfferV1, selected_index: u8) -> Result<Uuid, ProofE
     let mut hash = blake3::Hasher::new_derive_key("Akula signed P2P Offer receipt ID v2");
     hash.update(offer.offer_id.as_bytes());
     hash.update(&offer.nonce);
+    // Bind the full Offer, including its display-only label and enrollment IDs.
+    hash.update(&offer.commitment());
     hash.update(&[selected_index]);
     hash.update(&offer.sender.endpoint_id);
     hash.update(&offer.receiver.endpoint_id);
@@ -161,6 +166,7 @@ pub fn verify_cold_receipt_v2(
         receipt_id,
         selected_index: index,
         manifest_commitment: commitment,
+        proof_digest: *blake3::hash(record).as_bytes(),
     })
 }
 
@@ -396,5 +402,76 @@ mod tests {
         next = offer.clone();
         next.files[0].blake3_root = *blake3::hash(b"omega").as_bytes();
         assert_ne!(receipt_id_v2(&next, 0).unwrap(), original);
+        // A label-only substitution can no longer alias the receipt ID.
+        next = offer.clone();
+        next.files[0].label = "renamed-report.txt".into();
+        assert_ne!(receipt_id_v2(&next, 0).unwrap(), original);
+        next = offer.clone();
+        next.receiver.device_id = DeviceId::from_uuid(Uuid::from_u128(777));
+        assert_ne!(receipt_id_v2(&next, 0).unwrap(), original);
     }
+    #[test]
+    fn one_use_sqlite_fence_survives_cold_restart_without_retry() {
+        let (offer, record, observed) = fixture();
+        let checked = check(&offer, &record, observed, NOW + 6).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p2p-proof-qa.sqlite3");
+        {
+            let mut db = rusqlite::Connection::open(&path).unwrap();
+            journal::initialize(&db).unwrap();
+            journal::register_verified(&mut db, checked).unwrap();
+            // Before consumption the same signed proof is idempotent.
+            journal::register_verified(&mut db, checked).unwrap();
+            journal::consume_once(&mut db, checked).unwrap();
+            assert!(matches!(
+                journal::consume_once(&mut db, checked),
+                Err(journal::JournalError::AlreadyConsumed)
+            ));
+        }
+        let mut reopened = rusqlite::Connection::open(&path).unwrap();
+        journal::initialize(&reopened).unwrap();
+        let checked_again = check(&offer, &record, observed, NOW + 200).unwrap();
+        assert_eq!(checked_again, checked);
+        assert!(matches!(
+            journal::register_verified(&mut reopened, checked_again),
+            Err(journal::JournalError::AlreadyConsumed)
+        ));
+        assert!(matches!(
+            journal::consume_once(&mut reopened, checked_again),
+            Err(journal::JournalError::AlreadyConsumed)
+        ));
+    }
+
+    #[test]
+    fn journal_refuses_unregistered_ids_and_conflicting_signed_records() {
+        let (offer, record, observed) = fixture();
+        let checked = check(&offer, &record, observed, NOW + 6).unwrap();
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        journal::initialize(&db).unwrap();
+        assert!(matches!(
+            journal::consume_once(&mut db, checked),
+            Err(journal::JournalError::NotRegistered)
+        ));
+        journal::register_verified(&mut db, checked).unwrap();
+        let mut alias = checked;
+        alias.receipt_id = Uuid::from_u128(900);
+        assert!(matches!(
+            journal::register_verified(&mut db, alias),
+            Err(journal::JournalError::Conflict)
+        ));
+        let mut altered = checked;
+        altered.manifest_commitment[0] ^= 1;
+        assert!(matches!(
+            journal::register_verified(&mut db, altered),
+            Err(journal::JournalError::Conflict)
+        ));
+        altered = checked;
+        altered.proof_digest[0] ^= 1;
+        assert!(matches!(
+            journal::consume_once(&mut db, altered),
+            Err(journal::JournalError::Conflict)
+        ));
+        journal::consume_once(&mut db, checked).unwrap();
+    }
+
 }
