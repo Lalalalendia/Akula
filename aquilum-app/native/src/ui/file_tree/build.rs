@@ -42,7 +42,11 @@ impl FileTree {
         self.row_ids.clear();
         self.create_button = None;
         self.rename = None;
-        if self.model.root().is_some() && self.model.rows().is_empty() {
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        let has_imports = !self.imported.names().is_empty();
+        #[cfg(not(all(windows, feature = "p2p-inbox-preview")))]
+        let has_imports = false;
+        if self.model.root().is_some() && self.model.rows().is_empty() && !has_imports {
             let (state, button) = empty_state();
             self.create_button = Some(button);
             return state;
@@ -69,6 +73,10 @@ impl FileTree {
         }
         if last < count {
             list = list.with_fixed(spacer(count - last));
+        }
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        if let Some(verified) = super::imported::render(self.imported.names()) {
+            list = list.with_fixed(verified);
         }
         NewWidget::new(list).with_props(
             PropertySet::new()

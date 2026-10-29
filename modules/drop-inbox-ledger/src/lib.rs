@@ -1,19 +1,16 @@
 #![forbid(unsafe_code)]
 //! Local, provider-neutral receipt ledger for a future Akula Received Inbox.
-//!
-//! This crate does not trust cloud metadata, authenticate senders, decrypt files,
-//! transport bytes, create user files, change the Vault, or issue sender ACKs.
-//! A caller MUST separately authenticate the sender, recipient, transfer ID,
-//! size and BLAKE3 commitment before constructing `ExpectedTransfer`.
-//!
-//! The file writer (currently `p2p_inbox_lab::save_verified_stage_as_new`)
-//! must create a no-replace, verified file at `object_path` before `confirm`.
+//! This ledger never authorizes remote, Vault or network operations.
+//! Caller authenticates peer, IDs, size and digest before transfer intent.
+//! Only no-replace, verified file objects may be confirmed.
 //! This ledger never creates, renames, replaces or removes Inbox objects.
-//!
-//! `VerifiedLocal` means the DB record AND a freshly opened local file match.
-//! It is not a signed remote delivery ACK or proof against power loss. The
-//! higher-level host must handle OS-owned root custody, ACLs, Windows reparse
-//! points, installation, backup, and crash/power-loss acceptance separately.
+//! `VerifiedLocal` is checked local bytes, not a remote ACK. The
+//! Host handles OS custody, ACL, crashes and power-loss proof.
+
+mod import_audit;
+mod removal_audit;
+pub use import_audit::ImportAuditStatus;
+pub use removal_audit::RemovalAuditStatus;
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::{
@@ -185,6 +182,9 @@ impl InboxLedger {
     /// separate no-clobber export must rehash once more while copying.
     /// No network path, untrusted filename or Vault write is accepted here.
     pub fn open_verified_file(&self, id: Uuid) -> Result<(File, ExpectedTransfer), LedgerError> {
+        if self.removal_status(id)? != RemovalAuditStatus::Available {
+            return Err(LedgerError::InvalidLocalObject);
+        }
         let record = self.get(id)?.ok_or(LedgerError::UnknownTransfer)?;
         if record.state != 1 {
             return Err(LedgerError::InvalidLocalObject);

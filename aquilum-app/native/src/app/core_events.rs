@@ -98,6 +98,12 @@ impl App {
             self.tree.paths_changed(root, &changed);
             title |= self.close_missing_tabs(root, &changed);
         }
+        // QA Vault copies are not notes. Their content modifications reach
+        // CoreEvent::ContentChanged only in the opt-in P2P Core watcher.
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        if !rescan {
+            self.tree.imported_content_changed(root, &edited);
+        }
         // A worker's wake brings results here; a superseded tab, local edit,
         // or newer filesystem event may discard them before the UI is touched.
         if let Some(text) = self.note.as_mut().and_then(|note| note.take_reload(&self.workspace.wake)) {

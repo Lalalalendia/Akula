@@ -28,6 +28,37 @@ fn ignores_files_that_are_not_notes() {
     assert!(classify(written(&["cover.png"]), Path::new("")).is_none());
 }
 
+#[cfg(feature = "p2p-inbox-lab")]
+#[test]
+fn qa_import_copy_edits_reach_invalidation_without_admitting_other_binary_files() {
+    let root = Path::new("/vault");
+    let copy = "/vault/received-550e8400-e29b-41d4-a716-446655440000.bin";
+    let batch = classify(written(&[copy]), root).expect("QA copy change must invalidate");
+    assert_eq!(batch.scope, WatchScope::Content);
+    assert_eq!(batch.paths, vec![PathBuf::from(copy)]);
+
+    for unrelated in [
+        "/vault/random.bin",
+        "/vault/received-not-a-uuid.bin",
+        "/vault/cover.png",
+    ] {
+        assert!(classify(written(&[unrelated]), root).is_none(), "{unrelated}");
+    }
+    // Existing plain-text note routing must remain active, even if its
+    // basename resembles a P2P receipt. Only the .bin suffix is QA-only.
+    assert!(classify(written(&["/vault/received-550e8400-e29b-41d4-a716-446655440000.txt"]), root).is_some());
+    assert!(classify(written(&["/vault/.aquilum/received-550e8400-e29b-41d4-a716-446655440000.bin"]), root).is_none());
+}
+
+#[cfg(not(feature = "p2p-inbox-lab"))]
+#[test]
+fn qa_import_copy_stays_invisible_to_default_watcher() {
+    assert!(classify(
+        written(&["/vault/received-550e8400-e29b-41d4-a716-446655440000.bin"]),
+        Path::new("/vault"),
+    ).is_none());
+}
+
 #[test]
 fn a_write_touches_content_only() {
     let batch = classify(written(&["Заметка.md"]), Path::new("")).unwrap();
