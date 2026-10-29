@@ -1,5 +1,5 @@
 use super::*;
-use akula_inbox_ledger_lab::{ExpectedTransfer, Transport};
+use akula_inbox_ledger_lab::{ExpectedTransfer, LocalStatus, Transport};
 use std::{fs, io::Write};
 
 #[test]

@@ -9,9 +9,9 @@ use std::{
 };
 
 mod relative;
+use akula_inbox_ledger_lab::InboxLedger;
 use relative::open_delete_candidate;
 use uuid::Uuid;
-use akula_inbox_ledger_lab::InboxLedger;
 
 const REPARSE_ATTRIBUTE: u32 = 0x0000_0400;
 const FILE_DISPOSITION_INFO: u32 = 4;
@@ -246,15 +246,10 @@ mod tests {
         let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
         let id = receipt.id;
         let consent = confirmation(&receipt);
-        assert!(delete_after_explicit_consent(
-            &ledger,
-            &root,
-            id,
-            None,
-            CrashCut::None,
-            || {},
-        )
-        .is_err());
+        assert!(
+            delete_after_explicit_consent(&ledger, &root, id, None, CrashCut::None, || {},)
+                .is_err()
+        );
         assert!(delete_after_explicit_consent(
             &ledger,
             &root,
@@ -285,20 +280,13 @@ mod tests {
         );
         assert_eq!(fs::read(ledger.object_path(id)).unwrap(), bytes);
 
-        delete_after_explicit_consent(
-            &ledger,
-            &root,
-            id,
-            Some(consent),
-            CrashCut::None,
-            || {
-                assert_eq!(
-                    ledger.removal_status(id).unwrap(),
-                    RemovalAuditStatus::Requested
-                );
-                assert!(ledger.object_path(id).exists());
-            },
-        )
+        delete_after_explicit_consent(&ledger, &root, id, Some(consent), CrashCut::None, || {
+            assert_eq!(
+                ledger.removal_status(id).unwrap(),
+                RemovalAuditStatus::Requested
+            );
+            assert!(ledger.object_path(id).exists());
+        })
         .unwrap();
         assert_eq!(
             ledger.removal_status(id).unwrap(),
@@ -408,27 +396,13 @@ mod tests {
         let g2 = Arc::clone(&gate);
         let t1 = std::thread::spawn(move || {
             g1.wait();
-            delete_after_explicit_consent(
-                &first,
-                &root1,
-                id,
-                Some(consent),
-                CrashCut::None,
-                || {},
-            )
-            .is_ok()
+            delete_after_explicit_consent(&first, &root1, id, Some(consent), CrashCut::None, || {})
+                .is_ok()
         });
         let t2 = std::thread::spawn(move || {
             g2.wait();
-            delete_after_explicit_consent(
-                &second,
-                &root2,
-                id,
-                Some(consent),
-                CrashCut::None,
-                || {},
-            )
-            .is_ok()
+            delete_after_explicit_consent(&second, &root2, id, Some(consent), CrashCut::None, || {})
+                .is_ok()
         });
         assert_ne!(t1.join().unwrap(), t2.join().unwrap());
         let reader = InboxLedger::open_existing(&root).unwrap().unwrap();
