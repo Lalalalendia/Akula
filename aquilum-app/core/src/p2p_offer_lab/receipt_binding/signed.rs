@@ -473,5 +473,4 @@ mod tests {
         ));
         journal::consume_once(&mut db, checked).unwrap();
     }
-
 }
