@@ -50,8 +50,9 @@ objects directory, and SQLite pathname before consuming removal intent;
 all three must still match before DELETE-capable open. New negative tests
 exercise an entire objects-directory swap with byte-identical replacement,
 a real exclusive-open Windows sharing denial after SQLite CAS, wrong Inbox
-root, and cold reopen after a successful completion. Failed operations
-preserve user bytes and remain one-shot Requested rather than auto-retrying.
+root, and cold reopen after a successful completion. Pre-disposition refusals preserve the bytes and remain one-shot
+Requested rather than auto-retrying; a crash after disposition remains
+NeedsReview with the original object absent.
 This is not proof of custody of SQLite's own connection handle or NTFS
 power-loss resilience.
 

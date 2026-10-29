@@ -189,9 +189,8 @@ fn delete_after_explicit_consent(
     // Capture the Inbox root, objects directory and database pathname before
     // committing intent. Keep all three handles live until disposition returns;
     // their OS identities must still match when DELETE is attempted.
-    let (root_guard, objects_guard, database_guard) =
-        super::pin_p2p_read_snapshot(root)
-            .map_err(|e| format!("pinned Inbox custody failed: {e:?}"))?;
+    let (root_guard, objects_guard, database_guard) = super::pin_p2p_read_snapshot(root)
+        .map_err(|e| format!("pinned Inbox custody failed: {e:?}"))?;
     let custody = PinnedInboxIdentity {
         root: pinned_windows::file_identity(&root_guard)
             .map_err(|e| format!("root identity failed: {e:?}"))?,
@@ -352,7 +351,10 @@ mod tests {
         .is_err());
         drop(ledger);
         let cold = InboxLedger::open_existing(&root).unwrap().unwrap();
-        assert_eq!(cold.removal_status(id).unwrap(), RemovalAuditStatus::Removed);
+        assert_eq!(
+            cold.removal_status(id).unwrap(),
+            RemovalAuditStatus::Removed
+        );
     }
 
     #[test]
