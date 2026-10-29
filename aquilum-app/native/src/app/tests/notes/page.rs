@@ -306,3 +306,27 @@ fn successful_sidebar_rename_persists_and_reopens_after_restart() {
     assert!(h.app.open_error.is_none(), "sidebar-renamed note must reopen");
     assert_eq!(h.body_text(), "текст");
 }
+
+
+#[test]
+fn physical_enter_key_commits_title_to_real_file_not_just_a_widget_action() {
+    use crate::ui::editor::TextEditor;
+    let mut h = Harness::new();
+    let old = h.vault.path().join("a.md");
+    h.app.open(&mut h.root, old.clone());
+    let title = h.app.note_ids.as_ref().unwrap().title;
+    h.root.focus_on(Some(title.id()));
+    title.edit(&mut h.root, |mut editor| TextEditor::select_byte_range(&mut editor, 0, 0));
+    let _ = h.root.redraw();
+
+    // Exercise the actual keyboard -> TextEditor -> TitleAction -> File Gate path.
+    h.key(Key::Character("Z".into()), Modifiers::empty());
+    h.key(Key::Named(NamedKey::Enter), Modifiers::empty());
+
+    let next = h.vault.path().join("Za.md");
+    assert!(next.is_file(), "physical Enter must rename the file, not merely update the widget");
+    assert!(!old.exists());
+    assert_eq!(std::fs::read_to_string(&next).unwrap(), "текст");
+    assert!(h.app.note.as_ref().is_some_and(|n| n.is(&next)));
+    assert!(h.app.open_error.is_none());
+}
