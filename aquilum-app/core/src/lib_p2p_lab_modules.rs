@@ -1,4 +1,4 @@
-//! Opt-in P2P and call laboratories. These declarations never activate OS media.
+// Opt-in P2P and call laboratories. These declarations never activate OS media.
 #[cfg(feature = "p2p-offer-lab")]
 pub mod p2p_offer_lab;
 #[cfg(feature = "voice-jitter-lab")]
