@@ -250,3 +250,49 @@ fn rename_refuses_to_orphan_an_unreviewed_recovery_draft() {
     assert!(h.app.note.as_ref().is_some_and(|note| note.is(&from)));
     assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
 }
+
+
+#[test]
+fn untitled_note_title_enter_persists_file_and_body_after_restart() {
+    use crate::ui::editor::TextAction;
+    let mut h = Harness::new();
+    assert!(h.app.new_note(&mut h.root));
+    let original = h.app.note.as_ref().unwrap().path.clone();
+    h.app.commit_text(&mut h.root, crop::Rope::from("Содержимое после переименования"));
+    let title = h.app.note_ids.as_ref().unwrap().title.id();
+    h.act(title, TextAction::Entered("Название через Enter".into()));
+    let destination = h.vault.path().join("Название через Enter.md");
+
+    assert!(destination.is_file(), "the entered title must rename the file on disk");
+    assert!(!original.exists());
+    assert_eq!(std::fs::read_to_string(&destination).unwrap(), "Содержимое после переименования");
+    assert!(h.app.open_error.is_none());
+
+    let mut h = h.restarted(1.0);
+    h.app.open(&mut h.root, destination.clone());
+    assert!(h.app.open_error.is_none(), "renamed note must reopen after restart");
+    assert_eq!(h.body_text(), "Содержимое после переименования");
+}
+
+#[test]
+fn successful_sidebar_rename_persists_and_reopens_after_restart() {
+    use crate::ui::editor::TextAction;
+    let mut h = Harness::new();
+    let original = h.vault.path().join("a.md");
+    let renamed = h.vault.path().join("Через дерево.md");
+    h.app.open(&mut h.root, original.clone());
+    h.app.tree.start_rename(&mut h.root, original.clone());
+    let field = h.app.tree.rename_field().expect("sidebar rename input");
+    h.act(field, TextAction::Entered("Через дерево".into()));
+
+    assert!(!original.exists());
+    assert!(renamed.is_file(), "sidebar rename must update the real file");
+    assert_eq!(std::fs::read_to_string(&renamed).unwrap(), "текст");
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&renamed)));
+    assert!(h.app.open_error.is_none());
+
+    let mut h = h.restarted(1.0);
+    h.app.open(&mut h.root, renamed.clone());
+    assert!(h.app.open_error.is_none(), "sidebar-renamed note must reopen");
+    assert_eq!(h.body_text(), "текст");
+}
