@@ -19,6 +19,7 @@ impl InboxPreview {
                 self.view.importing = false;
                 self.view.notice_key = Some("transfer.inboxImported");
                 self.import_rx = None;
+                self.refresh_vault_copies = true;
                 *changed = true;
             }
             Some(Ok(Ok(None))) => {

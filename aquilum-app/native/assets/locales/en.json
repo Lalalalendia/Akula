@@ -102,7 +102,9 @@
     "inboxPreviewFailed": "Could not safely verify the file for preview.",
     "inboxImport": "Import to Vault (QA)",
     "inboxImporting": "Verifying and importing to the selected registered Vault…",
-    "inboxImported": "Created a separate received-UUID.bin in the Vault; binary attachments may not appear in the notes tree. The Inbox original is retained.",
+    "inboxImported": "Verified Vault copy created. In the active Vault it appears in the P2P QA read-only list, not as an openable note. The Inbox original remains.",
+    "inboxVaultCopies": "Imported P2P files (QA, latest 8)",
+    "inboxVaultCopiesHint": "Only reverified copies; no open or delete actions in this list.",
     "inboxAuditVerified": "Imported copy reverified",
     "inboxAuditReview": "Imported copy changed or missing — review required",
     "inboxImportFailed": "Import could not be verified. A separate new Vault file may exist; review manually. The Inbox original is retained."

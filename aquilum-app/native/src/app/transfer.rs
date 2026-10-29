@@ -110,6 +110,10 @@ impl App {
         if self.transfer.inbox.poll() {
             changed = true;
         }
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        if std::mem::take(&mut self.transfer.inbox.refresh_vault_copies) {
+            self.replace_root(root);
+        }
         #[cfg(feature = "p2p-native-send-beta")]
         if self.transfer.sender.poll() {
             changed = true;

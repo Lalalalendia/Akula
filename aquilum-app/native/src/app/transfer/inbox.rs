@@ -29,6 +29,8 @@ pub(super) struct InboxPreview {
     save_rx: Option<Receiver<Result<bool, String>>>,
     #[cfg(windows)]
     import_rx: Option<Receiver<Result<Option<Uuid>, String>>>,
+    #[cfg(windows)]
+    pub(super) refresh_vault_copies: bool,
     preview_rx: Option<Receiver<Result<Option<String>, String>>>,
 }
 

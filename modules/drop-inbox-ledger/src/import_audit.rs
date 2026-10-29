@@ -98,6 +98,54 @@ impl InboxLedger {
         }
         Ok(ImportAuditStatus::Verified)
     }
+
+    /// Recent separately reverified Vault copies for read-only, QA-only UI.
+    /// This is neither File Gate permission nor an open/delete capability.
+    pub fn verified_imports_in(&self, vault_root: &Path) -> Result<Vec<PathBuf>, LedgerError> {
+        if !vault_root.is_absolute() {
+            return Err(LedgerError::InvalidLocalObject);
+        }
+        let vault = fs::canonicalize(vault_root)?;
+        if !vault.is_dir() {
+            return Err(LedgerError::InvalidLocalObject);
+        }
+        // Old ledgers have no imported_inbox table and must stay readable.
+        let exists: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT 1 FROM sqlite_master
+                 WHERE type = 'table' AND name = 'imported_inbox'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if exists.is_none() {
+            return Ok(Vec::new());
+        }
+        // Bound synchronous UI rehash work; never enumerate arbitrary .bin files.
+        let mut query = self.db.prepare(
+            "SELECT transfer_id, destination FROM imported_inbox
+             ORDER BY rowid DESC LIMIT 8",
+        )?;
+        let rows = query.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut verified = Vec::new();
+        for row in rows {
+            let (identity, recorded) = row?;
+            let Ok(id) = Uuid::parse_str(&identity) else {
+                continue;
+            };
+            let path = PathBuf::from(recorded);
+            if path.parent() != Some(vault.as_path()) {
+                continue;
+            }
+            if matches!(self.import_status(id), Ok(ImportAuditStatus::Verified)) {
+                verified.push(path);
+            }
+        }
+        Ok(verified)
+    }
 }
 
 fn checked_destination(
@@ -199,6 +247,30 @@ mod tests {
         drop(f);
         let target = vault.join(format!("received-{}.bin", intent.id));
         (dir, ledger, intent, bytes, target)
+    }
+
+
+    #[test]
+    fn vault_projection_includes_only_verified_recorded_copies() {
+        let (dir, mut ledger, intent, bytes, target) = fixture();
+        let vault = target.parent().unwrap();
+        let other = dir.path().join("other-vault");
+        fs::create_dir(&other).unwrap();
+        assert!(ledger.verified_imports_in(vault).unwrap().is_empty());
+        ledger.confirm(&intent).unwrap();
+        fs::write(&target, &bytes).unwrap();
+        assert!(ledger.verified_imports_in(vault).unwrap().is_empty());
+        ledger.record_imported(intent.id, &target).unwrap();
+        assert_eq!(
+            ledger.verified_imports_in(vault).unwrap(),
+            vec![target.canonicalize().unwrap()]
+        );
+        assert!(ledger.verified_imports_in(&other).unwrap().is_empty());
+        let mut altered = bytes.clone();
+        altered[0] ^= 1;
+        fs::write(&target, altered).unwrap();
+        assert!(ledger.verified_imports_in(vault).unwrap().is_empty());
+        assert_eq!(fs::read(ledger.object_path(intent.id)).unwrap(), bytes);
     }
 
     #[test]

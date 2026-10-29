@@ -9,6 +9,7 @@ on:
       - 'aquilum-app/core/src/files/gate/mod.rs'
       - 'aquilum-app/native/src/app/transfer/**'
       - 'aquilum-app/native/src/ui/transfer/**'
+      - 'aquilum-app/native/src/ui/file_tree/**'
       - 'aquilum-app/native/assets/locales/**'
       - 'modules/drop-inbox-ledger/**'
       - '.github/workflows/p2p-b3-isolated-gate.yml'
@@ -66,4 +67,5 @@ jobs:
         run: |
           cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::inbox::import::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::file_tree::imported::tests -- --nocapture
           echo 'AKULA_P2P_B3_WINDOWS_QA_PASS installed_default_off=1 copy_only=1'

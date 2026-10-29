@@ -34,6 +34,10 @@ impl FileTree {
             let (toolbar, ids) = toolbar();
             self.toolbar = Some(ids);
             column = column.with_fixed(toolbar);
+            #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+            if let Some(verified) = self.model.root().and_then(super::imported::render) {
+                column = column.with_fixed(verified);
+            }
         }
         NewWidget::new(column.with(NewWidget::new(stack), 1.0))
     }

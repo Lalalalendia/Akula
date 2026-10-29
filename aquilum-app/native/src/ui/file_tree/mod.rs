@@ -2,6 +2,8 @@ mod actions;
 mod build;
 mod drag;
 mod ghost;
+#[cfg(all(windows, feature = "p2p-inbox-preview"))]
+mod imported;
 pub mod model;
 mod parts;
 mod pinned;
