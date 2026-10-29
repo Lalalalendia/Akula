@@ -26,6 +26,8 @@ mod inbox;
 #[cfg(feature = "p2p-device-ui")]
 mod local_identity;
 mod model;
+#[cfg(feature = "p2p-offer-consent-qa")]
+mod offer_consent;
 #[cfg(feature = "p2p-native-receive-beta")]
 mod native_receive;
 #[cfg(feature = "p2p-native-send-beta")]
@@ -62,6 +64,8 @@ pub(super) struct TransferState {
     #[cfg(feature = "p2p-device-contacts-preview")]
     transport_contacts: transfer_ui::TransportContactView,
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
+    #[cfg(feature = "p2p-offer-consent-qa")]
+    pub(super) offer_consent: offer_consent::OfferConsentUi,
     #[cfg(feature = "p2p-device-ui")]
     pub(super) peer_pair: peer_pair::PeerUi,
     #[cfg(feature = "p2p-inbox-preview")]

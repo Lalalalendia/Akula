@@ -5,6 +5,8 @@ pub(super) struct SectionActions {
     pub(super) identity_actions: Vec<(WidgetId, IdentityAction)>,
     #[cfg(feature = "p2p-device-ui")]
     pub(super) peer_controls: Option<PeerControls>,
+    #[cfg(feature = "p2p-offer-consent-qa")]
+    pub(super) offer_consent_actions: Vec<(WidgetId, OfferConsentAction)>,
     #[cfg(feature = "p2p-inbox-preview")]
     pub(super) inbox_save_actions: Vec<(WidgetId, InboxAction)>,
     #[cfg(feature = "p2p-native-send-beta")]
@@ -53,6 +55,17 @@ pub(super) fn render(
             .with_fixed(rule())
             .with(NewWidget::new(ScrollArea::new(panel)), 1.0);
     }
+    #[cfg(feature = "p2p-offer-consent-qa")]
+    let (card, offer_consent_actions) = if let Some(offer) = extras.offer_consent {
+        let (panel, actions) = super::offer_consent_view::render(offer);
+        (
+            card.with_fixed(rule())
+                .with(NewWidget::new(ScrollArea::new(panel)), 1.0),
+            actions,
+        )
+    } else {
+        (card, Vec::new())
+    };
     #[cfg(feature = "p2p-inbox-preview")]
     let (card, inbox_save_actions) = if let Some(inbox) = extras.inbox {
         let (panel, buttons) = inbox_view::render(inbox);
@@ -95,6 +108,8 @@ pub(super) fn render(
             identity_actions,
             #[cfg(feature = "p2p-device-ui")]
             peer_controls,
+            #[cfg(feature = "p2p-offer-consent-qa")]
+            offer_consent_actions,
             #[cfg(feature = "p2p-inbox-preview")]
             inbox_save_actions,
             #[cfg(feature = "p2p-native-send-beta")]

@@ -131,6 +131,14 @@ jobs:
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::inbox::import::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::file_tree::imported::tests -- --nocapture
           echo 'AKULA_P2P_B3_WINDOWS_QA_PASS installed_default_off=1 copy_only=1'
+      - name: Verify non-shipping Native explicit Offer UI consent on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2024 --check aquilum-app/native/src/app/transfer/offer_consent.rs aquilum-app/native/src/ui/transfer/dialog_view/offer_consent_view.rs aquilum-app/native/src/app/tests/offer_consent.rs
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta,p2p-offer-consent-qa app::tests::offer_consent -- --nocapture
+          echo 'AKULA_P2P_NATIVE_OFFER_CONSENT_UI_QA_PASS non_authorizing=1'
 
   one-file-interop:
     name: B3 local two-endpoint QUIC plus cold Inbox on ${{ matrix.os }}

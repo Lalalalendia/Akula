@@ -14,16 +14,16 @@ use super::scroll::ScrollArea;
 use super::tokens::size;
 use super::widgets::{IconButton, TextButton, Variant};
 use crate::i18n::{t, t_with};
-
 mod types;
 #[cfg(feature = "p2p-inbox-preview")]
 pub use types::InboxAction;
 pub use types::{InboxRow, InboxView, QueueAction, QueueRow, TransferDialog, TransferExtras};
+#[cfg(feature = "p2p-offer-consent-qa")]
+pub use types::{OfferConsentAction, OfferConsentView};
 #[cfg(feature = "p2p-native-receive-beta")]
 pub use types::{NativeReceiveAction, NativeReceiveView};
 #[cfg(feature = "p2p-native-send-beta")]
 pub use types::{NativeSendAction, NativeSendView};
-
 mod devices;
 mod identity;
 #[cfg(feature = "p2p-inbox-preview")]

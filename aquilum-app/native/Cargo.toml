@@ -38,6 +38,8 @@ server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
 p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
 # Opt-in local Iroh public identity UI; uses the same protected peer contacts.
 p2p-device-ui = ["p2p-device-contacts-preview"]
+# Draft-only consent gesture. NO transport, File Gate, signer or installed grant.
+p2p-offer-consent-qa = ["p2p-device-ui", "aquilum-core/p2p-offer-lab"]
 # User-triggered one-file LAN / opt-in Internet transfer; no background listener.
 p2p-inbox-preview = ["dep:akula-inbox-ledger-lab", "aquilum-core/p2p-inbox-lab"]
 p2p-native-send-beta = ["p2p-inbox-preview", "p2p-device-ui", "dep:akula-staya-integration", "dep:tokio"]

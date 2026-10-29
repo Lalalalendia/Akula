@@ -61,6 +61,24 @@ pub struct InboxView {
     pub notice_key: Option<&'static str>,
 }
 
+#[cfg(feature = "p2p-offer-consent-qa")]
+#[derive(Clone, Debug)]
+pub struct OfferConsentView {
+    pub revision: u64,
+    pub sender_endpoint: String,
+    pub offer_id: String,
+    pub file_label: String,
+    pub bytes: u64,
+    pub digest: String,
+}
+
+#[cfg(feature = "p2p-offer-consent-qa")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OfferConsentAction {
+    Accept(u64),
+    Decline(u64),
+}
+
 #[cfg(feature = "p2p-native-send-beta")]
 #[derive(Clone, Debug, Default)]
 pub struct NativeSendView {
@@ -86,6 +104,8 @@ pub struct TransferExtras<'a> {
     pub identity: Option<&'a IdentityView>,
     #[cfg(feature = "p2p-device-ui")]
     pub peer: Option<&'a PeerView>,
+    #[cfg(feature = "p2p-offer-consent-qa")]
+    pub offer_consent: Option<&'a OfferConsentView>,
     #[cfg(feature = "p2p-inbox-preview")]
     pub inbox: Option<&'a InboxView>,
     #[cfg(feature = "p2p-native-send-beta")]
@@ -107,6 +127,8 @@ pub struct TransferDialog {
     pub identity_actions: Vec<(WidgetId, IdentityAction)>,
     #[cfg(feature = "p2p-device-ui")]
     pub peer_controls: Option<PeerControls>,
+    #[cfg(feature = "p2p-offer-consent-qa")]
+    pub offer_consent_actions: Vec<(WidgetId, OfferConsentAction)>,
     #[cfg(feature = "p2p-inbox-preview")]
     pub inbox_save_actions: Vec<(WidgetId, InboxAction)>,
     #[cfg(feature = "p2p-native-send-beta")]

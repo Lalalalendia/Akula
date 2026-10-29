@@ -1,6 +1,8 @@
 //! Transfer dialog construction, leaving transfer.rs as a compact API.
 use super::*;
 mod panels;
+#[cfg(feature = "p2p-offer-consent-qa")]
+mod offer_consent_view;
 
 /// Draft controls remain inert. The optional received-Inbox Save Copy button
 /// invokes only an explicit local no-clobber export, never QUIC or Vault ACL.
@@ -65,6 +67,8 @@ pub fn dialog(
             identity_actions: sections.identity_actions,
             #[cfg(feature = "p2p-device-ui")]
             peer_controls: sections.peer_controls,
+            #[cfg(feature = "p2p-offer-consent-qa")]
+            offer_consent_actions: sections.offer_consent_actions,
             #[cfg(feature = "p2p-inbox-preview")]
             inbox_save_actions: sections.inbox_save_actions,
             #[cfg(feature = "p2p-native-send-beta")]

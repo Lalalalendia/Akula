@@ -24,6 +24,8 @@ impl TransferState {
             } else {
                 None
             },
+            #[cfg(feature = "p2p-offer-consent-qa")]
+            offer_consent: self.offer_consent.view.as_ref(),
             #[cfg(feature = "p2p-inbox-preview")]
             inbox: Some(&self.inbox.view),
             #[cfg(feature = "p2p-native-send-beta")]

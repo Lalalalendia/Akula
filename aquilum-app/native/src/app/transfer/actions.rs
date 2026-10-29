@@ -23,6 +23,8 @@ impl App {
             self.transfer.sender.cancel();
             #[cfg(feature = "p2p-native-receive-beta")]
             self.transfer.receiver.cancel();
+            #[cfg(feature = "p2p-offer-consent-qa")]
+            self.transfer.offer_consent.cancel();
             ui_dialog::close(root, dialog.layer);
             return Outcome::default();
         }
@@ -60,6 +62,16 @@ impl App {
                     #[cfg(windows)]
                     transfer_ui::InboxAction::Import(receipt) => self.begin_inbox_import(receipt),
                 };
+            }
+        }
+        #[cfg(feature = "p2p-offer-consent-qa")]
+        if pressed && !refresh {
+            if let Some((_, command)) = dialog
+                .offer_consent_actions
+                .iter()
+                .find(|(button, _)| *button == id)
+            {
+                refresh = self.transfer.offer_consent.respond(*command);
             }
         }
         #[cfg(feature = "p2p-native-send-beta")]
