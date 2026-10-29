@@ -45,16 +45,23 @@ volume/file-index/link count must match the DELETE-capable OS handle.
 Failure injection covers after-request and after-disposition crash windows,
 identical-byte object swapping, consent refusal, duplicate grants and
 independent SQLite connections racing to remove a disposable object.
-The Windows Core lab now pins and records the OS identities of the Inbox root,
+The Windows Core lab pins and records the OS identities of the Inbox root,
 objects directory, and SQLite pathname before consuming removal intent;
-all three must still match before DELETE-capable open. New negative tests
+all three must still match before DELETE-capable open. It also compares
+the actual SQLite Windows VFS database HANDLE (using the documented
+SQLITE_FCNTL_WIN32_GET_HANDLE) to the pinned SQLite file, before and
+after CAS and before the witnessed finish. The original verified file
+HANDLE stays live through Windows disposition so the file index cannot be
+recycled while the one-shot grant is being consumed. New negative tests
 exercise an entire objects-directory swap with byte-identical replacement,
 a real exclusive-open Windows sharing denial after SQLite CAS, wrong Inbox
 root, and cold reopen after a successful completion. Pre-disposition refusals preserve the bytes and remain one-shot
 Requested rather than auto-retrying; a crash after disposition remains
 NeedsReview with the original object absent.
-This is not proof of custody of SQLite's own connection handle or NTFS
-power-loss resilience.
+This in-process VFS identity binding is not proof against malicious VFS/WAL
+replacement, concurrent external writes during commit or NTFS power loss.
+Unsupported SQLite VFS controls fail closed. Real Windows physical device
+testing, ACL hardening and durable reconciliation remain outstanding.
 
 These tests do not establish power-loss durability or hostile SQLite
 replacement protection. The Ledger now requires an opaque

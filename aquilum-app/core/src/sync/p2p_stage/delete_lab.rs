@@ -2,7 +2,7 @@
 use super::{pinned_windows, VaultPortError};
 use std::{
     ffi::c_void,
-    fs,
+    fs::{self, File},
     io::Read,
     os::windows::{fs::MetadataExt, io::AsRawHandle},
     path::Path,
@@ -17,14 +17,52 @@ const REPARSE_ATTRIBUTE: u32 = 0x0000_0400;
 const FILE_DISPOSITION_INFO: u32 = 4;
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 
-/// The directories and SQLite pathname must remain the same OS objects
-/// from consent through the root-relative disposition. This is only an
-/// in-process Windows fixture guard, not an OS-authenticated SQLite connection.
+/// Root, objects, and SQLite must stay the same pinned OS objects.
+/// The real SQLite Windows VFS HANDLE must also match this database.
+/// This is in-process QA, not hostile VFS/WAL or power-loss proof.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PinnedInboxIdentity {
     root: (u32, u64),
     objects: (u32, u64),
     database: (u32, u64),
+}
+
+/// Read the *live SQLite connection's* main database HANDLE via the
+/// documented Windows VFS file control. The returned HANDLE is borrowed
+/// only for a synchronous GetFileInformationByHandle; never close or cache it.
+fn sqlite_vfs_main_identity(ledger: &InboxLedger) -> Result<(u32, u64), String> {
+    ledger.inspect_disposable_sqlite_connection(|connection| {
+        let mut native_handle: *mut c_void = std::ptr::null_mut();
+        // SAFETY: connection owns a live sqlite3* and is not concurrently
+        // mutated here. SQLite synchronously fills the pointer-sized HANDLE;
+        // the borrowed HANDLE stays owned by SQLite and cannot escape this
+        // closure. NULL database name selects the main database.
+        let status = unsafe {
+            rusqlite::ffi::sqlite3_file_control(
+                connection.handle(),
+                std::ptr::null(),
+                rusqlite::ffi::SQLITE_FCNTL_WIN32_GET_HANDLE,
+                (&mut native_handle as *mut *mut c_void).cast::<c_void>(),
+            )
+        };
+        if status != rusqlite::ffi::SQLITE_OK || native_handle.is_null() {
+            return Err(format!(
+                "SQLite Windows VFS native HANDLE unavailable (rc={status})"
+            ));
+        }
+        pinned_windows::borrowed_file_identity_for_lab(native_handle)
+            .map_err(|e| format!("SQLite main HANDLE identity rejected: {e:?}"))
+    })
+}
+
+fn require_connected_sqlite(
+    ledger: &InboxLedger,
+    database: (u32, u64),
+) -> Result<(), String> {
+    if sqlite_vfs_main_identity(ledger)? != database {
+        return Err("SQLite connection points at a different database object".into());
+    }
+    Ok(())
 }
 
 #[link(name = "kernel32")]
@@ -55,7 +93,7 @@ fn delete_disposable_fixture_matching(
     id: Uuid,
     expected_bytes: u64,
     expected_hash: [u8; 32],
-    ledger_identity: Option<(u32, u64, u32)>,
+    verified_file: Option<File>,
     expected_custody: Option<PinnedInboxIdentity>,
 ) -> Result<(u32, u64, u32), VaultPortError> {
     if id.is_nil() || expected_bytes == 0 || expected_bytes > MAX_BYTES || expected_hash == [0; 32]
@@ -77,7 +115,13 @@ fn delete_disposable_fixture_matching(
     // Stable directory-relative witness; no sender-controlled path.
     let witness = pinned_windows::open_child(&objects, &name, true)?;
     let identity = pinned_windows::file_identity_with_links(&witness)?;
-    if identity.2 != 1 || ledger_identity.is_some_and(|original| original != identity) {
+    if identity.2 != 1
+        || verified_file
+            .as_ref()
+            .map(pinned_windows::file_identity_with_links)
+            .transpose()?
+            .is_some_and(|original| original != identity)
+    {
         return Err(VaultPortError::FileChanged);
     }
 
@@ -123,6 +167,17 @@ fn delete_disposable_fixture_matching(
     {
         return Err(VaultPortError::FileChanged);
     }
+    // Keep the independently verified original HANDLE open until the OS
+    // disposition call. Its file index cannot be recycled during the CAS
+    // window. A changed name cannot transfer authorization to a new inode.
+    if verified_file
+        .as_ref()
+        .map(pinned_windows::file_identity_with_links)
+        .transpose()?
+        .is_some_and(|original| original != identity)
+    {
+        return Err(VaultPortError::FileChanged);
+    }
     drop(witness);
     // Win7-compatible deletion is marked on the checked HANDLE, not a path.
     let mut disposition = 1u8;
@@ -141,6 +196,9 @@ fn delete_disposable_fixture_matching(
             std::io::Error::last_os_error().to_string(),
         ));
     }
+    // Close every read/DELETE HANDLE before checking for final absence:
+    // Win7 deletion is pending until the last open file HANDLE is closed.
+    drop(verified_file);
     drop(candidate);
     // Verify absence using the pinned objects HANDLE. Delete-pending and any
     // unexpected replacement remain errors, never a successful receipt.
@@ -199,6 +257,9 @@ fn delete_after_explicit_consent(
         database: pinned_windows::file_identity(&database_guard)
             .map_err(|e| format!("database identity failed: {e:?}"))?,
     };
+    // A path-based pin cannot tell whether SQLite already opened a different
+    // database. Compare against the real Windows VFS connection HANDLE.
+    require_connected_sqlite(ledger, custody.database)?;
     // Capture the verified opened object and its OS identity before consuming
     // the one-shot intent. Size/hash alone cannot detect an identical swap.
     let (file, receipt) = ledger
@@ -212,8 +273,8 @@ fn delete_after_explicit_consent(
     if original_identity.2 != 1 {
         return Err("multiply linked receipt rejected".into());
     }
-    drop(file);
-
+    // Do not drop `file`: it pins the exact selected OS object through
+    // durable SQLite intent and the later kernel disposition.
     ledger
         .request_removal(selected_id)
         .map_err(|e| format!("one-shot SQLite request refused: {e:?}"))?;
@@ -221,19 +282,21 @@ fn delete_after_explicit_consent(
         return Err("simulated crash after durable request".into());
     }
     after_request();
+    require_connected_sqlite(ledger, custody.database)?;
 
     let observed_identity = delete_disposable_fixture_matching(
         root,
         selected_id,
         receipt.bytes,
         receipt.blake3,
-        Some(original_identity),
+        Some(file),
         Some(custody),
     )
     .map_err(|e| format!("same-HANDLE disposition refused: {e:?}"))?;
     if cut == CrashCut::AfterDisposition {
         return Err("simulated crash after HANDLE disposition".into());
     }
+    require_connected_sqlite(ledger, custody.database)?;
     let witnessed = RemovalDispositionWitness::for_disposable_lab(
         selected_id,
         receipt.bytes,
@@ -285,6 +348,23 @@ mod tests {
             bytes: receipt.bytes,
             blake3: receipt.blake3,
         }
+    }
+
+
+    #[test]
+    fn sqlite_vfs_handle_identity_matches_the_pinned_database_not_just_its_path() {
+        let (_temp, root, ledger, _receipt) = ledger_fixture(b"sqlite custody proof");
+        let (_root_handle, _objects, pinned_db) =
+            super::super::pin_p2p_read_snapshot(&root).unwrap();
+        let expected = pinned_windows::file_identity(&pinned_db).unwrap();
+        assert_eq!(sqlite_vfs_main_identity(&ledger).unwrap(), expected);
+        require_connected_sqlite(&ledger, expected).unwrap();
+
+        let (_other_temp, _other_root, other_ledger, _other_receipt) =
+            ledger_fixture(b"another SQLite connection");
+        let different = sqlite_vfs_main_identity(&other_ledger).unwrap();
+        assert_ne!(different, expected);
+        assert!(require_connected_sqlite(&other_ledger, expected).is_err());
     }
 
     #[test]
@@ -465,13 +545,13 @@ mod tests {
     }
 
     #[test]
-    fn exclusive_open_after_request_blocks_windows_delete_and_cold_retry() {
+    fn delete_denied_by_existing_reader_after_request_remains_requested() {
         use std::os::windows::fs::OpenOptionsExt;
         let bytes = b"exclusive sharing violation after SQLite CAS";
         let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
         let id = receipt.id;
         let leaf = ledger.object_path(id);
-        let mut exclusive = None;
+        let mut denies_delete_sharing = None;
 
         let result = delete_after_explicit_consent(
             &ledger,
@@ -480,17 +560,19 @@ mod tests {
             Some(confirmation(&receipt)),
             CrashCut::None,
             || {
-                exclusive = Some(
+                // Permit other READ opens but refuse DELETE sharing;
+                // this reader can coexist with the original pinned read.
+                denies_delete_sharing = Some(
                     fs::OpenOptions::new()
                         .read(true)
-                        .share_mode(0)
+                        .share_mode(0x0000_0001)
                         .open(&leaf)
                         .unwrap(),
                 );
             },
         );
         assert!(result.is_err());
-        drop(exclusive);
+        drop(denies_delete_sharing);
         assert_eq!(fs::read(&leaf).unwrap(), bytes);
         drop(ledger);
         let cold = InboxLedger::open_existing(&root).unwrap().unwrap();

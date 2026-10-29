@@ -89,6 +89,19 @@ pub struct InboxLedger {
 }
 
 impl InboxLedger {
+    /// Give the opt-in Windows QA probe access to this live SQLite connection.
+    /// The probe uses the documented SQLite Windows VFS file-control to inspect
+    /// the actual database HANDLE, not the pathname. This is deliberately NOT
+    /// available to normal Ledger or installed Akula builds. No handle escapes
+    /// this synchronous call, and the Ledger keeps owning the connection.
+    #[cfg(all(windows, feature = "disposable-removal-lab"))]
+    pub fn inspect_disposable_sqlite_connection<R>(
+        &self,
+        inspect: impl FnOnce(&Connection) -> R,
+    ) -> R {
+        inspect(&self.db)
+    }
+
     /// The caller is responsible for independently authenticating and pinning
     /// the local root. This lab rejects symlinks on the root and direct objects
     /// directory, but does not claim to handle hostile ancestor-directory races.
