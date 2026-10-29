@@ -63,7 +63,7 @@ fn set_frontmatter(core: &Core, arguments: &Value) -> Result<Value, String> {
     let note = vault.note_argument(arguments)?;
     let updates = field_updates(arguments)?;
     let version_name = optional_text(arguments, "versionName");
-    let (changed, next) = write_retrying(core, &note, Source::Agent, version_name.as_deref(), |current| {
+    let (changed, next) = write_retrying(core, &vault, &note, Source::Agent, version_name.as_deref(), |current| {
         frontmatter_set(current, &updates)
     })?;
     if changed {
