@@ -137,7 +137,10 @@ jobs:
         run: |
           set -euo pipefail
           rustfmt --edition 2024 --check aquilum-app/native/src/app/transfer/offer_consent.rs aquilum-app/native/src/ui/transfer/dialog_view/offer_consent_view.rs aquilum-app/native/src/app/tests/offer_consent.rs
-          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta,p2p-offer-consent-qa app::tests::offer_consent -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta,p2p-offer-consent-qa offer_consent -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::forged_peer_or_multiple_files_never_show_accept ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::old_revision_cancel_and_duplicate_press_never_create_a_reply ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::tests::offer_consent::modal_accept_comes_only_from_explicit_button_press_and_consumes_once ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
           echo 'AKULA_P2P_NATIVE_OFFER_CONSENT_UI_QA_PASS non_authorizing=1'
 
   one-file-interop:
