@@ -380,6 +380,35 @@ jobs:
             echo 'AKULA_CALL_VOICE_LAB_PASS twenty_offline_tests=1'
           fi
 
+      # AK-CALL-01/02: default-OFF call state + media binding. Exercise
+      # denial before Accept, wrong peer/call, revoked host policy and disconnect.
+      # No microphone, speaker, capture, network or libopus is started here.
+      - name: Validate authorized muted media after accepted call
+        if: needs.classify.outputs.mode != 'none'
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if git -C .. diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/core/src/call_authorized_media_lab.rs \
+            aquilum-app/core/src/call_signaling_lab.rs \
+            aquilum-app/core/src/call_signaling_lab_tests.rs \
+            aquilum-app/core/src/voice_jitter_lab.rs \
+            aquilum-app/core/src/lib.rs \
+            aquilum-app/core/Cargo.toml; then
+            echo 'AK-CALL-01/02 authorization seam unchanged'
+          else
+            rustfmt --edition 2021 --check core/src/call_authorized_media_lab.rs
+            cargo test --locked -p aquilum-core --lib --features call-authorized-media-lab \
+              call_authorized_media_lab::tests:: -- --nocapture \
+              2>&1 | tee "$RUNNER_TEMP/akula-authorized-call-media.log"
+            grep -Fq 'test result: ok. 2 passed; 0 failed;' \
+              "$RUNNER_TEMP/akula-authorized-call-media.log"
+            echo 'AKULA_CALL_AUTHORIZED_MEDIA_LAB_PASS two_offline_tests=1'
+          fi
+
       - name: Run full Rust workspace and sync-engine tests
         if: needs.classify.outputs.mode == 'workspace'
         working-directory: aquilum-app
