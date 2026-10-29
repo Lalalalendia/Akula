@@ -50,7 +50,11 @@ async fn accept_peer(endpoint: &Endpoint, expected: EndpointId) -> iroh::endpoin
         .await
         .expect("incoming handshake timeout")
         .expect("authenticated QUIC connection");
-    assert_eq!(connection.remote_id(), expected, "wrong authenticated Iroh key");
+    assert_eq!(
+        connection.remote_id(),
+        expected,
+        "wrong authenticated Iroh key"
+    );
     connection
 }
 
@@ -96,7 +100,11 @@ async fn server(reconnect: bool) {
         SocketAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
         SocketAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),
     };
-    println!("READY {} {}", endpoint.id(), SocketAddr::new(loopback, socket.port()));
+    println!(
+        "READY {} {}",
+        endpoint.id(),
+        SocketAddr::new(loopback, socket.port())
+    );
     std::io::stdout().flush().expect("flush READY");
     let mut command = String::new();
     std::io::stdin()
@@ -114,7 +122,10 @@ async fn server(reconnect: bool) {
         let (mut session, mut reply, offer) = receive_offer(&connection, &endpoint).await;
         old_call_id = Some(offer[11..27].to_vec());
         let ringing = session.ring_local(now()).expect("first ringing");
-        reply.write_all(&ringing).await.expect("first ringing write");
+        reply
+            .write_all(&ringing)
+            .await
+            .expect("first ringing write");
         reply.finish().expect("finish first ringing stream");
         tokio::time::timeout(DEADLINE, reply.stopped())
             .await
@@ -133,10 +144,16 @@ async fn server(reconnect: bool) {
     let connection = accept_peer(&endpoint, expected).await;
     let (mut session, mut reply, offer) = receive_offer(&connection, &endpoint).await;
     if let Some(old) = old_call_id {
-        assert_ne!(&offer[11..27], old.as_slice(), "call ID must change after transport loss");
+        assert_ne!(
+            &offer[11..27],
+            old.as_slice(),
+            "call ID must change after transport loss"
+        );
     }
     let ringing = session.ring_local(now()).expect("ringing");
-    let acceptance = session.accept_local(now()).expect("accept with separate host consent");
+    let acceptance = session
+        .accept_local(now())
+        .expect("accept with separate host consent");
     reply.write_all(&ringing).await.expect("send Ringing");
     reply.write_all(&acceptance).await.expect("send Accept");
     reply.finish().expect("finish response stream");
@@ -159,13 +176,18 @@ async fn server(reconnect: bool) {
         Ok(RemoteEvent::Ended)
     );
     assert_eq!(session.phase(), CallPhase::Closed);
-    ack.write_all(b"AKULA_CALL_END_OK").await.expect("send acknowledgement");
+    ack.write_all(b"AKULA_CALL_END_OK")
+        .await
+        .expect("send acknowledgement");
     ack.finish().expect("finish acknowledgement");
     tokio::time::timeout(DEADLINE, ack.stopped())
         .await
         .expect("acknowledgement delivery timeout")
         .expect("acknowledgement stream completion");
-    println!("CHILD_PASS server real_quic=1 reconnect={}", u8::from(reconnect));
+    println!(
+        "CHILD_PASS server real_quic=1 reconnect={}",
+        u8::from(reconnect)
+    );
     connection.close(0u8.into(), b"call complete");
     endpoint.close().await;
 }
@@ -184,11 +206,7 @@ async fn connect_peer(
     connection
 }
 
-async fn offer(
-    endpoint: &Endpoint,
-    connection: &iroh::endpoint::Connection,
-    full_call: bool,
-) {
+async fn offer(endpoint: &Endpoint, connection: &iroh::endpoint::Connection, full_call: bool) {
     let (mut session, wire) = CallSession::outbound(
         binding(1, endpoint.id()),
         binding(2, connection.remote_id()),
@@ -204,7 +222,11 @@ async fn offer(
         .expect("offer stream");
     sender.write_all(&wire).await.expect("send Offer");
     sender.finish().expect("finish Offer");
-    let expected_bytes = if full_call { WIRE_BYTES * 2 } else { WIRE_BYTES };
+    let expected_bytes = if full_call {
+        WIRE_BYTES * 2
+    } else {
+        WIRE_BYTES
+    };
     let replies = tokio::time::timeout(DEADLINE, receiver.read_to_end(expected_bytes))
         .await
         .expect("Ringing/Accept response timeout")
@@ -233,7 +255,10 @@ async fn offer(
         Ok(RemoteEvent::Accepted)
     );
     assert_eq!(session.phase(), CallPhase::Active);
-    let end = session.end_local().expect("user-initiated end").expect("End packet");
+    let end = session
+        .end_local()
+        .expect("user-initiated end")
+        .expect("End packet");
     let (mut sender, mut receiver) = tokio::time::timeout(DEADLINE, connection.open_bi())
         .await
         .expect("End stream open timeout")
@@ -259,7 +284,10 @@ async fn client(reconnect: bool) {
     println!("READY {}", endpoint.id());
     std::io::stdout().flush().expect("flush READY");
     let mut command = String::new();
-    std::io::stdin().lock().read_line(&mut command).expect("read CONNECT");
+    std::io::stdin()
+        .lock()
+        .read_line(&mut command)
+        .expect("read CONNECT");
     let parts: Vec<_> = command.split_whitespace().collect();
     assert_eq!(parts.len(), 3);
     assert_eq!(parts[0], "CONNECT");
@@ -276,7 +304,10 @@ async fn client(reconnect: bool) {
 
     let connection = connect_peer(&endpoint, server_id, socket).await;
     offer(&endpoint, &connection, true).await;
-    println!("CHILD_PASS client real_quic=1 reconnect={}", u8::from(reconnect));
+    println!(
+        "CHILD_PASS client real_quic=1 reconnect={}",
+        u8::from(reconnect)
+    );
     connection.close(0u8.into(), b"completed and acknowledged");
     endpoint.close().await;
 }
@@ -322,12 +353,14 @@ impl Process {
     }
 
     fn command(&mut self, message: &str) {
-        writeln!(
-            self.child.stdin.as_mut().expect("child stdin"),
-            "{message}"
-        )
-        .expect("send test-selected public ID to child");
-        self.child.stdin.as_mut().expect("child stdin").flush().expect("flush command");
+        writeln!(self.child.stdin.as_mut().expect("child stdin"), "{message}")
+            .expect("send test-selected public ID to child");
+        self.child
+            .stdin
+            .as_mut()
+            .expect("child stdin")
+            .flush()
+            .expect("flush command");
     }
 
     fn completed(&mut self) {
@@ -354,13 +387,15 @@ fn run_two_processes(test_name: &str, reconnect: bool) {
     match std::env::var("AKULA_CALL_QUIC_CHILD").as_deref() {
         Ok("server") => {
             let runtime = tokio::runtime::Runtime::new().expect("Tokio runtime");
-            runtime.block_on(tokio::time::timeout(WAIT, server(reconnect)))
+            runtime
+                .block_on(tokio::time::timeout(WAIT, server(reconnect)))
                 .expect("server deadline");
             return;
         }
         Ok("client") => {
             let runtime = tokio::runtime::Runtime::new().expect("Tokio runtime");
-            runtime.block_on(tokio::time::timeout(WAIT, client(reconnect)))
+            runtime
+                .block_on(tokio::time::timeout(WAIT, client(reconnect)))
                 .expect("client deadline");
             return;
         }
@@ -393,10 +428,7 @@ fn run_two_processes(test_name: &str, reconnect: bool) {
 
 #[test]
 fn two_os_processes_exchange_offer_ring_accept_and_end() {
-    run_two_processes(
-        "two_os_processes_exchange_offer_ring_accept_and_end",
-        false,
-    );
+    run_two_processes("two_os_processes_exchange_offer_ring_accept_and_end", false);
 }
 
 #[test]
