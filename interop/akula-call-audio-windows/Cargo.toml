@@ -1,0 +1,14 @@
+[package]
+name = "akula-call-audio-windows"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91"
+publish = false
+
+# Independent non-shipping laboratory, outside the Akula application workspace.
+[workspace]
+resolver = "2"
+
+# WASAPI is used only when the separate executable is deliberately run on Windows.
+[target.'cfg(windows)'.dependencies]
+cpal = "=0.15.3"
