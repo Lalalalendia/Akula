@@ -387,16 +387,20 @@ fn run_two_processes(test_name: &str, reconnect: bool) {
     match std::env::var("AKULA_CALL_QUIC_CHILD").as_deref() {
         Ok("server") => {
             let runtime = tokio::runtime::Runtime::new().expect("Tokio runtime");
-            runtime
-                .block_on(tokio::time::timeout(WAIT, server(reconnect)))
-                .expect("server deadline");
+            runtime.block_on(async {
+                tokio::time::timeout(WAIT, server(reconnect))
+                    .await
+                    .expect("server deadline");
+            });
             return;
         }
         Ok("client") => {
             let runtime = tokio::runtime::Runtime::new().expect("Tokio runtime");
-            runtime
-                .block_on(tokio::time::timeout(WAIT, client(reconnect)))
-                .expect("client deadline");
+            runtime.block_on(async {
+                tokio::time::timeout(WAIT, client(reconnect))
+                    .await
+                    .expect("client deadline");
+            });
             return;
         }
         Ok(other) => panic!("unexpected laboratory child role: {other}"),
