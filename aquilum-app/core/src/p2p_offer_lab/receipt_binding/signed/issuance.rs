@@ -246,7 +246,8 @@ fn with_loaded_local_key<T>(
 ) -> Result<T, IssueError> {
     let identity = load_checked_local(local, selected_remote_id, remote)?;
     identity.with_secret_seed(|seed| {
-        let key = Ed25519KeyPair::from_seed_unchecked(seed).map_err(|_| IssueError::BadSigningKey)?;
+        let key =
+            Ed25519KeyPair::from_seed_unchecked(seed).map_err(|_| IssueError::BadSigningKey)?;
         sign(&key)
     })
 }
