@@ -356,6 +356,30 @@ jobs:
             echo 'AKULA_CANVAS_CRDT_BRIDGE_PASS seven_session_tests=1'
           fi
 
+      # Default-OFF AK-CALL-01: signaling is a passive offline state machine.
+      # This NEVER starts a microphone/camera, Iroh socket, File Gate or UI.
+      - name: Validate offline call signaling when modified
+        if: needs.classify.outputs.mode != 'none'
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if git -C .. diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/core/src/call_signaling_lab.rs \
+            aquilum-app/core/src/lib.rs \
+            aquilum-app/core/Cargo.toml; then
+            echo 'Call signaling laboratory unchanged'
+          else
+            cargo test --locked -p aquilum-core --lib --features call-signaling-lab \
+              call_signaling_lab::tests:: -- --nocapture \
+              2>&1 | tee "$RUNNER_TEMP/akula-call-signal-lab.log"
+            grep -Fq 'test result: ok. 14 passed; 0 failed;' \
+              "$RUNNER_TEMP/akula-call-signal-lab.log"
+            echo 'AKULA_CALL_SIGNAL_LAB_PASS fourteen_offline_tests=1'
+          fi
+
       - name: Run full Rust workspace and sync-engine tests
         if: needs.classify.outputs.mode == 'workspace'
         working-directory: aquilum-app
