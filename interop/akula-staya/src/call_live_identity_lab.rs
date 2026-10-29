@@ -84,3 +84,36 @@ pub fn receive_live_call(
         now_unix,
     )
 }
+
+/// Explicit host-side consent to accept this CALL, not OS capture permission.
+/// Re-check every authority immediately before emitting Accept, because peer
+/// approval or roster membership can change while the phone is ringing.
+#[allow(clippy::too_many_arguments)]
+pub fn accept_live_call(
+    session: &mut CallSession,
+    connection: &Connection,
+    selected_remote_endpoint: &str,
+    trusted_roster: &VerifiedRosterObservation,
+    expected_vault: VaultId,
+    expected_remote_device: DeviceId,
+    peer_policy: LocalPeerPolicy,
+    now_unix: u64,
+) -> Result<aquilum_core::call_signaling_lab::Wire, CallError> {
+    let observed = match observe_live_pinned_roster_peer(
+        connection,
+        selected_remote_endpoint,
+        trusted_roster,
+        expected_vault,
+        expected_remote_device,
+    ) {
+        Ok(observed) => observed,
+        Err(_) => {
+            session.revoke();
+            return Err(CallError::Revoked);
+        }
+    };
+    // Reuse CallSession's identity and policy validation without consuming
+    // a remote sequence: a new internal preflight is needed for local Accept.
+    session.verify_local_accept_peer(observed.metadata_peer_binding(), peer_policy)?;
+    session.accept_local(now_unix)
+}
