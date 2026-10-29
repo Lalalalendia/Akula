@@ -330,17 +330,19 @@ async fn protected_identity_accepts_confirmed_live_peer_then_rejects_revoke() {
             )
             .unwrap();
             allowed_call.ring_local(now).unwrap();
-            assert!(accept_live_call(
-                &mut allowed_call,
-                &live,
-                &outsider_hex,
-                &verified,
-                vault_id,
-                device_id,
-                LocalPeerPolicy::Allowed,
-                now,
-            )
-            .is_ok());
+            assert!(
+                accept_live_call(
+                    &mut allowed_call,
+                    &live,
+                    &outsider_hex,
+                    &verified,
+                    vault_id,
+                    device_id,
+                    LocalPeerPolicy::Allowed,
+                    now,
+                )
+                .is_ok()
+            );
             assert_eq!(
                 allowed_call.phase(),
                 aquilum_core::call_signaling_lab::CallPhase::Active
