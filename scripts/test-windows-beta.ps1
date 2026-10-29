@@ -303,6 +303,14 @@ Assert-LegacyUntouched
 if ($LASTEXITCODE -ne 0) { throw "Installed 100k-line crash recovery failed: PowerShell exit $LASTEXITCODE" }
 Assert-LegacyUntouched
 
+# R2 installed-application readback (nine synthetic notes + plain DOCX).
+# Windows GitHub-hosted STA only; not physical user acceptance.
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-user-scenarios-installed.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw 'R2 Windows note/DOCX readback failed' }
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'R2 readback modified original beta note' }
+if ((Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash -ne $u02Hash) { throw 'R2 readback modified U02 note' }
+Assert-LegacyUntouched
+
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
 if (!(Test-Path $uninstall)) { throw 'Akula uninstaller missing' }
 $removed = Start-Process $uninstall -ArgumentList '/S' -Wait -PassThru

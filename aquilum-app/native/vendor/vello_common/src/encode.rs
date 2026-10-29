@@ -109,9 +109,7 @@ impl EncodeExt for Gradient {
 
         let kind = match self.kind {
             GradientKind::Linear(LinearGradientPosition { start: p0, end: p1 }) => {
-                // We update the transform currently in-place, such that the gradient line always
-                // starts at the point (0, 0) and ends at the point (1, 0). This simplifies the
-                // calculation for the current position along the gradient line a lot.
+                // Normalize the gradient line to (0,0) .. (1,0) for interpolation.
                 base_transform = ts_from_line_to_line(p0, p1, Point::ZERO, Point::new(1.0, 0.0));
 
                 EncodedKind::Linear(LinearKind)
@@ -568,7 +566,9 @@ impl Paint {
     pub fn may_have_transparency(&self, encoded_paints: &[EncodedPaint]) -> bool {
         match self {
             Self::Solid(color) => !color.is_opaque(),
-            Self::Indexed(index) => encoded_paints[index.index()].may_have_transparency(),
+            Self::Indexed(index) => encoded_paints
+                .get(index.index())
+                .is_none_or(EncodedPaint::may_have_transparency),
         }
     }
 }
@@ -1142,11 +1142,7 @@ impl<T: GradientLutExt> GradientLut<T> {
 pub const MAX_GRADIENT_LUT_SIZE: usize = 4096;
 
 fn determine_lut_size(ranges: &[GradientRange]) -> usize {
-    // Inspired by Blend2D.
-    // By default:
-    // 256 for 2 stops.
-    // 512 for 3 stops.
-    // 1024 for 4 or more stops.
+    // Blend2D-inspired LUT: 256/512/1024 entries for 2/3/4+ stops.
     let stop_len = match ranges.len() {
         1 => 256,
         2 => 512,
@@ -1189,6 +1185,9 @@ mod private {
     impl Sealed for super::Gradient {}
 }
 
+#[cfg(test)]
+#[path = "encode/indexed_paint_guard_tests.rs"]
+mod indexed_paint_guard_tests;
 #[cfg(test)]
 mod tests {
     use super::{EncodeExt, EncodedPaint, Gradient};
