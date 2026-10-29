@@ -379,6 +379,25 @@ jobs:
             echo 'AKULA_SCREEN_DAMAGE_LAB_PASS fourteen_offline_tests=1'
           fi
 
+      # Compile the actual AK-CALL-04 trace runner, not only the library tests.
+      # FFmpeg software-codec comparisons are explicitly diagnostic/manual.
+      - name: Compile offline screen-damage trace runner when modified
+        if: needs.classify.outputs.mode != 'none'
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if ! git -C .. diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/core/examples/ak_call04_damage_metrics.rs \
+            aquilum-app/core/src/screen_damage_lab.rs \
+            aquilum-app/core/Cargo.toml; then
+            cargo check --locked -p aquilum-core --features screen-damage-lab \
+              --example ak_call04_damage_metrics
+            echo 'AKULA_SCREEN_DAMAGE_TRACE_RUNNER_COMPILES=1'
+          fi
+
       - name: Run full Rust workspace and sync-engine tests
         if: needs.classify.outputs.mode == 'workspace'
         working-directory: aquilum-app
