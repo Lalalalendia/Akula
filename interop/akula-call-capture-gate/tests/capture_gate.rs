@@ -117,3 +117,79 @@ fn mute_or_changed_remote_closes_capture() {
         assert_eq!(count.get(), 1);
     }
 }
+
+#[test]
+fn consent_os_permission_or_policy_revocation_stops_capture_once() {
+    for (consent, os_permission, policy) in [
+        (false, OsPermission::Granted, PeerPolicy::Allowed),
+        (true, OsPermission::Denied, PeerPolicy::Allowed),
+        (true, OsPermission::Granted, PeerPolicy::Revoked),
+    ] {
+        let (call, remote) = active_call();
+        let stopped = Rc::new(Cell::new(0));
+        let mut gate = CaptureGate::open(
+            &call,
+            true,
+            OsPermission::Granted,
+            remote,
+            PeerPolicy::Allowed,
+            [7; 16],
+            || Ok(Fake(Rc::clone(&stopped))),
+        )
+        .unwrap();
+        assert!(matches!(
+            gate.revalidate(&call, consent, os_permission, remote, policy, false),
+            Err(VoiceError::Denied)
+        ));
+        assert!(!gate.active());
+        gate.close();
+        drop(gate);
+        assert_eq!(stopped.get(), 1, "every revoke path stops exactly once");
+    }
+}
+
+#[test]
+fn invalid_peer_or_call_id_never_invokes_capture_factory() {
+    let (call, remote) = active_call();
+    let wrong_peer = CaptureGate::<Fake>::open(
+        &call,
+        true,
+        OsPermission::Granted,
+        peer(3, 3),
+        PeerPolicy::Allowed,
+        [7; 16],
+        || panic!("wrong peer must never open capture"),
+    );
+    assert!(matches!(wrong_peer, Err(VoiceError::WrongPeer)));
+
+    let wrong_call = CaptureGate::<Fake>::open(
+        &call,
+        true,
+        OsPermission::Granted,
+        remote,
+        PeerPolicy::Allowed,
+        [9; 16],
+        || panic!("wrong call must never open capture"),
+    );
+    assert!(matches!(wrong_call, Err(VoiceError::WrongCall)));
+}
+
+#[test]
+fn dropping_authorized_gate_closes_the_device_once() {
+    let (call, remote) = active_call();
+    let stopped = Rc::new(Cell::new(0));
+    {
+        let gate = CaptureGate::open(
+            &call,
+            true,
+            OsPermission::Granted,
+            remote,
+            PeerPolicy::Allowed,
+            [7; 16],
+            || Ok(Fake(Rc::clone(&stopped))),
+        )
+        .unwrap();
+        assert!(gate.active());
+    }
+    assert_eq!(stopped.get(), 1, "Drop must not retain the capture device");
+}
