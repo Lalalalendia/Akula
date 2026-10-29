@@ -10,6 +10,8 @@ impl FileTree {
     pub fn reload(&mut self, root: &mut RenderRoot) {
         self.model.reload_all();
         self.count_notes(Arc::clone(&self.wake));
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        self.request_imported();
         self.refresh(root);
     }
 
@@ -21,8 +23,17 @@ impl FileTree {
 
     pub fn poll(&mut self, root: &mut RenderRoot) {
         let Some(path) = self.model.root() else { return };
-        let Some(counts) = self.counting.poll(path, Arc::clone(&self.wake)) else { return };
-        self.model.set_counts(counts);
-        self.refresh(root);
+        let mut changed = false;
+        if let Some(counts) = self.counting.poll(path, Arc::clone(&self.wake)) {
+            self.model.set_counts(counts);
+            changed = true;
+        }
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        {
+            changed |= self.poll_imported();
+        }
+        if changed {
+            self.refresh(root);
+        }
     }
 }

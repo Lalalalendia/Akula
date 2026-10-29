@@ -51,6 +51,8 @@ pub struct FileTree {
     scroll: Option<Handle<ScrollArea<Flex>>>,
     pinned: Option<Handle<Pinned>>,
     counting: scan::worker::CountScan,
+    #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+    imported: imported::ImportedScan,
     wake: std::sync::Arc<dyn Fn() + Send + Sync>,
     rename: Option<Handle<TextEditor>>,
     store: ExpandedStore,
@@ -82,6 +84,8 @@ impl FileTree {
             scroll: None,
             pinned: None,
             counting: scan::worker::CountScan::default(),
+            #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+            imported: imported::ImportedScan::default(),
             wake: std::sync::Arc::clone(&wake),
             rename: None,
             store,
@@ -90,6 +94,8 @@ impl FileTree {
             toolbar: None,
         };
         tree.count_notes(wake);
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        tree.request_imported();
         tree
     }
 
@@ -131,6 +137,14 @@ impl FileTree {
 
     pub fn paths_changed(&mut self, root: &mut RenderRoot, paths: &[PathBuf]) {
         self.model.refresh_paths(paths);
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        if paths.iter().any(|path| {
+            path.extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("bin"))
+        }) {
+            self.request_imported();
+        }
         self.refresh(root);
     }
 
