@@ -102,7 +102,7 @@
     "inboxPreviewFailed": "Could not safely verify the file for preview.",
     "inboxImport": "Import to Vault (QA)",
     "inboxImporting": "Verifying and importing to the selected registered Vault…",
-    "inboxImported": "Verified Vault copy created. In the active Vault it appears in the P2P QA read-only list, not as an openable note. The Inbox original remains.",
+    "inboxImported": "Copy created in the selected Vault. Once reverified, it appears in that Vault's last-8-imports QA list; switch to that Vault if needed. The Inbox original remains.",
     "inboxVaultCopies": "Imported P2P files (QA, latest 8)",
     "inboxVaultCopiesHint": "Only reverified copies; no open or delete actions in this list.",
     "inboxAuditVerified": "Imported copy reverified",

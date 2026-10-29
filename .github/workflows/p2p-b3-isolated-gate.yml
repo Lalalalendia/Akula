@@ -8,7 +8,11 @@ on:
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
       - 'aquilum-app/core/src/files/gate/mod.rs'
       - 'aquilum-app/native/src/app/transfer/**'
+      - 'aquilum-app/native/src/app/transfer.rs'
       - 'aquilum-app/native/src/ui/transfer/**'
+      - 'aquilum-app/native/src/ui/transfer.rs'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
       - 'aquilum-app/native/src/ui/file_tree/**'
       - 'aquilum-app/native/assets/locales/**'
       - 'modules/drop-inbox-ledger/**'
@@ -70,3 +74,21 @@ jobs:
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::inbox::import::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::file_tree::imported::tests -- --nocapture
           echo 'AKULA_P2P_B3_WINDOWS_QA_PASS installed_default_off=1 copy_only=1'
+
+  one-file-interop:
+    name: B3 with real two-process one-file QUIC on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify exact-head QUIC sender and persistent checked Inbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta real_quic_sender_ignores_unselected_peer_and_admits_expected_peer -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta actual_iroh_native_received_inbox_only_roundtrip_without_user_credentials -- --nocapture

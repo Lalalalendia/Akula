@@ -34,12 +34,17 @@ impl ImportedScan {
         &self.names
     }
 
-    pub(super) fn request(&mut self, vault: PathBuf, wake: Wake) {
+    /// Drop previously verified UI labels immediately when their evidence is stale.
+    /// The asynchronous result is the only way to repopulate the projection.
+    pub(super) fn request(&mut self, vault: PathBuf, wake: Wake) -> bool {
+        let changed = !self.names.is_empty();
+        self.names.clear();
         if self.receiver.is_some() {
             self.pending = true;
         } else {
             self.start(vault, wake);
         }
+        changed
     }
 
     fn start(&mut self, vault: PathBuf, wake: Wake) {
@@ -82,11 +87,12 @@ impl ImportedScan {
 }
 
 impl FileTree {
-    pub(crate) fn request_imported(&mut self) {
-        if let Some(vault) = self.model.root() {
-            self.imported
-                .request(vault.to_path_buf(), Arc::clone(&self.wake));
-        }
+    pub(crate) fn request_imported(&mut self) -> bool {
+        let Some(vault) = self.model.root() else {
+            return false;
+        };
+        self.imported
+            .request(vault.to_path_buf(), Arc::clone(&self.wake))
     }
 
     pub(super) fn poll_imported(&mut self) -> bool {
@@ -194,6 +200,21 @@ mod tests {
         fs::write(&target, b"modified after import").unwrap();
         assert!(verified_names(&vault, &inbox).is_empty());
         assert_eq!(fs::read(&original).unwrap(), bytes);
+    }
+
+    #[test]
+    fn recheck_hides_cached_labels_before_worker_completes() {
+        let (_sender, receiver) = mpsc::channel();
+        let root = tempfile::tempdir().unwrap();
+        let mut scan = ImportedScan {
+            names: vec!["received-old.bin".into()],
+            receiver: Some(receiver),
+            pending: false,
+        };
+        assert!(scan.request(root.path().to_path_buf(), Arc::new(|| {})));
+        assert!(scan.names().is_empty());
+        assert!(scan.pending);
+        assert!(scan.receiver.is_some());
     }
 
     #[test]
