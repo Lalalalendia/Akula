@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - integration/p2p-b3-filegate-20261029
+      - integration/p2p-b3-main-qa-20261029
     paths:
       - 'aquilum-app/core/src/p2p_inbox_lab/**'
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
