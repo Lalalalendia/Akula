@@ -4,9 +4,8 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'aquilum-app/native/src/app/tests/reader/quotes.rs'
+      # Opt-in UI journey: no new automatic fanout on existing source owners.
       - 'aquilum-app/native/src/app/tests/reader/quotes/journey.rs'
-      - 'aquilum-app/native/src/app/tests/reader/mod.rs'
       - '.github/workflows/book-quote-user-journey.yml'
   workflow_dispatch:
 
@@ -14,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: akula-book-quote-journey-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
