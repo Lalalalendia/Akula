@@ -222,3 +222,30 @@ fn ime_multiline_selection_nonempty_commit_is_single_undoable_replacement() {
     command_key(&mut root, "y");
     assert_eq!(text(&root), expected, "Redo restores exactly one committed replacement");
 }
+
+#[test]
+fn ime_window_blur_does_not_delete_selected_unicode_or_create_history() {
+    let original = "доверие 🍀\n日本語 и кириллица";
+    let start = original.find("🍀").unwrap();
+    let end = original.find(" и кириллица").unwrap();
+    let mut root = root(original);
+    let id = super::support::editor_id(&root);
+    root.edit_widget(id, |mut widget| {
+        TextEditor::select_byte_range(&mut widget.downcast(), start, end);
+    });
+    let _ = root.redraw();
+
+    ime(&mut root, Ime::Enabled);
+    ime(&mut root, Ime::Preedit("に".into(), Some((3, 3))));
+    root.handle_text_event(TextEvent::WindowFocusChange(false));
+    let _ = root.redraw();
+    assert_eq!(text(&root), original);
+    assert_eq!(selected(&root), original[start..end]);
+    root.focus_on(None);
+    let _ = root.redraw();
+    root.focus_on(Some(id));
+    let _ = root.redraw();
+    assert_eq!(text(&root), original);
+    command_key(&mut root, "z");
+    assert_eq!(text(&root), original, "losing focus during preedit must not add Undo history");
+}

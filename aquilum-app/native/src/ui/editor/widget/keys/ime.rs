@@ -39,3 +39,52 @@ impl TextEditor {
         }
     }
 }
+
+impl TextEditor {
+    /// Blur cancels transient composition without touching document bytes or Undo.
+    pub(in crate::ui::editor::widget) fn cancel_transient_ime(&mut self) -> bool {
+        if self.compose.take().is_none() {
+            return false;
+        }
+        let selection = self.selection();
+        self.doc.invalidate(selection.start);
+        if self.focus != selection.start {
+            self.doc.invalidate(self.focus);
+        }
+        true
+    }
+
+    pub(in crate::ui::editor::widget) fn blur_editor(&mut self) {
+        self.hide_suggest();
+        self.cancel_transient_ime();
+    }
+
+    pub(in crate::ui::editor::widget) fn handle_window_focus_change(&mut self, ctx: &mut EventCtx<'_>, focused: bool) {
+        if !focused && self.cancel_transient_ime() {
+            ctx.request_layout();
+        }
+        ctx.request_render();
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+
+    #[test]
+    fn blurring_ime_clears_only_transient_preedit_and_never_changes_selected_unicode() {
+        let original = "до 世界 после";
+        let mut editor = TextEditor::new(original);
+        let start = original.find("世界").unwrap();
+        let end = start + "世界".len();
+        editor.anchor = end;
+        editor.focus = start;
+        editor.compose = Some(("日本".into(), Some((6, 6))));
+        assert!(editor.cancel_transient_ime());
+        assert!(editor.compose.is_none());
+        assert_eq!(editor.doc.copy(start..end), "世界");
+        assert_eq!(editor.selection(), start..end);
+        assert!(!editor.cancel_transient_ime(), "repeated blur must be idempotent");
+        assert_eq!(editor.text(), original);
+    }
+}

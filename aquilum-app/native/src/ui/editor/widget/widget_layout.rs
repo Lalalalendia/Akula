@@ -21,7 +21,7 @@ impl TextEditor {
                 if *focused {
                     self.reset_blink();
                 } else {
-                    self.hide_suggest();
+                    self.blur_editor();
                 }
                 ctx.request_layout();
                 ctx.request_render();
