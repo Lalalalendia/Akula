@@ -1,0 +1,36 @@
+name: AKAI-HOST-FASTPATH-V1a - real scoped HTTP read fixture
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/mcp/server.rs"
+      - "aquilum-app/core/src/mcp/protocol.rs"
+      - "aquilum-app/core/src/mcp/agent_scoped_read.rs"
+      - ".github/workflows/akai-host-fastpath-v1a-http.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scoped-http:
+    name: Real scoped MCP read and revoke - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact PR commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Stable Rust compiler
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Rustfmt workspace
+        run: cargo fmt --manifest-path aquilum-app/Cargo.toml --all -- --check
+      - name: Two agents X/Y, real HTTP, deny and revoke
+        run: cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core scoped_host_v1_real_http_two_agents_read_and_revoke -- --nocapture
