@@ -216,6 +216,49 @@ mod tests {
     }
 
     #[test]
+    fn disposable_witness_rejects_invalid_kernel_identity_fields() {
+        let id = Uuid::new_v4();
+        let bytes = 12;
+        let digest = [77; 32];
+        assert!(RemovalDispositionWitness::for_disposable_lab(
+            Uuid::nil(),
+            bytes,
+            digest,
+            1,
+            2,
+            1,
+        )
+        .is_err());
+        assert!(RemovalDispositionWitness::for_disposable_lab(
+            id,
+            bytes,
+            digest,
+            0,
+            2,
+            1,
+        )
+        .is_err());
+        assert!(RemovalDispositionWitness::for_disposable_lab(
+            id,
+            bytes,
+            digest,
+            1,
+            0,
+            1,
+        )
+        .is_err());
+        assert!(RemovalDispositionWitness::for_disposable_lab(
+            id,
+            bytes,
+            digest,
+            1,
+            2,
+            2,
+        )
+        .is_err());
+    }
+
+    #[test]
     fn durable_request_never_unlinks_and_requires_explicit_finish() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("inbox");
@@ -251,7 +294,12 @@ mod tests {
         );
         assert!(ledger.open_verified_file(intent.id).is_err());
         let premature = RemovalDispositionWitness::for_disposable_lab(
-            intent.id, intent.bytes, intent.blake3, 1, 2, 1,
+            intent.id,
+            intent.bytes,
+            intent.blake3,
+            1,
+            2,
+            1,
         )
         .unwrap();
         assert!(ledger.finish_removal(intent.id, premature).is_err());
@@ -272,12 +320,22 @@ mod tests {
         // Synthetic fixture evidence tests the SQLite contract only; no
         // claim of actual OS disposition is made by this isolated unit test.
         let wrong_id = RemovalDispositionWitness::for_disposable_lab(
-            Uuid::new_v4(), intent.bytes, intent.blake3, 1, 2, 1,
+            Uuid::new_v4(),
+            intent.bytes,
+            intent.blake3,
+            1,
+            2,
+            1,
         )
         .unwrap();
         assert!(ledger.finish_removal(intent.id, wrong_id).is_err());
         let wrong_hash = RemovalDispositionWitness::for_disposable_lab(
-            intent.id, intent.bytes, [91; 32], 1, 2, 1,
+            intent.id,
+            intent.bytes,
+            [91; 32],
+            1,
+            2,
+            1,
         )
         .unwrap();
         assert!(ledger.finish_removal(intent.id, wrong_hash).is_err());
@@ -286,12 +344,22 @@ mod tests {
             RemovalAuditStatus::NeedsReview
         );
         let witnessed = RemovalDispositionWitness::for_disposable_lab(
-            intent.id, intent.bytes, intent.blake3, 1, 2, 1,
+            intent.id,
+            intent.bytes,
+            intent.blake3,
+            1,
+            2,
+            1,
         )
         .unwrap();
         ledger.finish_removal(intent.id, witnessed).unwrap();
         let duplicate = RemovalDispositionWitness::for_disposable_lab(
-            intent.id, intent.bytes, intent.blake3, 1, 2, 1,
+            intent.id,
+            intent.bytes,
+            intent.blake3,
+            1,
+            2,
+            1,
         )
         .unwrap();
         assert!(ledger.finish_removal(intent.id, duplicate).is_err());

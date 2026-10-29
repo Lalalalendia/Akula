@@ -17,6 +17,16 @@ const REPARSE_ATTRIBUTE: u32 = 0x0000_0400;
 const FILE_DISPOSITION_INFO: u32 = 4;
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 
+/// The directories and SQLite pathname must remain the same OS objects
+/// from consent through the root-relative disposition. This is only an
+/// in-process Windows fixture guard, not an OS-authenticated SQLite connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PinnedInboxIdentity {
+    root: (u32, u64),
+    objects: (u32, u64),
+    database: (u32, u64),
+}
+
 #[link(name = "kernel32")]
 extern "system" {
     fn SetFileInformationByHandle(
@@ -34,7 +44,8 @@ fn delete_disposable_fixture(
     expected_bytes: u64,
     expected_hash: [u8; 32],
 ) -> Result<(), VaultPortError> {
-    delete_disposable_fixture_matching(root, id, expected_bytes, expected_hash, None).map(|_| ())
+    delete_disposable_fixture_matching(root, id, expected_bytes, expected_hash, None, None)
+        .map(|_| ())
 }
 
 /// Require the OS identity of the independently verified Ledger file as well
@@ -45,12 +56,23 @@ fn delete_disposable_fixture_matching(
     expected_bytes: u64,
     expected_hash: [u8; 32],
     ledger_identity: Option<(u32, u64, u32)>,
+    expected_custody: Option<PinnedInboxIdentity>,
 ) -> Result<(u32, u64, u32), VaultPortError> {
     if id.is_nil() || expected_bytes == 0 || expected_bytes > MAX_BYTES || expected_hash == [0; 32]
     {
         return Err(VaultPortError::UnsafePath);
     }
-    let (_root_handle, objects, _db_handle) = super::pin_p2p_read_snapshot(root)?;
+    let (root_guard, objects, database_guard) = super::pin_p2p_read_snapshot(root)?;
+    if let Some(expected) = expected_custody {
+        let now = PinnedInboxIdentity {
+            root: pinned_windows::file_identity(&root_guard)?,
+            objects: pinned_windows::file_identity(&objects)?,
+            database: pinned_windows::file_identity(&database_guard)?,
+        };
+        if now != expected {
+            return Err(VaultPortError::FileChanged);
+        }
+    }
     let name = format!("{}.blob", id.hyphenated());
     // Stable directory-relative witness; no sender-controlled path.
     let witness = pinned_windows::open_child(&objects, &name, true)?;
@@ -164,6 +186,20 @@ fn delete_after_explicit_consent(
     if ledger.object_path(selected_id) != root.join("objects").join(&name) {
         return Err("ledger does not own selected Inbox root".into());
     }
+    // Capture the Inbox root, objects directory and database pathname before
+    // committing intent. Keep all three handles live until disposition returns;
+    // their OS identities must still match when DELETE is attempted.
+    let (root_guard, objects_guard, database_guard) =
+        super::pin_p2p_read_snapshot(root)
+            .map_err(|e| format!("pinned Inbox custody failed: {e:?}"))?;
+    let custody = PinnedInboxIdentity {
+        root: pinned_windows::file_identity(&root_guard)
+            .map_err(|e| format!("root identity failed: {e:?}"))?,
+        objects: pinned_windows::file_identity(&objects_guard)
+            .map_err(|e| format!("objects identity failed: {e:?}"))?,
+        database: pinned_windows::file_identity(&database_guard)
+            .map_err(|e| format!("database identity failed: {e:?}"))?,
+    };
     // Capture the verified opened object and its OS identity before consuming
     // the one-shot intent. Size/hash alone cannot detect an identical swap.
     let (file, receipt) = ledger
@@ -193,6 +229,7 @@ fn delete_after_explicit_consent(
         receipt.bytes,
         receipt.blake3,
         Some(original_identity),
+        Some(custody),
     )
     .map_err(|e| format!("same-HANDLE disposition refused: {e:?}"))?;
     if cut == CrashCut::AfterDisposition {
@@ -313,6 +350,9 @@ mod tests {
             || {},
         )
         .is_err());
+        drop(ledger);
+        let cold = InboxLedger::open_existing(&root).unwrap().unwrap();
+        assert_eq!(cold.removal_status(id).unwrap(), RemovalAuditStatus::Removed);
     }
 
     #[test]
@@ -388,6 +428,97 @@ mod tests {
             ledger.removal_status(id).unwrap(),
             RemovalAuditStatus::Requested
         );
+    }
+
+    #[test]
+    fn swapped_objects_directory_with_identical_bytes_is_not_deleted() {
+        let bytes = b"directory swap with identical verified bytes";
+        let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
+        let id = receipt.id;
+        let old_objects = root.join("objects");
+        let preserved = root.join("original-objects");
+        let injected = root.join("replacement-objects");
+        fs::create_dir(&injected).unwrap();
+        let name = format!("{}.blob", id.hyphenated());
+        fs::write(injected.join(&name), bytes).unwrap();
+
+        let result = delete_after_explicit_consent(
+            &ledger,
+            &root,
+            id,
+            Some(confirmation(&receipt)),
+            CrashCut::None,
+            || {
+                fs::rename(&old_objects, &preserved).unwrap();
+                fs::rename(&injected, &old_objects).unwrap();
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read(preserved.join(&name)).unwrap(), bytes);
+        assert_eq!(fs::read(old_objects.join(&name)).unwrap(), bytes);
+        assert_eq!(
+            ledger.removal_status(id).unwrap(),
+            RemovalAuditStatus::Requested
+        );
+    }
+
+    #[test]
+    fn exclusive_open_after_request_blocks_windows_delete_and_cold_retry() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let bytes = b"exclusive sharing violation after SQLite CAS";
+        let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
+        let id = receipt.id;
+        let leaf = ledger.object_path(id);
+        let mut exclusive = None;
+
+        let result = delete_after_explicit_consent(
+            &ledger,
+            &root,
+            id,
+            Some(confirmation(&receipt)),
+            CrashCut::None,
+            || {
+                exclusive = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .share_mode(0)
+                        .open(&leaf)
+                        .unwrap(),
+                );
+            },
+        );
+        assert!(result.is_err());
+        drop(exclusive);
+        assert_eq!(fs::read(&leaf).unwrap(), bytes);
+        drop(ledger);
+        let cold = InboxLedger::open_existing(&root).unwrap().unwrap();
+        assert_eq!(
+            cold.removal_status(id).unwrap(),
+            RemovalAuditStatus::Requested
+        );
+        assert!(cold.open_verified_file(id).is_err());
+        assert_eq!(fs::read(cold.object_path(id)).unwrap(), bytes);
+    }
+
+    #[test]
+    fn wrong_inbox_root_rejects_confirmation_before_sqlite_request() {
+        let bytes = b"wrong authorized root";
+        let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
+        let wrong_root = root.join("other-inbox");
+        assert!(delete_after_explicit_consent(
+            &ledger,
+            &wrong_root,
+            receipt.id,
+            Some(confirmation(&receipt)),
+            CrashCut::None,
+            || {},
+        )
+        .is_err());
+        assert_eq!(
+            ledger.removal_status(receipt.id).unwrap(),
+            RemovalAuditStatus::Available
+        );
+        assert_eq!(fs::read(ledger.object_path(receipt.id)).unwrap(), bytes);
     }
 
     #[test]

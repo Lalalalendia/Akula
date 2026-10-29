@@ -45,6 +45,15 @@ volume/file-index/link count must match the DELETE-capable OS handle.
 Failure injection covers after-request and after-disposition crash windows,
 identical-byte object swapping, consent refusal, duplicate grants and
 independent SQLite connections racing to remove a disposable object.
+The Windows Core lab now pins and records the OS identities of the Inbox root,
+objects directory, and SQLite pathname before consuming removal intent;
+all three must still match before DELETE-capable open. New negative tests
+exercise an entire objects-directory swap with byte-identical replacement,
+a real exclusive-open Windows sharing denial after SQLite CAS, wrong Inbox
+root, and cold reopen after a successful completion. Failed operations
+preserve user bytes and remain one-shot Requested rather than auto-retrying.
+This is not proof of custody of SQLite's own connection handle or NTFS
+power-loss resilience.
 
 These tests do not establish power-loss durability or hostile SQLite
 replacement protection. The Ledger now requires an opaque
