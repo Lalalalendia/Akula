@@ -6,7 +6,10 @@ on:
     paths:
       - 'aquilum-app/core/src/p2p_inbox_lab/**'
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
-      - 'aquilum-app/core/src/files/gate/mod.rs'
+      - 'aquilum-app/core/src/files/gate/**'
+      - 'aquilum-app/core/src/files/workspace.rs'
+      - 'aquilum-app/core/src/p2p_offer_lab.rs'
+      - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/core/src/files/watcher/**'
       - 'aquilum-app/native/src/app/transfer/**'
       - 'aquilum-app/native/src/app/transfer.rs'
@@ -18,6 +21,7 @@ on:
       - 'aquilum-app/native/src/ui/file_tree/**'
       - 'aquilum-app/native/assets/locales/**'
       - 'modules/drop-inbox-ledger/**'
+      - 'interop/akula-staya/**'
       - '.github/workflows/p2p-b3-isolated-gate.yml'
   workflow_dispatch:
 
