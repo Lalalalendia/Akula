@@ -18,6 +18,8 @@ pub mod node_v1_runtime;
 pub mod roster_observation_lab;
 #[cfg(feature = "sender-arm-lab")]
 pub mod sender_arm_lab;
+#[cfg(feature = "call-voice-codec-lab")]
+pub mod call_voice_codec_lab;
 
 use staya_transfer::{
     ContentId, Manifest,

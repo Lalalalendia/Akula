@@ -49,6 +49,18 @@ jobs:
       - name: Compile and test actual Akula and Staya queue linkage
         shell: bash
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features sender-arm-lab,p2p-live-identity --lib -- --nocapture
+      # Real bundled libopus over the default-OFF Akula jitter wire, on BOTH OS.
+      # Pure synthetic PCM; no device, recording, calls transport or permissions.
+      - name: AK-CALL-02 real Opus encode-decode and packet-loss PLC laboratory
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path interop/akula-staya/Cargo.toml \
+            --features call-voice-codec-lab --test call_voice_opus_codec \
+            -- --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-call-voice-codec.log"
+          grep -Fq 'test result: ok. 5 passed; 0 failed;' \
+            "$RUNNER_TEMP/akula-call-voice-codec.log"
+          echo 'AKULA_CALL_VOICE_OPUS_CODEC_PASS five_real_codec_tests=1'
       - name: Rust formatting for exact opt-in inbox Core
         shell: bash
         run: rustfmt --edition 2021 --check aquilum-app/core/src/p2p_inbox_lab.rs
