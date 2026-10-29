@@ -1,0 +1,184 @@
+//! Legacy Windows text files must be viewable without changing their bytes.
+//! Editable notes still require valid UTF-8; transcoding silently on save
+//! would destroy the original encoding and is deliberately not permitted.
+use std::fs::{self, File};
+use std::io::Read;
+use std::path::Path;
+
+use aquilum_core::files::error::FileCommandError;
+use masonry::core::NewWidget;
+use masonry::properties::types::CrossAxisAlignment;
+use masonry::widgets::Flex;
+
+use super::*;
+use crate::ui::scroll::ScrollArea;
+use crate::ui::widgets::{Font, Label, Leading};
+
+const MAX_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
+
+fn utf16(bytes: &[u8], little_endian: bool) -> Result<String, String> {
+    if bytes.len() % 2 != 0 {
+        return Err("Неполный символ UTF-16 в TXT".into());
+    }
+    let words = bytes.chunks_exact(2).map(|pair| {
+        if little_endian { u16::from_le_bytes([pair[0], pair[1]]) }
+        else { u16::from_be_bytes([pair[0], pair[1]]) }
+    }).collect::<Vec<_>>();
+    String::from_utf16(&words).map_err(|_| "Повреждённая последовательность UTF-16".to_owned())
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetACP() -> u32;
+    fn MultiByteToWideChar(page: u32, flags: u32, source: *const u8, size: i32, target: *mut u16, capacity: i32) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+fn ansi(bytes: &[u8]) -> Result<(String, String), String> {
+    // GetACP and MultiByteToWideChar exist on Windows 7. The user's active
+    // ANSI page may be 1251, 1252, 932, etc.; do not assume it is Cyrillic.
+    let page = unsafe { GetACP() };
+    let size = i32::try_from(bytes.len()).map_err(|_| "Слишком большой ANSI TXT".to_owned())?;
+    let count = unsafe { MultiByteToWideChar(page, 0x00000008, bytes.as_ptr(), size, std::ptr::null_mut(), 0) };
+    if count <= 0 {
+        return Err(format!("ANSI (кодовая страница Windows {page}) не декодирован"));
+    }
+    let mut decoded = vec![0u16; count as usize];
+    let written = unsafe { MultiByteToWideChar(page, 0x00000008, bytes.as_ptr(), size, decoded.as_mut_ptr(), count) };
+    if written != count {
+        return Err("TXT изменился при декодировании ANSI".to_owned());
+    }
+    let text = String::from_utf16(&decoded).map_err(|_| "Недопустимые символы ANSI".to_owned())?;
+    Ok((text, format!("Windows ANSI ({page})")))
+}
+
+fn decode(bytes: &[u8]) -> Result<(String, String), String> {
+    if let Some(body) = bytes.strip_prefix(&[0xff, 0xfe]) {
+        return utf16(body, true).map(|text| (text, "UTF-16 LE".to_owned()));
+    }
+    if let Some(body) = bytes.strip_prefix(&[0xfe, 0xff]) {
+        return utf16(body, false).map(|text| (text, "UTF-16 BE".to_owned()));
+    }
+    // A BOM-less UTF-16 or arbitrary binary file is ambiguous. Never feed
+    // embedded NULs to a legacy ANSI decoder and display arbitrary garbage.
+    if bytes.contains(&0) {
+        return Err("TXT содержит нулевые байты без BOM UTF-16; кодировка неизвестна".into());
+    }
+    #[cfg(target_os = "windows")]
+    { ansi(bytes) }
+    #[cfg(not(target_os = "windows"))]
+    { Err("Кодировка TXT неизвестна: файл не является UTF-8/UTF-16".into()) }
+}
+
+fn read_legacy(vault: &Path, path: &Path) -> Result<(String, String), String> {
+    let canonical_vault = fs::canonicalize(vault).map_err(|error| error.to_string())?;
+    let canonical_path = fs::canonicalize(path).map_err(|error| error.to_string())?;
+    if !canonical_path.starts_with(&canonical_vault) {
+        return Err("TXT находится за пределами хранилища".into());
+    }
+    let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("TXT не является обычным файлом".into());
+    }
+    if metadata.len() > MAX_PREVIEW_BYTES {
+        return Err("Старый TXT больше 2 МиБ; просмотр без преобразования ограничен".into());
+    }
+    let mut bytes = Vec::new();
+    File::open(path).map_err(|error| error.to_string())?
+        .take(MAX_PREVIEW_BYTES + 1).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_PREVIEW_BYTES {
+        return Err("TXT вырос во время чтения, превышен лимит 2 МиБ".into());
+    }
+    decode(&bytes)
+}
+
+impl App {
+    pub(super) fn show_txt_or_open_error(&mut self, root: &mut RenderRoot, path: &Path, error: FileCommandError) {
+        let reason = if is_plain_text(path) && matches!(error, FileCommandError::InvalidUtf8 { .. }) {
+            match self.show_legacy_txt(root, path) {
+                Ok(()) => return,
+                Err(legacy) => format!("{error}; {legacy}"),
+            }
+        } else {
+            error.to_string()
+        };
+        report!("заметка {} не прочитана: {reason}", path.display());
+        self.open_error = Some((path.to_path_buf(), reason.clone()));
+        self.show_open_error(root, path, &reason);
+    }
+
+    fn show_legacy_txt(&mut self, root: &mut RenderRoot, path: &Path) -> Result<(), String> {
+        let vault = self.tree.root().ok_or_else(|| "Хранилище Akula не выбрано".to_owned())?;
+        let (body, encoding) = read_legacy(vault, path)?;
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let heading = NewWidget::new(crate::ui::widgets::Caption::new(&format!(
+            "{name} — {encoding}, только чтение (исходный файл не изменён)"
+        )));
+        let body = NewWidget::new(Label::new(&body, |theme| theme.text_primary)
+            .font(Font::Editor).leading(Leading::Editor).selectable());
+        let column = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch)
+            .with_fixed(heading).with_fixed(body);
+        let page = NewWidget::new(ScrollArea::new(NewWidget::new(column)));
+        self.note = None;
+        self.note_ids = None;
+        self.embeds = None;
+        self.open_error = None;
+        self.open_error_ids = None;
+        self.text = crop::Rope::new();
+        if let Some(chrome) = &self.chrome {
+            chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
+        }
+        report!("TXT {} открыт только для чтения ({encoding})", path.display());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf16_bom_is_decoded_without_losing_unicode() {
+        let original = "Привет Windows 7 🐈\r\nстрока";
+        let mut little = vec![0xff, 0xfe];
+        let mut big = vec![0xfe, 0xff];
+        for word in original.encode_utf16() {
+            little.extend_from_slice(&word.to_le_bytes());
+            big.extend_from_slice(&word.to_be_bytes());
+        }
+        assert_eq!(decode(&little).unwrap().0, original);
+        assert_eq!(decode(&big).unwrap().0, original);
+    }
+
+    #[test]
+    fn reject_truncated_utf16_and_binary_without_bom() {
+        assert!(decode(&[0xff, 0xfe, 0x10]).is_err());
+        assert!(decode(&[0xff, 0xfe, 0x00, 0xd8]).is_err());
+        assert!(decode(&[0x41, 0, 0x42, 0]).is_err());
+    }
+
+    #[test]
+    fn preview_does_not_write_or_follow_out_of_vault_paths() {
+        let vault = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let path = vault.path().join("старый.TXT");
+        let bytes = vec![0xff, 0xfe, 0x1f, 0x04, 0x40, 0x04];
+        fs::write(&path, &bytes).unwrap();
+        let (text, kind) = read_legacy(vault.path(), &path).unwrap();
+        assert_eq!(text, "Пр");
+        assert_eq!(kind, "UTF-16 LE");
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert!(read_legacy(external.path(), &path).is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows7_active_ansi_codepage_can_decode_a_legacy_txt() {
+        let original = [b'A', 0xc0, b'\r', b'\n'];
+        let (decoded, kind) = decode(&original).unwrap();
+        assert!(decoded.starts_with('A'));
+        assert!(decoded.ends_with("\r\n"));
+        assert!(kind.starts_with("Windows ANSI ("));
+    }
+}
