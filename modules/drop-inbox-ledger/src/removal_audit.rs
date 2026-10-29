@@ -220,42 +220,19 @@ mod tests {
         let id = Uuid::new_v4();
         let bytes = 12;
         let digest = [77; 32];
-        assert!(RemovalDispositionWitness::for_disposable_lab(
-            Uuid::nil(),
-            bytes,
-            digest,
-            1,
-            2,
-            1,
-        )
-        .is_err());
-        assert!(RemovalDispositionWitness::for_disposable_lab(
-            id,
-            bytes,
-            digest,
-            0,
-            2,
-            1,
-        )
-        .is_err());
-        assert!(RemovalDispositionWitness::for_disposable_lab(
-            id,
-            bytes,
-            digest,
-            1,
-            0,
-            1,
-        )
-        .is_err());
-        assert!(RemovalDispositionWitness::for_disposable_lab(
-            id,
-            bytes,
-            digest,
-            1,
-            2,
-            2,
-        )
-        .is_err());
+        assert!(
+            RemovalDispositionWitness::for_disposable_lab(Uuid::nil(), bytes, digest, 1, 2, 1,)
+                .is_err()
+        );
+        assert!(
+            RemovalDispositionWitness::for_disposable_lab(id, bytes, digest, 0, 2, 1,).is_err()
+        );
+        assert!(
+            RemovalDispositionWitness::for_disposable_lab(id, bytes, digest, 1, 0, 1,).is_err()
+        );
+        assert!(
+            RemovalDispositionWitness::for_disposable_lab(id, bytes, digest, 1, 2, 2,).is_err()
+        );
     }
 
     #[test]
