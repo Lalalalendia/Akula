@@ -1,11 +1,7 @@
 name: HTML title parser paired benchmark (diagnostic only)
 
 on:
-  pull_request:
-    paths:
-      - 'aquilum-app/core/src/link_title/**'
-      - 'aquilum-app/core/tests/link_title_legacy_equivalence.rs'
-      - '.github/workflows/link-title-benchmark.yml'
+  # Diagnostic-only benchmark: manual runs avoid adding production paths to CI fanout.
   workflow_dispatch:
 
 permissions:
