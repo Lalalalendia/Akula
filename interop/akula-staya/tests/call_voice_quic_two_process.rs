@@ -199,7 +199,108 @@ async fn accept_peer(endpoint: &Endpoint, expected: EndpointId) -> iroh::endpoin
     connection
 }
 
-async fn server(negative: bool) {
+
+async fn server_unreliable_datagram(
+    connection: &iroh::endpoint::Connection,
+    call_id: [u8; 16],
+) {
+    let remote = peer(1, connection.remote_id());
+    let wire = tokio::time::timeout(DEADLINE, connection.read_datagram())
+        .await
+        .expect("unreliable Opus arrival timeout")
+        .expect("read encrypted QUIC datagram");
+    let mut receiver = OpusVoiceReceiver::new(call_id, remote).unwrap();
+    receiver
+        .receive(&wire, remote, PeerPolicy::Allowed, 100)
+        .expect("bound datagram for independently selected peer and call");
+    assert!(matches!(
+        receiver.poll(160).expect("decode real Opus"),
+        DecodedAudio::Pcm {
+            concealed: false,
+            ..
+        }
+    ));
+    receiver.close();
+
+    let mut sender = OpusVoiceSender::new(call_id, 0).unwrap();
+    sender.set_muted(false).expect("test controller synthetic audio");
+    let reply = sender
+        .encode_frame(&pcm_frame(2, 0))
+        .expect("real Opus encoding for QUIC datagram");
+    let max = connection
+        .max_datagram_size()
+        .expect("peer must negotiate QUIC DATAGRAM capability");
+    assert!(reply.len() <= max, "do not fragment time-critical voice");
+    connection
+        .send_datagram(reply.into())
+        .expect("queue one bounded encrypted reply datagram");
+
+    // Reliable acknowledgement only coordinates the TEST. Voice itself uses
+    // one unreliable, unordered QUIC DATAGRAM in each direction.
+    let (mut ack_send, mut ack_receive) = tokio::time::timeout(DEADLINE, connection.accept_bi())
+        .await
+        .expect("test acknowledgement deadline")
+        .expect("test acknowledgement stream");
+    let ack = tokio::time::timeout(DEADLINE, ack_receive.read_to_end(64))
+        .await
+        .expect("test acknowledgement read deadline")
+        .expect("bounded test acknowledgement");
+    assert_eq!(ack, b"VOICE_DATAGRAM_RECEIVED");
+    ack_send.write_all(b"DGRAM_DONE").await.unwrap();
+    ack_send.finish().unwrap();
+    tokio::time::timeout(DEADLINE, ack_send.stopped())
+        .await
+        .expect("acknowledgement delivery deadline")
+        .expect("acknowledgement completed");
+}
+
+async fn client_unreliable_datagram(
+    connection: &iroh::endpoint::Connection,
+    call_id: [u8; 16],
+) {
+    let mut sender = OpusVoiceSender::new(call_id, 0).unwrap();
+    sender.set_muted(false).expect("test controller synthetic audio");
+    let wire = sender
+        .encode_frame(&pcm_frame(1, 0))
+        .expect("real Opus encoding for QUIC datagram");
+    let max = connection
+        .max_datagram_size()
+        .expect("peer must negotiate QUIC DATAGRAM capability");
+    assert!(wire.len() <= max, "do not fragment time-critical voice");
+    connection
+        .send_datagram(wire.into())
+        .expect("queue one bounded encrypted Opus datagram");
+    let response = tokio::time::timeout(DEADLINE, connection.read_datagram())
+        .await
+        .expect("reply datagram arrival timeout")
+        .expect("read encrypted Opus response datagram");
+    let remote = peer(2, connection.remote_id());
+    let mut receiver = OpusVoiceReceiver::new(call_id, remote).unwrap();
+    receiver
+        .receive(&response, remote, PeerPolicy::Allowed, 100)
+        .expect("authenticated reply bound to selected call");
+    assert!(matches!(
+        receiver.poll(160).expect("decode returned Opus"),
+        DecodedAudio::Pcm {
+            concealed: false,
+            ..
+        }
+    ));
+    receiver.close();
+    let (mut ack_send, mut ack_receive) = tokio::time::timeout(DEADLINE, connection.open_bi())
+        .await
+        .expect("test acknowledgement stream deadline")
+        .expect("test acknowledgement stream");
+    ack_send.write_all(b"VOICE_DATAGRAM_RECEIVED").await.unwrap();
+    ack_send.finish().unwrap();
+    let ack = tokio::time::timeout(DEADLINE, ack_receive.read_to_end(64))
+        .await
+        .expect("test acknowledgement deadline")
+        .expect("bounded test acknowledgement");
+    assert_eq!(ack, b"DGRAM_DONE");
+}
+
+async fn server(negative: bool, datagrams: bool) {
     let endpoint = new_endpoint().await;
     let socket = endpoint
         .bound_sockets()
@@ -227,6 +328,13 @@ async fn server(negative: bool) {
     let call_id = supplied_call(parts[2]);
 
     let connection = accept_peer(&endpoint, expected).await;
+    if datagrams {
+        server_unreliable_datagram(&connection, call_id).await;
+        println!("CHILD_PASS server encrypted_quic=1 real_opus=1 datagram=1");
+        connection.close(0u8.into(), b"unreliable synthetic voice smoke complete");
+        endpoint.close().await;
+        return;
+    }
     let (mut reply, mut receive) = tokio::time::timeout(DEADLINE, connection.accept_bi())
         .await
         .expect("media bi-stream timeout")
@@ -262,7 +370,7 @@ async fn server(negative: bool) {
     endpoint.close().await;
 }
 
-async fn client(negative: bool) {
+async fn client(negative: bool, datagrams: bool) {
     let endpoint = new_endpoint().await;
     println!("READY {}", endpoint.id());
     std::io::stdout().flush().expect("flush READY");
@@ -280,6 +388,13 @@ async fn client(negative: bool) {
         .expect("direct connection deadline")
         .expect("TLS/QUIC connection");
     assert_eq!(connection.remote_id(), expected, "wrong remote TLS key");
+    if datagrams {
+        client_unreliable_datagram(&connection, call_id).await;
+        println!("CHILD_PASS client encrypted_quic=1 real_opus=1 datagram=1");
+        connection.close(0u8.into(), b"unreliable synthetic voice smoke complete");
+        endpoint.close().await;
+        return;
+    }
     let (mut send, mut response) = tokio::time::timeout(DEADLINE, connection.open_bi())
         .await
         .expect("media send stream deadline")
@@ -377,12 +492,12 @@ impl Drop for Process {
     }
 }
 
-fn two_processes(test_name: &str, negative: bool) {
+fn two_processes(test_name: &str, negative: bool, datagrams: bool) {
     match std::env::var("AKULA_VOICE_QUIC_CHILD").as_deref() {
         Ok("server") => {
             let runtime = tokio::runtime::Runtime::new().expect("Tokio multi-thread runtime");
             runtime.block_on(async {
-                tokio::time::timeout(WAIT, server(negative))
+                tokio::time::timeout(WAIT, server(negative, datagrams))
                     .await
                     .expect("server overall deadline");
             });
@@ -391,7 +506,7 @@ fn two_processes(test_name: &str, negative: bool) {
         Ok("client") => {
             let runtime = tokio::runtime::Runtime::new().expect("Tokio multi-thread runtime");
             runtime.block_on(async {
-                tokio::time::timeout(WAIT, client(negative))
+                tokio::time::timeout(WAIT, client(negative, datagrams))
                     .await
                     .expect("client overall deadline");
             });
@@ -425,16 +540,21 @@ fn two_processes(test_name: &str, negative: bool) {
     );
     server.completed();
     client.completed();
-    println!(
-        "AKULA_CALL_VOICE_TWO_PROCESS_PASS actual_quic=1 actual_libopus=1 negative={}",
-        u8::from(negative)
-    );
+    if datagrams {
+        println!("AKULA_CALL_VOICE_DATAGRAM_TWO_PROCESS_PASS actual_quic=1 actual_libopus=1");
+    } else {
+        println!(
+            "AKULA_CALL_VOICE_TWO_PROCESS_PASS actual_quic=1 actual_libopus=1 negative={}",
+            u8::from(negative)
+        );
+    }
 }
 
 #[test]
 fn two_os_processes_exchange_synthetic_opus_in_both_directions() {
     two_processes(
         "two_os_processes_exchange_synthetic_opus_in_both_directions",
+        false,
         false,
     );
 }
@@ -443,6 +563,16 @@ fn two_os_processes_exchange_synthetic_opus_in_both_directions() {
 fn two_os_processes_reject_old_call_id_and_close_on_revoke() {
     two_processes(
         "two_os_processes_reject_old_call_id_and_close_on_revoke",
+        true,
+        false,
+    );
+}
+
+#[test]
+fn two_os_processes_exchange_synthetic_opus_over_quic_datagrams() {
+    two_processes(
+        "two_os_processes_exchange_synthetic_opus_over_quic_datagrams",
+        false,
         true,
     );
 }
