@@ -35,3 +35,7 @@ impl Document {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "preview_tests.rs"]
+mod tests;
