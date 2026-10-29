@@ -82,7 +82,7 @@ impl ImportedScan {
 }
 
 impl FileTree {
-    pub(super) fn request_imported(&mut self) {
+    pub(crate) fn request_imported(&mut self) {
         if let Some(vault) = self.model.root() {
             self.imported
                 .request(vault.to_path_buf(), Arc::clone(&self.wake));
