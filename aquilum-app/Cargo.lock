@@ -165,7 +165,7 @@ dependencies = [
  "getrandom 0.3.4",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.1",
  "subtle",
  "ureq",
  "url",
@@ -192,7 +192,7 @@ name = "akula-dropbox-secret-store"
 version = "0.1.0"
 dependencies = [
  "keyring",
- "sha2 0.10.9",
+ "sha2 0.11.1",
  "subtle",
  "zeroize",
 ]
@@ -204,7 +204,7 @@ dependencies = [
  "blake3",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.1",
  "ureq",
  "zeroize",
 ]
@@ -454,7 +454,7 @@ dependencies = [
  "roxmltree",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.1",
  "skrifa",
  "softbuffer",
  "tempfile",

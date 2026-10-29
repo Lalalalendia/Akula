@@ -76,7 +76,7 @@ rayon = "1.12"
 arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 # Pinned after upstream #844: crates.io 0.10.0 incorrectly decodes 8-bit monochrome RLE.
 # All three packages share the same exact source revision.
 dicom-core = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
