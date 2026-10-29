@@ -186,6 +186,7 @@ const OWNED_SUITES=Object.freeze({
     "scripts/windows-beta-gui-input.ps1",
     "scripts/windows-beta-candidate-manifest.ps1",
     "scripts/windows-accesskit-uia.ps1",
+    "scripts/windows-p2p-installed-uia.ps1",
     "aquilum-app/native/packaging/akula-windows.json",
     "aquilum-app/native/Cargo.toml"
   ],
