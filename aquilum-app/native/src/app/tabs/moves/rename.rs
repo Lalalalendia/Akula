@@ -108,6 +108,11 @@ impl App {
         });
         if let Some(reason) = shadow_blocker {
             report!("{} не переименован: {reason}", from.display());
+            // The title commit remembers the last destination. Reset it on
+            // rejection or repeated Enter on the same name becomes a no-op.
+            if self.note.as_ref().is_some_and(|note| note.path.starts_with(&from)) {
+                self.refresh_note_names(root);
+            }
             self.show_rename_error(root, &from, &to, &reason);
             return;
         }
