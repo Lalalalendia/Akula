@@ -1,7 +1,9 @@
 #![cfg(feature = "p2p-live-identity")]
 //! Real Iroh handshake: no simulated remote_id and no new OS credentials.
 #[cfg(all(windows, feature = "call-live-identity-lab"))]
-use akula_staya_integration::call_live_identity_lab::{admit_incoming_call, receive_live_call};
+use akula_staya_integration::call_live_identity_lab::{
+    accept_live_call, admit_incoming_call, receive_live_call,
+};
 use akula_staya_integration::live_identity::{
     require_pinned_live_peer, with_protected_iroh_secret,
 };
@@ -307,6 +309,45 @@ async fn protected_identity_accepts_confirmed_live_peer_then_rejects_revoke() {
             (call, ringing)
         };
 
+        // A separate pending laboratory call is accepted ONLY while the
+        // live OS pin and independently verified roster are still valid.
+        #[cfg(feature = "call-live-identity-lab")]
+        {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let mut allowed_call = admit_incoming_call(
+                &live,
+                &outsider_hex,
+                &verified,
+                vault_id,
+                device_id,
+                local_binding,
+                LocalPeerPolicy::Allowed,
+                &offer,
+                now,
+            )
+            .unwrap();
+            allowed_call.ring_local(now).unwrap();
+            assert!(accept_live_call(
+                &mut allowed_call,
+                &live,
+                &outsider_hex,
+                &verified,
+                vault_id,
+                device_id,
+                LocalPeerPolicy::Allowed,
+                now,
+            )
+            .is_ok());
+            assert_eq!(
+                allowed_call.phase(),
+                aquilum_core::call_signaling_lab::CallPhase::Active
+            );
+            allowed_call.revoke();
+        }
+
         peer_pin::revoke_peer(&outsider_hex).unwrap();
         #[cfg(feature = "call-live-identity-lab")]
         {
@@ -314,6 +355,25 @@ async fn protected_identity_accepts_confirmed_live_peer_then_rejects_revoke() {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
+            // Revoke happened *after Ringing* but *before Accept*. A late
+            // local button press cannot emit Accept or revive capture access.
+            assert_eq!(
+                accept_live_call(
+                    &mut incoming_call,
+                    &live,
+                    &outsider_hex,
+                    &verified,
+                    vault_id,
+                    device_id,
+                    LocalPeerPolicy::Allowed,
+                    now,
+                ),
+                Err(CallError::Revoked)
+            );
+            assert_eq!(
+                incoming_call.phase(),
+                aquilum_core::call_signaling_lab::CallPhase::Closed
+            );
             assert_eq!(
                 receive_live_call(
                     &mut incoming_call,
