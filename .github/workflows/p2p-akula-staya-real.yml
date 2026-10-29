@@ -72,13 +72,15 @@ jobs:
           cargo test --manifest-path interop/akula-staya/Cargo.toml \
             --features call-voice-quic-lab --test call_voice_quic_two_process \
             -- --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-call-voice-quic.log"
-          grep -Fq 'test result: ok. 2 passed; 0 failed;' \
+          grep -Fq 'test result: ok. 3 passed; 0 failed;' \
             "$RUNNER_TEMP/akula-call-voice-quic.log"
           grep -Fq 'AKULA_CALL_VOICE_TWO_PROCESS_PASS actual_quic=1 actual_libopus=1 negative=0' \
             "$RUNNER_TEMP/akula-call-voice-quic.log"
           grep -Fq 'AKULA_CALL_VOICE_TWO_PROCESS_PASS actual_quic=1 actual_libopus=1 negative=1' \
             "$RUNNER_TEMP/akula-call-voice-quic.log"
-          echo 'AKULA_CALL_VOICE_LIVE_QUIC_TEST_PASS two_os_process_scenarios=1'
+          grep -Fq 'AKULA_CALL_VOICE_DATAGRAM_TWO_PROCESS_PASS actual_quic=1 actual_libopus=1' \
+            "$RUNNER_TEMP/akula-call-voice-quic.log"
+          echo 'AKULA_CALL_VOICE_LIVE_QUIC_TEST_PASS three_os_process_scenarios=1'
       - name: Rust formatting for exact opt-in inbox Core
         shell: bash
         run: rustfmt --edition 2021 --check aquilum-app/core/src/p2p_inbox_lab.rs
