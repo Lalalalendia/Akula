@@ -10,6 +10,7 @@ on:
       - 'aquilum-app/core/src/files/gate/**'
       - 'aquilum-app/core/src/files/workspace.rs'
       - 'aquilum-app/core/src/p2p_offer_lab.rs'
+      - 'aquilum-app/core/src/p2p_offer_lab/**'
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/core/src/files/watcher/**'
       - 'aquilum-app/native/src/app/transfer/**'
@@ -75,6 +76,14 @@ jobs:
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::file_gate::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab files::watcher::classify::tests -- --nocapture
+      - name: Verify opt-in Offer to receipt candidate denial tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check aquilum-app/core/src/p2p_offer_lab.rs aquilum-app/core/src/p2p_offer_lab/tests.rs aquilum-app/core/src/p2p_offer_lab/receipt_binding.rs
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-offer-lab --lib p2p_offer_lab::receipt_binding::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-receipt-binding.txt"
+          grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$RUNNER_TEMP/p2p-receipt-binding.txt"
+          echo 'AKULA_P2P_RECEIPT_CANDIDATE_TESTS_PASS'
       - name: Confirm unaccepted P2P excluded from signed installed graph
         if: runner.os == 'Windows'
         shell: bash
