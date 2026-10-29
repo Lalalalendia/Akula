@@ -36,6 +36,21 @@ missing/changed files, a file written before SQLite commit, unattested orphan,
 invalid size/IDs, symlink refusal (Unix), and one common ledger for all three
 transport types. They do not test Windows reparse points or power-loss durability.
 
+## Windows disposable delete integration (test only)
+
+Core Windows tests connect actual Ledger request/finish CAS to the
+RootDirectory-relative, same-HANDLE disposition probe. Synthetic explicit
+confirmation must match UUID, size and BLAKE3, and the opened Ledger file's
+volume/file-index/link count must match the DELETE-capable OS handle.
+Failure injection covers after-request and after-disposition crash windows,
+identical-byte object swapping, consent refusal, duplicate grants and
+independent SQLite connections racing to remove a disposable object.
+
+These tests do not establish power-loss durability or hostile SQLite
+replacement protection. Missing-path-only finish still needs an authenticated
+OS outcome proof before any product exposure. UI Delete, normal signed
+installed builds and release publishing stay OFF.
+
 ## Known gaps / intentionally absent features
 
 - Not connected to installed Native Akula UI, nor to an actual P2P, S3 or

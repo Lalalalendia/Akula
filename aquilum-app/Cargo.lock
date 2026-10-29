@@ -370,6 +370,7 @@ version = "0.1.0"
 name = "aquilum-core"
 version = "0.3.17"
 dependencies = [
+ "akula-inbox-ledger-lab",
  "akula-node-catalog",
  "akula-server-bootstrap-b0",
  "akula-server-release-b1a",

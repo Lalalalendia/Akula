@@ -11,6 +11,7 @@ use std::{
 mod relative;
 use relative::open_delete_candidate;
 use uuid::Uuid;
+use akula_inbox_ledger_lab::InboxLedger;
 
 const REPARSE_ATTRIBUTE: u32 = 0x0000_0400;
 const FILE_DISPOSITION_INFO: u32 = 4;
@@ -33,6 +34,18 @@ fn delete_disposable_fixture(
     expected_bytes: u64,
     expected_hash: [u8; 32],
 ) -> Result<(), VaultPortError> {
+    delete_disposable_fixture_matching(root, id, expected_bytes, expected_hash, None)
+}
+
+/// Require the OS identity of the independently verified Ledger file as well
+/// as equality between the root-relative witness and DELETE-capable handle.
+fn delete_disposable_fixture_matching(
+    root: &Path,
+    id: Uuid,
+    expected_bytes: u64,
+    expected_hash: [u8; 32],
+    ledger_identity: Option<(u32, u64, u32)>,
+) -> Result<(), VaultPortError> {
     if id.is_nil() || expected_bytes == 0 || expected_bytes > MAX_BYTES || expected_hash == [0; 32]
     {
         return Err(VaultPortError::UnsafePath);
@@ -42,7 +55,7 @@ fn delete_disposable_fixture(
     // Stable directory-relative witness; no sender-controlled path.
     let witness = pinned_windows::open_child(&objects, &name, true)?;
     let identity = pinned_windows::file_identity_with_links(&witness)?;
-    if identity.2 != 1 {
+    if identity.2 != 1 || ledger_identity.is_some_and(|original| original != identity) {
         return Err(VaultPortError::FileChanged);
     }
 
@@ -115,9 +128,316 @@ fn delete_disposable_fixture(
     Ok(())
 }
 
+/// Synthetic explicit user confirmation; no GUI can invoke this test module.
+/// This is never derived from sender-provided paths or network metadata.
+#[derive(Clone, Copy)]
+struct ConfirmedRemoval {
+    transfer_id: Uuid,
+    bytes: u64,
+    blake3: [u8; 32],
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CrashCut {
+    None,
+    AfterRequest,
+    AfterDisposition,
+}
+
+/// Test-only consent -> Ledger CAS -> same Windows HANDLE -> Ledger finish.
+/// The hook is a synthetic hostile-writer interruption after SQLite commit.
+fn delete_after_explicit_consent(
+    ledger: &InboxLedger,
+    root: &Path,
+    selected_id: Uuid,
+    consent: Option<ConfirmedRemoval>,
+    cut: CrashCut,
+    after_request: impl FnOnce(),
+) -> Result<(), String> {
+    let confirmed = consent.ok_or("explicit confirmation required")?;
+    if selected_id.is_nil() || confirmed.transfer_id != selected_id {
+        return Err("confirmation does not match selected transfer".into());
+    }
+    let name = format!("{}.blob", selected_id.hyphenated());
+    if ledger.object_path(selected_id) != root.join("objects").join(&name) {
+        return Err("ledger does not own selected Inbox root".into());
+    }
+    // Capture the verified opened object and its OS identity before consuming
+    // the one-shot intent. Size/hash alone cannot detect an identical swap.
+    let (file, receipt) = ledger
+        .open_verified_file(selected_id)
+        .map_err(|e| format!("receipt verification failed: {e:?}"))?;
+    if receipt.bytes != confirmed.bytes || receipt.blake3 != confirmed.blake3 {
+        return Err("stale or mismatched user confirmation".into());
+    }
+    let original_identity = pinned_windows::file_identity_with_links(&file)
+        .map_err(|e| format!("receipt identity failed: {e:?}"))?;
+    if original_identity.2 != 1 {
+        return Err("multiply linked receipt rejected".into());
+    }
+    drop(file);
+
+    ledger
+        .request_removal(selected_id)
+        .map_err(|e| format!("one-shot SQLite request refused: {e:?}"))?;
+    if cut == CrashCut::AfterRequest {
+        return Err("simulated crash after durable request".into());
+    }
+    after_request();
+
+    delete_disposable_fixture_matching(
+        root,
+        selected_id,
+        receipt.bytes,
+        receipt.blake3,
+        Some(original_identity),
+    )
+    .map_err(|e| format!("same-HANDLE disposition refused: {e:?}"))?;
+    if cut == CrashCut::AfterDisposition {
+        return Err("simulated crash after HANDLE disposition".into());
+    }
+    ledger
+        .finish_removal(selected_id)
+        .map_err(|e| format!("SQLite finish refused: {e:?}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use akula_inbox_ledger_lab::{ExpectedTransfer, RemovalAuditStatus, Transport};
+
+    fn ledger_fixture(
+        bytes: &[u8],
+    ) -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        InboxLedger,
+        ExpectedTransfer,
+    ) {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("inbox");
+        let mut ledger = InboxLedger::open(&root).unwrap();
+        let receipt = ExpectedTransfer {
+            id: Uuid::new_v4(),
+            sender_key: [41; 32],
+            recipient_key: [42; 32],
+            source: Transport::P2p,
+            bytes: bytes.len() as u64,
+            blake3: *blake3::hash(bytes).as_bytes(),
+        };
+        ledger.reserve(&receipt).unwrap();
+        fs::write(ledger.object_path(receipt.id), bytes).unwrap();
+        ledger.confirm(&receipt).unwrap();
+        (temp, root, ledger, receipt)
+    }
+
+    fn confirmation(receipt: &ExpectedTransfer) -> ConfirmedRemoval {
+        ConfirmedRemoval {
+            transfer_id: receipt.id,
+            bytes: receipt.bytes,
+            blake3: receipt.blake3,
+        }
+    }
+
+    #[test]
+    fn confirmed_intent_precedes_verified_same_handle_delete() {
+        let bytes = b"consent bound disposable object";
+        let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
+        let id = receipt.id;
+        let consent = confirmation(&receipt);
+        assert!(delete_after_explicit_consent(
+            &ledger,
+            &root,
+            id,
+            None,
+            CrashCut::None,
+            || {},
+        )
+        .is_err());
+        assert!(delete_after_explicit_consent(
+            &ledger,
+            &root,
+            id,
+            Some(ConfirmedRemoval {
+                transfer_id: Uuid::new_v4(),
+                ..consent
+            }),
+            CrashCut::None,
+            || {},
+        )
+        .is_err());
+        assert!(delete_after_explicit_consent(
+            &ledger,
+            &root,
+            id,
+            Some(ConfirmedRemoval {
+                blake3: [91; 32],
+                ..consent
+            }),
+            CrashCut::None,
+            || {},
+        )
+        .is_err());
+        assert_eq!(
+            ledger.removal_status(id).unwrap(),
+            RemovalAuditStatus::Available
+        );
+        assert_eq!(fs::read(ledger.object_path(id)).unwrap(), bytes);
+
+        delete_after_explicit_consent(
+            &ledger,
+            &root,
+            id,
+            Some(consent),
+            CrashCut::None,
+            || {
+                assert_eq!(
+                    ledger.removal_status(id).unwrap(),
+                    RemovalAuditStatus::Requested
+                );
+                assert!(ledger.object_path(id).exists());
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            ledger.removal_status(id).unwrap(),
+            RemovalAuditStatus::Removed
+        );
+        assert!(!ledger.object_path(id).exists());
+        assert!(delete_after_explicit_consent(
+            &ledger,
+            &root,
+            id,
+            Some(consent),
+            CrashCut::None,
+            || {},
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn crash_after_sqlite_request_retains_original_and_one_shot_intent() {
+        let bytes = b"crash before HANDLE disposition";
+        let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
+        let id = receipt.id;
+        assert!(delete_after_explicit_consent(
+            &ledger,
+            &root,
+            id,
+            Some(confirmation(&receipt)),
+            CrashCut::AfterRequest,
+            || {},
+        )
+        .is_err());
+        drop(ledger);
+        let reader = InboxLedger::open_existing(&root).unwrap().unwrap();
+        assert_eq!(
+            reader.removal_status(id).unwrap(),
+            RemovalAuditStatus::Requested
+        );
+        assert_eq!(fs::read(reader.object_path(id)).unwrap(), bytes);
+        assert!(reader.open_verified_file(id).is_err());
+    }
+
+    #[test]
+    fn crash_after_disposition_before_sqlite_finish_requires_review() {
+        let bytes = b"crash after HANDLE disposition";
+        let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
+        let id = receipt.id;
+        assert!(delete_after_explicit_consent(
+            &ledger,
+            &root,
+            id,
+            Some(confirmation(&receipt)),
+            CrashCut::AfterDisposition,
+            || {},
+        )
+        .is_err());
+        drop(ledger);
+        let reader = InboxLedger::open_existing(&root).unwrap().unwrap();
+        assert!(!reader.object_path(id).exists());
+        assert_eq!(
+            reader.removal_status(id).unwrap(),
+            RemovalAuditStatus::NeedsReview
+        );
+        assert!(reader.open_verified_file(id).is_err());
+    }
+
+    #[test]
+    fn identical_bytes_replacement_cannot_reuse_original_file_identity() {
+        let bytes = b"same bytes but another Windows file index";
+        let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
+        let id = receipt.id;
+        let leaf = ledger.object_path(id);
+        let preserved = root.join("objects").join("preserved-original");
+        assert!(delete_after_explicit_consent(
+            &ledger,
+            &root,
+            id,
+            Some(confirmation(&receipt)),
+            CrashCut::None,
+            || {
+                fs::rename(&leaf, &preserved).unwrap();
+                fs::write(&leaf, bytes).unwrap();
+            },
+        )
+        .is_err());
+        assert_eq!(fs::read(&leaf).unwrap(), bytes);
+        assert_eq!(fs::read(&preserved).unwrap(), bytes);
+        assert_eq!(
+            ledger.removal_status(id).unwrap(),
+            RemovalAuditStatus::Requested
+        );
+    }
+
+    #[test]
+    fn competing_confirmed_sqlite_connections_allow_one_disposition() {
+        use std::sync::{Arc, Barrier};
+        let bytes = b"only one competing physical disposition";
+        let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
+        drop(ledger);
+        let first = InboxLedger::open(&root).unwrap();
+        let second = InboxLedger::open(&root).unwrap();
+        let gate = Arc::new(Barrier::new(2));
+        let consent = confirmation(&receipt);
+        let id = receipt.id;
+        let root1 = root.clone();
+        let root2 = root.clone();
+        let g1 = Arc::clone(&gate);
+        let g2 = Arc::clone(&gate);
+        let t1 = std::thread::spawn(move || {
+            g1.wait();
+            delete_after_explicit_consent(
+                &first,
+                &root1,
+                id,
+                Some(consent),
+                CrashCut::None,
+                || {},
+            )
+            .is_ok()
+        });
+        let t2 = std::thread::spawn(move || {
+            g2.wait();
+            delete_after_explicit_consent(
+                &second,
+                &root2,
+                id,
+                Some(consent),
+                CrashCut::None,
+                || {},
+            )
+            .is_ok()
+        });
+        assert_ne!(t1.join().unwrap(), t2.join().unwrap());
+        let reader = InboxLedger::open_existing(&root).unwrap().unwrap();
+        assert_eq!(
+            reader.removal_status(id).unwrap(),
+            RemovalAuditStatus::Removed
+        );
+        assert!(!reader.object_path(id).exists());
+    }
 
     fn fixture() -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
