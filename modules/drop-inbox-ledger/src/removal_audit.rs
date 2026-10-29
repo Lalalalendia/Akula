@@ -113,6 +113,48 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn competing_sqlite_connections_grant_one_removal_request_only() {
+        use std::sync::{Arc, Barrier};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("inbox");
+        let mut seed = InboxLedger::open(&root).unwrap();
+        let bytes = b"independent concurrent delete requests";
+        let transfer = ExpectedTransfer {
+            id: Uuid::new_v4(),
+            sender_key: [17; 32],
+            recipient_key: [19; 32],
+            source: Transport::P2p,
+            bytes: bytes.len() as u64,
+            blake3: *blake3::hash(bytes).as_bytes(),
+        };
+        seed.reserve(&transfer).unwrap();
+        fs::write(seed.object_path(transfer.id), bytes).unwrap();
+        seed.confirm(&transfer).unwrap();
+        drop(seed);
+        let first = InboxLedger::open(&root).unwrap();
+        let second = InboxLedger::open(&root).unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let id = transfer.id;
+        let b1 = Arc::clone(&barrier);
+        let b2 = Arc::clone(&barrier);
+        let t1 = std::thread::spawn(move || {
+            b1.wait();
+            first.request_removal(id).is_ok()
+        });
+        let t2 = std::thread::spawn(move || {
+            b2.wait();
+            second.request_removal(id).is_ok()
+        });
+        assert_ne!(t1.join().unwrap(), t2.join().unwrap());
+        let reader = InboxLedger::open_existing(&root).unwrap().unwrap();
+        assert_eq!(
+            reader.removal_status(id).unwrap(),
+            RemovalAuditStatus::Requested
+        );
+        assert_eq!(fs::read(reader.object_path(id)).unwrap(), bytes);
+    }
+
+    #[test]
     fn durable_request_never_unlinks_and_requires_explicit_finish() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("inbox");
