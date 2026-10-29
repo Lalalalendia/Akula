@@ -364,9 +364,7 @@ impl CallSession {
     pub fn refuse_local(&mut self, refusal: Refusal, now_unix: u64)
         -> Result<Wire, CallError>
     {
-        if self.role != Role::Callee || self.phase != CallPhase::IncomingRinging
-            || !self.sent_ringing
-        {
+        if self.role != Role::Callee || self.phase != CallPhase::IncomingRinging {
             return Err(CallError::InvalidTransition);
         }
         self.not_expired(now_unix)?;
@@ -481,7 +479,7 @@ impl CallSession {
         }
         let kind = match (self.role, self.phase) {
             (Role::Caller, CallPhase::Dialing | CallPhase::RemoteRinging) => Kind::Cancel,
-            (Role::Callee, CallPhase::IncomingRinging) if self.sent_ringing => Kind::Reject,
+            (Role::Callee, CallPhase::IncomingRinging) => Kind::Reject,
             (_, CallPhase::Active) => Kind::End,
             _ => return Err(CallError::InvalidTransition),
         };
@@ -677,6 +675,16 @@ mod tests {
             } else { RemoteEvent::Busy });
             assert_eq!(caller.phase(),CallPhase::Closed);
         }
+        // A busy receiver may decline without sending an extra Ringing packet.
+        let (mut early_caller, mut early_receiver, _) = started();
+        let early_busy = early_receiver.refuse_local(Refusal::Busy, NOW+1).unwrap();
+        assert_eq!(early_caller.receive(&early_busy,b,LocalPeerPolicy::Allowed,NOW+1).unwrap(),
+            RemoteEvent::Busy);
+        assert_eq!(early_receiver.phase(), CallPhase::Closed);
+        let (mut early_caller, mut early_receiver, _) = started();
+        let early_reject = early_receiver.end_local().unwrap().unwrap();
+        assert_eq!(early_caller.receive(&early_reject,b,LocalPeerPolicy::Allowed,NOW+1).unwrap(),
+            RemoteEvent::Rejected);
         let (mut caller,mut receiver,_)=started();
         let cancel=caller.end_local().unwrap().unwrap();
         assert_eq!(receiver.receive(&cancel,a,LocalPeerPolicy::Allowed,NOW+2).unwrap(),
