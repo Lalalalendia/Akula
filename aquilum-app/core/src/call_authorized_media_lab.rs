@@ -90,6 +90,10 @@ mod tests {
             start_muted_media(&caller, true, peer(3, 3), PeerPolicy::Allowed, [9; 16]),
             Err(VoiceError::WrongPeer)
         ));
+        assert!(matches!(
+            start_muted_media(&caller, true, b, PeerPolicy::Allowed, [7; 16]),
+            Err(VoiceError::WrongCall)
+        ));
         let (sender, receiver) =
             start_muted_media(&caller, true, b, PeerPolicy::Allowed, [9; 16]).unwrap();
         assert!(sender.is_muted());
