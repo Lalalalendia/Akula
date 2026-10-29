@@ -348,6 +348,27 @@ impl CallSession {
         Ok(wire)
     }
 
+    /// Revalidate the authenticated remote key and current host decision
+    /// before a local Accept; no sequence number is consumed.
+    pub fn verify_local_accept_peer(
+        &mut self,
+        authenticated_remote: PeerBinding,
+        policy: LocalPeerPolicy,
+    ) -> Result<(), CallError> {
+        if self.role != Role::Callee || self.phase != CallPhase::IncomingRinging {
+            return Err(CallError::InvalidTransition);
+        }
+        if let Err(error) = check_peer_policy(policy) {
+            self.revoke();
+            return Err(error);
+        }
+        if self.offer.caller != authenticated_remote {
+            self.revoke();
+            return Err(CallError::WrongPeer);
+        }
+        Ok(())
+    }
+
     /// Approval of the CALL only. Device capture consent is a separate OS flow.
     pub fn accept_local(&mut self, now_unix: u64) -> Result<Wire, CallError> {
         if self.role != Role::Callee || self.phase != CallPhase::IncomingRinging
