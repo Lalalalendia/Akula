@@ -59,9 +59,9 @@ jobs:
           cargo test --manifest-path interop/akula-staya/Cargo.toml \
             --features call-voice-codec-lab --test call_voice_opus_codec \
             -- --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-call-voice-codec.log"
-          grep -Fq 'test result: ok. 5 passed; 0 failed;' \
+          grep -Fq 'test result: ok. 7 passed; 0 failed;' \
             "$RUNNER_TEMP/akula-call-voice-codec.log"
-          echo 'AKULA_CALL_VOICE_OPUS_CODEC_PASS five_real_codec_tests=1'
+          echo 'AKULA_CALL_VOICE_OPUS_CODEC_PASS seven_real_codec_tests=1'
       # GENUINE two-process Iroh QUIC/TLS, separately pinned TEST keys,
       # with libopus both directions and wrong-call/revoke negatives.
       # Reliable QUIC stream is a compatibility smoke, NOT real-time QoS.
