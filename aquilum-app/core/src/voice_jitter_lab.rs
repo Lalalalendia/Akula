@@ -311,11 +311,29 @@ impl VoiceReceiver {
             return Err(VoiceError::WrongCall);
         }
         let span = u64::from(packet.payload.ticks());
-        let start = self.next_tick.unwrap_or(packet.tick);
-        if packet.tick < start {
-            self.metrics.late_packets = self.metrics.late_packets.saturating_add(1);
-            return Err(VoiceError::Late);
-        }
+        // While startup is still buffering, an earlier tick may arrive
+        // after the first packet. Do not rewind after playout has begun.
+        let start = match self.next_tick {
+            Some(first) if packet.tick < first => {
+                let still_starting = self.metrics.played_opus_ticks == 0
+                    && self.metrics.played_silent_ticks == 0
+                    && self.metrics.conceal_ticks == 0
+                    && self.next_deadline_ms.is_some_and(|d| arrival_ms < d);
+                if !still_starting || first - packet.tick > START_DELAY_MS / FRAME_MS {
+                    self.metrics.late_packets = self.metrics.late_packets.saturating_add(1);
+                    return Err(VoiceError::Late);
+                }
+                if self.queued.last_key_value().is_some_and(
+                    |(&last, _)| last - packet.tick >= MAX_AHEAD_TICKS
+                ) {
+                    self.metrics.future_packets = self.metrics.future_packets.saturating_add(1);
+                    return Err(VoiceError::TooFarAhead);
+                }
+                packet.tick
+            }
+            Some(first) => first,
+            None => packet.tick,
+        };
         let end = packet.tick.checked_add(span).ok_or(VoiceError::SequenceExhausted)?;
         if end - 1 - start >= MAX_AHEAD_TICKS {
             self.metrics.future_packets = self.metrics.future_packets.saturating_add(1);
@@ -336,8 +354,8 @@ impl VoiceReceiver {
         } else { None };
         let Payload::Opus(ref bytes) = packet.payload else {
             for tick in packet.tick..end { self.queued.insert(tick, Slot::Silent); }
+            self.next_tick = Some(start);
             if let Some(deadline) = deadline {
-                self.next_tick = Some(start);
                 self.next_deadline_ms = Some(deadline);
             }
             self.last_arrival_ms = Some(arrival_ms);
@@ -346,8 +364,8 @@ impl VoiceReceiver {
             return Ok(());
         };
         self.queued.insert(packet.tick, Slot::Opus(bytes.clone()));
+        self.next_tick = Some(start);
         if let Some(deadline) = deadline {
-            self.next_tick = Some(start);
             self.next_deadline_ms = Some(deadline);
         }
         self.last_arrival_ms = Some(arrival_ms);
@@ -542,6 +560,41 @@ mod tests {
         assert!(matches!(r.poll(160), Ok(Playout::Opus { tick: 0, .. })));
         assert!(matches!(r.poll(180), Ok(Playout::Opus { tick: 1, .. })));
         assert!(matches!(r.poll(200), Ok(Playout::Opus { tick: 2, .. })));
+    }
+
+    #[test]
+    fn startup_reorders_first_speech_frames_before_deadline() {
+        let mut r = receiver();
+        admit(&mut r, &audio(2, 3), 100).unwrap();
+        admit(&mut r, &audio(0, 1), 110).unwrap();
+        admit(&mut r, &audio(1, 2), 120).unwrap();
+        assert_eq!(r.poll(159), Ok(Playout::Waiting));
+        assert_eq!(r.poll(160), Ok(Playout::Opus { tick: 0, bytes: vec![1; 5] }));
+        assert_eq!(r.poll(180), Ok(Playout::Opus { tick: 1, bytes: vec![2; 5] }));
+        assert_eq!(r.poll(200), Ok(Playout::Opus { tick: 2, bytes: vec![3; 5] }));
+    }
+
+    #[test]
+    fn startup_rewind_is_bounded_and_keeps_future_window_safe() {
+        let mut r = receiver();
+        admit(&mut r, &audio(10, 1), 100).unwrap();
+        assert_eq!(admit(&mut r, &audio(6, 2), 110), Err(VoiceError::Late));
+        admit(&mut r, &audio(9, 3), 120).unwrap();
+        assert_eq!(r.poll(160), Ok(Playout::Opus { tick: 9, bytes: vec![3; 5] }));
+        let mut w = receiver();
+        admit(&mut w, &audio(2, 1), 100).unwrap();
+        admit(&mut w, &audio(33, 2), 110).unwrap();
+        assert_eq!(admit(&mut w, &audio(0, 3), 120), Err(VoiceError::TooFarAhead));
+        assert_eq!(w.queued_ticks(), 2);
+    }
+
+    #[test]
+    fn expired_startup_and_started_playout_never_rewind() {
+        let mut r = receiver();
+        admit(&mut r, &audio(2, 1), 100).unwrap();
+        assert_eq!(admit(&mut r, &audio(1, 2), 160), Err(VoiceError::Late));
+        assert_eq!(r.poll(160), Ok(Playout::Opus { tick: 2, bytes: vec![1; 5] }));
+        assert_eq!(admit(&mut r, &audio(0, 3), 170), Err(VoiceError::Late));
     }
 
     #[test]
