@@ -199,11 +199,7 @@ async fn accept_peer(endpoint: &Endpoint, expected: EndpointId) -> iroh::endpoin
     connection
 }
 
-
-async fn server_unreliable_datagram(
-    connection: &iroh::endpoint::Connection,
-    call_id: [u8; 16],
-) {
+async fn server_unreliable_datagram(connection: &iroh::endpoint::Connection, call_id: [u8; 16]) {
     let remote = peer(1, connection.remote_id());
     let wire = tokio::time::timeout(DEADLINE, connection.read_datagram())
         .await
@@ -223,7 +219,9 @@ async fn server_unreliable_datagram(
     receiver.close();
 
     let mut sender = OpusVoiceSender::new(call_id, 0).unwrap();
-    sender.set_muted(false).expect("test controller synthetic audio");
+    sender
+        .set_muted(false)
+        .expect("test controller synthetic audio");
     let reply = sender
         .encode_frame(&pcm_frame(2, 0))
         .expect("real Opus encoding for QUIC datagram");
@@ -254,12 +252,11 @@ async fn server_unreliable_datagram(
         .expect("acknowledgement completed");
 }
 
-async fn client_unreliable_datagram(
-    connection: &iroh::endpoint::Connection,
-    call_id: [u8; 16],
-) {
+async fn client_unreliable_datagram(connection: &iroh::endpoint::Connection, call_id: [u8; 16]) {
     let mut sender = OpusVoiceSender::new(call_id, 0).unwrap();
-    sender.set_muted(false).expect("test controller synthetic audio");
+    sender
+        .set_muted(false)
+        .expect("test controller synthetic audio");
     let wire = sender
         .encode_frame(&pcm_frame(1, 0))
         .expect("real Opus encoding for QUIC datagram");
@@ -291,7 +288,10 @@ async fn client_unreliable_datagram(
         .await
         .expect("test acknowledgement stream deadline")
         .expect("test acknowledgement stream");
-    ack_send.write_all(b"VOICE_DATAGRAM_RECEIVED").await.unwrap();
+    ack_send
+        .write_all(b"VOICE_DATAGRAM_RECEIVED")
+        .await
+        .unwrap();
     ack_send.finish().unwrap();
     let ack = tokio::time::timeout(DEADLINE, ack_receive.read_to_end(64))
         .await
