@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use super::Note;
 use super::recovery::{CaptureStatus, SnapshotQueue};
+pub(crate) use super::recovery::has_unreviewed_shadow_under_move;
 
 /// Read-only candidate. No automatic write to user documents is possible here.
 pub(crate) struct RecoveryCandidate {

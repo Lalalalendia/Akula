@@ -363,3 +363,33 @@ fn folder_rename_refuses_to_orphan_inactive_tab_recovery() {
     assert_eq!(candidate.body.to_string(), "unsaved child draft");
     assert!(!candidate.already_saved);
 }
+
+#[test]
+fn folder_rename_blocks_closed_tab_unreviewed_draft() {
+    let mut h = Harness::new();
+    let folder = h.vault.path().join("ClosedFolder");
+    let moved = h.vault.path().join("MovedFolder");
+    std::fs::create_dir_all(&folder).unwrap();
+    let child = h.write_note("ClosedFolder/closed.md", "original disk bytes");
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+
+    // This document has no open tab, but it still has a durable recovery draft.
+    let (mut detached, _) = crate::note::Note::open(child.clone()).unwrap();
+    detached.arm_shadow(h._data.path(), h.vault.path(), workspace).unwrap();
+    detached.snapshot_unsaved(&crop::Rope::from("unsaved closed-tab text")).unwrap();
+    crate::disk::wait();
+    drop(detached);
+    assert!(!h.app.tabs.tabs().iter().any(|tab| tab.path.as_deref() == Some(child.as_path())));
+
+    h.app.rename_file(&mut h.root, folder.clone(), moved.clone());
+
+    assert!(folder.is_dir(), "folder containing a closed-tab draft must not move");
+    assert!(!moved.exists());
+    assert_eq!(std::fs::read_to_string(&child).unwrap(), "original disk bytes");
+    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
+    let restored = crate::note::bridge::inspect_for_recovery(
+        h._data.path(), h.vault.path(), workspace, &child,
+    ).unwrap().expect("recovery record must stay discoverable");
+    assert_eq!(restored.body.to_string(), "unsaved closed-tab text");
+    assert!(!restored.already_saved);
+}

@@ -3,11 +3,13 @@
 #![allow(dead_code)]
 mod queue;
 mod pending;
+mod move_inventory;
 mod quota;
 #[cfg(test)] mod large_tests;
 #[cfg(target_os = "windows")]
 mod acl;
 pub(super) use queue::{CaptureStatus, SnapshotQueue};
+pub(crate) use move_inventory::has_unreviewed_shadow_under_move;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -357,10 +359,8 @@ pub(super) fn clear_after_verified_save(
     if candidate.revision != revision || !candidate.already_saved {
         return Ok(false);
     }
-    // Once the newest revision has an exact on-disk ACK, all older
-    // snapshots for this same note are superseded. Validate the entire set
-    // BEFORE deleting any record: a corrupted older backup requires review
-    // and must not be concealed by partial garbage collection.
+    // Before retiring prior revisions, validate all records: corrupt backups
+    // require manual review, never partial deletion.
     let relative = checked_relative(vault, document)?;
     let Some(bucket) = folder(data, workspace, false)? else { return Ok(false) };
     let names = records(&bucket, &format!("{}-", key(&relative)))?;
