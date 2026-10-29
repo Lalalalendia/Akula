@@ -43,7 +43,7 @@ impl TextEditor {
         }
 
         if is_closing(c) {
-            let next_char = self.doc.after(self.focus).chars().next();
+            let next_char = self.doc.copy(self.focus..self.focus + self.doc.next_grapheme(self.focus)).chars().next();
             if next_char == Some(c) {
                 let next_pos = self.focus + c.len_utf8();
                 (self.anchor, self.focus) = (next_pos, next_pos);
@@ -52,7 +52,7 @@ impl TextEditor {
         }
 
         if let Some(close) = pair_close(c) {
-            let before = self.doc.before(self.focus);
+            let before = self.doc.copy(self.doc.line_at(self.focus).start..self.focus);
             if (c == '\'' || c == '"' || c == '`') && before.chars().next_back().is_some_and(char::is_alphanumeric) {
                 return false;
             }
@@ -77,8 +77,8 @@ impl TextEditor {
         if !self.selection().is_empty() || self.focus == 0 {
             return false;
         }
-        let prev = self.doc.before(self.focus).chars().next_back();
-        let next = self.doc.after(self.focus).chars().next();
+        let prev = self.doc.copy(self.doc.floor(self.focus.saturating_sub(4))..self.focus).chars().next_back();
+        let next = self.doc.copy(self.focus..self.focus + self.doc.next_grapheme(self.focus)).chars().next();
         if let (Some(p), Some(n)) = (prev, next)
             && is_matching_pair(p, n)
         {
