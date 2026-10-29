@@ -1,9 +1,5 @@
-//! AK-P2P-B3 signed receipt provenance, offline verifier only.
-//!
-//! Not a sender path, UI/open/delete permission, transport grant or durable
-//! anti-replay journal. The caller must independently pin both endpoint keys,
-//! rehash the actual opened Inbox file and retain a protected one-use journal.
-//! This pure module cannot establish physical user consent or OS file custody.
+//! V2 offline proof only; no file/UI/open/delete authority, consent or OS custody.
+//! Caller must pin peer keys, rehash a cold Inbox handle and protect its one-use journal.
 use super::ObservedLocalReceipt;
 use crate::p2p_offer_lab::{OfferError, OfferV1, PeerBinding};
 use crate::sync::DeviceId;
