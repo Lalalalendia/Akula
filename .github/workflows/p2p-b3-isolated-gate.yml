@@ -16,6 +16,8 @@ on:
       - 'aquilum-app/native/src/app/transfer/**'
       - 'aquilum-app/native/src/app/transfer.rs'
       - 'aquilum-app/native/src/app/core_events.rs'
+      # Changes to app graph tests can change the installed/default-OFF boundary.
+      - 'aquilum-app/native/src/app/tests/graph.rs'
       - 'aquilum-app/native/src/ui/transfer/**'
       - 'aquilum-app/native/src/ui/transfer.rs'
       - 'aquilum-app/native/Cargo.toml'
