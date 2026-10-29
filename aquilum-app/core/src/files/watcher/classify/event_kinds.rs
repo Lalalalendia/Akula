@@ -20,4 +20,3 @@ pub(super) fn needs_directory_rescan(event: &Event) -> bool {
         _ => false,
     }
 }
-

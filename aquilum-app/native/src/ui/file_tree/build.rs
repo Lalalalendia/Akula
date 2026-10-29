@@ -120,6 +120,4 @@ impl FileTree {
             }
         }
         self.update_pins(root);
-    }
-
-}
+    }}

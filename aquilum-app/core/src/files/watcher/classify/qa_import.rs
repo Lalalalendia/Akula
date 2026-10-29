@@ -15,4 +15,3 @@ pub(super) fn is_qa_import_copy(path: &Path) -> bool {
 pub(super) fn is_qa_import_copy(_path: &Path) -> bool {
     false
 }
-

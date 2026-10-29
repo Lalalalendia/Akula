@@ -20,6 +20,4 @@ impl FileTree {
         if let Some(path) = self.model.root() {
             self.counting.request(path.to_path_buf(), wake);
         }
-    }
-
-}
+    }}

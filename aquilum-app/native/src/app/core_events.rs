@@ -124,6 +124,4 @@ impl App {
             self.load_history(root);
         }
         title
-    }
-
-}
+    }}

@@ -51,6 +51,10 @@ jobs:
         run: |
           cargo metadata --manifest-path aquilum-app/Cargo.toml --locked --format-version 1 > /dev/null
           git diff --exit-code -- aquilum-app/Cargo.lock
+      - name: Rustfmt newly extracted Core watcher QA leaves
+        shell: bash
+        run: |
+          rustfmt --edition 2021 --check aquilum-app/core/src/files/watcher/classify/event_kinds.rs aquilum-app/core/src/files/watcher/classify/qa_import.rs
       - name: Enforce the default-OFF Core watcher boundary
         shell: bash
         run: |
@@ -84,6 +88,7 @@ jobs:
         shell: bash
         run: |
           rustfmt --edition 2024 --check aquilum-app/native/src/ui/file_tree/imported.rs
+          rustfmt --edition 2024 --check aquilum-app/native/src/app/core_events/update.rs aquilum-app/native/src/ui/file_tree/persistence.rs aquilum-app/native/src/ui/file_tree/scroll_ops.rs aquilum-app/native/src/ui/file_tree/scan/poll.rs
           cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::inbox::import::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::file_tree::imported::tests -- --nocapture

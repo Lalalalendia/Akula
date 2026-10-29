@@ -134,6 +134,4 @@ impl FileTree {
             self.request_imported();
         }
         self.refresh(root);
-    }
-
-}
+    }}
