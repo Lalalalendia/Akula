@@ -17,6 +17,8 @@ messaging-core-lab = []
 p2p-offer-lab = []
 # Default-OFF passive Opus-packet / jitter contract; no device, codec or live QUIC.
 voice-jitter-lab = ["p2p-offer-lab"]
+call-signaling-lab = ["p2p-offer-lab"]
+call-authorized-media-lab = ["call-signaling-lab", "voice-jitter-lab"]
 # Opt-in verified receiver staged-file create-new, no Vault apply.
 p2p-inbox-lab = ["p2p-offer-lab"]
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
