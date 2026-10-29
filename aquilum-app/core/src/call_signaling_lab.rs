@@ -331,6 +331,18 @@ impl CallSession {
         self.phase
     }
 
+    /// Trusted identity of the ACTIVE signaling session, not an OS permission.
+    pub fn active_media_identity(&self) -> Option<([u8; 16], PeerBinding)> {
+        if self.phase != CallPhase::Active {
+            return None;
+        }
+        let remote = match self.role {
+            Role::Caller => self.offer.callee,
+            Role::Callee => self.offer.caller,
+        };
+        Some((self.offer.call_id, remote))
+    }
+
     /// Informative only; "RemoteMuted(false)" is NEVER media permission.
     pub fn remote_muted(&self) -> bool {
         self.remote_muted
