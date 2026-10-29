@@ -9,6 +9,7 @@ on:
     paths:
       - 'interop/akula-staya/**'
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
+      - 'aquilum-app/core/src/voice_jitter_lab.rs'
       - '.github/workflows/p2p-akula-staya-real.yml'
   workflow_dispatch:
 

@@ -71,7 +71,9 @@ fn real_opus_pcm_roundtrip_through_bounded_akula_voice_ticks() {
     assert!(signal_power > 100_000);
     assert_eq!(receiver.metrics().played_opus_ticks, 16);
     assert_eq!(receiver.metrics().conceal_ticks, 0);
-    eprintln!("AKULA_CALL_VOICE_OPUS_REAL_ROUNDTRIP frames=16 actual_opus_wire_bytes={transmitted_bytes}");
+    eprintln!(
+        "AKULA_CALL_VOICE_OPUS_REAL_ROUNDTRIP frames=16 actual_opus_wire_bytes={transmitted_bytes}"
+    );
 }
 
 #[test]
