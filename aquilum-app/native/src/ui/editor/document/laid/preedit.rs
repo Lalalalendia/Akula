@@ -18,8 +18,21 @@ pub(super) fn preview_preedit(source: &str, span: Range<usize>, at: usize, selec
     Some((shown, local..local + preedit.len()))
 }
 
-pub(super) fn render<'a>(source: &'a str, span: Range<usize>, composing: Option<(usize, &str)>, selection: Option<&Range<usize>>) -> (Cow<'a, str>, Option<Range<usize>>) {
-    match composing.and_then(|(at, preedit)| preview_preedit(source, span, at, selection, preedit)) {
+pub(super) fn multiline_preedit(source: &str, span: Range<usize>, at: usize, tail: &str, preedit: &str) -> Option<(String, Range<usize>)> {
+    let local = at.checked_sub(span.start)?;
+    let prefix = source.get(..local)?;
+    let mut shown = String::with_capacity(prefix.len() + preedit.len() + tail.len());
+    shown.push_str(prefix);
+    shown.push_str(preedit);
+    shown.push_str(tail);
+    Some((shown, local..local + preedit.len()))
+}
+
+pub(super) fn render<'a>(source: &'a str, span: Range<usize>, composing: Option<(usize, &str)>, selection: Option<&Range<usize>>, tail: Option<&str>) -> (Cow<'a, str>, Option<Range<usize>>) {
+    match composing.and_then(|(at, preedit)| match tail {
+        Some(tail) => multiline_preedit(source, span, at, tail, preedit),
+        None => preview_preedit(source, span, at, selection, preedit),
+    }) {
         Some((shown, underline)) => (Cow::Owned(shown), Some(underline)),
         None => (Cow::Borrowed(source), None),
     }

@@ -1,4 +1,4 @@
-use super::preedit::preview_preedit;
+use super::preedit::{multiline_preedit, preview_preedit};
 
 #[test]
 fn ime_preview_replaces_single_paragraph_unicode_selection_without_mutating_source() {
@@ -32,4 +32,21 @@ fn ime_preview_does_not_consume_multiline_selection_or_split_utf8() {
     assert_eq!(shown, "abに猫cd");
     assert_eq!(underline, 2..5);
     assert!(preview_preedit(source, 0..source.len(), 3, None, "に").is_none(), "invalid UTF-8 boundary must fail closed");
+}
+
+#[test]
+fn ime_multiline_virtual_preview_collapses_unicode_selection_into_one_line() {
+    let first = "начало 🍀";
+    let last_tail = " хвост ✅";
+    let at = "начало ".len();
+    let (shown, underline) = multiline_preedit(first, 0..first.len(), at, last_tail, "日本語").unwrap();
+    assert_eq!(shown, "начало 日本語 хвост ✅");
+    assert_eq!(underline, at..at + "日本語".len());
+    assert_eq!(first, "начало 🍀", "the original paragraph must not be mutated");
+}
+
+#[test]
+fn ime_multiline_virtual_preview_rejects_mid_utf8_start() {
+    let first = "до🍀";
+    assert!(multiline_preedit(first, 0..first.len(), 3, "хвост", "に").is_none());
 }

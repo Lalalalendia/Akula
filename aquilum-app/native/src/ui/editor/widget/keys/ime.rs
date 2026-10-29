@@ -25,11 +25,7 @@ impl TextEditor {
         }
         // Invalidate the visual preedit origin as well as the live caret.
         // They differ for forward and multiline selections.
-        let at = self.selection().start;
-        self.doc.invalidate(at);
-        if at != self.focus {
-            self.doc.invalidate(self.focus);
-        }
+        self.invalidate_ime_region();
         ctx.set_handled();
         if edited {
             self.changed(ctx);
@@ -41,16 +37,31 @@ impl TextEditor {
 }
 
 impl TextEditor {
+    /// Invalidate all temporarily folded plain-text paragraphs, including on
+    /// cancellation, so the original height and cached layouts are restored.
+    fn invalidate_ime_region(&mut self) {
+        let range = self.selection();
+        let first = self.doc.at_offset(range.start);
+        let last = self.doc.at_offset(range.end);
+        if self.doc.markdown.is_none() && last > first && last - first <= 64 && range.end - range.start <= 8192 {
+            for i in first..=last {
+                let at = self.doc.paragraph(i).start;
+                self.doc.invalidate(at);
+            }
+        } else {
+            self.doc.invalidate(range.start);
+            if range.start != self.focus {
+                self.doc.invalidate(self.focus);
+            }
+        }
+    }
+
     /// Blur cancels transient composition without touching document bytes or Undo.
     pub(in crate::ui::editor::widget) fn cancel_transient_ime(&mut self) -> bool {
         if self.compose.take().is_none() {
             return false;
         }
-        let selection = self.selection();
-        self.doc.invalidate(selection.start);
-        if self.focus != selection.start {
-            self.doc.invalidate(self.focus);
-        }
+        self.invalidate_ime_region();
         true
     }
 

@@ -36,3 +36,31 @@ fn ime_candidate_cursor_clamps_mid_codepoint_and_oversized_offsets() {
         assert!((actual.x0 - expected.x0).abs() < 0.01);
     }
 }
+
+#[test]
+fn ime_multiline_preview_visually_collapses_plain_paragraphs_and_restores_them_on_cancel() {
+    let text = "слева 🍀\nсередина 世界\nпосле ✅ хвост";
+    let start = text.find("🍀").unwrap();
+    let end = text.find(" хвост").unwrap();
+    let mut editor = TextEditor::new(text);
+    editor.doc.keep = (0.0, 1000.0);
+    editor.ensure_layout(&mut FontContext::default(), &mut LayoutContext::new(), 400.0);
+    let original_height = editor.doc.height();
+    editor.anchor = end;
+    editor.focus = start;
+    editor.compose = Some(("日本".into(), Some((6, 6))));
+    editor.ensure_layout(&mut FontContext::default(), &mut LayoutContext::new(), 400.0);
+    assert_eq!(editor.doc.paragraph(1).fold, Fold::Member);
+    assert_eq!(editor.doc.paragraph(2).fold, Fold::Member);
+    assert!(editor.doc.height() < original_height, "selected paragraphs must be visually collapsed");
+    assert_eq!(editor.text(), text, "temporary rendering may not mutate persistent bytes");
+    let actual = editor.caret();
+    let expected = editor.caret_at(start, "日本".len(), Affinity::Downstream);
+    assert!((actual.x0 - expected.x0).abs() < 0.01);
+    assert!(editor.cancel_transient_ime());
+    editor.ensure_layout(&mut FontContext::default(), &mut LayoutContext::new(), 400.0);
+    assert_eq!(editor.doc.paragraph(1).fold, Fold::None);
+    assert_eq!(editor.doc.paragraph(2).fold, Fold::None);
+    assert!((editor.doc.height() - original_height).abs() < 0.5, "cancel must restore measured height");
+    assert_eq!(editor.text(), text);
+}

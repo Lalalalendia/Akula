@@ -4,15 +4,12 @@ use masonry::parley::{Alignment, FontContext, Layout, LayoutContext};
 use super::super::markdown::{self, Block, Decor, Fonts};
 use super::super::highlight::Lang;
 use super::{Document, text};
-
 pub(super) static PLAIN: Decor = Decor { x: 0.0, inset: 0.0, pad: (0.0, 0.0), hang: None, codes: Vec::new(), marks: Vec::new(), tags: Vec::new(), links: Vec::new(), caret: None, source_selection: None, boxes: Vec::new(), pictures: Vec::new() };
-
 #[cfg(test)]
 #[path = "laid_tests.rs"]
 mod tests;
 
 mod preedit;
-
 pub(super) struct Laid {
     pub(super) layout: Layout<BrushIndex>,
     pub(super) decor: Decor,
@@ -48,7 +45,10 @@ impl Document {
     pub(super) fn lay(&self, line: usize, fcx: &mut FontContext, lcx: &mut LayoutContext<BrushIndex>, styles: &StyleSet, composing: Option<(usize, &str)>, caret: Option<usize>) -> Laid {
         let range = self.span(line);
         let source = &self.text[self.lines.range(line)];
-        let (text, underline) = preedit::render(source, range, composing, self.selection.as_ref());
+        let tail = self.multiline_preview(composing)
+            .filter(|preview| preview.start_line == line)
+            .map(|preview| self.slice(preview.end_byte..self.span(preview.end_line).end));
+        let (text, underline) = preedit::render(source, range, composing, self.selection.as_ref(), tail);
         let context = self.markdown.as_ref().map(|fonts| self.context(fonts, Some(line)));
         let markdown = context.as_ref().map(|context| (context, self.blocks.get(line), self.local_caret(line, caret)));
         // Native fenced code has one horizontal visual line; math keeps its
