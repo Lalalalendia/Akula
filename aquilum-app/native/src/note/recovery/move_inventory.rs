@@ -14,12 +14,15 @@ const MAX_MOVE_BYTES: u64 = 64 * 1024 * 1024;
 pub(crate) fn has_unreviewed_shadow_under_move(
     data: &Path, vault: &Path, workspace: Uuid, from: &Path,
 ) -> io::Result<bool> {
-    let moving = from.strip_prefix(vault)
+    let moving = from
+        .strip_prefix(vault)
         .map_err(|_| denied("move source outside workspace"))?;
     if !normal_relative(moving) {
         return Err(denied("unnormalized move source"));
     }
-    let Some(bucket) = folder(data, workspace, false)? else { return Ok(false) };
+    let Some(bucket) = folder(data, workspace, false)? else {
+        return Ok(false);
+    };
     let workspace_id = workspace.to_string();
     let mut count = 0usize;
     let mut bytes = 0u64;
@@ -42,13 +45,14 @@ pub(crate) fn has_unreviewed_shadow_under_move(
         if !name.ends_with(".shadow") {
             return Err(denied("unexpected recovery entry requires manual review"));
         }
-        bytes = bytes.checked_add(meta.len())
+        bytes = bytes
+            .checked_add(meta.len())
             .ok_or_else(|| denied("recovery inventory size overflow"))?;
         if bytes > MAX_MOVE_BYTES {
             return Err(denied("recovery inventory too large for synchronous move preflight"));
         }
 
-        // Verify the full authenticated-by-checksum wire before trusting its
+        // Verify the integrity checksum before trusting the
         // embedded relative pathname. Reject corrupt records even if unrelated.
         let record = decode(&read_bounded(&path)?)?;
         let relative = Path::new(&record.relative);
@@ -120,6 +124,51 @@ mod tests {
         assert!(!has_unreviewed_shadow_under_move(
             data.path(), vault.path(), workspace, &folder,
         ).unwrap());
+    }
+
+    #[test]
+    fn oversized_recovery_inventory_blocks_move_without_reading_or_deleting_data() {
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let workspace = Uuid::new_v4();
+        let folder = vault.path().join("Folder");
+        fs::create_dir_all(&folder).unwrap();
+        let bucket = super::super::folder(data.path(), workspace, true).unwrap().unwrap();
+        let huge = bucket.join(format!("{}-{:020}.shadow", "b".repeat(64), 1));
+        fs::File::create(&huge)
+            .unwrap()
+            .set_len(MAX_MOVE_BYTES + 1)
+            .unwrap();
+
+        let err = has_unreviewed_shadow_under_move(
+            data.path(),
+            vault.path(),
+            workspace,
+            &folder,
+        ).unwrap_err();
+        assert!(err.to_string().contains("too large"));
+        assert_eq!(fs::metadata(&huge).unwrap().len(), MAX_MOVE_BYTES + 1);
+        assert!(folder.is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_recovery_entry_blocks_move_without_following_it() {
+        use std::os::unix::fs::symlink;
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let workspace = Uuid::new_v4();
+        let folder = vault.path().join("Folder");
+        fs::create_dir_all(&folder).unwrap();
+        let outside = data.path().join("outside.txt");
+        fs::write(&outside, b"do not read or modify").unwrap();
+        let bucket = super::super::folder(data.path(), workspace, true).unwrap().unwrap();
+        let link = bucket.join(format!("{}-{:020}.shadow", "b".repeat(64), 1));
+        symlink(&outside, &link).unwrap();
+        assert!(has_unreviewed_shadow_under_move(
+            data.path(), vault.path(), workspace, &folder,
+        ).is_err());
+        assert_eq!(fs::read(&outside).unwrap(), b"do not read or modify");
     }
 
     #[test]
