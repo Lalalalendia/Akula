@@ -436,3 +436,42 @@ use super::*;
         // Durable anti-replay across restarts *within* TTL is still a host
         // requirement; this isolated laboratory does not implement it.
     }
+
+    #[test]
+    fn local_accept_preflight_denies_revoked_policy_after_ringing() {
+        let (a, _) = peers();
+        let (_, mut receiver, _) = started();
+        receiver.ring_local(NOW + 1).unwrap();
+        assert_eq!(
+            receiver.verify_local_accept_peer(a, LocalPeerPolicy::Revoked),
+            Err(CallError::Revoked)
+        );
+        assert_eq!(receiver.phase(), CallPhase::Closed);
+        assert_eq!(receiver.accept_local(NOW + 2), Err(CallError::InvalidTransition));
+    }
+
+    #[test]
+    fn local_accept_preflight_rejects_wrong_authenticated_peer() {
+        let (_, mut receiver, _) = started();
+        receiver.ring_local(NOW + 1).unwrap();
+        assert_eq!(
+            receiver.verify_local_accept_peer(peer(99, 99), LocalPeerPolicy::Allowed),
+            Err(CallError::WrongPeer)
+        );
+        assert_eq!(receiver.phase(), CallPhase::Closed);
+        assert_eq!(receiver.accept_local(NOW + 2), Err(CallError::InvalidTransition));
+    }
+
+    #[test]
+    fn local_accept_preflight_keeps_allowed_session_ringing_until_consent() {
+        let (a, _) = peers();
+        let (_, mut receiver, _) = started();
+        receiver.ring_local(NOW + 1).unwrap();
+        assert_eq!(
+            receiver.verify_local_accept_peer(a, LocalPeerPolicy::Allowed),
+            Ok(())
+        );
+        assert_eq!(receiver.phase(), CallPhase::IncomingRinging);
+        assert!(receiver.accept_local(NOW + 2).is_ok());
+        assert_eq!(receiver.phase(), CallPhase::Active);
+    }
