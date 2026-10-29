@@ -14,6 +14,7 @@ on:
       - 'aquilum-app/core/src/p2p_inbox_lab/**'
       - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/core/src/sync/p2p_stage.rs'
+      - 'aquilum-app/core/src/sync/p2p_stage/**'
       - 'aquilum-app/core/src/sync/disabled_tests.rs'
       - 'modules/drop-inbox-ledger/**'
       - 'aquilum-app/native/src/ui/transfer/**'
