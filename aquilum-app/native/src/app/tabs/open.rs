@@ -1,4 +1,5 @@
-mod readonly; mod legacy_txt;
+mod readonly;
+mod legacy_txt;
 mod open_in;
 mod docx;
 #[cfg(feature = "dicom-preview")]
@@ -209,7 +210,6 @@ impl App {
             chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
         }
     }
-
     fn drop_note_page(&mut self, root: &mut RenderRoot) {
         self.embeds = None;
         // Read-only image/structured pages have no NoteIds, but their decoded
