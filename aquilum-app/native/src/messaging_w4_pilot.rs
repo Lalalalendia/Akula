@@ -48,7 +48,7 @@ fn verify_executable(path:&Path, expected:Option<&str>)->Result<(),String>{
         if count>MAX_BINARY {return Err("W4 превышает предел".into());}
         digest.update(&block[..n]);
     }
-    let actual=format!("{:x}",digest.finalize());
+    let actual=digest.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
     if actual!=expected.to_ascii_lowercase() {
         return Err("контрольная сумма W4 не совпадает; запуск запрещён".into());
     }
@@ -181,7 +181,7 @@ mod tests {
         fs::write(&helper,b"not the verified WOW helper").unwrap();
         assert!(verify_executable(&helper,None).is_err());
         assert!(verify_executable(&helper,Some(&"0".repeat(64))).is_err());
-        assert!(verify_executable(&helper,Some(&format!("{:x}",Sha256::digest(b"not the verified WOW helper")))).is_ok());
+        assert!(verify_executable(&helper,Some(&Sha256::digest(b"not the verified WOW helper").iter().map(|byte| format!("{byte:02x}")).collect::<String>())).is_ok());
     }
     #[cfg(unix)]
     #[test]
