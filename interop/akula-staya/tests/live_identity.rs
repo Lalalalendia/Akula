@@ -18,6 +18,17 @@ use aquilum_core::sync::{
         inspect_signed_roster,
     },
 };
+#[cfg(all(windows, feature = "call-live-identity-lab"))]
+use akula_staya_integration::call_live_identity_lab::{
+    admit_incoming_call, receive_live_call,
+};
+#[cfg(all(windows, feature = "call-live-identity-lab"))]
+use aquilum_core::{
+    call_signaling_lab::{CallError, CallSession, LocalPeerPolicy},
+    p2p_offer_lab::PeerBinding,
+};
+#[cfg(all(windows, feature = "call-live-identity-lab"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 use iroh::{Endpoint, EndpointAddr, RelayMode, SecretKey, endpoint::presets};
 #[cfg(windows)]
 use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -221,6 +232,31 @@ async fn protected_identity_accepts_confirmed_live_peer_then_rejects_revoke() {
             "a signed roster cannot self-authorize transport admission"
         );
 
+        // A valid QUIC channel and signed roster alone do not authorize a call.
+        #[cfg(feature = "call-live-identity-lab")]
+        let (local_binding, offer) = {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+            let local_binding = PeerBinding {
+                device_id: DeviceId::new(),
+                endpoint_id: *server.id().as_bytes(),
+            };
+            let remote_binding = PeerBinding {
+                device_id,
+                endpoint_id: *outsider_id.as_bytes(),
+            };
+            let (_, offer) = CallSession::outbound(
+                remote_binding, local_binding, [71; 16], now, 90, LocalPeerPolicy::Allowed
+            ).unwrap();
+            assert!(matches!(
+                admit_incoming_call(
+                    &live, &outsider_hex, &verified, vault_id, device_id,
+                    local_binding, LocalPeerPolicy::Allowed, &offer, now
+                ),
+                Err(CallError::Denied)
+            ));
+            (local_binding, offer)
+        };
+
         // CI synthetic peer confirmation is NOT a product human pairing.
         peer_pin::confirm_peer(&outsider_hex, &outsider_hex).unwrap();
         assert_eq!(require_pinned_live_peer(&live, &outsider_hex), Ok(()));
@@ -235,7 +271,37 @@ async fn protected_identity_accepts_confirmed_live_peer_then_rejects_revoke() {
         assert_eq!(observed.vault_id(), vault_id);
         assert_eq!(observed.roster_epoch(), 7);
 
+        #[cfg(feature = "call-live-identity-lab")]
+        let (mut incoming_call, emitted_ring) = {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+            let mut call = admit_incoming_call(
+                &live, &outsider_hex, &verified, vault_id, device_id,
+                local_binding, LocalPeerPolicy::Allowed, &offer, now
+            ).expect("actual OS-pinned QUIC peer and signed roster admit the offer");
+            let ringing = call.ring_local(now).unwrap();
+            (call, ringing)
+        };
+
         peer_pin::revoke_peer(&outsider_hex).unwrap();
+        #[cfg(feature = "call-live-identity-lab")]
+        {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+            assert_eq!(
+                receive_live_call(
+                    &mut incoming_call, &live, &outsider_hex, &verified, vault_id, device_id,
+                    LocalPeerPolicy::Allowed, &emitted_ring, now
+                ),
+                Err(CallError::Revoked)
+            );
+            assert_eq!(incoming_call.phase(), aquilum_core::call_signaling_lab::CallPhase::Closed);
+            assert!(matches!(
+                admit_incoming_call(
+                    &live, &outsider_hex, &verified, vault_id, device_id,
+                    local_binding, LocalPeerPolicy::Allowed, &offer, now
+                ),
+                Err(CallError::Denied)
+            ));
+        }
         assert_eq!(
             require_pinned_live_peer(&live, &outsider_hex),
             Err(IdentityError::PeerRevoked),
