@@ -118,7 +118,14 @@ mod tests {
     #[test]
     fn capture_requires_explicit_exact_confirmation() {
         assert!(approved("CAPTURE\r\n"));
-        for invalid in ["", "capture", " CAPTURE", "CAPTURE ", "CAPTURE_MORE", "PLAY"] {
+        for invalid in [
+            "",
+            "capture",
+            " CAPTURE",
+            "CAPTURE ",
+            "CAPTURE_MORE",
+            "PLAY",
+        ] {
             assert!(!approved(invalid));
         }
     }
