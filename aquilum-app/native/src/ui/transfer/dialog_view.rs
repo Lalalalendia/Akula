@@ -4,8 +4,6 @@ use super::*;
 mod offer_consent_view;
 mod panels;
 
-/// Draft controls remain inert. The optional received-Inbox Save Copy button
-/// invokes only an explicit local no-clobber export, never QUIC or Vault ACL.
 pub fn dialog(
     rows: &[QueueRow],
     devices: &[DeviceRow],
@@ -20,7 +18,6 @@ pub fn dialog(
     let choose_id = choose.id();
     let (queue, actions) = queue_view::render(rows);
     let queue = NewWidget::new(ScrollArea::new(queue));
-
     let (info, device_actions) = devices::render(devices, error);
     let footer = NewWidget::new(
         Flex::row()

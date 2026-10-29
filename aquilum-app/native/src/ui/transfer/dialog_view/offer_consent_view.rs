@@ -41,12 +41,12 @@ pub(super) fn render(
             t("transfer.offerConsentDigest"),
             offer.digest
         )))
-        .with_fixed(
+        .with_fixed(NewWidget::new(
             Flex::row()
                 .main_axis_alignment(MainAxisAlignment::End)
                 .with_fixed(decline)
                 .with_fixed(accept),
-        );
+        ));
     (
         NewWidget::new(panel).with_props(
             PropertySet::new()
