@@ -71,7 +71,10 @@ pub(super) fn open_delete_candidate(parent: &File, leaf: &str) -> Result<File, V
         return Err(VaultPortError::UnsafePath);
     }
     let mut wide: Vec<u16> = leaf.encode_utf16().collect();
-    let bytes = wide.len().checked_mul(2).ok_or(VaultPortError::UnsafePath)?;
+    let bytes = wide
+        .len()
+        .checked_mul(2)
+        .ok_or(VaultPortError::UnsafePath)?;
     if bytes == 0 || bytes > u16::MAX as usize {
         return Err(VaultPortError::UnsafePath);
     }
@@ -105,9 +108,7 @@ pub(super) fn open_delete_candidate(parent: &File, leaf: &str) -> Result<File, V
             0,
             SHARE_READ,
             FILE_OPEN,
-            FILE_NON_DIRECTORY_FILE
-                | FILE_OPEN_REPARSE_POINT
-                | FILE_SYNCHRONOUS_IO_NONALERT,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
             ptr::null_mut(),
             0,
         )
