@@ -682,6 +682,7 @@
       "scrollLineDown": "Прокрутить на строку вниз",
       "deleteWord": "Удалить слово слева",
       "deleteWordForward": "Удалить слово справа",
+      "deleteLineBackward": "Удалить до начала строки",
       "tables": "Таблицы",
       "nextCell": "Следующая ячейка",
       "previousCell": "Предыдущая ячейка",

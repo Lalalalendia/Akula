@@ -92,7 +92,7 @@ impl TextEditor {
                 }
             }
             (_, Key::Named(NamedKey::ArrowUp | NamedKey::ArrowDown)) => {
-                let target = self.vertical(matches!(event.key, Key::Named(NamedKey::ArrowDown)));
+                let target = self.vertical_target(command, matches!(event.key, Key::Named(NamedKey::ArrowDown)));
                 self.move_to(target, shift);
                 self.skip_tables(matches!(event.key, Key::Named(NamedKey::ArrowDown)));
             }
@@ -106,7 +106,7 @@ impl TextEditor {
             }
             (_, Key::Named(NamedKey::Backspace)) => {
                 if !self.apply_multicursor_delete(false) && !self.handle_pair_backspace() {
-                    self.delete(false, command == Some(Command::DeleteWord));
+                    self.backspace_with_command(command);
                 }
                 edited = true;
             }

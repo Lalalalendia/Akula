@@ -1,5 +1,4 @@
 use std::ops::Range;
-
 use masonry::accesskit::{Node, Role};
 pub(super) use masonry::core::keyboard::{Key, KeyState, NamedKey};
 pub(super) use masonry::core::Ime;
@@ -38,6 +37,7 @@ mod format;
 mod geometry;
 use geometry::{rect, visible};
 mod keys;
+mod mac_keys;
 mod lifecycle;
 mod source_shortcut;
 mod links;
