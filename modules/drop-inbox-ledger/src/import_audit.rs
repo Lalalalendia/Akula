@@ -122,12 +122,19 @@ impl InboxLedger {
         if exists.is_none() {
             return Ok(Vec::new());
         }
-        // Bound synchronous UI rehash work; never enumerate arbitrary .bin files.
+        // Select the newest eight rows for THIS Vault, not the newest
+        // eight globally (which could all belong to a different Vault).
+        // Bind a literal destination prefix rather than using LIKE/GLOB:
+        // Vault names may contain SQL wildcard characters.
+        // The trailing "received-" also enforces the directory boundary.
+        let prefix = vault.join("received-");
+        let prefix = prefix.to_str().ok_or(LedgerError::InvalidLocalObject)?;
         let mut query = self.db.prepare(
             "SELECT transfer_id, destination FROM imported_inbox
+             WHERE substr(destination, 1, length(?1)) = ?1
              ORDER BY rowid DESC LIMIT 8",
         )?;
-        let rows = query.query_map([], |row| {
+        let rows = query.query_map([prefix], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
         let mut verified = Vec::new();
@@ -269,6 +276,53 @@ mod tests {
         altered[0] ^= 1;
         fs::write(&target, altered).unwrap();
         assert!(ledger.verified_imports_in(vault).unwrap().is_empty());
+        assert_eq!(fs::read(ledger.object_path(intent.id)).unwrap(), bytes);
+    }
+
+    #[test]
+    fn vault_projection_pages_after_selecting_its_own_destination() {
+        let (dir, mut ledger, intent, bytes, target) = fixture();
+        let original_vault = target.parent().unwrap().to_path_buf();
+        let newer_vault = dir.path().join("newer-vault");
+        fs::create_dir(&newer_vault).unwrap();
+
+        ledger.confirm(&intent).unwrap();
+        fs::write(&target, &bytes).unwrap();
+        ledger.record_imported(intent.id, &target).unwrap();
+
+        // A global LIMIT 8 would wrongly evict the old Vault from its own list.
+        for _ in 0..9 {
+            let next = ExpectedTransfer {
+                id: Uuid::new_v4(),
+                ..intent.clone()
+            };
+            ledger.reserve(&next).unwrap();
+            let mut object = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(ledger.object_path(next.id))
+                .unwrap();
+            object.write_all(&bytes).unwrap();
+            object.sync_all().unwrap();
+            drop(object);
+            ledger.confirm(&next).unwrap();
+            let newer_copy = newer_vault.join(format!("received-{}.bin", next.id));
+            fs::write(&newer_copy, &bytes).unwrap();
+            ledger.record_imported(next.id, &newer_copy).unwrap();
+        }
+
+        assert_eq!(
+            ledger.verified_imports_in(&original_vault).unwrap(),
+            vec![target.canonicalize().unwrap()]
+        );
+        let recent_other = ledger.verified_imports_in(&newer_vault).unwrap();
+        assert_eq!(recent_other.len(), 8);
+        let canonical_other = newer_vault.canonicalize().unwrap();
+        assert!(
+            recent_other
+                .iter()
+                .all(|item| item.parent() == Some(canonical_other.as_path()))
+        );
         assert_eq!(fs::read(ledger.object_path(intent.id)).unwrap(), bytes);
     }
 
