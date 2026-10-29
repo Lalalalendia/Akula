@@ -111,3 +111,46 @@ fn closing_modal_or_stale_widget_id_cannot_grant_consent() {
     assert_eq!(reply.decision().action, DecisionAction::Decline);
     assert!(reply.decision().selected.is_empty());
 }
+
+#[test]
+fn actual_pointer_event_on_visible_accept_button_creates_one_decision() {
+    let mut h = Harness::new();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let offer = offer(now);
+    h.app
+        .transfer
+        .offer_consent
+        .present_from_authenticated_transport(
+            &offer.encode(now).unwrap(),
+            offer.sender,
+            offer.receiver,
+            now,
+        )
+        .unwrap();
+    let rail = h.app.chrome.as_ref().unwrap().transfer_button;
+    let position = h
+        .root
+        .get_widget(rail)
+        .expect("transfer rail button")
+        .ctx()
+        .bounding_box()
+        .center();
+    h.click(position.x, position.y);
+    let accept = button(&h, true);
+    let position = h
+        .root
+        .get_widget(accept)
+        .expect("consent button must be mounted")
+        .ctx()
+        .bounding_box()
+        .center();
+    h.click(position.x, position.y);
+    let reply = h.app.transfer.offer_consent.take_response().unwrap();
+    assert_eq!(reply.decision().action, DecisionAction::Accept);
+    assert_eq!(reply.decision().selected, vec![0]);
+    assert_eq!(reply.decision().manifest_commitment, offer.commitment());
+    assert!(h.app.transfer.offer_consent.take_response().is_none());
+}
