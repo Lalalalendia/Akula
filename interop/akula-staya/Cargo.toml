@@ -27,6 +27,8 @@ node-v1-runtime = ["node-live-read-lab", "aquilum-core/node-v1", "dep:tokio", "d
 sender-arm-lab = []
 # Explicit Windows two-PC OS-backed QUIC HELLO/OK. Never sends user bytes.
 os-pinned-lan-probe = ["p2p-live-identity", "dep:tokio"]
+# Real loopback two-process Iroh call signaling; no production consent or media.
+call-quic-lab = ["aquilum-core/call-signaling-lab", "dep:tokio"]
 
 [[bin]]
 name = "akula-p2p-lan"
