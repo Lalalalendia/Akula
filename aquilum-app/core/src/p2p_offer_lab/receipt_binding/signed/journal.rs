@@ -128,3 +128,6 @@ pub fn consume_once(db: &mut Connection, checked: CheckedColdReceipt) -> Result<
     transaction.commit()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

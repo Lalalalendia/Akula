@@ -88,11 +88,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rustfmt --edition 2021 --check aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed.rs aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed/journal.rs
+          rustfmt --edition 2021 --check aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed.rs aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed/journal.rs aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed/journal/tests.rs
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-offer-lab --lib p2p_offer_lab::receipt_binding::signed::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-signed-cold-receipt.txt"
           grep -F 'test result: ok. 8 passed; 0 failed;' "$RUNNER_TEMP/p2p-signed-cold-receipt.txt"
           grep -F 'test p2p_offer_lab::receipt_binding::signed::tests::signed_two_endpoint_proof_survives_cold_read_after_offer_expiry ... ok' "$RUNNER_TEMP/p2p-signed-cold-receipt.txt"
           grep -F 'test p2p_offer_lab::receipt_binding::signed::tests::one_use_sqlite_fence_survives_cold_restart_without_retry ... ok' "$RUNNER_TEMP/p2p-signed-cold-receipt.txt"
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-offer-lab --lib p2p_offer_lab::receipt_binding::signed::journal::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-cold-journal-independent-handles.txt"
+          grep -F 'test result: ok. 2 passed; 0 failed;' "$RUNNER_TEMP/p2p-cold-journal-independent-handles.txt"
+          grep -F 'test p2p_offer_lab::receipt_binding::signed::journal::tests::two_open_sqlite_handles_cannot_consume_same_receipt_twice ... ok' "$RUNNER_TEMP/p2p-cold-journal-independent-handles.txt"
           echo 'AKULA_P2P_SIGNED_COLD_PROOF_V2_TESTS_PASS'
       - name: Confirm unaccepted P2P excluded from signed installed graph
         if: runner.os == 'Windows'
