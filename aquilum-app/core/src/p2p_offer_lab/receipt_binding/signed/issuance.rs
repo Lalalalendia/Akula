@@ -119,8 +119,7 @@ fn sign_sender_with_key(
     Ok(half)
 }
 
-fn countersign_with_key(
-    key: &Ed25519KeyPair,
+fn verify_receiver_half(
     sender_half: &[u8],
     offer: &OfferV1,
     ui_decision: &DecisionV1,
@@ -128,14 +127,11 @@ fn countersign_with_key(
     authenticated_receiver: PeerBinding,
     rehashed_inbox: ObservedLocalReceipt,
     now: u64,
-) -> Result<[u8; RECORD_BYTES], IssueError> {
+) -> Result<(), IssueError> {
     if sender_half.len() != SENDER_HALF_BYTES {
         return Err(IssueError::BadLength);
     }
     offer.validate(now).map_err(IssueError::Offer)?;
-    if key.public_key().as_ref() != &authenticated_receiver.endpoint_id[..] {
-        return Err(IssueError::WrongKey);
-    }
     if ui_decision.action != DecisionAction::Accept
         || ui_decision.offer_id != offer.offer_id
         || ui_decision.manifest_commitment != offer.commitment()
@@ -182,6 +178,31 @@ fn countersign_with_key(
             &sender_half[BODY_BYTES..SENDER_HALF_BYTES],
         )
         .map_err(|_| IssueError::BadSenderSignature)?;
+    Ok(())
+}
+
+fn countersign_with_key(
+    key: &Ed25519KeyPair,
+    sender_half: &[u8],
+    offer: &OfferV1,
+    ui_decision: &DecisionV1,
+    authenticated_sender: PeerBinding,
+    authenticated_receiver: PeerBinding,
+    rehashed_inbox: ObservedLocalReceipt,
+    now: u64,
+) -> Result<[u8; RECORD_BYTES], IssueError> {
+    verify_receiver_half(
+        sender_half,
+        offer,
+        ui_decision,
+        authenticated_sender,
+        authenticated_receiver,
+        rehashed_inbox,
+        now,
+    )?;
+    if key.public_key().as_ref() != &authenticated_receiver.endpoint_id[..] {
+        return Err(IssueError::WrongKey);
+    }
     let mut record = [0u8; RECORD_BYTES];
     record[..SENDER_HALF_BYTES].copy_from_slice(sender_half);
     record[SENDER_HALF_BYTES..].copy_from_slice(key.sign(sender_half).as_ref());
@@ -215,9 +236,19 @@ fn load_checked_local(
     Ok(identity)
 }
 
-fn pair_for(identity: &DeviceIdentity) -> Result<Ed25519KeyPair, IssueError> {
+/// Construct the signing key only inside the protected seed callback. Only
+/// public signature bytes, never the key object, may outlive this scope.
+fn with_loaded_local_key<T>(
+    local: PeerBinding,
+    selected_remote_id: &str,
+    remote: PeerBinding,
+    sign: impl FnOnce(&Ed25519KeyPair) -> Result<T, IssueError>,
+) -> Result<T, IssueError> {
+    let identity = load_checked_local(local, selected_remote_id, remote)?;
     identity.with_secret_seed(|seed| {
-        Ed25519KeyPair::from_seed_unchecked(seed).map_err(|_| IssueError::BadSigningKey)
+        let key =
+            Ed25519KeyPair::from_seed_unchecked(seed).map_err(|_| IssueError::BadSigningKey)?;
+        sign(&key)
     })
 }
 
@@ -234,20 +265,32 @@ pub fn sign_sender_half_v2(
     rehashed_source: ObservedLocalReceipt,
     now: u64,
 ) -> Result<[u8; SENDER_HALF_BYTES], IssueError> {
-    let identity = load_checked_local(
-        authenticated_sender,
-        selected_receiver_full_id,
-        authenticated_receiver,
-    )?;
-    let key = pair_for(&identity)?;
-    sign_sender_with_key(
-        &key,
+    // Reject pending, declined, unselected and forged file facts before
+    // touching the user's OS credential store.
+    match_accepted_local_receipt(
         session,
         index,
         authenticated_sender,
         authenticated_receiver,
         rehashed_source,
         now,
+    )
+    .map_err(IssueError::Binding)?;
+    with_loaded_local_key(
+        authenticated_sender,
+        selected_receiver_full_id,
+        authenticated_receiver,
+        |key| {
+            sign_sender_with_key(
+                key,
+                session,
+                index,
+                authenticated_sender,
+                authenticated_receiver,
+                rehashed_source,
+                now,
+            )
+        },
     )
 }
 
@@ -266,14 +309,9 @@ pub fn countersign_received_v2(
     rehashed_inbox: ObservedLocalReceipt,
     now: u64,
 ) -> Result<[u8; RECORD_BYTES], IssueError> {
-    let identity = load_checked_local(
-        authenticated_receiver,
-        selected_sender_full_id,
-        authenticated_sender,
-    )?;
-    let key = pair_for(&identity)?;
-    countersign_with_key(
-        &key,
+    // Invalid wire halves and caller-supplied decisions cannot even cause
+    // an OS credential lookup. This does not authenticate the UI action.
+    verify_receiver_half(
         sender_half,
         offer,
         trusted_ui_accept,
@@ -281,6 +319,23 @@ pub fn countersign_received_v2(
         authenticated_receiver,
         rehashed_inbox,
         now,
+    )?;
+    with_loaded_local_key(
+        authenticated_receiver,
+        selected_sender_full_id,
+        authenticated_sender,
+        |key| {
+            countersign_with_key(
+                key,
+                sender_half,
+                offer,
+                trusted_ui_accept,
+                authenticated_sender,
+                authenticated_receiver,
+                rehashed_inbox,
+                now,
+            )
+        },
     )
 }
 

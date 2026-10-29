@@ -105,9 +105,11 @@ jobs:
           set -euo pipefail
           rustfmt --edition 2021 --check aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed/issuance.rs aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed/issuance/tests.rs
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-offer-lab,p2p-device-identity --lib p2p_offer_lab::receipt_binding::signed::issuance::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
-          grep -Eq 'test result: ok\. [45] passed; 0 failed;' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
+          grep -Eq 'test result: ok\. (6|7) passed; 0 failed;' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
           grep -F 'test p2p_offer_lab::receipt_binding::signed::issuance::tests::genuine_two_key_half_to_cold_v2_roundtrip ... ok' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
           grep -F 'test p2p_offer_lab::receipt_binding::signed::issuance::tests::pending_declined_and_unselected_session_cannot_sign ... ok' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
+          grep -F 'test p2p_offer_lab::receipt_binding::signed::issuance::tests::rejected_sender_request_fails_before_os_credential_lookup ... ok' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
+          grep -F 'test p2p_offer_lab::receipt_binding::signed::issuance::tests::receiver_half_preflight_rejects_forgery_before_os_credential_lookup ... ok' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
           echo 'AKULA_P2P_OS_SIGNED_ISSUANCE_QA_TESTS_PASS'
       - name: Confirm unaccepted P2P excluded from signed installed graph
         if: runner.os == 'Windows'

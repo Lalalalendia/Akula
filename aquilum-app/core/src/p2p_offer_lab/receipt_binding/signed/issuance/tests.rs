@@ -295,3 +295,87 @@ fn absent_os_credential_backend_never_falls_back_to_test_key() {
         Err(IssueError::Identity(IdentityError::UnsupportedPlatform))
     ));
 }
+
+#[test]
+fn rejected_sender_request_fails_before_os_credential_lookup() {
+    let f = fixture();
+    let pending =
+        OfferSession::new_sender(f.offer.clone(), NOW, f.offer.sender, f.offer.receiver).unwrap();
+    assert!(matches!(
+        sign_sender_half_v2(
+            &pending,
+            0,
+            f.offer.sender,
+            f.offer.receiver,
+            "not-a-valid-pin",
+            f.observed,
+            NOW + 2,
+        ),
+        Err(IssueError::Binding(BindingError::NotAccepted))
+    ));
+    let mut corrupted = f.observed;
+    corrupted.blake3_root[0] ^= 1;
+    assert!(matches!(
+        sign_sender_half_v2(
+            &f.session,
+            0,
+            f.offer.sender,
+            f.offer.receiver,
+            "not-a-valid-pin",
+            corrupted,
+            NOW + 2,
+        ),
+        Err(IssueError::Binding(BindingError::ReceiptMismatch))
+    ));
+}
+
+#[test]
+fn receiver_half_preflight_rejects_forgery_before_os_credential_lookup() {
+    let f = fixture();
+    let half = sender_half(&f);
+    let mut declined = f.accept.clone();
+    declined.action = DecisionAction::Decline;
+    assert!(matches!(
+        countersign_received_v2(
+            &half,
+            &f.offer,
+            &declined,
+            f.offer.sender,
+            f.offer.receiver,
+            "not-a-valid-pin",
+            f.observed,
+            NOW + 3,
+        ),
+        Err(IssueError::InvalidDecision)
+    ));
+    let mut corrupted_half = half;
+    corrupted_half[BODY_BYTES] ^= 1;
+    assert!(matches!(
+        countersign_received_v2(
+            &corrupted_half,
+            &f.offer,
+            &f.accept,
+            f.offer.sender,
+            f.offer.receiver,
+            "not-a-valid-pin",
+            f.observed,
+            NOW + 3,
+        ),
+        Err(IssueError::BadSenderSignature)
+    ));
+    let mut corrupted_receipt = f.observed;
+    corrupted_receipt.receipt_id = Uuid::from_u128(999);
+    assert!(matches!(
+        countersign_received_v2(
+            &half,
+            &f.offer,
+            &f.accept,
+            f.offer.sender,
+            f.offer.receiver,
+            "not-a-valid-pin",
+            corrupted_receipt,
+            NOW + 3,
+        ),
+        Err(IssueError::WrongReceipt)
+    ));
+}
