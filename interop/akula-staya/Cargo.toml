@@ -29,6 +29,8 @@ sender-arm-lab = []
 os-pinned-lan-probe = ["p2p-live-identity", "dep:tokio"]
 # Isolated real software Opus 20ms PCM roundtrip, NO device, QUIC or recording.
 call-voice-codec-lab = ["aquilum-core/voice-jitter-lab", "dep:opus"]
+# Two ephemeral OS processes over genuine Iroh/QUIC TLS, synthetic encoded PCM only.
+call-voice-quic-lab = ["call-voice-codec-lab", "dep:tokio"]
 
 [[bin]]
 name = "akula-p2p-lan"
