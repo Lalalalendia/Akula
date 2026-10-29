@@ -9,7 +9,7 @@ use masonry::widgets::{Flex, SizedBox};
 use crate::i18n::{t, t_with};
 use crate::ui::icons;
 use crate::ui::tokens::size;
-use crate::ui::widgets::{ButtonSize, IconButton, TextButton, Variant};
+use crate::ui::widgets::{ButtonSize, IconButton, Leading, TextButton, Variant};
 
 pub struct SaveErrorIds {
     pub retry: WidgetId,
@@ -59,8 +59,10 @@ pub fn open_error_page(path: &Path, error: &str) -> (NewWidget<Flex>, OpenErrorI
     let actions = NewWidget::new(actions).with_props(PropertySet::new().with(Gap::new(Length::px(size::SPACE_8))));
 
     let icon = NewWidget::new(IconButton::new(icons::FILE_X, t("editor.openFailedTitle"))).disabled(true);
-    let title = NewWidget::new(crate::ui::widgets::Caption::new(&t("editor.openFailedTitle")));
-    let desc_w = NewWidget::new(crate::ui::widgets::Caption::new(&desc));
+    // Caption measures zero horizontal width here and clips errors to "...".
+    let leading = Leading::Px(size::SIZE_20 as f32);
+    let title = crate::ui::text::label(&t("editor.openFailedTitle"), |theme| theme.text_secondary, None, leading);
+    let desc_w = crate::ui::text::selectable(&desc, |theme| theme.text_tertiary, None, leading);
 
     let content = Flex::column()
         .cross_axis_alignment(CrossAxisAlignment::Center)
