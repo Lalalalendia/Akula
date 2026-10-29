@@ -1,27 +1,44 @@
-# AK-CALL-02 — Windows sound-device laboratory
+# AK-CALL-02 — Windows audio device laboratory
 
-This is a manually launched, **non-shipping** console diagnostic. It is not wired to Akula Core, Native, startup, Iroh, Opus, recording, or calls.
+Standalone **non-shipping** Windows diagnostics. No Akula runtime integration,
+Iroh/QUIC, Opus, automatic startup, file writes or network access.
+These are not working calls or release candidates.
 
-## Safe behavior
+## Manual output diagnostic
 
-- Lists input/output device names without opening microphone capture.
-- Opens the default *output* device only after the user types the exact confirmation `PLAY`.
-- Generates a quiet 440 Hz local tone for at most one second, then closes the output stream after two seconds. No file, network, microphone capture, or recording.
-- The sample format must be f32; unsupported devices produce an error instead of being silently reconfigured.
-- No automatic audio capture. Microphone opening and lifetime/permission logic are deferred until consent, mute/revoke and OS permission behavior can be tested properly.
-- No guarantee for Windows 7; hardware compatibility must be verified separately.
-
-## Manual test (Windows)
+The default executable lists device names but never opens a microphone.
+Only the exact `PLAY` confirmation opens default output. It plays a quiet
+440 Hz tone for at most one second and closes the output within two seconds.
 
 ```powershell
-cargo run --manifest-path interop/akula-call-audio-windows/Cargo.toml
+cargo run --manifest-path interop/akula-call-audio-windows/Cargo.toml --bin akula-call-audio-windows
 ```
 
-Enter anything except `PLAY` to exit without opening a device.
+## Manual microphone diagnostic
 
-## Engineering acceptance still open
+Use a separate console command to run the `mic` binary. The exact word
+`CAPTURE` is required before opening the default input device. Windows
+privacy settings remain authoritative. Audio samples are immediately
+discarded by the device callback, without storage, processing or sending.
 
-- Validate device unplug during playback, device busy/denied permission and orderly stream stop.
-- Implement opt-in microphone permission and capture with explicit second consent; ensure no capture before accepted call and stop on mute/revoke/disconnect.
-- Connect bounded audio queues to the tested Opus + authenticated call, then measure physical audio delays.
-- Verify Windows 7 separately, including cpal/backend support and minimum executable requirements.
+```powershell
+cargo run --manifest-path interop/akula-call-audio-windows/Cargo.toml --bin mic
+```
+
+During capture, `STOP`, `MUTE`, `REVOKE`, or `DISCONNECT` closes the stream.
+Unknown input also ends capture. Input failure, device callback error and
+the five-second deadline terminate the probe. These commands are **local
+simulations**, NOT actual network-disconnect or remote-revoke notifications.
+The program uses a separate console-input thread so it can time out even
+if the operator types nothing. Both probes accept only default f32 formats.
+
+## Verification and limitations
+
+Windows CI checks formatting, compilation, pure logic tests and Clippy.
+It cannot prove audio hardware operation, unplug behavior, Windows 7,
+permission dialogs, latency or physical microphone privacy.
+No audio devices are opened by automated tests.
+
+**Keep Draft/HOLD.** Before any real call: connect accepted-call and
+OS-authorized device lifecycles, enforce revoke and disconnect at the host,
+build bounded PCM queues, integrate Opus/QUIC and test two physical PCs.
