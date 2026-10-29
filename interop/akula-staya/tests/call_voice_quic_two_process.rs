@@ -13,9 +13,7 @@ use akula_staya_integration::call_voice_codec_lab::{
 use aquilum_core::{
     p2p_offer_lab::PeerBinding,
     sync::DeviceId,
-    voice_jitter_lab::{
-        HEADER_BYTES, MAX_WIRE_BYTES, PeerPolicy, SAMPLES_PER_FRAME, VoiceError,
-    },
+    voice_jitter_lab::{HEADER_BYTES, MAX_WIRE_BYTES, PeerPolicy, SAMPLES_PER_FRAME, VoiceError},
 };
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, endpoint::presets};
 use std::{
@@ -66,7 +64,10 @@ fn next_frame<'a>(bytes: &'a [u8], cursor: &mut usize) -> &'a [u8] {
     let length_end = (*cursor).checked_add(2).expect("length offset");
     assert!(length_end <= bytes.len(), "short frame prefix");
     let len = u16::from_be_bytes([bytes[*cursor], bytes[*cursor + 1]]) as usize;
-    assert!((HEADER_BYTES..=MAX_WIRE_BYTES).contains(&len), "oversized frame");
+    assert!(
+        (HEADER_BYTES..=MAX_WIRE_BYTES).contains(&len),
+        "oversized frame"
+    );
     let end = length_end.checked_add(len).expect("frame offset");
     assert!(end <= bytes.len(), "truncated encoded frame");
     *cursor = end;
@@ -89,11 +90,7 @@ fn encode_frames(call_id: [u8; 16], seed: usize) -> Vec<u8> {
     out
 }
 
-fn decode_frames(
-    bytes: &[u8],
-    call_id: [u8; 16],
-    remote: PeerBinding,
-) -> usize {
+fn decode_frames(bytes: &[u8], call_id: [u8; 16], remote: PeerBinding) -> usize {
     let mut receiver = OpusVoiceReceiver::new(call_id, remote).expect("real Opus decoder");
     let mut cursor = 0;
     let mut nonzero = 0usize;
@@ -194,7 +191,11 @@ async fn accept_peer(endpoint: &Endpoint, expected: EndpointId) -> iroh::endpoin
         .await
         .expect("TLS deadline")
         .expect("authenticated QUIC TLS");
-    assert_eq!(connection.remote_id(), expected, "independently pinned test key");
+    assert_eq!(
+        connection.remote_id(),
+        expected,
+        "independently pinned test key"
+    );
     connection
 }
 
@@ -288,7 +289,9 @@ async fn client(negative: bool) {
     } else {
         encode_frames(call_id, 1)
     };
-    send.write_all(&request).await.expect("send real Opus frames");
+    send.write_all(&request)
+        .await
+        .expect("send real Opus frames");
     send.finish().expect("finish test media");
     let reply = tokio::time::timeout(DEADLINE, response.read_to_end(MAX_BATCH_BYTES))
         .await
