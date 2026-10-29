@@ -90,7 +90,7 @@ impl App {
                 Some(TextAction::Entered(text)) => {
                     let text = text.clone();
                     self.commit_title(root, &text);
-                    if let Some(ids) = &self.note_ids {
+                    if self.popup.is_none() && let Some(ids) = &self.note_ids {
                         let body = ids.body;
                         root.focus_on(Some(body.id()));
                         body.edit(root, |mut body| TextEditor::select_byte_range(&mut body, 0, 0));
