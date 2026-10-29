@@ -40,10 +40,7 @@ pub struct CheckedColdReceipt {
 
 /// A V2 receipt is offer-scoped and cannot reuse the legacy content-only ID.
 /// Determinism does not constitute a durable consumed/replay ledger.
-pub fn receipt_id_v2(
-    offer: &OfferV1,
-    selected_index: u8,
-) -> Result<Uuid, ProofError> {
+pub fn receipt_id_v2(offer: &OfferV1, selected_index: u8) -> Result<Uuid, ProofError> {
     let file = offer
         .files
         .get(usize::from(selected_index))
@@ -225,9 +222,17 @@ mod tests {
         append(&mut record, &mut at, &offer.commitment());
         append(&mut record, &mut at, &[0]);
         append(&mut record, &mut at, receipt_id.as_bytes());
-        append(&mut record, &mut at, offer.sender.device_id.as_uuid().as_bytes());
+        append(
+            &mut record,
+            &mut at,
+            offer.sender.device_id.as_uuid().as_bytes(),
+        );
         append(&mut record, &mut at, &offer.sender.endpoint_id);
-        append(&mut record, &mut at, offer.receiver.device_id.as_uuid().as_bytes());
+        append(
+            &mut record,
+            &mut at,
+            offer.receiver.device_id.as_uuid().as_bytes(),
+        );
         append(&mut record, &mut at, &offer.receiver.endpoint_id);
         append(&mut record, &mut at, &file.bytes.to_be_bytes());
         append(&mut record, &mut at, &file.blake3_root);
@@ -254,14 +259,7 @@ mod tests {
         observed: ObservedLocalReceipt,
         now: u64,
     ) -> Result<CheckedColdReceipt, ProofError> {
-        verify_cold_receipt_v2(
-            record,
-            offer,
-            offer.sender,
-            offer.receiver,
-            observed,
-            now,
-        )
+        verify_cold_receipt_v2(record, offer, offer.sender, offer.receiver, observed, now)
     }
 
     #[test]
@@ -278,7 +276,10 @@ mod tests {
     #[test]
     fn unsigned_legacy_receipt_and_malformed_frames_fail_closed() {
         let (offer, record, observed) = fixture();
-        assert_eq!(check(&offer, &[], observed, NOW + 6), Err(ProofError::BadLength));
+        assert_eq!(
+            check(&offer, &[], observed, NOW + 6),
+            Err(ProofError::BadLength)
+        );
         assert_eq!(
             check(&offer, &record[..RECORD_BYTES - 1], observed, NOW + 6),
             Err(ProofError::BadLength)
