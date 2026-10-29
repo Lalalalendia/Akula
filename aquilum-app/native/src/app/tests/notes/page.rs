@@ -212,3 +212,41 @@ fn renaming_folder_preserves_dirty_nested_note_and_other_open_tabs() {
     assert!(h.app.tabs.tabs().iter().any(|tab| tab.path.as_deref() == Some(unrelated.as_path())));
     assert!(h.app.open_error.is_none());
 }
+
+#[test]
+fn rename_rebinds_crash_recovery_capture_to_the_destination_path() {
+    let mut h = Harness::new();
+    let from = h.vault.path().join("a.md");
+    let to = h.vault.path().join("Rebound.md");
+    h.app.open(&mut h.root, from.clone());
+    h.app.rename_file(&mut h.root, from.clone(), to.clone());
+    assert!(to.exists());
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&to)));
+    h.app.note.as_ref().unwrap()
+        .snapshot_unsaved(&crop::Rope::from("Черновик после переименования"))
+        .unwrap();
+    crate::disk::wait();
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    let candidate = crate::note::bridge::inspect_for_recovery(h._data.path(), h.vault.path(), workspace, &to)
+        .unwrap().expect("new destination must have a recoverable shadow");
+    assert_eq!(candidate.body.to_string(), "Черновик после переименования");
+    assert!(!candidate.already_saved);
+    assert!(h.app.note.as_ref().unwrap().shadow_error().is_none());
+}
+
+#[test]
+fn rename_refuses_to_orphan_an_unreviewed_recovery_draft() {
+    let mut h = Harness::new();
+    let from = h.vault.path().join("a.md");
+    let to = h.vault.path().join("Unsafe.md");
+    h.app.open(&mut h.root, from.clone());
+    h.app.note.as_ref().unwrap()
+        .snapshot_unsaved(&crop::Rope::from("Невосстановленный черновик"))
+        .unwrap();
+    crate::disk::wait();
+    h.app.rename_file(&mut h.root, from.clone(), to.clone());
+    assert!(from.exists());
+    assert!(!to.exists());
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&from)));
+    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
+}
