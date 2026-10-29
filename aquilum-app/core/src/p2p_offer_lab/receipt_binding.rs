@@ -165,14 +165,7 @@ mod tests {
         receipt: ObservedLocalReceipt,
         now: u64,
     ) -> Result<MetadataMatchCandidate, BindingError> {
-        match_accepted_local_receipt(
-            session,
-            index,
-            offer.sender,
-            offer.receiver,
-            receipt,
-            now,
-        )
+        match_accepted_local_receipt(session, index, offer.sender, offer.receiver, receipt, now)
     }
 
     #[test]
@@ -231,15 +224,11 @@ mod tests {
         let session = accepted(&offer, vec![0]);
         let receipt = observed(&offer, 0);
         assert_eq!(
-            match_accepted_local_receipt(
-                &session, 0, peer(3, 3), offer.receiver, receipt, NOW + 2
-            ),
+            match_accepted_local_receipt(&session, 0, peer(3, 3), offer.receiver, receipt, NOW + 2),
             Err(BindingError::Offer(OfferError::WrongIdentity))
         );
         assert_eq!(
-            match_accepted_local_receipt(
-                &session, 0, offer.sender, peer(4, 4), receipt, NOW + 2
-            ),
+            match_accepted_local_receipt(&session, 0, offer.sender, peer(4, 4), receipt, NOW + 2),
             Err(BindingError::Offer(OfferError::WrongIdentity))
         );
         let mut wrong = receipt;
@@ -317,7 +306,10 @@ mod tests {
             candidate.files[0].label = bad.into();
             assert!(matches!(
                 OfferSession::new_sender(
-                    candidate.clone(), NOW, candidate.sender, candidate.receiver
+                    candidate.clone(),
+                    NOW,
+                    candidate.sender,
+                    candidate.receiver
                 ),
                 Err(OfferError::InvalidMetadata)
             ));

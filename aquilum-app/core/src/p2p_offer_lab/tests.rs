@@ -241,12 +241,7 @@ fn unknown_fields_bad_schema_and_oversized_frame_refused() {
     x2.schema = 9;
     assert_eq!(x2.validate(NOW), Err(OfferError::UnsupportedSchema));
     assert_eq!(
-        OfferV1::decode_for_receiver(
-            &vec![b' '; MAX_OFFER_WIRE + 1],
-            NOW,
-            x.sender,
-            x.receiver
-        ),
+        OfferV1::decode_for_receiver(&vec![b' '; MAX_OFFER_WIRE + 1], NOW, x.sender, x.receiver),
         Err(OfferError::TooLarge)
     );
     assert_eq!(
