@@ -1,5 +1,5 @@
 use super::*;
-use notify::event::{CreateKind, DataChange};
+use notify::event::{CreateKind, DataChange, ModifyKind, RemoveKind};
 use std::path::PathBuf;
 
 fn event(kind: EventKind, paths: &[&str]) -> notify::Result<Event> {
