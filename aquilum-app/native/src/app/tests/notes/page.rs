@@ -180,3 +180,35 @@ fn failed_sidebar_rename_does_not_patch_the_tree_before_the_file_moves() {
     assert!(h.app.note.as_ref().is_some_and(|note| note.is(&from)));
     assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
 }
+
+#[test]
+fn renaming_folder_preserves_dirty_nested_note_and_other_open_tabs() {
+    let mut h = Harness::new();
+    let from = h.vault.path().join("Folder");
+    let to = h.vault.path().join("Renamed");
+    std::fs::create_dir_all(from.join("nested")).unwrap();
+    let first = h.write_note("Folder/first.md", "первый");
+    let second = h.write_note("Folder/nested/second.md", "второй");
+    let unrelated = h.write_note("Folder-copy.md", "в стороне");
+    h.app.open(&mut h.root, first.clone());
+    h.app.open_in(&mut h.root, second.clone(), true);
+    h.app.open_in(&mut h.root, unrelated.clone(), true);
+    h.app.open(&mut h.root, first.clone());
+    let original_tab_count = h.app.tabs.tabs().len();
+    h.app.commit_text(&mut h.root, crop::Rope::from("изменено до переименования"));
+
+    h.app.rename_file(&mut h.root, from.clone(), to.clone());
+
+    let moved_first = to.join("first.md");
+    let moved_second = to.join("nested").join("second.md");
+    assert!(!from.exists(), "old folder must disappear after successful rename");
+    assert_eq!(std::fs::read_to_string(&moved_first).unwrap(), "изменено до переименования");
+    assert_eq!(std::fs::read_to_string(&moved_second).unwrap(), "второй");
+    assert_eq!(std::fs::read_to_string(&unrelated).unwrap(), "в стороне");
+    assert_eq!(h.app.tabs.tabs().len(), original_tab_count);
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(moved_first.as_path()));
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&moved_first)));
+    assert!(h.app.tabs.tabs().iter().any(|tab| tab.path.as_deref() == Some(moved_second.as_path())));
+    assert!(h.app.tabs.tabs().iter().any(|tab| tab.path.as_deref() == Some(unrelated.as_path())));
+    assert!(h.app.open_error.is_none());
+}

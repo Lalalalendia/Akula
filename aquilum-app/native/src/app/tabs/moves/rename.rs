@@ -5,6 +5,44 @@ use crate::ui::dialog::ConfirmDialog;
 use masonry::kurbo::Point;
 
 impl App {
+    /// Rebase the active editor path immediately after a verified File Gate rename,
+    /// including notes inside a renamed directory.
+    pub(in crate::app) fn follow_move(&mut self, root: &mut RenderRoot, from: &Path, to: &Path) {
+        self.interface.move_metadata(from, to);
+        let active = self.note.as_ref().and_then(|note| {
+            if note.is(from) {
+                Some(to.to_path_buf())
+            } else {
+                note.path.strip_prefix(from).ok().map(|suffix| to.join(suffix))
+            }
+        });
+        if let Some(path) = active {
+            if let Some(note) = &mut self.note {
+                note.path = path.clone();
+            }
+            self.workspace.core.active_note.set(Some(path.clone()));
+            self.tree.set_active(root, Some(path));
+            self.refresh_note_names(root);
+        }
+        self.relocate_tabs(root, from, to);
+    }
+
+    pub(in crate::app) fn relocate_tabs(&mut self, root: &mut RenderRoot, from: &Path, to: &Path) {
+        if !self.tabs.rename(from, to) {
+            return;
+        }
+        // A moved file cannot reuse a cache entry keyed to its old disk path.
+        self.inactive_notes.clear();
+        if let Some(session) = &self.session {
+            for tab in self.tabs.tabs().iter().filter(|tab| {
+                tab.path.as_deref().is_some_and(|path| path.starts_with(to))
+            }) {
+                session.renamed(&self.workspace.core, tab);
+            }
+        }
+        self.refresh_tabs(root);
+    }
+
     /// Keep the visible note on its original path until File Gate succeeds.
     /// This synchronous path is intentional until an async edit/navigation
     /// fence exists; changing the path before the disk operation loses notes.
