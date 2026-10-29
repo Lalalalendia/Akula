@@ -114,7 +114,10 @@ jobs:
           }
           $root = Join-Path $env:RUNNER_TEMP ('desk15-hostcopy-' + [Guid]::NewGuid().ToString('N'))
           $trusted = Join-Path $env:RUNNER_TEMP ('desk15-trusted-' + [Guid]::NewGuid().ToString('N'))
+          $aliasParent = Join-Path $env:RUNNER_TEMP ('desk15-alias-' + [Guid]::NewGuid().ToString('N'))
           [void][IO.Directory]::CreateDirectory($root)
+          [void][IO.Directory]::CreateDirectory($aliasParent)
+          $alias = Join-Path $aliasParent 'guest-junction'
           $guest = Join-Path $root 'checkpoint.txt'
           $nested = Join-Path $root 'nested\fake-host-copy.txt'
           [void][IO.Directory]::CreateDirectory((Split-Path -Parent $nested))
@@ -136,8 +139,19 @@ jobs:
             [IO.File]::WriteAllText($trusted,'trial=tampered')
             Refuse { Check-TrustedCheckpoint $guest $trusted $root } 'different archive SHA256'
             Refuse { Checked-ExternalEvidence $nested $root } 'nested guest path as controller event'
+            # The lexical path is outside $root but points back inside via a real NTFS junction.
+            New-Item -ItemType Junction -Path $alias -Target $root -ErrorAction Stop | Out-Null
+            if (([IO.File]::GetAttributes($alias) -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+              throw 'Negative fixture is not a reparse-point directory'
+            }
+            Refuse { Check-TrustedCheckpoint $guest (Join-Path $alias 'checkpoint.txt') $root } 'external junction pointing into trial'
+            Refuse { Checked-ExternalEvidence (Join-Path $alias 'checkpoint.txt') $root } 'controller log through external junction'
+            Write-Host 'DESK15_TRUSTED_CHECKPOINT_REPARSE_ANCESTOR_PASS'
             Write-Host 'DESK15_TRUSTED_CHECKPOINT_FAIL_CLOSED_PASS'
           } finally {
+            # Remove the junction itself BEFORE recursively deleting test fixtures.
+            if ([IO.Directory]::Exists($alias)) { [IO.Directory]::Delete($alias) }
+            Remove-Item -LiteralPath $aliasParent -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $trusted -Force -ErrorAction SilentlyContinue
           }

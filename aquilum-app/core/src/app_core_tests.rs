@@ -685,3 +685,96 @@ fn sync_reservation_denies_an_editor_open_from_another_thread() {
     assert_eq!(opened.text, "original contents");
     core.documents.release(&core, &note);
 }
+
+#[test]
+fn core_watcher_forwards_txt_create_modify_rename_and_delete_to_search() {
+    use crate::files::watcher::{WatchBatch, WatchScope};
+    use crate::search::models::SearchIndexState;
+    use crate::search::query::Request;
+    use std::time::{Duration, Instant};
+
+    fn wait(stage: &str, mut predicate: impl FnMut() -> bool) {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(25) {
+            if predicate() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("{stage}: search did not reach the expected state");
+    }
+
+    fn hit(core: &Core, workspace: &str, term: &str, expected: &Path) -> bool {
+        core.search
+            .search(workspace, &Request::new(term))
+            .unwrap()
+            .results
+            .iter()
+            .any(|result| crate::search::paths::same_path(Path::new(&result.path), expected))
+    }
+
+    let (directory, core, _events) = open_core();
+    let root = directory.path().join("Vault");
+    fs::create_dir_all(&root).unwrap();
+    let root = fs::canonicalize(&root).unwrap();
+    let workspace = root.to_string_lossy().into_owned();
+    core.ui_state.resolve_workspace(&workspace, 1).unwrap();
+    let md = root.join("Control.md");
+    let baseline = b"desk10baselinecontrol only\n";
+    fs::write(&md, baseline).unwrap();
+
+    core.search.prepare(&workspace).unwrap();
+    wait("initial index", || {
+        let status = core.search.status(Some(&workspace));
+        status.state == SearchIndexState::Ready && !status.updating
+    });
+    assert!(hit(&core, &workspace, "desk10baselinecontrol", &md));
+
+    // This calls Core::ingest_watch, the exact production bridge from the
+    // notify watcher callback to SearchService (not a test-only sink).
+    let txt = root.join("東京日記.TXT");
+    let first = "日本語と中文\ndesk10corecreatedneedle\n";
+    fs::write(&txt, first).unwrap();
+    core.ingest_watch(WatchBatch::new(vec![txt.clone()], WatchScope::Structure));
+    wait("new TXT event", || {
+        hit(&core, &workspace, "desk10corecreatedneedle", &txt)
+    });
+    assert_eq!(fs::read_to_string(&txt).unwrap(), first);
+
+    let updated = "日本語と中文と한국어\ndesk10corechangedneedle\nsecond line\n";
+    fs::write(&txt, updated).unwrap();
+    core.ingest_watch(WatchBatch::new(vec![txt.clone()], WatchScope::Content));
+    wait("modified TXT event", || {
+        hit(&core, &workspace, "desk10corechangedneedle", &txt)
+            && !hit(&core, &workspace, "desk10corecreatedneedle", &txt)
+    });
+    assert_eq!(fs::read_to_string(&txt).unwrap(), updated);
+
+    let moved = root.join("東京日記改.txt");
+    fs::rename(&txt, &moved).unwrap();
+    core.ingest_watch(WatchBatch::new(
+        vec![txt.clone(), moved.clone()],
+        WatchScope::Structure,
+    ));
+    wait("renamed TXT event", || {
+        hit(&core, &workspace, "desk10corechangedneedle", &moved)
+            && !hit(&core, &workspace, "desk10corechangedneedle", &txt)
+    });
+    assert_eq!(fs::read_to_string(&moved).unwrap(), updated);
+
+    fs::remove_file(&moved).unwrap();
+    core.ingest_watch(WatchBatch::new(vec![moved.clone()], WatchScope::Structure));
+    wait("deleted TXT event", || {
+        !hit(&core, &workspace, "desk10corechangedneedle", &moved)
+    });
+    assert!(hit(&core, &workspace, "desk10baselinecontrol", &md));
+    assert_eq!(fs::read(&md).unwrap(), baseline);
+    println!(
+        "DESK10_CORE_TXT_WATCH_FORWARD_PASS create=1 modify=1 rename=1 delete=1 md_preserved=1"
+    );
+
+    let opened = core.search.active.write().unwrap().take();
+    if let Some(index) = opened {
+        index.stop();
+    }
+}
