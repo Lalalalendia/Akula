@@ -1,8 +1,8 @@
 //! Transfer dialog construction, leaving transfer.rs as a compact API.
 use super::*;
-mod panels;
 #[cfg(feature = "p2p-offer-consent-qa")]
 mod offer_consent_view;
+mod panels;
 
 /// Draft controls remain inert. The optional received-Inbox Save Copy button
 /// invokes only an explicit local no-clobber export, never QUIC or Vault ACL.

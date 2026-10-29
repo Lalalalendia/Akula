@@ -1,11 +1,9 @@
 //! Real transfer-modal Pressed routing; not a signed human-presence proof.
 use super::*;
-use aquilum_core::p2p_offer_lab::{
-    DecisionAction, OfferV1, OfferedFile, PeerBinding, SCHEMA,
-};
-use aquilum_core::sync::DeviceId;
 use crate::ui::transfer::OfferConsentAction;
 use crate::ui::widgets::Pressed;
+use aquilum_core::p2p_offer_lab::{DecisionAction, OfferV1, OfferedFile, PeerBinding, SCHEMA};
+use aquilum_core::sync::DeviceId;
 use uuid::Uuid;
 
 fn offer(now: u64) -> OfferV1 {
@@ -38,9 +36,7 @@ fn button(h: &Harness, is_accept: bool) -> masonry::core::WidgetId {
     dialog
         .offer_consent_actions
         .iter()
-        .find(|(_, action)| {
-            matches!(action, OfferConsentAction::Accept(_)) == is_accept
-        })
+        .find(|(_, action)| matches!(action, OfferConsentAction::Accept(_)) == is_accept)
         .expect("missing Offer action")
         .0
 }

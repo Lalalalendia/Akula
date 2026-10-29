@@ -2,10 +2,8 @@
 //! No production transport invokes present_from_authenticated_transport yet.
 //! A UI reply is not a signed receipt, OS-owned journal, File Gate grant or
 //! proof of an independently authenticated live QUIC session.
-use aquilum_core::p2p_offer_lab::{
-    DecisionAction, DecisionV1, OfferError, OfferV1, PeerBinding,
-};
 use crate::ui::transfer::{OfferConsentAction, OfferConsentView};
+use aquilum_core::p2p_offer_lab::{DecisionAction, DecisionV1, OfferError, OfferV1, PeerBinding};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct Pending {
@@ -56,12 +54,8 @@ impl OfferConsentUi {
     ) -> Result<(), OfferError> {
         // Even a failed replacement invalidates previously displayed buttons.
         self.cancel();
-        let offer = OfferV1::decode_for_receiver(
-            wire,
-            now,
-            authenticated_sender,
-            trusted_local_receiver,
-        )?;
+        let offer =
+            OfferV1::decode_for_receiver(wire, now, authenticated_sender, trusted_local_receiver)?;
         if offer.files.len() != 1 {
             return Err(OfferError::InvalidSelection);
         }
@@ -70,9 +64,8 @@ impl OfferConsentUi {
             .checked_add(1)
             .ok_or(OfferError::AlreadyResolved)?;
         let file = &offer.files[0];
-        let hex = |bytes: &[u8]| -> String {
-            bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-        };
+        let hex =
+            |bytes: &[u8]| -> String { bytes.iter().map(|byte| format!("{byte:02x}")).collect() };
         self.view = Some(OfferConsentView {
             revision: self.revision,
             sender_endpoint: hex(&authenticated_sender.endpoint_id),
