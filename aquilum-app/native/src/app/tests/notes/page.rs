@@ -236,6 +236,7 @@ fn rename_rebinds_crash_recovery_capture_to_the_destination_path() {
 
 #[test]
 fn rename_refuses_to_orphan_an_unreviewed_recovery_draft() {
+    use crate::ui::editor::TextAction;
     let mut h = Harness::new();
     let from = h.vault.path().join("a.md");
     let to = h.vault.path().join("Unsafe.md");
@@ -244,11 +245,20 @@ fn rename_refuses_to_orphan_an_unreviewed_recovery_draft() {
         .snapshot_unsaved(&crop::Rope::from("Невосстановленный черновик"))
         .unwrap();
     crate::disk::wait();
-    h.app.rename_file(&mut h.root, from.clone(), to.clone());
+
+    let title = h.app.note_ids.as_ref().unwrap().title.id();
+    h.act(title, TextAction::Entered("Unsafe".into()));
     assert!(from.exists());
     assert!(!to.exists());
     assert!(h.app.note.as_ref().is_some_and(|note| note.is(&from)));
-    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
+    assert!(h.app.renaming_to.is_none(), "the same title must be retryable");
+    assert_eq!(h.app.note_ids.as_ref().unwrap().title.get(&h.root).unwrap().inner().text(), "a");
+    match &h.app.popup {
+        Some(Popup::RenameFailed { dialog, .. }) => {
+            assert_eq!(h.root.focused_widget(), Some(dialog.layer), "error dialog should retain keyboard focus");
+        }
+        _ => panic!("unsafe rename must show the failure dialog"),
+    }
 }
 
 
