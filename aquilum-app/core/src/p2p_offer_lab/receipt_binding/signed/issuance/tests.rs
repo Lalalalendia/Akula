@@ -119,13 +119,25 @@ fn pending_declined_and_unselected_session_cannot_sign() {
         OfferSession::new_sender(f.offer.clone(), NOW, f.offer.sender, f.offer.receiver).unwrap();
     assert!(matches!(
         sign_sender_with_key(
-            &f.sender, &pending, 0, f.offer.sender, f.offer.receiver, f.observed, NOW + 2,
+            &f.sender,
+            &pending,
+            0,
+            f.offer.sender,
+            f.offer.receiver,
+            f.observed,
+            NOW + 2,
         ),
         Err(IssueError::Binding(BindingError::NotAccepted))
     ));
     assert!(matches!(
         sign_sender_with_key(
-            &f.sender, &f.session, 1, f.offer.sender, f.offer.receiver, f.observed, NOW + 2,
+            &f.sender,
+            &f.session,
+            1,
+            f.offer.sender,
+            f.offer.receiver,
+            f.observed,
+            NOW + 2,
         ),
         Err(IssueError::Binding(BindingError::UnselectedFile))
     ));
@@ -144,7 +156,13 @@ fn pending_declined_and_unselected_session_cannot_sign() {
     declined.resolve(&decline, f.offer.receiver, NOW + 1).unwrap();
     assert!(matches!(
         sign_sender_with_key(
-            &f.sender, &declined, 0, f.offer.sender, f.offer.receiver, f.observed, NOW + 2,
+            &f.sender,
+            &declined,
+            0,
+            f.offer.sender,
+            f.offer.receiver,
+            f.observed,
+            NOW + 2,
         ),
         Err(IssueError::Binding(BindingError::NotAccepted))
     ));
@@ -152,7 +170,13 @@ fn pending_declined_and_unselected_session_cannot_sign() {
     wrong.blake3_root[0] ^= 1;
     assert!(matches!(
         sign_sender_with_key(
-            &f.sender, &f.session, 0, f.offer.sender, f.offer.receiver, wrong, NOW + 2,
+            &f.sender,
+            &f.session,
+            0,
+            f.offer.sender,
+            f.offer.receiver,
+            wrong,
+            NOW + 2,
         ),
         Err(IssueError::Binding(BindingError::ReceiptMismatch))
     ));
@@ -163,7 +187,13 @@ fn sender_half_mutation_wrong_key_and_untrusted_decision_fail() {
     let f = fixture();
     assert!(matches!(
         sign_sender_with_key(
-            &f.receiver, &f.session, 0, f.offer.sender, f.offer.receiver, f.observed, NOW + 2,
+            &f.receiver,
+            &f.session,
+            0,
+            f.offer.sender,
+            f.offer.receiver,
+            f.observed,
+            NOW + 2,
         ),
         Err(IssueError::WrongKey)
     ));
@@ -181,8 +211,14 @@ fn sender_half_mutation_wrong_key_and_untrusted_decision_fail() {
     decline.action = DecisionAction::Decline;
     assert!(matches!(
         countersign_with_key(
-            &f.receiver, &half, &f.offer, &decline, f.offer.sender,
-            f.offer.receiver, f.observed, NOW + 3,
+            &f.receiver,
+            &half,
+            &f.offer,
+            &decline,
+            f.offer.sender,
+            f.offer.receiver,
+            f.observed,
+            NOW + 3,
         ),
         Err(IssueError::InvalidDecision)
     ));
@@ -196,8 +232,14 @@ fn wrong_peer_receipt_and_expired_acceptance_fail_closed() {
     wrong.receipt_id = Uuid::from_u128(987);
     assert!(matches!(
         countersign_with_key(
-            &f.receiver, &half, &f.offer, &f.accept, f.offer.sender,
-            f.offer.receiver, wrong, NOW + 3,
+            &f.receiver,
+            &half,
+            &f.offer,
+            &f.accept,
+            f.offer.sender,
+            f.offer.receiver,
+            wrong,
+            NOW + 3,
         ),
         Err(IssueError::WrongReceipt)
     ));
