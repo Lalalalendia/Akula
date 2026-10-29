@@ -6,7 +6,7 @@ use crate::history::HistoryService;
 use crate::mcp::active::ActiveNote;
 use crate::mcp::bridge::Navigation;
 use crate::mcp::{McpServer, McpStatus};
-use crate::search::paths::is_markdown;
+use crate::search::paths::is_note;
 use crate::search::{ChangeNotifier, IndexNotifier, IndexRevision, SearchService};
 use crate::settings::SettingsManager;
 use crate::ui_state::UiStateService;
@@ -554,12 +554,12 @@ impl Core {
         self.mcp.apply(self, &self.settings.get_config().mcp)
     }
 
-    /// Stops background work before the host exits: unsaved edits are written, MCP and the
-    /// watcher stop.
+    /// Stop file and search index workers before starting another session.
     pub fn shutdown(&self) {
         self.documents.flush_all(self);
         self.mcp.shutdown();
         self.watcher.stop();
+        self.search.shutdown();
     }
 
     pub fn known_roots(&self) -> Vec<PathBuf> {
@@ -573,7 +573,7 @@ impl Core {
             WatchScope::Listing | WatchScope::Structure | WatchScope::Rescan => self.emit(CoreEvent::WorkspaceChanged(path_names(&batch.paths))),
         }
         let rescan = batch.scope == WatchScope::Rescan;
-        let notes: Vec<PathBuf> = if rescan { batch.paths } else { batch.paths.into_iter().filter(|path| is_markdown(path)).collect() };
+        let notes: Vec<PathBuf> = if rescan { batch.paths } else { batch.paths.into_iter().filter(|path| is_note(path)).collect() };
         if notes.is_empty() && !rescan {
             return;
         }

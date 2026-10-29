@@ -33,7 +33,16 @@ fn resolve(body: &str) -> Option<char> {
     }
     match body.strip_prefix('#') {
         Some(number) => numeric(number),
-        None => named(&body.to_ascii_lowercase()),
+        None => {
+            if !body.is_ascii() {
+                return None;
+            }
+            let mut lower = [0u8; 8];
+            for (dst, byte) in lower.iter_mut().zip(body.bytes()) {
+                *dst = byte.to_ascii_lowercase();
+            }
+            named(std::str::from_utf8(&lower[..body.len()]).ok()?)
+        },
     }
 }
 
@@ -62,29 +71,4 @@ pub fn decode(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::decode;
-
-    #[test]
-    fn decodes_named_entities() {
-        assert_eq!(decode("Tom &amp; Jerry"), "Tom & Jerry");
-        assert_eq!(decode("&laquo;Мозг&raquo;"), "«Мозг»");
-    }
-
-    #[test]
-    fn decodes_decimal_and_hex_entities() {
-        assert_eq!(decode("We&#39;re"), "We're");
-        assert_eq!(decode("&#1053;&#x435;&#x439;"), "Ней");
-    }
-
-    #[test]
-    fn leaves_an_ampersand_that_is_not_an_entity_alone() {
-        assert_eq!(decode("R&D and & more"), "R&D and & more");
-        assert_eq!(decode("a &notanentity; b"), "a &notanentity; b");
-    }
-
-    #[test]
-    fn a_run_of_entities_decodes_without_losing_the_text_between_them() {
-        assert_eq!(decode("&lt;a&gt; и &lt;b&gt;"), "<a> и <b>");
-    }
-}
+mod tests;
