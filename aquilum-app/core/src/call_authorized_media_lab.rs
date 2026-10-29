@@ -1,7 +1,7 @@
 //! Non-shipping AK-CALL-01/02 authorization seam. No OS devices or socket.
 /// Host-owned media permission is independent of network-call acceptance.
 use crate::{
-    call_signaling_lab::{CallPhase, CallSession},
+    call_signaling_lab::CallSession,
     p2p_offer_lab::PeerBinding,
     voice_jitter_lab::{PeerPolicy, VoiceError, VoiceReceiver, VoiceSender},
 };
@@ -12,16 +12,19 @@ pub fn permit_media(
     call: &CallSession,
     host_consented: bool,
     authenticated_remote: PeerBinding,
-    expected_remote: PeerBinding,
     peer_policy: PeerPolicy,
+    call_id: [u8; 16],
 ) -> Result<(), VoiceError> {
-    if call.phase() != CallPhase::Active
-        || !host_consented
-        || peer_policy != PeerPolicy::Allowed
-    {
+    if !host_consented || peer_policy != PeerPolicy::Allowed {
         return Err(VoiceError::Denied);
     }
-    if authenticated_remote != expected_remote {
+    let Some((active_id, remote)) = call.active_media_identity() else {
+        return Err(VoiceError::Denied);
+    };
+    if active_id != call_id {
+        return Err(VoiceError::WrongCall);
+    }
+    if authenticated_remote != remote {
         return Err(VoiceError::WrongPeer);
     }
     Ok(())
@@ -33,11 +36,10 @@ pub fn start_muted_media(
     call: &CallSession,
     host_consented: bool,
     remote: PeerBinding,
-    expected_remote: PeerBinding,
     policy: PeerPolicy,
     call_id: [u8; 16],
 ) -> Result<(VoiceSender, VoiceReceiver), VoiceError> {
-    permit_media(call, host_consented, remote, expected_remote, policy)?;
+    permit_media(call, host_consented, remote, policy, call_id)?;
     let sender = VoiceSender::new(call_id, 0)?;
     let receiver = VoiceReceiver::new(call_id, remote)?;
     Ok((sender, receiver))
@@ -65,7 +67,7 @@ mod tests {
         let (mut caller, offer) =
             CallSession::outbound(a, b, [9; 16], 100, 60, LocalPeerPolicy::Allowed).unwrap();
         assert!(matches!(
-            start_muted_media(&caller, true, b, b, PeerPolicy::Allowed, [9; 16]),
+            start_muted_media(&caller, true, b, PeerPolicy::Allowed, [9; 16]),
             Err(VoiceError::Denied)
         ));
         let mut callee =
@@ -81,20 +83,20 @@ mod tests {
             Ok(RemoteEvent::Accepted)
         );
         assert!(matches!(
-            start_muted_media(&caller, false, b, b, PeerPolicy::Allowed, [9; 16]),
+            start_muted_media(&caller, false, b, PeerPolicy::Allowed, [9; 16]),
             Err(VoiceError::Denied)
         ));
         assert!(matches!(
-            start_muted_media(&caller, true, peer(3, 3), b, PeerPolicy::Allowed, [9; 16]),
+            start_muted_media(&caller, true, peer(3, 3), PeerPolicy::Allowed, [9; 16]),
             Err(VoiceError::WrongPeer)
         ));
         let (sender, receiver) =
-            start_muted_media(&caller, true, b, b, PeerPolicy::Allowed, [9; 16]).unwrap();
+            start_muted_media(&caller, true, b, PeerPolicy::Allowed, [9; 16]).unwrap();
         assert!(sender.is_muted());
         assert_eq!(receiver.queued_ticks(), 0);
         caller.transport_lost();
         assert!(matches!(
-            start_muted_media(&caller, true, b, b, PeerPolicy::Allowed, [9; 16]),
+            start_muted_media(&caller, true, b, PeerPolicy::Allowed, [9; 16]),
             Err(VoiceError::Denied)
         ));
     }
@@ -111,7 +113,7 @@ mod tests {
         let accept = callee.accept_local(102).unwrap();
         caller.receive(&accept, b, LocalPeerPolicy::Allowed, 102).unwrap();
         assert!(matches!(
-            start_muted_media(&caller, true, b, b, PeerPolicy::Revoked, [8; 16]),
+            start_muted_media(&caller, true, b, PeerPolicy::Revoked, [8; 16]),
             Err(VoiceError::Denied)
         ));
     }
