@@ -1,9 +1,8 @@
 mod cache;
 mod measure;
 mod place;
-
+mod preview;
 use std::ops::Range;
-
 use masonry::core::{BrushIndex, StyleSet};
 use masonry::parley::{FontContext, LayoutContext};
 
@@ -43,7 +42,7 @@ impl Document {
         loop {
             let stale = dirty.take();
             let built = pinned.iter().copied().chain(self.laid.iter().map(|(i, _)| i)).map(|i| i..i + 1);
-            let mut spans: Vec<Range<usize>> = built.chain([self.window()]).chain(stale.clone()).collect();
+            let mut spans: Vec<Range<usize>> = built.chain([self.window()]).chain(stale.clone()).chain(self.multiline_preview(compose).map(|p| p.start_line..p.end_line + 1)).collect();
             if !self.placed {
                 spans = vec![0..self.lines.count()];
             }
@@ -64,6 +63,7 @@ impl Document {
                 self.place(span.start, span.end, fcx, lcx, styles, width, caret);
             }
             drop(placed);
+            self.collapse_preview(compose);
             if !(changed | self.aligned()) {
                 break;
             }

@@ -23,7 +23,7 @@ impl TextEditor {
     pub(super) fn ensure_layout(&mut self, fcx: &mut masonry::parley::FontContext, lcx: &mut masonry::parley::LayoutContext<BrushIndex>, width: f64) {
         let _zone = aq_trace::zone("редактор: вёрстка");
         self.width = width;
-        let compose = self.compose.as_ref().map(|(text, _)| (self.focus, text.as_str()));
+        let compose = self.compose.as_ref().map(|(text, _)| (self.selection().start, text.as_str()));
         let wrap = (!self.single_line).then(|| (width - size::CARET_WIDTH * 2.0).max(0.0) as f32);
         let focus = self.focus;
         self.doc.source = self.doc.source.filter(|&source| {

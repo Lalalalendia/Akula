@@ -168,3 +168,84 @@ fn ime_empty_commit_preserves_multiline_selection_and_undo() {
     assert_eq!(text(&root), original);
     assert_eq!(selected(&root), selected_original);
 }
+
+#[test]
+fn ime_multiline_selection_preedit_cancel_preserves_every_byte() {
+    let original = "лево 🍀\n日本語 содержимое\nпосле ✅ хвост";
+    let start = original.find("🍀").unwrap();
+    let end = original.find(" хвост").unwrap();
+    let selected_original = &original[start..end];
+    let mut root = root(original);
+    let id = super::support::editor_id(&root);
+    root.edit_widget(id, |mut widget| {
+        TextEditor::select_byte_range(&mut widget.downcast(), start, end);
+    });
+    let _ = root.redraw();
+
+    ime(&mut root, Ime::Enabled);
+    for (preview, cursor) in [("に", 3), ("日本", 6), ("日本語", 9)] {
+        ime(&mut root, Ime::Preedit(preview.into(), Some((cursor, cursor))));
+        assert_eq!(text(&root), original, "provisional text must not change stored Unicode bytes");
+        assert_eq!(selected(&root), selected_original, "preedit must retain all selected paragraphs");
+    }
+    ime(&mut root, Ime::Disabled);
+    assert_eq!(text(&root), original, "cancelling a multiline composition must leave no edits");
+    assert_eq!(selected(&root), selected_original, "cancel must not collapse selection");
+    command_key(&mut root, "z");
+    assert_eq!(text(&root), original, "cancel may not create an Undo entry");
+}
+
+#[test]
+fn ime_multiline_selection_nonempty_commit_is_single_undoable_replacement() {
+    let original = "слева 🍀\n日本語 содержимое\nпосле ✅ хвост";
+    let start = original.find("🍀").unwrap();
+    let end = original.find(" хвост").unwrap();
+    let expected = format!("{}選択済{}", &original[..start], &original[end..]);
+    let mut root = root(original);
+    let id = super::support::editor_id(&root);
+    root.edit_widget(id, |mut widget| {
+        TextEditor::select_byte_range(&mut widget.downcast(), start, end);
+    });
+    let _ = root.redraw();
+
+    ime(&mut root, Ime::Enabled);
+    ime(&mut root, Ime::Preedit("に".into(), Some((3, 3))));
+    ime(&mut root, Ime::Preedit("日本".into(), Some((6, 6))));
+    assert_eq!(text(&root), original);
+    ime(&mut root, Ime::Commit("選択済".into()));
+    assert_eq!(text(&root), expected, "commit replaces all selected lines exactly once");
+
+    command_key(&mut root, "z");
+    assert_eq!(text(&root), original, "one Undo restores Unicode and embedded newline bytes");
+    command_key(&mut root, "z");
+    assert_eq!(text(&root), original, "Preedit did not add another Undo entry");
+    command_key(&mut root, "y");
+    assert_eq!(text(&root), expected, "Redo restores exactly one committed replacement");
+}
+
+#[test]
+fn ime_window_blur_does_not_delete_selected_unicode_or_create_history() {
+    let original = "доверие 🍀\n日本語 и кириллица";
+    let start = original.find("🍀").unwrap();
+    let end = original.find(" и кириллица").unwrap();
+    let mut root = root(original);
+    let id = super::support::editor_id(&root);
+    root.edit_widget(id, |mut widget| {
+        TextEditor::select_byte_range(&mut widget.downcast(), start, end);
+    });
+    let _ = root.redraw();
+
+    ime(&mut root, Ime::Enabled);
+    ime(&mut root, Ime::Preedit("に".into(), Some((3, 3))));
+    root.handle_text_event(TextEvent::WindowFocusChange(false));
+    let _ = root.redraw();
+    assert_eq!(text(&root), original);
+    assert_eq!(selected(&root), original[start..end]);
+    root.focus_on(None);
+    let _ = root.redraw();
+    root.focus_on(Some(id));
+    let _ = root.redraw();
+    assert_eq!(text(&root), original);
+    command_key(&mut root, "z");
+    assert_eq!(text(&root), original, "losing focus during preedit must not add Undo history");
+}

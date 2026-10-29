@@ -1,20 +1,6 @@
-use unicode_segmentation::GraphemeCursor;
-
+mod cursor;
+use cursor::{nearest_boundary, on_boundary};
 use super::*;
-
-fn on_boundary(text: &str, index: usize) -> bool {
-    GraphemeCursor::new(index, text.len(), true).is_boundary(text, 0).unwrap_or(true)
-}
-
-fn nearest_boundary(text: &str, index: usize) -> usize {
-    let index = index.min(text.len());
-    if on_boundary(text, index) {
-        return index;
-    }
-    let before = GraphemeCursor::new(index, text.len(), true).prev_boundary(text, 0).ok().flatten().unwrap_or(0);
-    let after = GraphemeCursor::new(index, text.len(), true).next_boundary(text, 0).ok().flatten().unwrap_or(text.len());
-    if index - before <= after - index { before } else { after }
-}
 
 impl TextEditor {
     pub(super) fn local(&self, offset: usize) -> (usize, usize, Option<&Layout<BrushIndex>>) {
@@ -42,8 +28,8 @@ impl TextEditor {
     }
 
     pub(super) fn caret(&self) -> Rect {
-        let compose = self.compose.as_ref().and_then(|(_, cursor)| *cursor).map_or(0, |(start, _)| start);
-        self.caret_at(self.focus, compose, self.affinity)
+        let (at, offset, affinity) = cursor::target(self);
+        self.caret_at(at, offset, affinity)
     }
 
     pub(super) fn caret_at(&self, offset: usize, compose: usize, affinity: Affinity) -> Rect {
@@ -241,3 +227,7 @@ mod folded_hit_tests {
         check_folded_edges(&with_tail, prefix.len() + 1);
     }
 }
+
+#[cfg(test)]
+#[path = "caret_tests.rs"]
+mod ime_preview_tests;

@@ -175,7 +175,7 @@ impl TextEditor {
                 ctx.set_handled();
                 self.changed(ctx);
             }
-            TextEvent::WindowFocusChange(_) => ctx.request_render(),
+            TextEvent::WindowFocusChange(focused) => self.handle_window_focus_change(ctx, *focused),
             _ => {}
         }
     }
