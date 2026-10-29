@@ -95,7 +95,7 @@ fn read_legacy(vault: &Path, path: &Path) -> Result<(String, String), String> {
 
 impl App {
     pub(super) fn show_txt_or_open_error(&mut self, root: &mut RenderRoot, path: &Path, error: FileCommandError) {
-        let reason = if is_plain_text(path) && matches!(error, FileCommandError::InvalidUtf8 { .. }) {
+        let reason = if is_plain_text(path) && matches!(&error, FileCommandError::InvalidUtf8 { .. }) {
             match self.show_legacy_txt(root, path) {
                 Ok(()) => return,
                 Err(legacy) => format!("{error}; {legacy}"),
@@ -175,10 +175,11 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn windows7_active_ansi_codepage_can_decode_a_legacy_txt() {
-        let original = [b'A', 0xc0, b'\r', b'\n'];
-        let (decoded, kind) = decode(&original).unwrap();
-        assert!(decoded.starts_with('A'));
-        assert!(decoded.ends_with("\r\n"));
+        let (decoded, kind) = decode(b"ASCII\r\n").unwrap();
+        assert_eq!(decoded, "ASCII\r\n");
         assert!(kind.starts_with("Windows ANSI ("));
+        if unsafe { GetACP() } == 1251 {
+            assert_eq!(decode(&[0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]).unwrap().0, "Привет");
+        }
     }
 }
