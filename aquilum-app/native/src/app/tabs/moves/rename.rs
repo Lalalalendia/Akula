@@ -105,8 +105,25 @@ impl App {
         }
 
         match aquilum_core::files::gate::rename(&self.workspace.core, &from, &to) {
-            Ok(_) => {
+            Ok(result) => {
+                // The File Gate result is authoritative: a wiki-link rewrite can
+                // change this file's bytes as part of the rename transaction.
+                // Update the editor hash before rebinding the recovery baseline.
+                let refreshed_text = if !result.hash.is_empty()
+                    && self.note.as_ref().is_some_and(|note| note.is(&from))
+                {
+                    if let Some(note) = &mut self.note {
+                        note.accept_verified_rename_hash(&result.hash);
+                    }
+                    (self.text.to_string() != result.content)
+                        .then(|| crop::Rope::from(result.content.as_str()))
+                } else {
+                    None
+                };
                 self.follow_move(root, &from, &to);
+                if let Some(text) = refreshed_text {
+                    self.set_text(root, text);
+                }
                 self.tree.rename_succeeded(root, &from, &to);
             }
             Err(error) => {
