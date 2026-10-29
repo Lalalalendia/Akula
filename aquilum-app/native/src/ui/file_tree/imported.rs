@@ -45,11 +45,13 @@ pub(super) fn render(vault: &Path) -> Option<NewWidget<Flex>> {
         &t("transfer.inboxVaultCopiesHint"),
         |t| t.text_tertiary,
     )));
-    Some(NewWidget::new(panel).with_props(
-        PropertySet::new()
-            .with(Gap::new(Length::px(size::SPACE_4)))
-            .with(Padding::all(Length::px(size::SPACE_8))),
-    ))
+    Some(
+        NewWidget::new(panel).with_props(
+            PropertySet::new()
+                .with(Gap::new(Length::px(size::SPACE_4)))
+                .with(Padding::all(Length::px(size::SPACE_8))),
+        ),
+    )
 }
 
 #[cfg(test)]
