@@ -27,6 +27,10 @@ node-v1-runtime = ["node-live-read-lab", "aquilum-core/node-v1", "dep:tokio", "d
 sender-arm-lab = []
 # Explicit Windows two-PC OS-backed QUIC HELLO/OK. Never sends user bytes.
 os-pinned-lan-probe = ["p2p-live-identity", "dep:tokio"]
+# Isolated real software Opus 20ms PCM roundtrip, NO device, QUIC or recording.
+call-voice-codec-lab = ["aquilum-core/voice-jitter-lab", "dep:opus"]
+# Two ephemeral OS processes over genuine Iroh/QUIC TLS, synthetic encoded PCM only.
+call-voice-quic-lab = ["call-voice-codec-lab", "dep:tokio"]
 
 [[bin]]
 name = "akula-p2p-lan"
@@ -47,6 +51,8 @@ serde_json = { version = "1", optional = true }
 ring = { version = "=0.17.14", optional = true }
 rustix = { version = "=0.38.44", features = ["fs", "process"], optional = true }
 iroh = "=1.3.0"
+# Non-shipping test adapter; opusic-sys builds vendored libopus using CMake.
+opus = { version = "=0.4.0", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "signal"], optional = true }
 postcard = { version = "=1.1.3", features = ["use-std"] }
 uuid = { version = "=1.23.5", features = ["v4"] }

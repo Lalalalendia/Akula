@@ -8,6 +8,8 @@
 use aquilum_core::p2p_offer_lab::{
     DecisionV1, OfferError, OfferSession, OfferV1, Outcome, PeerBinding,
 };
+#[cfg(feature = "call-voice-codec-lab")]
+pub mod call_voice_codec_lab;
 #[cfg(feature = "p2p-live-identity")]
 pub mod live_identity;
 #[cfg(all(target_os = "linux", feature = "node-live-read-lab"))]
