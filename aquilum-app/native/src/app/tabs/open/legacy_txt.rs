@@ -24,7 +24,12 @@ fn utf16(bytes: &[u8], little_endian: bool) -> Result<String, String> {
         if little_endian { u16::from_le_bytes([pair[0], pair[1]]) }
         else { u16::from_be_bytes([pair[0], pair[1]]) }
     }).collect::<Vec<_>>();
-    String::from_utf16(&words).map_err(|_| "Повреждённая последовательность UTF-16".to_owned())
+    let text = String::from_utf16(&words)
+        .map_err(|_| "Повреждённая последовательность UTF-16".to_owned())?;
+    if text.contains('\0') {
+        return Err("TXT содержит нулевые символы UTF-16: возможно, это двоичный файл".into());
+    }
+    Ok(text)
 }
 
 #[cfg(target_os = "windows")]
@@ -59,6 +64,11 @@ fn decode(bytes: &[u8]) -> Result<(String, String), String> {
     }
     if let Some(body) = bytes.strip_prefix(&[0xfe, 0xff]) {
         return utf16(body, false).map(|text| (text, "UTF-16 BE".to_owned()));
+    }
+    // An explicit UTF-8 BOM is not a license to reinterpret malformed UTF-8
+    // as the system ANSI code page: that would silently misrepresent bytes.
+    if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
+        return Err("Повреждённый UTF-8 TXT с BOM: ANSI-просмотр запрещён".into());
     }
     // A BOM-less UTF-16 or arbitrary binary file is ambiguous. Never feed
     // embedded NULs to a legacy ANSI decoder and display arbitrary garbage.
@@ -156,6 +166,14 @@ mod tests {
         assert!(decode(&[0xff, 0xfe, 0x10]).is_err());
         assert!(decode(&[0xff, 0xfe, 0x00, 0xd8]).is_err());
         assert!(decode(&[0x41, 0, 0x42, 0]).is_err());
+    }
+
+    #[test]
+    fn nul_containing_utf16_and_corrupt_utf8_bom_fail_closed() {
+        assert!(decode(&[0xff, 0xfe, 0, 0]).is_err());
+        assert!(decode(&[0xfe, 0xff, 0, 0]).is_err());
+        assert!(decode(&[0xff, 0xfe, 0x41, 0, 0, 0]).is_err());
+        assert!(decode(&[0xef, 0xbb, 0xbf, 0xff]).is_err());
     }
 
     #[test]
