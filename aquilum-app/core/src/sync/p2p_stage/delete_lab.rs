@@ -55,10 +55,7 @@ fn sqlite_vfs_main_identity(ledger: &InboxLedger) -> Result<(u32, u64), String> 
     })
 }
 
-fn require_connected_sqlite(
-    ledger: &InboxLedger,
-    database: (u32, u64),
-) -> Result<(), String> {
+fn require_connected_sqlite(ledger: &InboxLedger, database: (u32, u64)) -> Result<(), String> {
     if sqlite_vfs_main_identity(ledger)? != database {
         return Err("SQLite connection points at a different database object".into());
     }
@@ -349,7 +346,6 @@ mod tests {
             blake3: receipt.blake3,
         }
     }
-
 
     #[test]
     fn sqlite_vfs_handle_identity_matches_the_pinned_database_not_just_its_path() {
