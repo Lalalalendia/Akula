@@ -6,7 +6,7 @@ use crate::history::HistoryService;
 use crate::mcp::active::ActiveNote;
 use crate::mcp::bridge::Navigation;
 use crate::mcp::{McpServer, McpStatus};
-use crate::search::paths::is_markdown;
+use crate::search::paths::is_note;
 use crate::search::{ChangeNotifier, IndexNotifier, IndexRevision, SearchService};
 use crate::settings::SettingsManager;
 use crate::ui_state::UiStateService;
@@ -573,7 +573,7 @@ impl Core {
             WatchScope::Listing | WatchScope::Structure | WatchScope::Rescan => self.emit(CoreEvent::WorkspaceChanged(path_names(&batch.paths))),
         }
         let rescan = batch.scope == WatchScope::Rescan;
-        let notes: Vec<PathBuf> = if rescan { batch.paths } else { batch.paths.into_iter().filter(|path| is_markdown(path)).collect() };
+        let notes: Vec<PathBuf> = if rescan { batch.paths } else { batch.paths.into_iter().filter(|path| is_note(path)).collect() };
         if notes.is_empty() && !rescan {
             return;
         }
