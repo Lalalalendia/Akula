@@ -53,11 +53,14 @@ SQLITE_FCNTL_WIN32_GET_HANDLE) to the pinned SQLite file, before and
 after CAS and before the witnessed finish. The original verified file
 HANDLE stays live through Windows disposition so the file index cannot be
 recycled while the one-shot grant is being consumed. New negative tests
-exercise an entire objects-directory swap with byte-identical replacement,
-a real exclusive-open Windows sharing denial after SQLite CAS, wrong Inbox
-root, and cold reopen after a successful completion. Pre-disposition refusals preserve the bytes and remain one-shot
-Requested rather than auto-retrying; a crash after disposition remains
-NeedsReview with the original object absent.
+verify Windows refuses a byte-identical objects-directory replacement
+while the directory HANDLE is pinned, a reader denies DELETE sharing after
+SQLite CAS, and a wrong Inbox root is rejected. They also verify cold reopen
+after completion. Simultaneous independently verified readers may cause both
+physical attempts to fail closed: then the original bytes must remain and the
+one-shot Ledger state is Requested. At most one deletion may complete.
+Other pre-disposition refusals preserve the bytes and remain Requested;
+a crash after disposition remains NeedsReview with the original absent.
 This in-process VFS identity binding is not proof against malicious VFS/WAL
 replacement, concurrent external writes during commit or NTFS power loss.
 Unsupported SQLite VFS controls fail closed. Real Windows physical device

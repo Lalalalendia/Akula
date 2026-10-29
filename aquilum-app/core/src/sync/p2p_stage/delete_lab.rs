@@ -509,7 +509,7 @@ mod tests {
     }
 
     #[test]
-    fn swapped_objects_directory_with_identical_bytes_is_not_deleted() {
+    fn pinned_objects_directory_refuses_byte_identical_swap() {
         let bytes = b"directory swap with identical verified bytes";
         let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
         let id = receipt.id;
@@ -520,6 +520,10 @@ mod tests {
         let name = format!("{}.blob", id.hyphenated());
         fs::write(injected.join(&name), bytes).unwrap();
 
+        // Windows must refuse replacing a directory while its custody
+        // HANDLE is pinned. The synthetic replacement stays untouched.
+        // The original disposable file can still be deleted with consent.
+        let mut rename_denied = false;
         let result = delete_after_explicit_consent(
             &ledger,
             &root,
@@ -527,16 +531,18 @@ mod tests {
             Some(confirmation(&receipt)),
             CrashCut::None,
             || {
-                fs::rename(&old_objects, &preserved).unwrap();
-                fs::rename(&injected, &old_objects).unwrap();
+                rename_denied = fs::rename(&old_objects, &preserved).is_err();
+                assert!(rename_denied, "pinned objects directory was renamed");
             },
         );
-        assert!(result.is_err());
-        assert_eq!(fs::read(preserved.join(&name)).unwrap(), bytes);
-        assert_eq!(fs::read(old_objects.join(&name)).unwrap(), bytes);
+        assert!(rename_denied);
+        result.unwrap();
+        assert!(!old_objects.join(&name).exists());
+        assert!(!preserved.exists());
+        assert_eq!(fs::read(injected.join(&name)).unwrap(), bytes);
         assert_eq!(
             ledger.removal_status(id).unwrap(),
-            RemovalAuditStatus::Requested
+            RemovalAuditStatus::Removed
         );
     }
 
@@ -602,7 +608,7 @@ mod tests {
     }
 
     #[test]
-    fn competing_confirmed_sqlite_connections_allow_one_disposition() {
+    fn competing_confirmed_sqlite_connections_never_double_delete() {
         use std::sync::{Arc, Barrier};
         let bytes = b"only one competing physical disposition";
         let (_temp, root, ledger, receipt) = ledger_fixture(bytes);
@@ -626,13 +632,27 @@ mod tests {
             delete_after_explicit_consent(&second, &root2, id, Some(consent), CrashCut::None, || {})
                 .is_ok()
         });
-        assert_ne!(t1.join().unwrap(), t2.join().unwrap());
+        let first_removed = t1.join().unwrap();
+        let second_removed = t2.join().unwrap();
+        assert!(!(first_removed && second_removed), "duplicate physical delete");
         let reader = InboxLedger::open_existing(&root).unwrap().unwrap();
-        assert_eq!(
-            reader.removal_status(id).unwrap(),
-            RemovalAuditStatus::Removed
-        );
-        assert!(!reader.object_path(id).exists());
+        if first_removed || second_removed {
+            assert_eq!(
+                reader.removal_status(id).unwrap(),
+                RemovalAuditStatus::Removed
+            );
+            assert!(!reader.object_path(id).exists());
+        } else {
+            // Competing verification HANDLEs may both prevent disposition
+            // under Win7-compatible sharing rules. That is a safe refusal,
+            // not a reason to repeat a consumed SQLite authorization.
+            assert_eq!(
+                reader.removal_status(id).unwrap(),
+                RemovalAuditStatus::Requested
+            );
+            assert_eq!(fs::read(reader.object_path(id)).unwrap(), bytes);
+            assert!(reader.open_verified_file(id).is_err());
+        }
     }
 
     fn fixture() -> (tempfile::TempDir, std::path::PathBuf) {
