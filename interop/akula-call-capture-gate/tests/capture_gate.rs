@@ -24,20 +24,28 @@ fn active_call() -> (CallSession, PeerBinding) {
     let (a, b) = (peer(1, 1), peer(2, 2));
     let (mut caller, offer) =
         CallSession::outbound(a, b, [7; 16], 100, 60, LocalPeerPolicy::Allowed).unwrap();
-    let mut callee =
-        CallSession::incoming(&offer, a, b, LocalPeerPolicy::Allowed, 101).unwrap();
+    let mut callee = CallSession::incoming(&offer, a, b, LocalPeerPolicy::Allowed, 101).unwrap();
     let ring = callee.ring_local(101).unwrap();
-    caller.receive(&ring, b, LocalPeerPolicy::Allowed, 101).unwrap();
+    caller
+        .receive(&ring, b, LocalPeerPolicy::Allowed, 101)
+        .unwrap();
     let accept = callee.accept_local(102).unwrap();
-    caller.receive(&accept, b, LocalPeerPolicy::Allowed, 102).unwrap();
+    caller
+        .receive(&accept, b, LocalPeerPolicy::Allowed, 102)
+        .unwrap();
     (caller, b)
 }
 #[test]
 fn rejects_os_denial_before_opening_device() {
     let (call, remote) = active_call();
     let result = CaptureGate::<Fake>::open(
-        &call, true, OsPermission::Denied, remote,
-        PeerPolicy::Allowed, [7; 16], || panic!("device opened"),
+        &call,
+        true,
+        OsPermission::Denied,
+        remote,
+        PeerPolicy::Allowed,
+        [7; 16],
+        || panic!("device opened"),
     );
     assert!(matches!(result, Err(VoiceError::Denied)));
 }
@@ -46,19 +54,37 @@ fn revoked_consent_and_disconnected_call_stop_exactly_once() {
     let (mut call, remote) = active_call();
     let stopped = Rc::new(Cell::new(0));
     let mut gate = CaptureGate::open(
-        &call, true, OsPermission::Granted, remote,
-        PeerPolicy::Allowed, [7; 16], || Ok(Fake(Rc::clone(&stopped))),
-    ).unwrap();
+        &call,
+        true,
+        OsPermission::Granted,
+        remote,
+        PeerPolicy::Allowed,
+        [7; 16],
+        || Ok(Fake(Rc::clone(&stopped))),
+    )
+    .unwrap();
     assert!(gate.active());
-    assert!(gate.revalidate(
-        &call, true, OsPermission::Granted, remote,
-        PeerPolicy::Allowed, false,
-    ).is_ok());
+    assert!(gate
+        .revalidate(
+            &call,
+            true,
+            OsPermission::Granted,
+            remote,
+            PeerPolicy::Allowed,
+            false,
+        )
+        .is_ok());
     call.transport_lost();
-    assert!(gate.revalidate(
-        &call, true, OsPermission::Granted, remote,
-        PeerPolicy::Allowed, false,
-    ).is_err());
+    assert!(gate
+        .revalidate(
+            &call,
+            true,
+            OsPermission::Granted,
+            remote,
+            PeerPolicy::Allowed,
+            false,
+        )
+        .is_err());
     assert!(!gate.active());
     gate.close();
     assert_eq!(stopped.get(), 1);
@@ -69,14 +95,23 @@ fn mute_or_changed_remote_closes_capture() {
         let (call, remote) = active_call();
         let count = Rc::new(Cell::new(0));
         let mut gate = CaptureGate::open(
-            &call, true, OsPermission::Granted, remote,
-            PeerPolicy::Allowed, [7; 16], || Ok(Fake(Rc::clone(&count))),
-        ).unwrap();
+            &call,
+            true,
+            OsPermission::Granted,
+            remote,
+            PeerPolicy::Allowed,
+            [7; 16],
+            || Ok(Fake(Rc::clone(&count))),
+        )
+        .unwrap();
         let other = peer(3, 3);
         let result = gate.revalidate(
-            &call, true, OsPermission::Granted,
+            &call,
+            true,
+            OsPermission::Granted,
             if altered { other } else { remote },
-            PeerPolicy::Allowed, !altered,
+            PeerPolicy::Allowed,
+            !altered,
         );
         assert!(result.is_err());
         assert_eq!(count.get(), 1);
