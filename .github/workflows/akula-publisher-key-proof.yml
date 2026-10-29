@@ -1,0 +1,84 @@
+# RELEASE-AKULA-OWNER-KEY-01
+# Manual, main-only proof that the owner-provisioned private key really
+# corresponds to the reviewed public key. NEVER publishes a Release.
+name: Akula publisher key proof (no release)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prove-identity:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: akula-release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify pinned source and private key is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_REF" = 'refs/heads/main'
+          node - <<'NODE'
+          const fs=require('fs');
+          const file=fs.readFileSync('aquilum-app/native/src/updater/release.rs','utf8');
+          const found=file.match(/pub\(super\) const PUBLIC_KEY: &str = "([^"]+)";/);
+          if (!found) throw Error('No Akula pinned root; refuse pairing');
+          const decoded=Buffer.from(found[1],'base64');
+          const lines=decoded.toString('utf8').trimEnd().split('\n');
+          if (lines.length!==2 ||
+              lines[0]!=='untrusted comment: minisign public key: D7A66B6D4046F6C5' ||
+              !/^RW[A-Za-z0-9+/]+$/.test(lines[1]))
+            throw Error('Unexpected pinned Akula publisher root');
+          fs.writeFileSync(process.env.RUNNER_TEMP+'/akula-owner.pub',decoded,{mode:0o600});
+          NODE
+
+      - name: Install pinned cargo-packager and independent verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq minisign
+          cargo install cargo-packager --version 0.11.8 --locked
+
+      - name: Prove installed Akula private key actually signs
+        shell: bash
+        env:
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY:-}" || {
+            echo "::error title=Missing secret::Set CARGO_PACKAGER_SIGN_PRIVATE_KEY in the protected akula-release environment"
+            exit 1
+          }
+          test -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD:-}" || {
+            echo "::error title=Missing secret::Set CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD in the protected akula-release environment"
+            exit 1
+          }
+          printf 'AKULA-PUBLISHER-OWNER-KEY-V1\n%s\n%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$RUNNER_TEMP/challenge.txt"
+          cargo packager signer sign "$RUNNER_TEMP/challenge.txt"
+          test -s "$RUNNER_TEMP/challenge.txt.sig"
+          base64 -d "$RUNNER_TEMP/challenge.txt.sig" > "$RUNNER_TEMP/challenge.minisig"
+          minisign -Vm "$RUNNER_TEMP/challenge.txt" -x "$RUNNER_TEMP/challenge.minisig" -p "$RUNNER_TEMP/akula-owner.pub" -Q
+          printf 'tamper\n' >> "$RUNNER_TEMP/challenge.txt"
+          if minisign -Vm "$RUNNER_TEMP/challenge.txt" -x "$RUNNER_TEMP/challenge.minisig" -p "$RUNNER_TEMP/akula-owner.pub" -Q; then
+            echo "::error title=Verification failure::Altered challenge was accepted"
+            exit 1
+          fi
+          echo 'AKULA_PUBLISHER_OWNER_KEY_PASS key_id=D7A66B6D4046F6C5 signed_challenge=1 tamper_refused=1 no_release=1' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove disposable signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/challenge.txt" "$RUNNER_TEMP/challenge.txt.sig" "$RUNNER_TEMP/challenge.minisig" "$RUNNER_TEMP/akula-owner.pub"

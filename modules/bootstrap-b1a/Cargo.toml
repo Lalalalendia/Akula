@@ -1,0 +1,15 @@
+[package]
+name = "akula-server-release-b1a"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "Pure offline Ed25519 and rollback admission contract for signed Node releases"
+
+# Standalone parity crate; attachment to Core is a separate reviewed PR.
+[workspace]
+
+[dependencies]
+ring = "0.17.14"
+serde = { version = "1", features = ["derive"] }
+blake3 = "1.8.5"

@@ -1,0 +1,44 @@
+# NOT AUTO-INSTALLED. This is a staged service template for a separately
+# signed root-owned installer with explicit owner approval and OS witnessing.
+# Never start this service using a root or shared application account.
+[Unit]
+Description=Akula Node V1 authenticated Iroh file replica (HOLD)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=4
+
+[Service]
+Type=simple
+User=akula-node
+Group=akula-node
+UMask=0077
+StateDirectory=akula-node
+StateDirectoryMode=0700
+RuntimeDirectory=akula-node
+RuntimeDirectoryMode=0700
+ExecStart=/opt/akula-node/node --serve-iroh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadOnlyPaths=/etc/akula-node
+LimitNOFILE=1024
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

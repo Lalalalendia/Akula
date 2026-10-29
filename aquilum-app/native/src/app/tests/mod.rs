@@ -1,8 +1,11 @@
+mod canvas;
 mod damage;
 mod dialogs;
+mod docx;
 mod external;
 mod folder_colors;
 mod graph;
+mod image_files;
 mod harness;
 mod keys;
 #[cfg(feature = "memory-probe")]
@@ -11,6 +14,7 @@ mod misc;
 mod navigation;
 mod notes;
 mod panels;
+mod pdf_preview;
 mod perf;
 mod reader;
 mod snapshots;
@@ -18,16 +22,15 @@ mod support;
 mod tab_cache;
 mod version_memory;
 mod tab_list;
+mod transfer;
 mod templates;
 mod text_files;
 mod tree_pins;
 mod tree_toolbar;
 mod wide;
-mod wiki;
+mod wiki; mod user_scenarios; mod scenario_course_engineering; mod scenario_research_writing; mod scenario_games_projects_trip;
 
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use aquilum_core::settings::models::AppConfig;
 use masonry::app::{RenderRoot, RenderRootOptions, RenderRootSignal, WindowSizePolicy};

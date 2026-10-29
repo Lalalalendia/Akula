@@ -4,7 +4,7 @@ use super::{offset,
     content, content_or_empty, flag, limit, open_after_write, optional_content, optional_names, optional_text,
     require_write, shorten, text, tool, version_name_property, workspace_property, write_retrying,
 };
-use crate::files::document::{read_file_snapshot_impl, read_text};
+use crate::files::document::{read_file_snapshot_impl, snapshot_of, text_from_bytes};
 use crate::files::error::FileCommandError;
 use crate::files::gate;
 use crate::history::Source;
@@ -174,11 +174,11 @@ fn read_note(core: &Core, arguments: &Value) -> Result<Value, String> {
 
 fn read_one(vault: &Vault, name: &str, arguments: &Value, size: usize) -> Result<Value, String> {
     let note = vault.note(name)?;
-    let (content, revision) = if flag(arguments, "includeRevision", false) {
-        let snapshot = read_file_snapshot_impl(&note).map_err(|error| error.to_string())?;
+    let bytes = vault.read_note_bytes(&note)?; let (content, revision) = if flag(arguments, "includeRevision", false) {
+        let snapshot = snapshot_of(bytes).map_err(|error| error.to_string())?;
         (snapshot.content, Some(snapshot.hash))
     } else {
-        (read_text(&note).map_err(|error| error.to_string())?, None)
+        (text_from_bytes(bytes).map_err(|error| error.to_string())?, None)
     };
     let meta = super::frontmatter::map(&content);
     let (content, section) = match optional_text(arguments, "heading").as_deref() {
@@ -236,7 +236,7 @@ pub fn window(text: &str, offset: usize, size: usize) -> Result<(&str, usize), S
 fn note_outline(core: &Core, arguments: &Value) -> Result<Value, String> {
     let vault = requested_vault(core, arguments)?;
     let note = vault.note_argument(arguments)?;
-    let content = read_text(&note).map_err(|error| error.to_string())?;
+    let content = text_from_bytes(vault.read_note_bytes(&note)?).map_err(|error| error.to_string())?;
     let items = headings::headings(&content)
         .iter()
         .map(|heading| {

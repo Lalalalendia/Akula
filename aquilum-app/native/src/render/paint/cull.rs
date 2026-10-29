@@ -27,7 +27,7 @@ impl Painter {
     }
 
     pub(super) fn filtered(&self) -> bool {
-        self.groups.contains(&true)
+        self.groups.iter().any(|&n| n > 0)
     }
 
     pub(super) fn cull_inside(&mut self) -> bool {

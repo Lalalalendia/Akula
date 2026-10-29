@@ -3,8 +3,11 @@ mod edit;
 mod load;
 mod select;
 mod sort;
+mod startup;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod startup_bench;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -62,10 +65,7 @@ pub struct TreeModel {
 
 impl TreeModel {
     pub fn new(root: Option<PathBuf>, expanded: impl IntoIterator<Item = PathBuf>) -> Self {
-        let expanded = expanded.into_iter().map(|p| (comparable(&p), p)).collect();
-        let mut model = TreeModel { root, expanded, ..Default::default() };
-        model.reload_all();
-        model
+        Self::with_sort(root, expanded, Sort::default())
     }
 
     pub fn root(&self) -> Option<&Path> {

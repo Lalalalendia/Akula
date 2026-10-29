@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use masonry::peniko::{Blob, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
 use vello_cpu::{PixelMetadata, Pixmap};
-
 struct Shared(Arc<Pixmap>);
 
 impl AsRef<[u8]> for Shared {
@@ -18,6 +17,7 @@ fn registry() -> &'static Mutex<HashMap<u64, Weak<Pixmap>>> {
 }
 
 pub fn brush(pixmap: Pixmap) -> ImageBrush {
+    let pixmap = if pixmap.width() == 0 || pixmap.height() == 0 { Pixmap::new(1, 1) } else { pixmap };
     let (width, height) = (u32::from(pixmap.width()), u32::from(pixmap.height()));
     let pixmap = Arc::new(pixmap);
     let data = Blob::new(Arc::new(Shared(Arc::clone(&pixmap))));
@@ -29,7 +29,7 @@ pub fn brush(pixmap: Pixmap) -> ImageBrush {
 
 pub fn from_rgba(data: Vec<u8>, width: u32, height: u32, alpha_type: ImageAlphaType) -> Option<ImageBrush> {
     let (w, h) = (u16::try_from(width).ok()?, u16::try_from(height).ok()?);
-    if data.len() != usize::from(w) * usize::from(h) * 4 {
+    if w == 0 || h == 0 || data.len() != usize::from(w) * usize::from(h) * 4 {
         return None;
     }
     Some(brush(Pixmap::from_parts(data, w, h, PixelMetadata::new(alpha_type, true))))

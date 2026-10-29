@@ -114,3 +114,7 @@ fn settings_scroll_frames() {
     }
     eprintln!("{}x{}@{}: сцена {:?}, растр {:?}, худший {worst:?}, сдвигов {shifts} из {frames}", b.w, b.hh, b.scale, scene / frames, raster / frames);
 }
+
+#[cfg(target_os = "linux")]
+#[path = "editor_journey.rs"]
+mod editor_journey;

@@ -18,15 +18,17 @@ pub mod text;
 pub mod theme;
 pub mod titlebar;
 pub mod timer;
-pub mod graph;
+pub mod graph; pub mod canvas;
 pub mod motion;
 pub mod palette;
 pub mod reader;
 pub mod suggest;
 pub mod viewer;
+#[cfg(feature = "dicom-preview")] pub mod dicom;
 pub mod tokens;
 pub mod widgets;
 pub mod workspaces;
+pub mod transfer;
 
 mod frame;
 mod header;
@@ -36,7 +38,6 @@ mod shell;
 mod sidebar;
 #[cfg(test)]
 mod snapshot;
-
 use masonry::core::WidgetTag;
 
 pub use header::{controls_width, panel_label};

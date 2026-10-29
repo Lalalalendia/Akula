@@ -31,6 +31,15 @@ use zeroize::Zeroize;
 
 const ID: &str = "akula-b1b4b-ci-witness";
 const ENROLLMENT: &[u8] = b"AKULA-B1B4B-CI-ENROLLED\n";
+// B1d0 production witness enrollment is deliberately NOT the disposable
+// B1b4b CI ceremony. The root-installing service must never accept a CI
+// witness seed, marker, signing identity or caller-chosen ledger directory.
+#[cfg(feature = "server-bootstrap-b1d0-durable-node")]
+const PROD_ID: &str = "akula-b1d0-provisioned-owner-witness";
+#[cfg(feature = "server-bootstrap-b1d0-durable-node")]
+const PROD_ENROLLMENT: &[u8] = b"AKULA-B1D0-KEY-ENROLLED\n";
+#[cfg(feature = "server-bootstrap-b1d0-durable-node")]
+const PROD_WITNESS_ROOT: &str = "/var/lib/akula/server-bootstrap";
 const MAX_RECEIPT_SECONDS: u64 = 30;
 
 #[derive(Debug)]
@@ -94,6 +103,7 @@ fn pinned_bytes<const N: usize>(
 }
 /// Root-owned witness actor, provisioned OUTSIDE candidate/SSH/client traffic.
 /// Must be instantiated only in a dedicated OS-owned witness service.
+mod accessors;
 pub struct OsWitnessLab {
     ledger: InertWitnessLedgerLab,
     signer: Ed25519KeyPair,
@@ -101,6 +111,55 @@ pub struct OsWitnessLab {
 }
 impl OsWitnessLab {
     pub fn open(trust_path: &Path, journal_path: &Path) -> Result<Self, OsWitnessError> {
+        Self::open_enrolled(trust_path, journal_path, ENROLLMENT, ID)
+    }
+    // Dedicated, separately enrolled production witness. It is not exposed
+    // to a remote SSH/IPC client or UI. All path components must be trusted
+    // root-owned directories BEFORE any signing seed can be loaded.
+    #[cfg(feature = "server-bootstrap-b1d0-durable-node")]
+    pub(crate) fn open_provisioned_first_install() -> Result<Self, OsWitnessError> {
+        if rustix::process::geteuid().as_raw() != 0 {
+            return Err(OsWitnessError::TrustBoundary);
+        }
+        let mut current = File::from(open(
+            Path::new("/"),
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        ).map_err(os)?);
+        let filesystem_root = current.metadata()?;
+        if !filesystem_root.is_dir() || filesystem_root.uid() != 0 ||
+            filesystem_root.nlink() == 0 ||
+            filesystem_root.permissions().mode() & 0o7777 != 0o755 {
+            return Err(OsWitnessError::TrustBoundary);
+        }
+        for (component, mode) in [
+            ("var", 0o755), ("lib", 0o755),
+            ("akula", 0o700), ("server-bootstrap", 0o700),
+        ] {
+            let next = File::from(openat(
+                &current, component,
+                OFlags::RDONLY | OFlags::DIRECTORY |
+                    OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            ).map_err(os)?);
+            let metadata = next.metadata()?;
+            if !metadata.is_dir() || metadata.uid() != 0 ||
+                metadata.nlink() == 0 ||
+                metadata.permissions().mode() & 0o7777 != mode {
+                return Err(OsWitnessError::TrustBoundary);
+            }
+            current = next;
+        }
+        let root = Path::new(PROD_WITNESS_ROOT);
+        Self::open_enrolled(
+            &root.join("trust"), &root.join("journal"),
+            PROD_ENROLLMENT, PROD_ID,
+        )
+    }
+    fn open_enrolled(
+        trust_path: &Path, journal_path: &Path,
+        expected_marker: &[u8], witness_id: &str,
+    ) -> Result<Self, OsWitnessError> {
         if rustix::process::geteuid().as_raw() != 0 {
             return Err(OsWitnessError::TrustBoundary);
         }
@@ -111,10 +170,17 @@ impl OsWitnessLab {
         if trust_m.dev() == journal_m.dev() && trust_m.ino() == journal_m.ino() {
             return Err(OsWitnessError::TrustBoundary);
         }
+        // Both enrollment profiles have the same fixed marker length.
+        // A different production marker cannot be substituted with a CI key.
+        if expected_marker.len() != ENROLLMENT.len() {
+            return Err(OsWitnessError::TrustBoundary);
+        }
         let marker = pinned_bytes::<{ ENROLLMENT.len() }>(
             &trust_dir, "enrollment", 0o600,
         )?;
-        if marker.as_slice() != ENROLLMENT { return Err(OsWitnessError::TrustBoundary); }
+        if marker.as_slice() != expected_marker {
+            return Err(OsWitnessError::TrustBoundary);
+        }
         let public = pinned_bytes::<32>(&trust_dir, "witness.pub", 0o600)?;
         let mut seed = pinned_bytes::<32>(&trust_dir, "witness.seed", 0o600)?;
         let signer = Ed25519KeyPair::from_seed_unchecked(&seed)
@@ -126,16 +192,10 @@ impl OsWitnessLab {
         }
         let ledger = InertWitnessLedgerLab::open(journal_path)?;
         let trust = TrustedWitnessSigner {
-            witness_id: ID.into(),
+            witness_id: witness_id.into(),
             ed25519_public: public,
         };
         Ok(Self { ledger, signer, trust })
-    }
-    pub fn trusted_witness(&self) -> TrustedWitnessSigner {
-        self.trust.clone()
-    }
-    pub fn current_checkpoint(&self) -> Result<WitnessCheckpoint, OsWitnessError> {
-        self.ledger.current_checkpoint().map_err(OsWitnessError::Witness)
     }
     /// Exactly one new B1b1c CAS is written, fsynced and read back before the
     /// independently held witness key signs the specific accepted revision.

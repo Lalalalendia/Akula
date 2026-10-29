@@ -1,3 +1,6 @@
+mod fast;
+use fast::{read_symbol, read_text};
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Piece {
     Word(String),
@@ -131,63 +134,6 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>, String> {
     }
 
     Ok(tokens)
-}
-
-fn read_text(rest: &str) -> Result<(String, usize), String> {
-    let mut value = String::new();
-    let mut length = 1;
-    let mut characters = rest[1..].chars();
-    while let Some(symbol) = characters.next() {
-        length += symbol.len_utf8();
-        match symbol {
-            '"' => return Ok((value, length)),
-            '\\' => match characters.next() {
-                Some(escaped) => {
-                    length += escaped.len_utf8();
-                    value.push(escaped);
-                }
-                None => break,
-            },
-            _ => value.push(symbol),
-        }
-    }
-    Err("Строка не закрыта кавычкой".to_owned())
-}
-
-fn read_symbol(rest: &str) -> Option<(Symbol, usize)> {
-    for (text, symbol) in [
-        ("=>", Symbol::Arrow),
-        ("!=", Symbol::NotEqual),
-        (">=", Symbol::GreaterOrEqual),
-        ("<=", Symbol::LessOrEqual),
-        ("&&", Symbol::AmpAmp),
-        ("||", Symbol::PipePipe),
-    ] {
-        if rest.starts_with(text) {
-            return Some((symbol, 2));
-        }
-    }
-    let single = match rest.as_bytes().first()? {
-        b'(' => Symbol::OpenParen,
-        b')' => Symbol::CloseParen,
-        b'[' => Symbol::OpenBracket,
-        b']' => Symbol::CloseBracket,
-        b',' => Symbol::Comma,
-        b'.' => Symbol::Dot,
-        b'+' => Symbol::Plus,
-        b'-' => Symbol::Minus,
-        b'*' => Symbol::Star,
-        b'/' => Symbol::Slash,
-        b'%' => Symbol::Percent,
-        b'=' => Symbol::Equal,
-        b'<' => Symbol::Less,
-        b'>' => Symbol::Greater,
-        b'!' => Symbol::Bang,
-        b'&' => Symbol::AmpAmp,
-        b'|' => Symbol::PipePipe,
-        _ => return None,
-    };
-    Some((single, 1))
 }
 
 fn number_length(rest: &str) -> usize {

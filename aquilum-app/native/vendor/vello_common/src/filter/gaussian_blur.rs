@@ -4,7 +4,7 @@
 //! The gaussian blur filter.
 
 use alloc::vec::Vec;
-
+mod limits;
 use crate::filter_effects::EdgeMode;
 use crate::kurbo::Affine;
 use crate::util::extract_scales;
@@ -74,7 +74,7 @@ impl GaussianBlur {
         let (n_decimations, kernel, kernel_size) = plan_decimated_blur(std_deviation);
 
         Self {
-            std_deviation,
+            std_deviation: limits::bounded(std_deviation),
             edge_mode,
             n_decimations,
             kernel,
@@ -90,8 +90,8 @@ impl GaussianBlur {
 /// - `kernel`: Pre-computed Gaussian kernel weights (fixed-size array)
 /// - `kernel_size`: Actual length of the kernel (rest is zero-padded)
 pub fn plan_decimated_blur(std_deviation: f32) -> (usize, [f32; MAX_KERNEL_SIZE], u8) {
+    let std_deviation = limits::bounded(std_deviation);
     if std_deviation <= 0.0 {
-        // Invalid standard deviation, return identity kernel (no blur)
         let mut kernel = [0.0; MAX_KERNEL_SIZE];
         kernel[0] = 1.0;
         return (0, kernel, 1);
@@ -134,21 +134,21 @@ pub fn plan_decimated_blur(std_deviation: f32) -> (usize, [f32; MAX_KERNEL_SIZE]
 /// The kernel is stored in a fixed-size array to avoid heap allocation.
 /// Uses the standard Gaussian formula: G(x) = exp(-x² / (2σ²)), normalized to sum to 1.
 pub fn compute_gaussian_kernel(std_deviation: f32) -> ([f32; MAX_KERNEL_SIZE], u8) {
-    // Use radius = 3σ to capture 99.7% of the Gaussian distribution.
-    // Beyond ±3σ, the Gaussian values are negligible (<0.3%).
+    let std_deviation = limits::bounded(std_deviation);
+    if std_deviation == 0.0 {
+        let mut kernel = [0.0; MAX_KERNEL_SIZE];
+        kernel[0] = 1.0;
+        return (kernel, 1);
+    }
     let radius = (3.0 * std_deviation).ceil() as usize;
     let kernel_size = (1 + radius * 2).min(MAX_KERNEL_SIZE) as u8;
 
     let mut kernel = [0.0; MAX_KERNEL_SIZE];
-    // Compute Gaussian weights using the formula: G(x) = exp(-x² / (2σ²))
-    // This creates a symmetric bell curve centered at the middle of the kernel.
     let gaussian_denominator = 2.0 * std_deviation * std_deviation;
     let mut sum = 0.0;
     let kernel_center = (kernel_size / 2) as f32;
     for (i, weight) in kernel.iter_mut().enumerate().take(usize::from(kernel_size)) {
-        // Compute distance from center (0 at center, increases outward)
         let x = (i as f32) - kernel_center;
-        // Apply Gaussian formula: weight decreases exponentially with squared distance
         *weight = E.powf(-x * x / gaussian_denominator);
         sum += *weight;
     }
@@ -208,13 +208,17 @@ impl DecimationSizer {
     /// Apply a new upscale operation.
     #[inline]
     pub fn upscale(&mut self) -> (u16, u16) {
-        let (target_w, target_h) = self.dim_stack.pop().unwrap();
-        // Clamp because upscale can exceed target on odd dimensions (e.g., 5→3→6 > 5)
-        self.width = (self.width * 2).min(target_w);
-        self.height = (self.height * 2).min(target_h);
+        let Some((target_w, target_h)) = self.dim_stack.pop() else { return self.current() };
+        // Saturate before clamping: ceil(u16::MAX / 2) * 2 overflows u16.
+        self.width = self.width.saturating_mul(2).min(target_w);
+        self.height = self.height.saturating_mul(2).min(target_h);
         (self.width, self.height)
     }
 }
+
+#[cfg(test)]
+#[path = "gaussian_blur/decimation_sizer_tests.rs"]
+mod decimation_sizer_tests;
 
 #[cfg(test)]
 mod tests {

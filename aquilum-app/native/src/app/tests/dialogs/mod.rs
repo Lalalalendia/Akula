@@ -1,5 +1,6 @@
 use super::*;
 
-mod appearance;
+mod appearance; mod locale;
 mod settings;
 mod tabs;
+mod workspaces;

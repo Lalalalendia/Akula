@@ -51,6 +51,47 @@ $built = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\akula-
 if ((Get-FileHash $exe).Hash -ne (Get-FileHash $built).Hash) { throw 'Installed binary does not match built Akula' }
 Assert-LegacyUntouched
 
+# Verify the *installed* companion is the exact compiled pinned Shiva binary;
+# this is an integration test, not a downloadable or user-run converter script.
+$sidecar = Join-Path $akulaInstall 'shiva-pdf-preview.exe'
+$compiledSidecar = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\shiva-pdf-preview.exe'
+if (!(Test-Path -LiteralPath $sidecar -PathType Leaf)) {
+  throw 'Installed Akula is missing the required Shiva PDF sidecar'
+}
+if ((Get-FileHash -LiteralPath $sidecar).Hash -ne (Get-FileHash -LiteralPath $compiledSidecar).Hash) {
+  throw 'Installed Shiva PDF sidecar differs from compiled pinned source'
+}
+$probeDir = Join-Path $env:RUNNER_TEMP 'akula-pdf-smoke'
+New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
+$sourcePdf = Join-Path $probeDir 'real-text.pdf'
+$extractedMd = Join-Path $probeDir 'text.md'
+python scripts/pdf-preview/generate-fixture.py --out $sourcePdf
+if ($LASTEXITCODE -ne 0) { throw 'Synthetic PDF generation failed' }
+& $sidecar $sourcePdf $extractedMd
+if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $extractedMd -PathType Leaf)) {
+  throw 'Installed Shiva PDF sidecar rejected valid digital-text PDF'
+}
+$extracted = Get-Content -LiteralPath $extractedMd -Raw -Encoding UTF8
+if (-not $extracted.Contains('AKULANATIVEPDFNEEDLE')) {
+  throw 'Installed Shiva PDF extraction lost native PDF text'
+}
+Write-Host 'AKULA_PDF_SIDECAR_INSTALLED=PASS;source=pinned-shiva;real_pdf=1;external_setup=0'
+# Run the full native application integration path against this *installed*
+# sidecar: File Gate, idempotence, Tantivy search UI cards and result opening.
+$env:AKULA_PDF_INSTALLED_SIDECAR = $sidecar
+$env:AKULA_PDF_FIXTURE_PATH = $sourcePdf
+Push-Location (Join-Path $env:GITHUB_WORKSPACE 'aquilum-app')
+try {
+  cargo test --locked -p aquilum-native --bin aquilum-native app::tests::pdf_preview::installed_shiva_pdf_is_searchable_and_opens_from_native_result -- --exact --ignored --nocapture
+  if ($LASTEXITCODE -ne 0) { throw 'Installed Shiva to native Akula search E2E failed' }
+} finally {
+  Pop-Location
+  Remove-Item Env:\AKULA_PDF_INSTALLED_SIDECAR -ErrorAction SilentlyContinue
+  Remove-Item Env:\AKULA_PDF_FIXTURE_PATH -ErrorAction SilentlyContinue
+}
+Write-Host 'AKULA_PDF_NATIVE_SEARCH_E2E=PASS;source=installed;real_ui_state=1'
+
+
 $vault = Join-Path $env:RUNNER_TEMP 'akula-beta-vault'
 New-Item -ItemType Directory -Force -Path $vault | Out-Null
 $note = Join-Path $vault 'First note.md'
@@ -180,6 +221,21 @@ if ($LASTEXITCODE -ne 0) {
   throw "Installed Akula Windows UIA acceptance failed: PowerShell exit $LASTEXITCODE"
 }
 
+# Installed real Windows PDF pointer path; separate from native Rust harness.
+$canvasScript = Join-Path $PSScriptRoot 'windows-canvas-installed-uia.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $canvasScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -Editable -IncludeDelete -IncludeResize -IncludeConnect -IncludeGroup
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula Canvas UIA smoke failed: PowerShell exit $LASTEXITCODE" }
+
+$pdfPointerScript = Join-Path $PSScriptRoot 'windows-pdf-os-pointer.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula PDF OS-pointer acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-dot-folder-uia.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula dot-folder UIA failed: PowerShell exit $LASTEXITCODE" }
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-txt-search-uia.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula TXT global search UIA failed: PowerShell exit $LASTEXITCODE" }
 Start-And-Close -EditNote
 $state = Join-Path $akulaData 'window-state.json'
 if (!(Test-Path $state)) { throw 'Akula window state not persisted to its own AppData' }
@@ -198,6 +254,53 @@ $clipboardSentinel = 'AKULA_CLIPBOARD_POISON_' + [Guid]::NewGuid().ToString('N')
 Set-Clipboard -Value $clipboardSentinel -ErrorAction Stop
 Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
+
+# U02 uses installed Akula to create/save a note, restart, find and reopen it.
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-beta-u02-user-journey.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula U02 user journey failed: PowerShell exit $LASTEXITCODE" }
+$u02Note = Join-Path $vault 'AkulaU02Created.md'
+if (!(Test-Path -LiteralPath $u02Note -PathType Leaf)) { throw 'Installed U02 file not found' }
+$u02Hash = (Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash
+Assert-LegacyUntouched
+
+# Installed NSIS + foreground OS keyboard regression for the 30k and 100k
+# whole-note replacement path. Test-only vault, never developer/user files.
+. (Join-Path $PSScriptRoot 'windows-beta-replace-all.ps1')
+foreach ($lines in @(30000,100000)) {
+  Test-AkulaBetaReplaceAll -Executable $exe -Vault $vault -DataDir $akulaData -LineCount $lines
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'Large-document acceptance changed the original smoke-test note'
+}
+Assert-LegacyUntouched
+
+# DESK-15 installed-app recovery in a fresh disposable vault/data directory.
+$recoveryScript = Join-Path $PSScriptRoot 'windows-beta-recovery.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $recoveryScript -ExePath $exe
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula hard-kill recovery acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'DESK-15 isolated acceptance changed the original beta smoke note'
+}
+Assert-LegacyUntouched
+
+# Exercise the separate two-tab path through the installed Windows GUI:
+# Ctrl+Shift+pointer click, detached File Gate ACK cleanup, and a second
+# unsaved tab recovered after a hard process kill.
+$recoveryTabs = Join-Path $PSScriptRoot 'windows-beta-recovery-tabs.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $recoveryTabs -ExePath $exe
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula two-tab hard-kill recovery failed: PowerShell exit $LASTEXITCODE"
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'DESK-15 two-tab test changed original beta source'
+}
+Assert-LegacyUntouched
+
+# Server 2022 installed-GUI 100k Unicode crash/Restore; not a Win7 runtime claim.
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-beta-recovery-large.ps1') -ExePath $exe
+if ($LASTEXITCODE -ne 0) { throw "Installed 100k-line crash recovery failed: PowerShell exit $LASTEXITCODE" }
 Assert-LegacyUntouched
 
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
@@ -211,5 +314,6 @@ if (Test-Path $exe) { throw 'Akula executable remains after uninstall' }
 if (Test-Path $akulaRegistry) { throw 'Akula uninstall registry key remains' }
 if (!(Test-Path $state)) { throw 'Uninstall removed Akula user state' }
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Uninstall changed the edited local document' }
+if ((Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash -ne $u02Hash) { throw 'Uninstall changed the U02-created Markdown note' }
 Assert-LegacyUntouched
 Write-Host 'AKULA_WINDOWS_BETA_GUI_EDIT_PASS: NSIS install, real OS keyboard edit, on-disk save, restart, uninstall and upstream sentinels'

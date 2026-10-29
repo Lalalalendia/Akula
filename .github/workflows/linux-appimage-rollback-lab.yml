@@ -9,12 +9,20 @@ on:
       - 'aquilum-app/native/src/updater/apply.rs'
       - 'aquilum-app/native/src/updater/mod.rs'
       - 'aquilum-app/native/src/updater/tests.rs'
+      - 'aquilum-app/native/src/updater/release.rs'
+      - '.github/scripts/release-isolation-policy.test.cjs'
       - '.github/workflows/linux-appimage-rollback-lab.yml'
       - 'docs/release/AKULA-LINUX-ROLLBACK-LAB-01.md'
       - 'docs/release/AKULA-LINUX-RUNTIME-GATE-01.md'
   workflow_dispatch:
 permissions:
   contents: read
+
+# Coalesce superseded PR commits without cancelling manual or push runs.
+# A unique run_id suffix for non-PR events preserves every manual run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   linux-rollback-lab:
     runs-on: ubuntu-24.04
@@ -54,6 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test .github/scripts/release-isolation-policy.test.cjs
-          grep -Fq 'pub(super) const PUBLIC_KEY: &str = "";' aquilum-app/native/src/updater/release.rs
-          grep -A2 'const fn channel_ready()' aquilum-app/native/src/updater/release.rs | grep -Fq 'false'
-          echo 'AKULA_RELEASE_HOLD_PASS signing=disabled updater=disabled'
+          # Linux rollback/update authority must remain OFF even though the
+          # independently signed Windows beta is now allowed.
+          grep -A2 'const fn channel_ready()' aquilum-app/native/src/updater/release.rs | grep -Fq 'cfg!(all(target_os = "windows", feature = "installed"))'
+          echo 'AKULA_RELEASE_HOLD_PASS publisher_root=pinned linux_updater=disabled'

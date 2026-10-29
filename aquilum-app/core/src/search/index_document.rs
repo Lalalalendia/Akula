@@ -1,3 +1,4 @@
+mod structured;
 use super::paths::relative_slash_path;
 use super::created::{self, CreatedAt, CreatedSource};
 use super::error::SearchError;
@@ -69,7 +70,7 @@ pub fn apply_prepared(
     probe: Probe,
     prepared: PreparedFile,
 ) -> Result<bool, SearchError> {
-    let created = created::declared(&prepared.body).unwrap_or(probe.created);
+    let created = structured::created(&prepared, probe.created);
     if probe.up_to_date
         && probe
             .previous_hash
@@ -79,9 +80,7 @@ pub fn apply_prepared(
         return Ok(false);
     }
     update_document(root, index, writer, &prepared.path, &prepared.body)?;
-    wiki::index_document(transaction, root, &prepared.path, &prepared.body)?;
-    fields::index_document(transaction, &prepared.path, &prepared.body)?;
-    tasks::index_document(transaction, &prepared.path, &prepared.body)?;
+    structured::index(root, transaction, &prepared)?;
     upsert(transaction, key, &prepared, created)?;
     Ok(true)
 }

@@ -1,0 +1,481 @@
+name: LAB Win7 Akula and Shiva PDF build
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/akula-win7-full-native.yml'
+      - 'aquilum-app/native/src/output/soft/present.rs'
+      - 'aquilum-app/native/src/host/window_events/restore.rs'
+      - 'aquilum-app/native/src/touchpad/compat.rs'
+      - 'scripts/akula-win7-nsis-candidate.ps1'
+      - 'scripts/akula-win7-signed-stage.ps1'
+      - '.github/scripts/akula-win7-portable-package.py'
+      - '.github/scripts/akula-win7-portable-package.test.py'
+      - '.github/scripts/akula-win7-dumpbin-audit.py'
+      - '.github/scripts/akula-win7-dumpbin-audit.test.py'
+      - 'scripts/akula-win7-sp1-acceptance.ps1'
+      - 'scripts/akula-desk15-real-windows-acceptance.ps1'
+      - 'scripts/akula-desk15-powercut-witness.ps1'
+      # DESK-15 AppData shadow and guarded File Gate ACK must compile for Win7.
+      - 'aquilum-app/native/src/app/note_recovery.rs'
+      - 'aquilum-app/native/src/note/bridge.rs'
+      - 'aquilum-app/native/src/note/recovery.rs'
+      - 'aquilum-app/native/src/note/recovery/**'
+      - 'scripts/windows-beta-recovery*.ps1'
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: windows-2022
+    timeout-minutes: 155
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      # Exact Shiva commit used by the public Akula release. Do not allow HEAD drift.
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/shiva
+          ref: 40b72a90b1dac39812c77c7321e57d613a81cb51
+          path: _shiva-preview
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - name: Parse both production Win7 NSIS staging scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in @('scripts/akula-win7-nsis-candidate.ps1', 'scripts/akula-win7-signed-stage.ps1',
+                              'scripts/akula-win7-sp1-acceptance.ps1',
+                              'scripts/akula-desk15-real-windows-acceptance.ps1',
+                              'scripts/akula-desk15-powercut-witness.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) { throw "Win7 production staging parse error in $file : $($errors[0])" }
+          }
+          $publisher = Get-Content -LiteralPath '.github/workflows/akula-windows-signed-candidate.yml' -Raw
+          foreach ($token in @('scripts/akula-win7-signed-stage.ps1', 'scripts/akula-win7-nsis-candidate.ps1',
+                              'Sign tested Windows NSIS bytes', 'Verify public key, both detached signatures')) {
+            if (!$publisher.Contains($token)) { throw "Signed Akula workflow lost required Win7 or trust gate: $token" }
+          }
+
+      - name: Reject DESK-15 clipboard false PASS from trailing newline trimming
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cases = @(
+            @{ Path = 'scripts/akula-desk15-real-windows-acceptance.ps1'; Function = 'Normalized' },
+            @{ Path = 'scripts/akula-desk15-powercut-witness.ps1'; Function = 'Normalize' }
+          )
+          foreach ($case in $cases) {
+            $source = Get-Content -LiteralPath $case.Path -Raw
+            if ($source.Contains('.TrimEnd([char]10)')) {
+              throw "DESK15 GUI readback may discard real trailing lines: $($case.Path)"
+            }
+            $pattern = '(?ms)^function ' + $case.Function + '\(\[string\]\$\w+\) \{\r?\n.*?^\}'
+            $match = [regex]::Match($source, $pattern)
+            if (!$match.Success) { throw "Missing normalizer for $($case.Path)" }
+            . ([scriptblock]::Create($match.Value))
+            $name = $case.Function
+            $lf = & $name ('One' + [char]10 + 'Two' + [char]10)
+            $crlf = & $name ('One' + [char]13 + [char]10 + 'Two' + [char]13 + [char]10)
+            if ($lf -cne $crlf) {
+              throw "DESK15 does not normalize Windows clipboard CRLF: $($case.Path)"
+            }
+            $without = & $name ('One' + [char]10 + 'Two')
+            $extra = & $name ('One' + [char]10 + 'Two' + [char]10 + [char]10)
+            if ($lf -ceq $without -or $lf -ceq $extra) {
+              throw "DESK15 silently trims meaningful trailing lines: $($case.Path)"
+            }
+            Write-Host "DESK15_TRAILING_LINE_FIDELITY_PASS $($case.Path)"
+          }
+
+      - name: Validate independent DESK-15 power-cut checkpoint evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Get-Content -LiteralPath 'scripts/akula-desk15-powercut-witness.ps1' -Raw
+          foreach ($name in @('Sha256', 'Checked-ExternalEvidence', 'Check-TrustedCheckpoint')) {
+            $pattern = '(?ms)^function ' + $name + '\([^\r\n]*\) \{\r?\n.*?^\}'
+            $match = [regex]::Match($source, $pattern)
+            if (!$match.Success) { throw "Missing DESK-15 independent checkpoint validator: $name" }
+            . ([scriptblock]::Create($match.Value))
+          }
+          foreach ($token in @('Check-TrustedCheckpoint $guestCheckpoint $TrustedCheckpointPath $root',
+                               'Checked-ExternalEvidence $ExternalCutEvidence $root',
+                               'Power event proof and archived checkpoint must be separate files')) {
+            if (!$source.Contains($token)) { throw "Power-cut Verify can bypass trusted host evidence: $token" }
+          }
+          $root = Join-Path $env:RUNNER_TEMP ('desk15-hostcopy-' + [Guid]::NewGuid().ToString('N'))
+          $trusted = Join-Path $env:RUNNER_TEMP ('desk15-trusted-' + [Guid]::NewGuid().ToString('N'))
+          $aliasParent = Join-Path $env:RUNNER_TEMP ('desk15-alias-' + [Guid]::NewGuid().ToString('N'))
+          [void][IO.Directory]::CreateDirectory($root)
+          [void][IO.Directory]::CreateDirectory($aliasParent)
+          $alias = Join-Path $aliasParent 'guest-junction'
+          $guest = Join-Path $root 'checkpoint.txt'
+          $nested = Join-Path $root 'nested\fake-host-copy.txt'
+          [void][IO.Directory]::CreateDirectory((Split-Path -Parent $nested))
+          [IO.File]::WriteAllText($guest,'trial=synthetic')
+          [IO.File]::WriteAllText($trusted,'trial=synthetic')
+          [IO.File]::WriteAllText($nested,'trial=synthetic')
+          function Refuse([scriptblock]$attempt,[string]$caseName) {
+            $rejected = $false
+            try { & $attempt | Out-Null } catch { $rejected = $true }
+            if (!$rejected) { throw "Unsafe DESK-15 trusted evidence accepted: $caseName" }
+          }
+          try {
+            $accepted = Check-TrustedCheckpoint $guest $trusted $root
+            if ($accepted -cne [IO.Path]::GetFullPath($trusted)) {
+              throw 'Valid independent host checkpoint was rejected'
+            }
+            Refuse { Check-TrustedCheckpoint $guest $guest $root } 'guest checkpoint as own archive'
+            Refuse { Check-TrustedCheckpoint $guest $nested $root } 'nested guest file as host archive'
+            [IO.File]::WriteAllText($trusted,'trial=tampered')
+            Refuse { Check-TrustedCheckpoint $guest $trusted $root } 'different archive SHA256'
+            Refuse { Checked-ExternalEvidence $nested $root } 'nested guest path as controller event'
+            # The lexical path is outside $root but points back inside via a real NTFS junction.
+            New-Item -ItemType Junction -Path $alias -Target $root -ErrorAction Stop | Out-Null
+            if (([IO.File]::GetAttributes($alias) -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+              throw 'Negative fixture is not a reparse-point directory'
+            }
+            Refuse { Check-TrustedCheckpoint $guest (Join-Path $alias 'checkpoint.txt') $root } 'external junction pointing into trial'
+            Refuse { Checked-ExternalEvidence (Join-Path $alias 'checkpoint.txt') $root } 'controller log through external junction'
+            Write-Host 'DESK15_TRUSTED_CHECKPOINT_REPARSE_ANCESTOR_PASS'
+            Write-Host 'DESK15_TRUSTED_CHECKPOINT_FAIL_CLOSED_PASS'
+          } finally {
+            # Remove the junction itself BEFORE recursively deleting test fixtures.
+            if ([IO.Directory]::Exists($alias)) { [IO.Directory]::Delete($alias) }
+            Remove-Item -LiteralPath $aliasParent -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $trusted -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Check Win7 SP1 native acceptance harness guard and evidence contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $script = Get-Content -LiteralPath 'scripts/akula-win7-sp1-acceptance.ps1' -Raw
+          foreach ($required in @('Get-WmiObject Win32_OperatingSystem', 'ServicePackMajorVersion',
+                                   'if ([int]$os.ProductType -ne 1)', 'acceptance_script_sha256=',
+                                   'if (-not $DisposableVm)', 'installed_app_and_shiva_hashes=PASS',
+                                   'pdf_roundtrip=PASS', 'cover_uncover_20=COMPLETED_REQUIRES_VISUAL_REVIEW',
+                                   'Cold-reopened', 'Sha256 $Installer', 'Start-Process -FilePath $Installer')) {
+            if (-not $script.Contains($required)) { throw "Win7 acceptance scenario missing: $required" }
+          }
+          if ($script -match 'Invoke-WebRequest|Invoke-RestMethod|iex\b|DownloadString') {
+            throw 'Win7 acceptance harness must not download or execute network content'
+          }
+          # DESK-15 physical acceptance must remain disposable, explicitly
+          # operator-confirmed, and must never claim a real power-cut PASS.
+          $desk15 = Get-Content -LiteralPath 'scripts/akula-desk15-real-windows-acceptance.ps1' -Raw
+          foreach ($required in @('if (-not $DisposableMachine)', 'Get-WmiObject Win32_OperatingSystem',
+                                   'if ([int]$os.ProductType -ne 1)', 'acceptance_script_sha256=',
+                                   'Get-Process -Name', 'Sha256 $exe', 'Wait-Shadow $markerB $app',
+                                   'Check-Acl $shadowB', '$app.Kill()', 'no_auto_overwrite=PASS',
+                                   'restored_second_gui_exact=PASS', 'power_cut=NOT_TESTED',
+                                   'status=PASS_DESK15_REAL_OS_MANUAL_HARD_KILL')) {
+            if (-not $desk15.Contains($required)) { throw "DESK-15 physical acceptance scenario missing: $required" }
+          }
+          if ($desk15 -match 'Invoke-WebRequest|Invoke-RestMethod|iex\b|DownloadString|Get-FileHash|Remove-Item|Stop-Process') {
+            throw 'DESK-15 real-OS acceptance must be Windows PS2-compatible and non-destructive'
+          }
+          $powercut = Get-Content -LiteralPath 'scripts/akula-desk15-powercut-witness.ps1' -Raw
+          foreach ($required in @('if (-not $DisposableMachine)', 'Get-WmiObject Win32_OperatingSystem',
+                                   'if ([int]$os.ProductType -ne 1)', 'boot_ticks=',
+                                   'external_event_proof=PROVIDED_FOR_MANUAL_AUDIT_NOT_INDEPENDENTLY_AUTHENTICATED',
+                                   'No reboot observed', 'source_unchanged_before_restore=PASS',
+                                   'Check-Acl $shadow', 'status=RESTORE_PASS_EXTERNAL_POWER_EVENT_REQUIRES_MANUAL_AUDIT')) {
+            if (-not $powercut.Contains($required)) { throw "DESK-15 powercut witness missing: $required" }
+          }
+          if ($powercut.Contains('Get-Acl -LiteralPath')) { throw 'PowerShell 2.0 has no Get-Acl -LiteralPath' }
+          if ($powercut -match 'Invoke-WebRequest|Invoke-RestMethod|iex\b|DownloadString|Get-FileHash|Remove-Item|Stop-Process|Restart-Computer|Stop-Computer|shutdown\.exe') {
+            throw 'DESK-15 power-cut harness must not control power, fetch code, or delete user data'
+          }
+
+      # A version-only check would mislabel Server 2008 R2 as Win7 SP1,
+      # and Server 2022 as Windows 10/11. Exercise both guards on this hosted
+      # Windows Server 2022 runner, before any test files could be created.
+      - name: Prove real-OS harnesses reject Windows Server editions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $winPs = Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          if (!(Test-Path -LiteralPath $winPs)) { throw 'Windows PowerShell for the negative test is missing' }
+          $missing = Join-Path $env:RUNNER_TEMP 'akula-negative-control-does-not-exist.exe'
+          if (Test-Path -LiteralPath $missing) { throw 'Negative-control fixture unexpectedly exists' }
+          $cases = @(
+            @{ Name = 'WIN7_SP1'; File = 'scripts/akula-win7-sp1-acceptance.ps1';
+               Marker = 'Win7 SP1 acceptance requires a workstation Windows edition';
+               Args = @('-Installer', $missing, '-InstallerAudit', $missing,
+                        '-Provenance', $missing, '-DisposableVm') },
+            @{ Name = 'DESK15'; File = 'scripts/akula-desk15-real-windows-acceptance.ps1';
+               Marker = 'DESK-15 acceptance requires a workstation Windows edition';
+               Args = @('-ExePath', $missing, '-ExpectedSha256', ('0' * 64),
+                        '-DisposableMachine') },
+            @{ Name = 'DESK15_POWERCUT'; File = 'scripts/akula-desk15-powercut-witness.ps1';
+               Marker = 'DESK15 power-cut witness requires a Windows workstation, not Windows Server';
+               Args = @('-Phase', 'Prepare', '-ExePath', $missing,
+                        '-ExpectedSha256', ('0' * 64), '-DisposableMachine') }
+          )
+          foreach ($case in $cases) {
+            $argsList = @('-NoProfile', '-NonInteractive', '-Sta', '-ExecutionPolicy',
+                          'Bypass', '-File', (Join-Path $env:GITHUB_WORKSPACE $case.File)) + $case.Args
+            $output = (& $winPs @argsList 2>&1 | Out-String)
+            if ($LASTEXITCODE -eq 0 -or !$output.Contains($case.Marker)) {
+              throw "Unsafe real-OS acceptance guard: $($case.Name) exited $LASTEXITCODE; $output"
+            }
+            Write-Host "$($case.Name)_SERVER_EDITION_NEGATIVE_PASS"
+          }
+          # The two expected child-process failures leave LASTEXITCODE=1.
+          # Clear it only AFTER both fail-closed assertions passed, otherwise
+          # the GitHub pwsh wrapper incorrectly fails this step.
+          $global:LASTEXITCODE = 0
+
+      - name: Verify fail-closed COM import staging decisions
+        shell: pwsh
+        run: |
+          python .github/scripts/akula-win7-portable-package.test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Win7 COM import staging unit tests failed' }
+
+      - name: Detect dynamic CRT prerequisites on Windows 7
+        shell: pwsh
+        run: |
+          python .github/scripts/akula-win7-dumpbin-audit.test.py
+          if ($LASTEXITCODE -ne 0) { throw 'External CRT import classification tests failed' }
+
+      - name: Build entire native Akula for Windows 7
+        shell: pwsh
+        env:
+          RUSTFLAGS: '--cfg windows_slim_errors -C target-feature=+crt-static'
+          CARGO_INCREMENTAL: '0'
+        run: |
+          New-Item -ItemType Directory -Force win7-full-results | Out-Null
+          rustc -Vv | Out-File win7-full-results/compiler.txt
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native'
+          & cargo +nightly build --manifest-path aquilum-app/Cargo.toml --release --locked -p aquilum-native --features installed,s3-pair-beta --target x86_64-win7-windows-msvc -Z build-std=std,panic_abort *> win7-full-results/build.log
+          "exit_code=$LASTEXITCODE" | Out-File win7-full-results/status.txt
+          Get-Content win7-full-results/build.log -Tail 50 | Write-Host
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Inspect complete native EXE static PE imports
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = 'win7-full-results'
+          $exe = '.artifacts/cargo-native/x86_64-win7-windows-msvc/release/aquilum-native.exe'
+          if (!(Test-Path $exe)) { throw "No native executable at $exe" }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
+          $bytes = (Get-Item $exe).Length
+          "exe_sha256=$hash" | Add-Content "$out/status.txt"
+          "exe_bytes=$bytes" | Add-Content "$out/status.txt"
+          $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $root = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (!$root) { throw 'MSVC toolchain missing' }
+          $toolsets = @(Get-ChildItem (Join-Path $root 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending)
+          $dumpbin = Join-Path $toolsets[0].FullName 'bin/Hostx64/x64/dumpbin.exe'
+          if (!(Test-Path $dumpbin)) { throw 'dumpbin missing' }
+          & $dumpbin /imports $exe | Set-Content "$out/full-imports.txt" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'dumpbin imports failed' }
+          & $dumpbin /headers $exe | Set-Content "$out/full-headers.txt" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'dumpbin headers failed' }
+          python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin "$out/full-imports.txt" --out $out --sha256 $hash --bytes $bytes
+          if ($LASTEXITCODE -ne 0) { throw 'Full import parser failed' }
+          $audit = Get-Content "$out/full-audit.json" -Raw | ConvertFrom-Json
+          if (@($audit.external_crt_imported_dlls).Count -ne 0) {
+            throw "Akula still dynamically imports UCRT/VC runtime: $($audit.external_crt_imported_dlls -join ', ')"
+          }
+          "external_crt_dll_count=0" | Add-Content "$out/status.txt"
+          Get-Content "$out/full-audit.md" | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Build pinned Shiva PDF CLI for Windows 7 (same Rust target as Akula)
+        shell: pwsh
+        env:
+          RUSTFLAGS: '--cfg windows_slim_errors -C target-feature=+crt-static'
+          CARGO_INCREMENTAL: '0'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pin = '40b72a90b1dac39812c77c7321e57d613a81cb51'
+          $actual = (git -C _shiva-preview rev-parse HEAD).Trim()
+          if ($actual -cne $pin) { throw "Pinned Shiva source changed: $actual" }
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE '.artifacts/shiva-win7'
+          & cargo +nightly build --manifest-path _shiva-preview/Cargo.toml --release -p cli --target x86_64-win7-windows-msvc -Z build-std=std,panic_abort *> win7-full-results/shiva-build.log
+          $buildExit = $LASTEXITCODE
+          "shiva_exit_code=$buildExit" | Add-Content win7-full-results/status.txt
+          Get-Content win7-full-results/shiva-build.log -Tail 45 | Write-Host
+          if ($buildExit -ne 0) { throw "Pinned Shiva PDF CLI Win7-target build failed: $buildExit" }
+          $built = '.artifacts/shiva-win7/x86_64-win7-windows-msvc/release/shiva.exe'
+          if (!(Test-Path -LiteralPath $built -PathType Leaf)) { throw 'Shiva Win7 executable absent' }
+          if (Test-Path -LiteralPath '_shiva-preview/Cargo.lock') {
+            $lock = (Get-FileHash -LiteralPath '_shiva-preview/Cargo.lock' -Algorithm SHA256).Hash.ToLowerInvariant()
+            "shiva_cargo_lock_sha256=$lock" | Add-Content win7-full-results/status.txt
+          }
+          "shiva_source_commit=$actual" | Add-Content win7-full-results/status.txt
+
+      - name: Reject post-Win7 Shiva static imports and smoke-test PDF on Windows runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = '.artifacts/shiva-win7/x86_64-win7-windows-msvc/release/shiva.exe'
+          $out = 'win7-full-results/shiva-audit'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $root = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (!$root) { throw 'Visual Studio MSVC tools not installed' }
+          $toolsets = @(Get-ChildItem (Join-Path $root 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending)
+          $dumpbin = Join-Path $toolsets[0].FullName 'bin/Hostx64/x64/dumpbin.exe'
+          if (!(Test-Path -LiteralPath $dumpbin)) { throw 'MSVC dumpbin not found' }
+          & $dumpbin /imports $exe | Set-Content "$out/imports.txt" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'Shiva dumpbin imports failed' }
+          $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          $bytes = (Get-Item -LiteralPath $exe).Length
+          python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin "$out/imports.txt" --out $out --sha256 $hash --bytes $bytes
+          if ($LASTEXITCODE -ne 0) { throw 'Shiva PE import report failed' }
+          $audit = Get-Content "$out/full-audit.json" -Raw | ConvertFrom-Json
+          if (@($audit.known_post_win7_imports).Count -ne 0) { throw 'Shiva still has post-Windows-7 static imports' }
+          if (@($audit.potentially_risky_imported_dlls) -contains 'combase.dll') { throw 'Shiva has unapproved combase.dll direct dependency' }
+          if (@($audit.external_crt_imported_dlls).Count -ne 0) {
+            throw "Shiva still dynamically imports UCRT/VC runtime: $($audit.external_crt_imported_dlls -join ', ')"
+          }
+          "shiva_external_crt_dll_count=0" | Add-Content win7-full-results/status.txt
+          # Shiva requires a pre-authorized font directory. Use a font
+          # from this Windows installation, not a downloaded/bundled font.
+          $fontDir = Join-Path $env:RUNNER_TEMP 'shiva-smoke-fonts'
+          New-Item -ItemType Directory -Force -Path $fontDir | Out-Null
+          $systemFont = Join-Path $env:WINDIR 'Fonts\arial.ttf'
+          if (!(Test-Path -LiteralPath $systemFont -PathType Leaf)) { throw 'System Arial font missing from Windows runner' }
+          Copy-Item -LiteralPath $systemFont -Destination (Join-Path $fontDir 'arial.ttf') -Force
+          $env:SHIVA_FONT_DIR = $fontDir
+          # Native execution here is on Windows Server 2022, NOT Windows 7.
+          $src = Join-Path $env:GITHUB_WORKSPACE 'win7-full-results/pdf-smoke-input.txt'
+          $pdf = Join-Path $env:GITHUB_WORKSPACE 'win7-full-results/pdf-smoke-output.pdf'
+          [IO.File]::WriteAllText($src, "Akula Windows 7 PDF companion sample.`r`nA test of Shiva text-to-PDF.`r`n")
+          & $exe $src $pdf *> win7-full-results/shiva-convert.log
+          $convertExit = $LASTEXITCODE
+          if ($convertExit -ne 0) {
+            Get-Content win7-full-results/shiva-convert.log -Tail 50 | Write-Host
+            throw "Shiva text to PDF failed on Windows runner: $convertExit"
+          }
+          if (!(Test-Path -LiteralPath $pdf -PathType Leaf)) { throw 'Shiva failed to write PDF' }
+          $pdfBytes = [IO.File]::ReadAllBytes((Resolve-Path $pdf).Path)
+          if ($pdfBytes.Length -lt 64 -or [Text.Encoding]::ASCII.GetString($pdfBytes, 0, 5) -cne '%PDF-') {
+            throw 'Shiva produced invalid PDF header'
+          }
+          "shiva_pdf_smoke_sha256=$((Get-FileHash -LiteralPath $pdf -Algorithm SHA256).Hash.ToLowerInvariant())" | Add-Content win7-full-results/status.txt
+          "shiva_exe_sha256=$($hash.ToLowerInvariant())" | Add-Content win7-full-results/status.txt
+          Get-Content "$out/full-audit.md" | Add-Content $env:GITHUB_STEP_SUMMARY
+          Write-Host 'WIN7_SHIVA_PDF_COMPILED_AUDITED_AND_SMOKE_PASSED (runner is Windows Server 2022)'
+
+      - name: Package the exact Win7-target executable as portable trial ZIP
+        shell: pwsh
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # GITHUB_SHA is a synthetic merge SHA for pull_request events.
+          # Checkout uses the exact PR head, and provenance must record it.
+          $actualSourceSha = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0 -or $actualSourceSha -notmatch '^[a-f0-9]{40}$' -or
+              $actualSourceSha -cne $env:EXPECTED_SOURCE_SHA.ToLowerInvariant()) {
+            throw 'The Win7 source checkout SHA differs from the requested PR head'
+          }
+          $source = '.artifacts/cargo-native/x86_64-win7-windows-msvc/release/aquilum-native.exe'
+          python .github/scripts/akula-win7-portable-package.py --exe $source --audit win7-full-results/full-audit.json --sidecar .artifacts/shiva-win7/x86_64-win7-windows-msvc/release/shiva.exe --sidecar-audit win7-full-results/shiva-audit/full-audit.json --out win7-lab-output --revision $actualSourceSha
+          if ($LASTEXITCODE -ne 0) { throw 'Win7 portable package verification failed' }
+          if (!(Test-Path 'win7-lab-output/Akula-Win7-LAB-portable.zip')) { throw 'Test ZIP was not created' }
+          $provenance = Get-Content -LiteralPath win7-lab-output/PROVENANCE.txt -Raw
+          if (!$provenance.Contains("source_sha=$actualSourceSha")) {
+            throw 'Win7 package provenance did not preserve the checked-out source SHA'
+          }
+
+      - name: Exercise the exact packaged Windows 7 PDF smoke command on runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $batch = Join-Path $env:GITHUB_WORKSPACE 'win7-lab-output/SMOKE-PDF-WIN7.cmd'
+          if (!(Test-Path -LiteralPath $batch -PathType Leaf)) { throw 'Portable PDF smoke command missing' }
+          & cmd.exe /d /c $batch
+          $code = $LASTEXITCODE
+          if ($code -ne 0) { throw "Packaged PDF smoke failed: $code" }
+          $pdf = Join-Path $env:GITHUB_WORKSPACE 'win7-lab-output/pdf-smoke-output.pdf'
+          if (!(Test-Path -LiteralPath $pdf -PathType Leaf)) { throw 'Portable PDF smoke produced no PDF' }
+          $bytes = [IO.File]::ReadAllBytes($pdf)
+          if ($bytes.Length -lt 64 -or [Text.Encoding]::ASCII.GetString($bytes, 0, 5) -cne '%PDF-') {
+            throw 'Portable PDF smoke output is not a PDF'
+          }
+          Write-Host 'WIN7_PACKAGED_PDF_SMOKE_PASSED runner=windows2022 test_os_win7=false'
+
+      - name: Verify patched portable EXE imports before distribution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'win7-lab-output/akula-app.exe'
+          $out = 'win7-lab-output/pe-audit'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vsroot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (!$vsroot) { throw 'VS build tools missing for second PE audit' }
+          $toolsets = @(Get-ChildItem (Join-Path $vsroot 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending)
+          $dumpbin = Join-Path $toolsets[0].FullName 'bin/Hostx64/x64/dumpbin.exe'
+          & $dumpbin /imports $exe | Set-Content "$out/imports.txt" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'Patched PE dump failed' }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
+          $bytes = (Get-Item $exe).Length
+          python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin "$out/imports.txt" --out $out --sha256 $hash --bytes $bytes
+          if ($LASTEXITCODE -ne 0) { throw 'Patched PE audit failed' }
+          $audit = Get-Content "$out/full-audit.json" -Raw | ConvertFrom-Json
+          if (@($audit.known_post_win7_imports).Count -ne 0) { throw 'Known newer Windows APIs remain' }
+          if (@($audit.potentially_risky_imported_dlls) -contains 'combase.dll') { throw 'COMBASE static dependency still present' }
+          $imports = @($audit.imports.'ole32.dll')
+          if ($imports -notcontains 'CoCreateFreeThreadedMarshaler' -or $imports -notcontains 'CoTaskMemFree') { throw 'Win7 COM fallbacks missing from OLE32 imports' }
+          Get-Content "$out/full-audit.md" | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Install pinned packager for normal Windows installer candidate
+        shell: pwsh
+        run: |
+          cargo install cargo-packager --version 0.11.8 --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned cargo-packager installation failed' }
+
+      - name: Stage PE-audited Win7 binaries in one ordinary Akula NSIS (not published)
+        shell: pwsh
+        run: ./scripts/akula-win7-nsis-candidate.ps1
+
+      - name: Install and exercise Win7-target NSIS on hosted Windows Server 2022
+        shell: pwsh
+        timeout-minutes: 35
+        run: |
+          # A real installed NSIS+GUI+PDF test, NOT a Windows 7 OS test.
+          ./scripts/test-windows-beta.ps1
+          Write-Host 'AKULA_WIN7_NSIS_INSTALLED_GUI_SMOKE_PASS tested_os=windows2022 win7_runtime_tested=false'
+
+      - name: Upload actual Win7 test archive (NOT production release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-win7-lab-test-${{ github.run_id }}
+          path: |
+            win7-lab-output/Akula-Win7-LAB-portable.zip
+            win7-lab-output/PROVENANCE.txt
+            scripts/akula-win7-sp1-acceptance.ps1
+            scripts/akula-desk15-real-windows-acceptance.ps1
+            scripts/akula-desk15-powercut-witness.ps1
+            win7-lab-output/pe-audit/full-audit.md
+            win7-lab-output/pe-audit/full-audit.json
+            dist/Akula_*-setup.exe
+            dist/win7-installer-pe-audit/full-audit.json
+            dist/win7-installer-pe-audit/full-audit.md
+            win7-full-results/shiva-audit/full-audit.md
+            win7-full-results/shiva-audit/full-audit.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload compile evidence on failure or success
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-win7-full-compile-evidence
+          path: win7-full-results/
+          retention-days: 7

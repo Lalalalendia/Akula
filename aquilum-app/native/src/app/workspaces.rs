@@ -1,3 +1,7 @@
+mod actions;
+mod close;
+mod switch;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -17,7 +21,7 @@ use crate::ui::workspaces::{self, RowAction, WorkspaceDialog};
 
 pub(super) struct WorkspacesState {
     dialog: WorkspaceDialog,
-    forget: Option<(DialogIds, Uuid)>,
+    forget: Option<(DialogIds, Uuid, bool)>,
 }
 
 #[cfg(test)]
@@ -27,12 +31,25 @@ impl WorkspacesState {
     }
 
     pub(super) fn forget_layer(&self) -> Option<WidgetId> {
-        self.forget.as_ref().map(|(ids, _)| ids.layer)
+        self.forget.as_ref().map(|(ids, _, _)| ids.layer)
     }
 }
 
 
 impl App {
+    fn save_before_workspace_change(&mut self, root: &mut RenderRoot) -> bool {
+        if let Some(note) = self.note.as_mut() {
+            // Keep the Note and editor alive until the serial disk worker has
+            // reported the result. Note::leave consumes this recovery state.
+            note.flush(&self.workspace.core, &self.text);
+            if note.save_error.is_some() {
+                self.refresh_save_error(root);
+                return false;
+            }
+        }
+        true
+    }
+
     pub(super) fn open_workspaces(&mut self, root: &mut RenderRoot) {
         self.show_workspaces(root, None);
     }
@@ -60,66 +77,13 @@ impl App {
         self.popup = Some(Popup::Workspaces(WorkspacesState { dialog, forget: None }));
     }
 
-    fn close_workspaces(&mut self, root: &mut RenderRoot) {
+    pub(in crate::app) fn close_workspaces(&mut self, root: &mut RenderRoot) {
         if let Some(Popup::Workspaces(state)) = self.popup.take() {
-            if let Some((forget, _)) = state.forget {
+            if let Some((forget, _, _)) = state.forget {
                 crate::ui::dialog::close(root, forget.layer);
             }
             crate::ui::dialog::close(root, state.dialog.layer);
         }
-    }
-
-    pub(super) fn on_workspaces_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction) -> Outcome {
-        let Some(Popup::Workspaces(mut state)) = self.popup.take() else { return Outcome::default() };
-        if let Some((forget, workspace)) = state.forget.take() {
-            let Some(answer) = forget.answer(id, action) else {
-                state.forget = Some((forget, workspace));
-                self.popup = Some(Popup::Workspaces(state));
-                return Outcome::default();
-            };
-            crate::ui::dialog::close(root, forget.layer);
-            if answer == DialogAnswer::Cancel {
-                root.focus_on(Some(state.dialog.layer));
-                self.popup = Some(Popup::Workspaces(state));
-                return Outcome::default();
-            }
-            root.remove_layer(state.dialog.layer);
-            let error = self.workspace.core.ui_state.forget_workspace(workspace).err().map(|e| {
-                report!("база не забыта: {e:?}");
-                t("workspaces.forgetFailed")
-            });
-            self.show_workspaces(root, error);
-            return Outcome::default();
-        }
-        let dialog = &state.dialog;
-        let pressed = action.downcast_ref::<Pressed>().is_some();
-        let closing = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
-            || (id == dialog.close && pressed);
-        if closing {
-            crate::ui::dialog::close(root, dialog.layer);
-            return Outcome::default();
-        }
-        if id == dialog.open_folder && pressed {
-            self.popup = Some(Popup::Workspaces(state));
-            return self.pick_workspace(root);
-        }
-        let row = dialog.rows.iter().find(|(row, _, _)| *row == id).map(|(_, path, uuid)| (path.clone(), *uuid));
-        match (row, action.downcast_ref::<RowAction>()) {
-            (Some((path, _)), Some(RowAction::Open)) => {
-                self.popup = Some(Popup::Workspaces(state));
-                return self.switch_workspace(root, path);
-            }
-            (Some((path, workspace)), Some(RowAction::Forget)) => {
-                let (title, description) = workspaces::forget_texts(&path);
-                let (layer, forget) = ConfirmDialog::new(&title, &description, &t("common.cancel"), &t("workspaces.forgetConfirm"));
-                root.add_layer(layer, Point::ORIGIN);
-                root.focus_on(Some(forget.layer));
-                state.forget = Some((forget, workspace));
-            }
-            _ => {}
-        }
-        self.popup = Some(Popup::Workspaces(state));
-        Outcome::default()
     }
 
     pub(super) fn pick_workspace(&mut self, _root: &mut RenderRoot) -> Outcome {
@@ -140,64 +104,4 @@ impl App {
         Outcome::default()
     }
 
-    pub(super) fn switch_workspace(&mut self, root: &mut RenderRoot, path: PathBuf) -> Outcome {
-        let path = crate::workspace::normalize(&path);
-        let reopen = matches!(self.popup, Some(Popup::Workspaces(_)));
-        let failed = |app: &mut App, root: &mut RenderRoot| {
-            let error = t_with("workspaces.openFailed", &[("path", &path.to_string_lossy())]);
-            if reopen || app.tree.root().is_some() {
-                app.close_workspaces(root);
-                app.show_workspaces(root, Some(error));
-            } else {
-                app.vault_error = Some(error);
-                app.replace_root(root);
-                app.show_active(root);
-            }
-            Outcome::default()
-        };
-        if !path.is_dir() {
-            return failed(self, root);
-        }
-        if let Err(e) = self.workspace.core.ui_state.resolve_workspace(&path.to_string_lossy(), crate::dates::now_ms()) {
-            report!("база {} не открыта: {e:?}", path.display());
-            return failed(self, root);
-        }
-        self.close_workspaces(root);
-        if self.tree.root().is_some_and(|current| workspaces::same_path(current, &path)) {
-            return Outcome::default();
-        }
-        self.leave_note();
-        // No document content from the previous workspace survives the switch,
-        // even if the same relative pathname exists in the next vault.
-        self.inactive_notes.clear();
-        if let Some(session) = &mut self.session {
-            session.save(&self.workspace.core, &mut self.tabs);
-        }
-        self.workspace.root = Some(path.clone());
-        self.tree = FileTree::new(Some(path.clone()), &self.workspace.data_dir, std::sync::Arc::clone(&self.workspace.wake));
-        self.navigation = crate::navigation::Navigation::load(&self.workspace.data_dir, Some(&path));
-        (self.session, self.tabs) = match Session::open(&self.workspace.core, &path) {
-            Some((session, tabs)) => (Some(session), tabs),
-            None => (None, Tabs::default()),
-        };
-        self.text = crop::Rope::new();
-        self.vault_error = None;
-        self.renaming_tab = None;
-        self.rename_field = None;
-        self.listing = None;
-        self.panel_body = None;
-        self.history = None;
-        self.history_body = None;
-        self.opened_versions = HashMap::new();
-        self.version_view = None;
-        self.version_notice = None;
-        self.home = None;
-        self.graph = super::graph_page::GraphState::default();
-        self.start_index();
-        self.refresh_home();
-        self.cleanup_retention();
-        self.replace_root(root);
-        self.show_active(root);
-        Outcome { title: true, ..Outcome::default() }
-    }
 }

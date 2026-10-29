@@ -1,4 +1,6 @@
-use masonry::core::{NewWidget, Widget, WidgetId};
+mod chrome;
+pub use chrome::Chrome;
+use masonry::core::{NewWidget, Widget};
 use masonry::properties::types::CrossAxisAlignment;
 use masonry::widgets::{Flex, IndexedStack, SizedBox};
 
@@ -7,40 +9,8 @@ use super::header::titlebar;
 use super::new_tab::new_tab_view;
 use super::rail::rail;
 use super::sidebar::sidebar;
-use super::titlebar::TabStrip;
-use super::widgets::{Collapse, Slot, Visible};
+use super::widgets::{Collapse, Slot};
 use super::{backlinks, style, workspaces};
-
-pub struct Chrome {
-    pub toggle_sidebar: WidgetId,
-    pub settings: WidgetId,
-    pub new_tab: WidgetId,
-    pub tab_list: WidgetId,
-    pub tab_strip: Handle<TabStrip>,
-    pub panel_toggle: WidgetId,
-    pub controls_inset: Handle<Collapse>,
-    pub panel: Handle<Collapse>,
-    pub panel_parts: backlinks::Panel,
-    pub pages: Handle<IndexedStack>,
-    pub version_page: Handle<Slot>,
-    pub create_note: WidgetId,
-    pub open_file: WidgetId,
-    pub close_tab: WidgetId,
-    pub workspaces: WidgetId,
-    pub open_vault: WidgetId,
-    pub sidebar: Handle<Collapse>,
-    pub sidebar_sash: WidgetId,
-    pub note_page: Handle<Slot>,
-    pub rail: Handle<Collapse>,
-    pub rail_settings: WidgetId,
-    pub search_button: WidgetId,
-    pub home_slot: Handle<Slot>,
-    pub home_button: Option<WidgetId>,
-    pub graph_page: Handle<Slot>,
-    pub graph_button: Option<WidgetId>,
-    pub focus_hidden: Vec<Handle<Visible>>,
-    pub focus_shown: Handle<Visible>,
-}
 
 pub struct RootParts<'a> {
     pub workspace_name: &'a str,
@@ -75,10 +45,10 @@ pub fn root(tree: NewWidget<impl Widget>, parts: RootParts<'_>) -> (NewWidget<im
     let titlebar = titlebar(tabs, active_tab, panel_open, panel_from, focus_mode);
     let focus_hidden = vec![titlebar.toggle_shown];
     let (panel, panel_handle, panel_parts) = backlinks::panel(panel_mode, has_analysis, panel_width, panel_open, panel_from);
-    let (empty, create_note, open_file, close_tab) = new_tab_view();
+    let (empty, create_note, open_file, close_tab, dicom_new_tab_folder, dicom_new_tab_file) = new_tab_view();
     let version_page = Slot::new(NewWidget::new(Flex::column()).erased());
     let version_handle = Handle::of(&version_page);
-    let (no_vault, open_vault) = workspaces::no_vault(vault_error);
+    let (no_vault, open_vault, dicom_no_vault_folder, dicom_no_vault_file) = workspaces::no_vault(vault_error);
     let active = if !vault_open {
         3
     } else if graph_active {
@@ -119,6 +89,10 @@ pub fn root(tree: NewWidget<impl Widget>, parts: RootParts<'_>) -> (NewWidget<im
         close_tab,
         workspaces: sidebar.workspaces,
         open_vault,
+        dicom_no_vault_folder,
+        dicom_no_vault_file,
+        dicom_new_tab_folder,
+        dicom_new_tab_file,
         sidebar: sidebar.handle,
         sidebar_sash: sidebar.sash,
         note_page: note_handle,
@@ -129,6 +103,7 @@ pub fn root(tree: NewWidget<impl Widget>, parts: RootParts<'_>) -> (NewWidget<im
         home_button: rail.home_button,
         graph_page: graph_handle,
         graph_button: rail.graph_button,
+        transfer_button: rail.transfer_button,
         focus_hidden,
         focus_shown: titlebar.settings_shown,
     };

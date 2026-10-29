@@ -1,31 +1,17 @@
 use super::*;
+mod tick;
 
 impl App {
     pub fn title(&self) -> String {
         let product = if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" };
-        match &self.note {
-            Some(note) => format!("{} — {product}", note.path.file_stem().unwrap_or_default().to_string_lossy()),
+        match self.note.as_ref().map(|n| n.path.as_path()).or_else(|| self.tabs.active().path.as_deref()) {
+            Some(path) => format!("{} — {product}", path.file_stem().unwrap_or_default().to_string_lossy()),
             None => product.to_owned(),
         }
     }
 
     pub fn deadline(&self) -> Option<Instant> {
         [self.note.as_ref().and_then(Note::deadline), self.view_due, self.hold].into_iter().flatten().min()
-    }
-
-    pub fn tick(&mut self, root: &mut RenderRoot, now: Instant) {
-        if self.view_due.is_some_and(|t| t <= now) {
-            self.flush_view();
-        }
-        if let Some(note) = self.note.as_mut()
-            && note.tick(&self.workspace.core, &self.text, now)
-        {
-            self.refresh_save_error(root);
-        }
-        if let Some(text) = self.note.as_mut().and_then(crate::note::Note::take_replaced) {
-            self.set_text(root, text);
-            self.refresh_save_error(root);
-        }
     }
 
     pub fn scale(&self) -> f64 {
@@ -38,7 +24,7 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
-        self.flush_view();
+        self.flush_canvas_on_shutdown(); self.flush_view();
         match &mut self.note {
             Some(note) => note.flush(&self.workspace.core, &self.text),
             None => crate::disk::wait(),

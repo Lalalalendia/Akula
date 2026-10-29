@@ -1,12 +1,8 @@
-//! PR 00: inert cloud-sync contracts, types and deterministic fake provider.
-//!
-//! The existing local note history is not the distributed revision graph.
-//! Later stages must use the File Gate for writes and protect dirty editor buffers.
-
+//! Inert sync contracts, types and deterministic fake provider.
+//! Local history is not distributed; File Gate protects dirty editor buffers.
 mod core_scan;
 mod dag;
 mod delta;
-// Experimental and opt-in versioned codec; never an S3 writer or File Gate.
 #[cfg(feature = "sync-text-delta")]
 pub(crate) mod text_delta_codec;
 mod download;
@@ -16,8 +12,6 @@ mod fake_vault;
 mod host_admission;
 mod filegate_lock_custody;
 mod filegate_custody_identity;
-// Installer-provisioned local custody epoch: independent of S3 transport.
-// Legacy unhosted Core::open remains a release blocker until native binding.
 #[cfg(feature = "host-custody")]
 mod host_ledger_identity;
 #[cfg(feature = "host-custody")]
@@ -38,6 +32,8 @@ pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::{PinnedFileIdentity, PinnedReadOnlyRoot};
 #[cfg(test)]
 mod fault_matrix;
+#[cfg(feature = "device-roster-lab")]
+pub mod device_roster_lab;
 mod identity;
 mod journal;
 mod local_create;
@@ -47,9 +43,22 @@ mod native_existing_replace_probe;
 mod native_windows_replace_probe;
 mod local_recovery;
 mod recovery_review;
-/// Crypto envelope contract only: no production key custody or archive writer yet.
 pub mod sealed_archive;
+#[cfg(feature = "sync-s3-invite")]
+mod s3_pair_connection;
+#[cfg(feature = "sync-s3-invite")]
+pub use s3_pair_connection::{S3ConnectionProfile, S3TransportError};
+#[cfg(feature = "sync-s3-invite")]
+pub mod s3_pair_invite;
+#[cfg(feature = "sync-s3")]
+pub mod s3_pair_bootstrap;
+#[cfg(feature = "sync-s3-invite")]
+pub mod s3_pair_profile;
+#[cfg(feature = "sync-s3")]
+pub mod s3_pair_host;
 mod recovery_dashboard;
+#[cfg(feature = "sync-s3")]
+mod s3_publication_dashboard;
 mod planner;
 mod protection_store;
 #[cfg(feature = "sync-s3")]
@@ -65,13 +74,12 @@ mod pinned_read;
 #[cfg(windows)]
 mod filegate_windows_acl;
 #[cfg(windows)]
-mod pinned_windows;
+pub(crate) mod pinned_windows;
 mod protocol;
 mod provider;
 mod s3;
-mod s3_manifest;
-// Inert V2 contract only: no S3 pack writer, reader or auto-sync activation.
-mod s3_pack_index;
+#[cfg(any(feature = "sync-s3", feature = "sync-s3-pack-lab"))] #[path = "s3_transport/pack_probe.rs"] mod s3_pack_probe;
+mod s3_manifest; mod s3_pack_index;
 mod s3_manifest_delta;
 mod s3_coord_v2;
 #[cfg(feature = "sync-s3")]
@@ -80,8 +88,6 @@ mod s3_anchored_delta;
 mod s3_delta_walker;
 #[cfg(feature = "sync-s3")]
 mod s3_remote_anchor;
-// App-data-only V2 trust checkpoints: explicit genesis pin and monotonic
-// remote observation, never a per-document or user-write baseline.
 #[cfg(feature = "sync-s3")]
 mod s3_v2_trust_anchor;
 #[cfg(feature = "sync-s3")]
@@ -92,11 +98,12 @@ mod s3_transport;
 mod yandex_readonly_probe;
 mod upload;
 mod vault;
-
 pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimits};
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use delta::{plan_revision_exchange, DeltaPlanError, MissingRevisionBatch, RevisionExchangePlan, RevisionInventory};
 pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
+#[cfg(feature = "sync-s3")]
+pub use s3_publication_dashboard::native_s3_bound_publication_overview;
 pub use recovery_dashboard::{
     native_recovery_overview, native_recovery_case_preview, native_record_recovery_decision,
     NativeRecoveryOverview, NativeRecoveryExample, NativeRecoveryCasePreview,
@@ -117,7 +124,6 @@ pub use protocol::{
     decode_identity_for_write, IdentityEnvelope, IdentityRecord, ProtocolCompatibility,
     ProtocolError, ProtocolVersion, SyncConfig, SyncProvider, WireEnvelope,
 };
-
 pub use fake::FakeRemoteStore;
 pub use fake_vault::FakeVaultPort;
 pub use provider::{
@@ -131,9 +137,7 @@ pub use s3_coord_v2::{
     MAX_DELTA_PACK_BYTES, MAX_DELTA_PACK_MEMBERS,
 };
 #[cfg(feature = "sync-s3")]
-pub use s3_anchored_delta::{
-    walk_s3_delta_from_saved_anchor, S3AnchoredWalkError,
-};
+pub use s3_anchored_delta::{walk_s3_delta_from_saved_anchor, S3AnchoredWalkError};
 #[cfg(feature = "sync-s3")]
 pub use s3_remote_anchor::{
     S3RemoteAnchor, S3RemoteAnchorError, S3RemoteAnchorJournal,
@@ -175,9 +179,9 @@ pub use s3_head_probe::{
 pub use yandex_readonly_probe::{probe_yandex_s3_read_only, YandexS3ProbeError};
 #[cfg(feature = "sync-s3")]
 pub use s3_transport::{
-    AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage,
+    AwsS3ProbeClient, S3BoundedObject, S3DiagnosticPage, S3PairAccess,
     S3AwsAccountProofError, S3AwsVerifiedAccountScope,
-    S3ObservedObject, S3PutCondition, S3TransportError,
+    S3ObservedObject, S3PutCondition,
     S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
     S3MultipartPhase, S3MultipartStatus, S3StreamDigest,
     S3HeadAttemptPhase, S3HeadError, S3HeadJournal, S3HeadPublication, S3VerifiedHead,
@@ -191,19 +195,15 @@ pub use s3_transport::{
     S3VerifiedHintsError, S3VerifiedHintsJournal,
     plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError,
 };
-
 pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};
 pub use vault::{
     LocalFileEntry, LocalFileSnapshot, PreservationReceipt, VaultFileKind, VaultPort,
     VaultPortError,
 };
-
 /// No sync scheduler or external I/O is started by importing these contracts.
-/// Runtime activation/UI remain out of scope until the S3 slice is validated.
 pub const SYNC_ENGINE_FEATURE_ENABLED: bool = cfg!(feature = "sync-engine");
 /// Local custody checks can compile without an S3 SDK or sync scheduler.
 pub const HOST_CUSTODY_FEATURE_ENABLED: bool = cfg!(feature = "host-custody");
-
 #[cfg(all(test, not(feature = "sync-engine")))]
 mod disabled_tests {
     #[test]

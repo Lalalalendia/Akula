@@ -5,12 +5,13 @@ mod epub;
 mod fb2;
 pub mod flow;
 pub mod hyphen;
+mod input;
 mod mobi;
 pub mod page;
 pub mod quotes;
 pub mod session;
 mod text;
-mod zip;
+pub(crate) mod zip;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -21,7 +22,7 @@ use std::path::Path;
 
 pub use cfi::Point;
 pub use dom::{Dom, NodeId};
-
+pub(crate) use epub::TocEntry;
 pub struct Section {
     pub base: String,
     dom: OnceCell<Option<Dom>>,
@@ -35,13 +36,12 @@ pub struct Book {
 
 impl Book {
     pub fn open(path: &Path) -> Option<Book> {
-        let data = std::fs::read(path).ok()?;
+        let data = input::read(path)?;
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         if ext.eq_ignore_ascii_case("mobi") || ext.eq_ignore_ascii_case("azw3") || ext.eq_ignore_ascii_case("azw") || ext.eq_ignore_ascii_case("prc") {
             return mobi::open(data);
         }
-        let fb2 = ext.eq_ignore_ascii_case("fb2");
-        if fb2 {
+        if ext.eq_ignore_ascii_case("fb2") {
             let text = text::decode(&data);
             let doc = text::parse_xml(&text)?;
             let sections = fb2::sections(&doc)

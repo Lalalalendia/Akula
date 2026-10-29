@@ -1,22 +1,22 @@
+mod readonly;
+mod open_in;
+mod docx;
+#[cfg(feature = "dicom-preview")]
+mod dicom;
 use std::path::{Path, PathBuf};
-
 use aquilum_core::search::paths::{is_markdown, is_plain_text};
 use masonry::app::RenderRoot;
 use masonry::widgets::IndexedStack;
-
 use super::super::{App, Outcome};
 use crate::note::Note;
 use crate::ui::editor::TextEditor;
 use crate::ui::widgets::Slot;
-
 fn is_structured_file(path: &Path) -> bool {
     path.extension().and_then(|value| value.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas") || ext.eq_ignore_ascii_case("base"))
 }
-
 const MAX_INACTIVE_NOTES: usize = 2;
 const MAX_INACTIVE_BYTES: usize = 8 * 1024 * 1024;
-
 /// Clean text only. A cached Rope is *never* authoritative without comparing
 /// its raw-file BLAKE3 digest against the actual bytes on every reopening.
 pub(in crate::app) struct CachedNote {
@@ -65,6 +65,8 @@ fn record_stage(update: impl FnOnce(&mut TabSwitchStages)) {
 
 impl App {
     pub(in crate::app) fn show_active(&mut self, root: &mut RenderRoot) {
+        #[cfg(feature = "dicom-preview")]
+        dicom::retain_dicom_grants(&mut self.dicom_external_sources, &self.tabs);
         // Closing/renaming a tab also invalidates any cached text associated
         // with its old identity; workspace switches clear the cache outright.
         self.inactive_notes.retain(|entry| {
@@ -120,6 +122,17 @@ impl App {
             self.show_page(root, if self.tree.root().is_some() { 1 } else { 3 });
             return;
         };
+        if crate::images::kind(&path.to_string_lossy()) == Some(crate::images::MediaKind::Image) {
+            self.leave_note();
+            self.drop_note_page(root);
+            self.show_image_readonly(root, &path);
+            self.tree.set_active(root, Some(path));
+            self.show_page(root, 0);
+            return;
+        }
+        #[cfg(feature = "dicom-preview")]
+        if crate::dicom::is_candidate(&path) || self.dicom_external_sources.contains(&path) { return self.show_dicom_tab(root, path); }
+        if crate::docx::is_docx_path(&path) { return self.show_docx_tab(root, path); }
         if is_structured_file(&path) {
             self.leave_note();
             self.show_structured_readonly(root, &path);
@@ -153,7 +166,6 @@ impl App {
         self.leave_note();
         #[cfg(test)]
         record_stage(|s| s.leave = started.elapsed());
-
         let read = aq_trace::zone("открытие: чтение файла");
         #[cfg(test)]
         let started = std::time::Instant::now();
@@ -162,7 +174,8 @@ impl App {
         record_stage(|s| s.file_read = started.elapsed());
         drop(read);
         match opened {
-            Ok((note, text)) => {
+            Ok((mut note, text)) => {
+                self.arm_note_recovery(&mut note);
                 self.open_error = None;
                 self.open_error_ids = None;
                 self.text = text;
@@ -191,51 +204,10 @@ impl App {
         record_stage(|s| s.tree = started.elapsed());
     }
 
-    /// First-stage format view: no TextEditor and no save path for structured files.
-    /// Reopening always reparses from disk rather than reusing a stale tab cache.
-    fn show_structured_readonly(&mut self, root: &mut RenderRoot, path: &Path) {
-        use aquilum_core::files::structured::{Format, StructuredDocument};
-        use masonry::core::NewWidget;
-        use masonry::widgets::Flex;
-        self.note = None;
-        self.note_ids = None;
-        self.embeds = None;
-        self.open_error = None;
-        self.open_error_ids = None;
-        let result = StructuredDocument::open(path).and_then(|doc| {
-            let header = match doc.format() {
-                Format::Canvas => {
-                    let canvas = doc.canvas()?;
-                    let nodes = canvas["nodes"].as_array().map_or(0, Vec::len);
-                    let edges = canvas["edges"].as_array().map_or(0, Vec::len);
-                    format!("JSON Canvas — {nodes} objects, {edges} connections")
-                }
-                Format::Base => "Obsidian Bases — YAML source".to_owned(),
-            };
-            Ok((header, doc.text().chars().take(2048).collect::<String>()))
-        });
-        match result {
-            Ok((heading, preview)) => {
-                let page = NewWidget::new(
-                    Flex::column()
-                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(
-                            "Read-only preview — editing is not available yet",
-                        )))
-                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(&heading)))
-                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(&preview))),
-                );
-                if let Some(chrome) = &self.chrome {
-                    chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
-                }
-            }
-            Err(error) => self.show_open_error(root, path, &error.to_string()),
-        }
-    }
-
     pub(in crate::app) fn show_open_error(&mut self, root: &mut RenderRoot, path: &Path, error: &str) {
         self.note = None;
         self.note_ids = None;
-        self.embeds = None;
+        self.embeds = None; self.open_error = Some((path.to_path_buf(), error.to_owned()));
         let (page, ids) = crate::ui::note::open_error_page(path, error);
         self.open_error_ids = Some(ids);
         if let Some(chrome) = &self.chrome {
@@ -245,9 +217,9 @@ impl App {
 
     fn drop_note_page(&mut self, root: &mut RenderRoot) {
         self.embeds = None;
-        if self.note_ids.take().is_none() {
-            return;
-        }
+        // Read-only image/structured pages have no NoteIds, but their decoded
+        // content must still be released when the tab is closed or switched.
+        self.note_ids = None;
         self.text = crop::Rope::new();
         if let Some(chrome) = &self.chrome {
             chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, masonry::core::NewWidget::new(masonry::widgets::SizedBox::empty()).erased()));
@@ -347,24 +319,6 @@ impl App {
         self.open_in_with_offset(root, path, new_tab, None)
     }
 
-    pub(crate) fn open_in_with_offset(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool, offset: Option<usize>) -> bool {
-        if !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) {
-            return false;
-        }
-        if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {
-            self.navigation.push(&current);
-        }
-        self.navigation.push(&path);
-        self.pending_reveal = offset;
-        if new_tab {
-            self.tabs.open_new(path);
-        } else {
-            self.tabs.open(path);
-        }
-        self.show_active(root);
-        true
-    }
-
     pub(in crate::app) fn new_tab(&mut self, root: &mut RenderRoot) -> Outcome {
         self.tabs.new_tab();
         self.show_active(root);
@@ -372,6 +326,7 @@ impl App {
     }
 
     pub(in crate::app) fn close_active_tab(&mut self, root: &mut RenderRoot) -> Outcome {
+        if self.canvas_dirty_active() { self.canvas_notify(root, "Canvas has unsaved changes. Save it before closing."); return Outcome::default(); }
         self.tabs.close(self.tabs.active_id());
         self.show_active(root);
         Outcome { title: true, ..Outcome::default() }

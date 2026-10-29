@@ -21,6 +21,7 @@ test('package identity and desktop files never own Aquilum paths', () => {
   assert.match(p, /src: packaging\/stage\/akula-app\s+dst: \/usr\/bin\/akula-app/);
   assert.match(p, /src: packaging\/Akula.desktop\s+dst: \/usr\/share\/applications\/Akula.desktop/);
   assert.doesNotMatch(p, /Freaction|Dmitriy|Aquilum|aquilum-app|com.dmitriy/);
+  assert.equal((p.match(/- xdg-desktop-portal/g) || []).length, 2, 'both DEB and RPM must depend on portal');
   assert.match(d, /^Name=Akula$/m);
   assert.match(d, /^Exec=akula-app$/m);
   assert.match(d, /^Icon=akula-app$/m);
@@ -43,7 +44,13 @@ test('CI is not a release and updater stays fail closed', () => {
   assert.match(smoke, /grep -Fxq 'AKULA_LINUX_BETA_COEXIST_PASS[^']*' "\$ubuntu_log"/);
   assert.match(smoke, /grep -Fxq 'AKULA_LINUX_BETA_COEXIST_PASS[^']*' "\$fedora_log"/);
   assert.match(smoke, /AKULA_LINUX_BETA_HOST_GATE_PASS/);
+  assert.ok(smoke.includes("dpkg-query -W -f='${Status}' xdg-desktop-portal"));
+  assert.match(smoke, /rpm -q xdg-desktop-portal/);
   const updater=file('aquilum-app/native/src/updater/release.rs');
-  assert.match(updater, /pub\(super\) const PUBLIC_KEY: &str = "";/);
-  assert.match(updater, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*false\s*\}/);
+  // The owner key may be pinned before release; pin its entire value so
+  // a spoofed Minisign comment or a different publisher is not accepted.
+  const pinned = updater.match(/pub\(super\) const PUBLIC_KEY: &str = "([^"]+)";/);
+  assert.ok(pinned, 'Akula public release root must be explicitly pinned');
+  assert.equal(pinned[1], 'dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ3QTY2QjZENDA0NkY2QzUKUldURjlrWkFiV3VtMXh2SFFsdEljaUw0T0pUakVmd1krZG4wVmJ1REVmaEx1eWcrMFIzTjQzMi8K', 'unexpected Akula publisher key');
+  assert.match(updater, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(target_os = "windows", feature = "installed"\)\)\s*\}/);
 });

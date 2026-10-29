@@ -1,0 +1,57 @@
+use super::*;
+
+impl App {
+    /// First-stage format view: no TextEditor and no save path for structured files.
+    /// Reopening always reparses from disk rather than reusing a stale tab cache.
+    pub(super) fn show_structured_readonly(&mut self, root: &mut RenderRoot, path: &Path) {
+        use aquilum_core::files::structured::StructuredDocument;
+        use masonry::core::NewWidget;
+        use masonry::widgets::Flex;
+        self.note = None;
+        self.note_ids = None;
+        self.embeds = None;
+        self.open_error = None;
+        self.open_error_ids = None;
+        if path.extension().and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas"))
+        {
+            if let Err(error) = self.show_canvas_tab(root, path) {
+                self.show_open_error(root, path, &error);
+            }
+            return;
+        }
+        // Bases YAML remains a separate read-only preview.
+        let result = StructuredDocument::open(path)
+            .map(|doc| doc.text().chars().take(2048).collect::<String>());
+        match result {
+            Ok(preview) => {
+                let page = NewWidget::new(
+                    Flex::column()
+                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(
+                            "Obsidian Bases — read-only YAML source",
+                        )))
+                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(&preview))),
+                );
+                if let Some(chrome) = &self.chrome {
+                    chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
+                }
+            }
+            Err(error) => self.show_open_error(root, path, &error.to_string()),
+        }
+    }
+
+    pub(super) fn show_image_readonly(&mut self, root: &mut RenderRoot, path: &Path) {
+        self.note = None;
+        self.note_ids = None;
+        self.embeds = None;
+        self.open_error = None;
+        self.open_error_ids = None;
+        if let Some(page) = self.image_tab_widget() {
+            if let Some(chrome) = &self.chrome {
+                chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page));
+            }
+        } else {
+            self.show_open_error(root, path, &crate::i18n::t("fileTree.imageOpenFailed"));
+        }
+    }
+}

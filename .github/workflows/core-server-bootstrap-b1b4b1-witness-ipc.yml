@@ -1,12 +1,13 @@
 name: Akula Bootstrap B1b4b1 real root-owned read-only witness IPC
 
 on:
+  workflow_call:
   pull_request:
+    # main PRs run the mandatory Main PR gate; retain the legacy experiment lane.
     branches:
-      - main
       - experiment/akula-server-bootstrap-b1b4b-os-witness-cas
     paths:
-      - "aquilum-app/core/Cargo.toml"
+
       - "aquilum-app/core/src/server_installer_ipc_lab.rs"
       - "aquilum-app/core/src/server_installer_os_witness_lab.rs"
       - "aquilum-app/core/tests/server_bootstrap_b1b4b.rs"
@@ -19,6 +20,11 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  # New PR revisions supersede old ones; explicit manual runs remain independent.
+  group: akula-b1b4b1-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   actual-root-witness-read-only-ipc:

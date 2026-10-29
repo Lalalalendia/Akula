@@ -2,7 +2,7 @@
 //! path, including both event batching stages. Run on Windows/macOS/Linux.
 use aquilum_core::files::watcher::{WatchBatch, WatchScope, WatchSink, WorkspaceWatcher};
 use aquilum_core::search::models::SearchIndexState;
-use aquilum_core::search::paths::is_markdown;
+use aquilum_core::search::paths::is_note;
 use aquilum_core::search::query::Request;
 use aquilum_core::search::SearchService;
 use std::fs;
@@ -43,6 +43,14 @@ fn native_workspace_watcher_to_search_roundtrip() {
     let directory = tempfile::tempdir().unwrap();
     let workspace = directory.path().join("Vault");
     fs::create_dir_all(&workspace).unwrap();
+    let user_dot_dir = workspace.join(".заметки");
+    fs::create_dir(&user_dot_dir).unwrap();
+    let internal_dir = workspace.join(".git");
+    fs::create_dir(&internal_dir).unwrap();
+    let private = internal_dir.join("private.md");
+    fs::write(&private, "watcherservicesecretunique").unwrap();
+    let hidden_txt = internal_dir.join("private.TXT");
+    fs::write(&hidden_txt, "desk10privatehiddentxtneedle").unwrap();
     // Force the initial scan to build a real index before monitoring edits.
     fs::write(workspace.join("Baseline.md"), "# Baseline\nseedcontent\n").unwrap();
 
@@ -67,7 +75,7 @@ fn native_workspace_watcher_to_search_roundtrip() {
         let notes: Vec<PathBuf> = if rescan {
             batch.paths
         } else {
-            batch.paths.into_iter().filter(|p| is_markdown(p)).collect()
+            batch.paths.into_iter().filter(|p| is_note(p)).collect()
         };
         if !notes.is_empty() || rescan {
             sink_search.ingest_watch(notes, rescan);
@@ -99,6 +107,88 @@ fn native_workspace_watcher_to_search_roundtrip() {
         !search_contains(&search, &workspace_name, modify_term, &note)
     });
     println!("REAL_WATCHER os={} stage=delete elapsed_ms={:.3}", std::env::consts::OS, deleted.as_secs_f64() * 1_000.0);
+    // Unlike manually passing watcher paths, these TXT updates must arrive
+    // from the real OS notify backend through WorkspaceWatcher + SearchService.
+    // Case-insensitive .TXT is a supported note suffix, not a Markdown-only
+    // event. The distinct filenames also exercise both legs of OS rename.
+    let txt = workspace.join("東京日記.TXT");
+    let txt_created_term = "desk10nativecreatedtextneedle";
+    let txt_modified_term = "desk10nativemodifiedtextneedle";
+    let original_txt = format!("日本語と中文\n{txt_created_term}\n");
+    fs::write(&txt, &original_txt).unwrap();
+    let txt_created = wait_for("native TXT create to search", TIMEOUT, || {
+        search_contains(&search, &workspace_name, txt_created_term, &txt)
+    });
+    assert_eq!(fs::read_to_string(&txt).unwrap(), original_txt);
+    println!(
+        "REAL_WATCHER os={} stage=txt_create elapsed_ms={:.3}",
+        std::env::consts::OS, txt_created.as_secs_f64() * 1_000.0,
+    );
+
+    let edited_txt = format!("日本語と中文と한국어\n{txt_modified_term}\nupdated\n");
+    fs::write(&txt, &edited_txt).unwrap();
+    let txt_modified = wait_for("native TXT modify to search", TIMEOUT, || {
+        search_contains(&search, &workspace_name, txt_modified_term, &txt)
+            && !search_contains(&search, &workspace_name, txt_created_term, &txt)
+    });
+    assert_eq!(fs::read_to_string(&txt).unwrap(), edited_txt);
+    println!(
+        "REAL_WATCHER os={} stage=txt_modify elapsed_ms={:.3}",
+        std::env::consts::OS, txt_modified.as_secs_f64() * 1_000.0,
+    );
+
+    let renamed_txt = workspace.join("東京日記改.txt");
+    fs::rename(&txt, &renamed_txt).unwrap();
+    let txt_renamed = wait_for("native TXT rename to search", TIMEOUT, || {
+        search_contains(&search, &workspace_name, txt_modified_term, &renamed_txt)
+            && !search_contains(&search, &workspace_name, txt_modified_term, &txt)
+    });
+    assert_eq!(fs::read_to_string(&renamed_txt).unwrap(), edited_txt);
+    println!(
+        "REAL_WATCHER os={} stage=txt_rename elapsed_ms={:.3}",
+        std::env::consts::OS, txt_renamed.as_secs_f64() * 1_000.0,
+    );
+
+    fs::remove_file(&renamed_txt).unwrap();
+    let txt_deleted = wait_for("native TXT delete from search", TIMEOUT, || {
+        !search_contains(&search, &workspace_name, txt_modified_term, &renamed_txt)
+    });
+    assert!(!search_contains(
+        &search,
+        &workspace_name,
+        "desk10privatehiddentxtneedle",
+        &hidden_txt,
+    ));
+    println!(
+        "REAL_WATCHER os={} stage=txt_delete elapsed_ms={:.3}",
+        std::env::consts::OS, txt_deleted.as_secs_f64() * 1_000.0,
+    );
+    println!(
+        "DESK10_TXT_OS_WATCHER_PASS os={} create=1 modify=1 rename=1 delete=1 hidden_txt_excluded=1 source_bytes_intact=1",
+        std::env::consts::OS,
+    );
+    // Real OS-level notification from a user-owned dot folder must reach Search.
+    // A service folder already contained a Markdown file during the initial scan.
+    assert!(!search_contains(&search, &workspace_name, "watcherservicesecretunique", &private));
+    let dot_note = user_dot_dir.join("Идея.md");
+    let dot_created_term = "userdotwatchcreateduniquegamma";
+    let dot_modified_term = "userdotwatchmodifieduniquedelta";
+    fs::write(&dot_note, format!("# User dot folder\n{dot_created_term}\n")).unwrap();
+    let dot_created = wait_for("user dot folder native create", TIMEOUT, || {
+        search_contains(&search, &workspace_name, dot_created_term, &dot_note)
+    });
+    println!("REAL_WATCHER os={} stage=user_dot_create elapsed_ms={:.3}", std::env::consts::OS, dot_created.as_secs_f64() * 1_000.0);
+    fs::write(&dot_note, format!("# User dot folder\n{dot_modified_term}\n")).unwrap();
+    let dot_modified = wait_for("user dot folder native modify", TIMEOUT, || {
+        search_contains(&search, &workspace_name, dot_modified_term, &dot_note)
+            && !search_contains(&search, &workspace_name, dot_created_term, &dot_note)
+    });
+    println!("REAL_WATCHER os={} stage=user_dot_modify elapsed_ms={:.3}", std::env::consts::OS, dot_modified.as_secs_f64() * 1_000.0);
+    fs::remove_file(&dot_note).unwrap();
+    let dot_deleted = wait_for("user dot folder native delete", TIMEOUT, || {
+        !search_contains(&search, &workspace_name, dot_modified_term, &dot_note)
+    });
+    println!("REAL_WATCHER os={} stage=user_dot_delete elapsed_ms={:.3}", std::env::consts::OS, dot_deleted.as_secs_f64() * 1_000.0);
     assert!(delivered.load(Ordering::Relaxed) >= 1, "native watcher must deliver at least one event");
     println!(
         "REAL_WATCHER os={} stage=summary callbacks={} initial_to_cleanup_ms={:.3} native_notifications=true search_updates_verified=true",

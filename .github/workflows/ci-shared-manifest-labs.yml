@@ -1,0 +1,310 @@
+name: Akula required shared-manifest OS and security checks
+
+on:
+  workflow_call:
+    inputs:
+      core:
+        required: true
+        type: boolean
+      owner:
+        required: true
+        type: boolean
+      lib:
+        required: true
+        type: boolean
+      lock:
+        required: true
+        type: boolean
+      root:
+        required: true
+        type: boolean
+      native:
+        required: true
+        type: boolean
+      owned_host_custody:
+        required: true
+        type: boolean
+      owned_b1b4b_witness:
+        required: true
+        type: boolean
+      owned_b1c0_node:
+        required: true
+        type: boolean
+      owned_b1b4b1_ipc:
+        required: true
+        type: boolean
+      owned_b1b3c_fd:
+        required: true
+        type: boolean
+      owned_b1d0_opt:
+        required: true
+        type: boolean
+      owned_b1b2b_vm:
+        required: true
+        type: boolean
+      owned_b1c1_vm:
+        required: true
+        type: boolean
+      owned_b0c_ssh:
+        required: true
+        type: boolean
+      owned_sync_protection:
+        required: true
+        type: boolean
+      owned_text_delta:
+        required: true
+        type: boolean
+      text_delta_module_required:
+        required: true
+        type: boolean
+      text_delta_pack_fast_path:
+        required: true
+        type: boolean
+      text_delta_pack_boundary_changed:
+        required: true
+        type: boolean
+      owned_appimage:
+        required: true
+        type: boolean
+      owned_windows_beta:
+        required: true
+        type: boolean
+      owned_linux_beta:
+        required: true
+        type: boolean
+      owned_pinned_read:
+        required: true
+        type: boolean
+      owned_s3_reservation:
+        required: true
+        type: boolean
+      owned_s3_minio:
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  route-host-custody:
+    name: Impacted shared manifest / host-custody
+    if: ${{ inputs.core || inputs.native || inputs.owned_host_custody }}
+    uses: ./.github/workflows/sync-host-custody.yml
+
+  route-b0c-ssh-native:
+    name: Impacted native manifest / b0c-windows-ssh
+    if: ${{ inputs.native || inputs.owned_b0c_ssh }}
+    uses: ./.github/workflows/core-server-bootstrap-b0c-windows-ssh.yml
+
+  route-b1b2b-ubuntu:
+    name: Impacted shared manifest / b1b2b-ubuntu
+    if: ${{ inputs.core || inputs.owned_b1b2b_vm }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b2b-ubuntu.yml
+
+  route-b1c1-vm:
+    name: Impacted shared manifest / b1c1-vm
+    if: ${{ inputs.core || inputs.owned_b1c1_vm }}
+    uses: ./.github/workflows/core-server-bootstrap-b1c1-real-elf-vm.yml
+
+  route-b1b2a-systemd:
+    name: Impacted shared manifest / b1b2a-systemd
+    if: ${{ inputs.core }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b2a-systemd.yml
+
+  route-b1b3b-helper:
+    name: Impacted shared manifest / b1b3b-helper
+    if: ${{ inputs.core }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b3b-root-helper.yml
+
+  route-b1b3c-fd:
+    name: Impacted shared manifest / b1b3c-fd
+    if: ${{ inputs.core || inputs.lib || inputs.owned_b1b3c_fd }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b3c-signed-fd.yml
+
+  route-b1b4a-cas:
+    name: Impacted shared manifest / b1b4a-cas
+    if: ${{ inputs.core || inputs.lib }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b4a-cas-fence.yml
+
+  route-b1b4b-witness:
+    name: Impacted shared manifest / b1b4b-witness
+    if: ${{ inputs.core || inputs.lib || inputs.owned_b1b4b_witness }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b4b-os-witness.yml
+
+  route-b1b4b1-ipc:
+    name: Impacted shared manifest / b1b4b1-ipc
+    if: ${{ inputs.core || inputs.owned_b1b4b1_ipc }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b4b1-witness-ipc.yml
+
+  route-b1c0-node:
+    name: Impacted shared manifest / b1c0-node
+    if: ${{ inputs.core || inputs.lib || inputs.owned_b1c0_node }}
+    uses: ./.github/workflows/core-server-bootstrap-b1c0-fixed-node.yml
+
+  route-b1d0-opt:
+    name: Impacted shared manifest / b1d0-opt
+    if: ${{ inputs.core || inputs.lib || inputs.owned_b1d0_opt }}
+    uses: ./.github/workflows/core-server-bootstrap-b1d0-opt.yml
+
+  route-b0b-ssh:
+    name: Impacted shared manifest / b0b-ssh
+    if: ${{ inputs.core || inputs.lib }}
+    uses: ./.github/workflows/core-server-bootstrap-b0b.yml
+
+  route-b1b3a-ipc:
+    name: Impacted shared manifest / b1b3a-ipc
+    if: ${{ inputs.core || inputs.lib }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b3a-ipc.yml
+
+  route-p2p-offer:
+    name: Impacted shared manifest / p2p-offer
+    if: ${{ inputs.core || inputs.lib }}
+    uses: ./.github/workflows/p2p-offer-lab.yml
+
+  route-s3-minio:
+    name: Impacted shared manifest / s3-minio
+    if: ${{ inputs.core || inputs.lock || inputs.owned_s3_minio }}
+    uses: ./.github/workflows/sync-s3-minio.yml
+
+  route-s3-platform:
+    name: Impacted shared manifest / s3-platform
+    if: ${{ inputs.core || inputs.lock || inputs.native }}
+    uses: ./.github/workflows/sync-s3-platform.yml
+
+  route-pinned-read:
+    name: Impacted shared manifest / pinned-read
+    if: ${{ inputs.core || inputs.lock || inputs.owned_pinned_read }}
+    uses: ./.github/workflows/sync-pinned-read.yml
+
+  route-s3-reservation:
+    name: Impacted shared manifest / s3-reservation
+    if: ${{ inputs.core || inputs.lock || inputs.owned_s3_reservation }}
+    uses: ./.github/workflows/sync-reserved-s3-transaction.yml
+
+  route-sync-protection:
+    name: Impacted shared manifest / sync-protection
+    if: ${{ inputs.core || inputs.lock || inputs.owned_sync_protection }}
+    uses: ./.github/workflows/sync-protection.yml
+
+  route-sync-transaction:
+    name: Impacted shared manifest / sync-transaction
+    if: ${{ inputs.core || inputs.lock }}
+    uses: ./.github/workflows/sync-guarded-transaction.yml
+
+  route-text-delta:
+    name: Impacted shared manifest / text-delta
+    if: ${{ inputs.core || inputs.lock || inputs.owned_text_delta }}
+    uses: ./.github/workflows/sync-text-delta-rust.yml
+    with:
+      codec_already_tested: ${{ inputs.text_delta_module_required }}
+      lightweight_pack_probe: ${{ inputs.text_delta_pack_fast_path }}
+      verify_lightweight_boundary: ${{ inputs.text_delta_pack_boundary_changed }}
+
+  route-appimage-beta:
+    name: Impacted shared manifest / appimage-beta
+    if: ${{ inputs.lock || inputs.owned_appimage }}
+    uses: ./.github/workflows/appimage-beta.yml
+
+  route-windows-beta:
+    name: Impacted shared manifest / windows-beta
+    if: ${{ inputs.lock || inputs.owned_windows_beta }}
+    uses: ./.github/workflows/windows-beta.yml
+
+  route-vello-half-tie:
+    name: Impacted shared manifest / vello-half-tie
+    if: ${{ inputs.root || inputs.lock }}
+    uses: ./.github/workflows/native-vello-half-tie-regression.yml
+
+  route-linux-beta:
+    name: Impacted shared manifest / linux-beta
+    if: ${{ inputs.lock || inputs.owned_linux_beta }}
+    uses: ./.github/workflows/linux-beta.yml
+
+  route-installed-owner:
+    name: Impacted shared manifest / installed-owner
+    if: ${{ inputs.core || inputs.owner }}
+    uses: ./.github/workflows/sync-installed-os-owner-witness.yml
+
+  route-device-roster:
+    name: Impacted shared manifest / device-roster
+    if: ${{ inputs.core }}
+    uses: ./.github/workflows/sty-device-roster-lab.yml
+
+  route-native-positive:
+    name: Impacted shared manifest / native-positive
+    if: ${{ inputs.native }}
+    uses: ./.github/workflows/sync-native-positive-host.yml
+
+  boundary-1:
+    name: Verify required subset 1
+    needs: [route-host-custody, route-b0c-ssh-native, route-b1b2b-ubuntu, route-b1c1-vm, route-b1b2a-systemd, route-b1b3b-helper, route-b1b3c-fd, route-b1b4a-cas, route-b1b4b-witness, route-b1b4b1-ipc, route-b1c0-node, route-b1d0-opt, route-b0b-ssh]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fail closed on missing or failed OS labs
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          INPUTS_JSON: ${{ toJSON(inputs) }}
+        run: |
+          node <<'JS'
+          const needs=JSON.parse(process.env.NEEDS_JSON);
+          const flags=JSON.parse(process.env.INPUTS_JSON);
+          const cases=[["route-host-custody",["owned_host_custody","core","native"]],["route-b0c-ssh-native",["native","owned_b0c_ssh"]],["route-b1b2b-ubuntu",["core","owned_b1b2b_vm"]],["route-b1c1-vm",["core","owned_b1c1_vm"]],["route-b1b2a-systemd",["core"]],["route-b1b3b-helper",["core"]],["route-b1b3c-fd",["core","lib","owned_b1b3c_fd"]],["route-b1b4a-cas",["core","lib"]],["route-b1b4b-witness",["core","lib","owned_b1b4b_witness"]],["route-b1b4b1-ipc",["core","owned_b1b4b1_ipc"]],["route-b1c0-node",["core","lib","owned_b1c0_node"]],["route-b1d0-opt",["core","lib","owned_b1d0_opt"]],["route-b0b-ssh",["core","lib"]]];
+          const errors=[];
+          for(const [job,keys] of cases){
+            const expected=keys.some(k=>flags[k]===true);
+            const want=expected?'success':'skipped';
+            const actual=needs[job]?.result;
+            if(actual!==want)errors.push(job+': expected '+want+', actual '+actual);
+          }
+          if(errors.length){console.error('SHARED_BOUNDARY_FAIL_CLOSED '+errors.join('; '));process.exit(1);}
+          console.log('SHARED_BOUNDARY_PASS '+cases.length+' checked routing conditions');
+          JS
+
+  boundary-2:
+    name: Verify required subset 2
+    needs: [route-b1b3a-ipc, route-p2p-offer, route-s3-minio, route-s3-platform, route-pinned-read, route-s3-reservation, route-sync-protection, route-sync-transaction, route-text-delta, route-appimage-beta, route-windows-beta, route-vello-half-tie, route-linux-beta, route-installed-owner, route-device-roster, route-native-positive]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fail closed on missing or failed OS labs
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          INPUTS_JSON: ${{ toJSON(inputs) }}
+        run: |
+          node <<'JS'
+          const needs=JSON.parse(process.env.NEEDS_JSON);
+          const flags=JSON.parse(process.env.INPUTS_JSON);
+          const cases=[["route-b1b3a-ipc",["core","lib"]],["route-p2p-offer",["core","lib"]],["route-s3-minio",["core","lock","owned_s3_minio"]],["route-s3-platform",["core","lock","native"]],["route-pinned-read",["core","lock","owned_pinned_read"]],["route-s3-reservation",["core","lock","owned_s3_reservation"]],["route-sync-protection",["owned_sync_protection","core","lock"]],["route-sync-transaction",["core","lock"]],["route-text-delta",["owned_text_delta","core","lock"]],["route-appimage-beta",["owned_appimage","lock"]],["route-windows-beta",["lock","owned_windows_beta"]],["route-vello-half-tie",["root","lock"]],["route-linux-beta",["lock","owned_linux_beta"]],["route-installed-owner",["core","owner"]],["route-device-roster",["core"]],["route-native-positive",["native"]]];
+          const errors=[];
+          for(const [job,keys] of cases){
+            const expected=keys.some(k=>flags[k]===true);
+            const want=expected?'success':'skipped';
+            const actual=needs[job]?.result;
+            if(actual!==want)errors.push(job+': expected '+want+', actual '+actual);
+          }
+          if(errors.length){console.error('SHARED_BOUNDARY_FAIL_CLOSED '+errors.join('; '));process.exit(1);}
+          console.log('SHARED_BOUNDARY_PASS '+cases.length+' checked routing conditions');
+          JS
+
+  boundary-gate:
+    name: Fail-closed required routed gate
+    needs: [boundary-1, boundary-2]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Require both protected route groups
+        shell: bash
+        env:
+          A: ${{ needs.boundary-1.result }}
+          B: ${{ needs.boundary-2.result }}
+        run: |
+          set -euo pipefail
+          test "$A" = success
+          test "$B" = success
+          echo 'Routed OS/security boundary PASS' >> "$GITHUB_STEP_SUMMARY"

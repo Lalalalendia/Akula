@@ -1,6 +1,6 @@
 [package]
 name = "aquilum-native"
-version = "0.3.9"
+version = "0.3.17"
 description = "Aquilum native UI (Masonry on winit + vello_cpu), no WebView"
 authors = ["Dmitriy Chaplinskiy"]
 license = "AGPL-3.0-only"
@@ -26,8 +26,27 @@ signingIdentity = "-"
 linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh" }
 
 [features]
-installed = []
+# Public install includes read-only Dropbox authorization; cloud writes remain disabled.
+installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
+messaging-w4-pilot = []
 memory-probe = []
+# Opt-in experimental local DICOM viewing. Not included in the installed build.
+dicom-preview = ["dep:dicom-core", "dep:dicom-object", "dep:dicom-pixeldata", "dep:zip"]
+# User-visible Windows read-only SSH verification. No install grant.
+server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
+# Non-shipping read-only OS-backed Iroh contacts; no send actions.
+p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
+# Opt-in local Iroh public identity UI; uses the same protected peer contacts.
+p2p-device-ui = ["p2p-device-contacts-preview"]
+# S3-E2E-01: optional read-only dashboard of registered S3 receive claims.
+# Does not expose S3 writes, apply, file mutation or baseline actions.
+s3-e2e01-review-preview = ["aquilum-core/sync-s3"]
+# Dropbox remains read-only; full sync is a separate guarded release feature.
+dropbox-readonly-preview = ["dep:akula-dropbox-connect-lab", "dep:akula-dropbox-secret-store", "dep:akula-dropbox-t0"]
+# Manual QA preview; no user write/sync capability yet.
+yandex-s3-connection-preview = ["aquilum-core/sync-s3", "dep:tokio"]
+# User-enabled S3 pairing BETA: no activation in default installer.
+s3-pair-beta = ["aquilum-core/sync-s3", "dep:tokio"]
 # Installer-enforced local custody flavor; does not pull in AWS/S3.
 sync-installed-host = ["aquilum-core/sync-installed-host"]
 # Separate non-published installer-witness integration acceptance.
@@ -36,7 +55,11 @@ sync-installed-host-witness = ["sync-installed-host", "aquilum-core/sync-install
 sync-installed-host-unix-root-witness = ["sync-installed-host-witness", "aquilum-core/sync-installed-host-unix-root-witness"]
 
 [dependencies]
+tokio = { version = "1", features = ["rt", "time"], optional = true }
 aquilum-core = { path = "../core", features = ["host-custody"] }
+akula-dropbox-connect-lab = { path = "../../modules/dropbox-connect-lab", optional = true }
+akula-dropbox-secret-store = { path = "../../modules/dropbox-secret-store", features = ["system-store"], optional = true }
+akula-dropbox-t0 = { path = "../../modules/dropbox-t0", optional = true }
 # Основная ветка xilem: Masonry без релиза больше года, бэкенды под vello_cpu только там.
 # Ревизия зафиксирована, обновлять пачками.
 masonry = { git = "https://github.com/linebender/xilem", rev = "271a27a6d4a930f7878d404f9014e3c50a3a9b88", default-features = false }
@@ -48,6 +71,13 @@ arboard = { version = "3", default-features = false, features = ["image-data", "
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Pinned after upstream #844: crates.io 0.10.0 incorrectly decodes 8-bit monochrome RLE.
+# All three packages share the same exact source revision.
+dicom-core = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
+dicom-object = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
+dicom-pixeldata = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", features = ["image"], optional = true }
+# ZIP is read directly by a bounded ZIP reader; nothing is unpacked to the vault.
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"], optional = true }
 uuid = { version = "1.23.5", features = ["v4"] }
 rfd = "0.16"
 pulldown-cmark = { version = "0.13", default-features = false }
@@ -73,7 +103,8 @@ aq_trace = { path = "vendor/aq_trace" }
 crop = { version = "0.4", features = ["utf16-metric", "graphemes"] }
 blake3 = { version = "1.8.5", features = ["rayon"] }
 
-[target.'cfg(not(target_os = "windows"))'.dependencies]
+# Keep the software output available in the SAME executable for Win7 fallback.
+[target.'cfg(any(not(target_os = "windows"), target_os = "windows"))'.dependencies]
 softbuffer = "0.4.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -90,8 +121,9 @@ objc2-core-foundation = "0.3"
 accesskit_unix = "=0.22.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+zeroize = "1.9.0"
 windows-core = "0.62"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectManipulation", "Win32_Graphics_Dwm", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Graphics_Imaging", "Win32_Media_Audio", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_Registry", "Win32_UI_Input_Pointer", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Security_Credentials", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectManipulation", "Win32_Graphics_Dwm", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Graphics_Imaging", "Win32_Media_Audio", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_Registry", "Win32_UI_Input_Pointer", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
 # Под accesskit 0.24 из Masonry: та же версия, что у accesskit_winit 0.32.
 accesskit_windows = "=0.32.1"
 
