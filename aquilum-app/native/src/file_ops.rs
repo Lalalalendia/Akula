@@ -84,16 +84,6 @@ pub fn rename_target(from: &Path, input: &str) -> Option<(PathBuf, String)> {
     Some((to, name))
 }
 
-pub fn rename(core: &Arc<Core>, from: PathBuf, to: PathBuf, failed: impl FnOnce() + Send + 'static) {
-    let core = Arc::clone(core);
-    crate::disk::run(move || {
-        if let Err(error) = gate::rename(&core, &from, &to) {
-            report!("{} не переименован: {error}", from.display());
-            failed();
-        }
-    });
-}
-
 pub fn move_all(core: &Arc<Core>, sources: Vec<PathBuf>, target: PathBuf) {
     background(core, sources, "не перенесён", move |core, source| {
         let Some(name) = source.file_name() else { return Ok(()) };
