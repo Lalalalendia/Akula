@@ -1,20 +1,6 @@
-use unicode_segmentation::GraphemeCursor;
-
+mod cursor;
+use cursor::{nearest_boundary, on_boundary};
 use super::*;
-
-fn on_boundary(text: &str, index: usize) -> bool {
-    GraphemeCursor::new(index, text.len(), true).is_boundary(text, 0).unwrap_or(true)
-}
-
-fn nearest_boundary(text: &str, index: usize) -> usize {
-    let index = index.min(text.len());
-    if on_boundary(text, index) {
-        return index;
-    }
-    let before = GraphemeCursor::new(index, text.len(), true).prev_boundary(text, 0).ok().flatten().unwrap_or(0);
-    let after = GraphemeCursor::new(index, text.len(), true).next_boundary(text, 0).ok().flatten().unwrap_or(text.len());
-    if index - before <= after - index { before } else { after }
-}
 
 impl TextEditor {
     pub(super) fn local(&self, offset: usize) -> (usize, usize, Option<&Layout<BrushIndex>>) {
@@ -42,16 +28,8 @@ impl TextEditor {
     }
 
     pub(super) fn caret(&self) -> Rect {
-        let Some((text, cursor)) = &self.compose else {
-            return self.caret_at(self.focus, 0, self.affinity);
-        };
-        // The provisional IME text visually replaces the selection at its
-        // beginning. Clamp OS-supplied cursor offsets to UTF-8 boundaries.
-        let mut offset = cursor.map_or(0, |(start, _)| start.min(text.len()));
-        while !text.is_char_boundary(offset) {
-            offset -= 1;
-        }
-        self.caret_at(self.selection().start, offset, Affinity::Downstream)
+        let (at, offset, affinity) = cursor::target(self);
+        self.caret_at(at, offset, affinity)
     }
 
     pub(super) fn caret_at(&self, offset: usize, compose: usize, affinity: Affinity) -> Rect {

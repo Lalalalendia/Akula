@@ -79,8 +79,6 @@ impl TextEditor {
             }
         }
         let range = self.selection();
-        // Source selection offsets describe the persistent document, not the
-        // provisional Parley text with the selected span replaced by preedit.
         if !range.is_empty() && self.compose.is_none() && ctx.is_window_focused() {
             let sel_color = props.get::<SelectionColor>(ctx.property_cache()).color;
             self.paint_range(painter, shown.clone(), range.clone(), sel_color);

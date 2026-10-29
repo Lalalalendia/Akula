@@ -1,4 +1,4 @@
-use super::preview_preedit;
+use super::preedit::preview_preedit;
 
 #[test]
 fn ime_preview_replaces_single_paragraph_unicode_selection_without_mutating_source() {
