@@ -254,6 +254,13 @@ $clipboardSentinel = 'AKULA_CLIPBOARD_POISON_' + [Guid]::NewGuid().ToString('N')
 Set-Clipboard -Value $clipboardSentinel -ErrorAction Stop
 Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
+
+# U02 uses installed Akula to create/save a note, restart, find and reopen it.
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-beta-u02-user-journey.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula U02 user journey failed: PowerShell exit $LASTEXITCODE" }
+$u02Note = Join-Path $vault 'AkulaU02Created.md'
+if (!(Test-Path -LiteralPath $u02Note -PathType Leaf)) { throw 'Installed U02 file not found' }
+$u02Hash = (Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash
 Assert-LegacyUntouched
 
 # Installed NSIS + foreground OS keyboard regression for the 30k and 100k
@@ -296,6 +303,14 @@ Assert-LegacyUntouched
 if ($LASTEXITCODE -ne 0) { throw "Installed 100k-line crash recovery failed: PowerShell exit $LASTEXITCODE" }
 Assert-LegacyUntouched
 
+# R2 installed-application readback (nine synthetic notes + plain DOCX).
+# Windows GitHub-hosted STA only; not physical user acceptance.
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-user-scenarios-installed.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw 'R2 Windows note/DOCX readback failed' }
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'R2 readback modified original beta note' }
+if ((Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash -ne $u02Hash) { throw 'R2 readback modified U02 note' }
+Assert-LegacyUntouched
+
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
 if (!(Test-Path $uninstall)) { throw 'Akula uninstaller missing' }
 $removed = Start-Process $uninstall -ArgumentList '/S' -Wait -PassThru
@@ -307,5 +322,6 @@ if (Test-Path $exe) { throw 'Akula executable remains after uninstall' }
 if (Test-Path $akulaRegistry) { throw 'Akula uninstall registry key remains' }
 if (!(Test-Path $state)) { throw 'Uninstall removed Akula user state' }
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Uninstall changed the edited local document' }
+if ((Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash -ne $u02Hash) { throw 'Uninstall changed the U02-created Markdown note' }
 Assert-LegacyUntouched
 Write-Host 'AKULA_WINDOWS_BETA_GUI_EDIT_PASS: NSIS install, real OS keyboard edit, on-disk save, restart, uninstall and upstream sentinels'

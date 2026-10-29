@@ -26,6 +26,7 @@ mod corpus_blocks;
 mod corpus_inline;
 mod source;
 mod scan;
+mod selection;
 mod sparse;
 #[cfg(test)]
 mod tests;
@@ -102,6 +103,7 @@ pub struct Document {
     pub uncropped: Option<usize>,
     pub resized: Option<(usize, f64)>,
     pub source: Option<usize>,
+    pub selection: Option<Range<usize>>,
     pub keep: (f64, f64),
     pub pins: Vec<usize>,
     edits: Option<Vec<super::Edit>>,
@@ -122,11 +124,9 @@ impl Document {
     pub fn windowed(text: crop::Rope) -> Self {
         Document::of(text, true)
     }
-
     pub fn entire(text: crop::Rope) -> Self {
         Document::of(text, false)
     }
-
     fn of(full: crop::Rope, windowed: bool) -> Self {
         let mut doc = Document {
             full,
@@ -155,6 +155,7 @@ impl Document {
             uncropped: None,
             resized: None,
             source: None,
+            selection: None,
             keep: (0.0, 0.0),
             pins: Vec::new(),
             edits: None,
@@ -178,7 +179,6 @@ impl Document {
         LAST_BUILD.with(|slot| slot.set(DocumentBuildProfile { rescan, load: started.elapsed() }));
         doc
     }
-
     fn mark(&mut self, range: Range<usize>) {
         self.dirty = Some(match self.dirty.take() {
             Some(dirty) => dirty.start.min(range.start)..dirty.end.max(range.end),

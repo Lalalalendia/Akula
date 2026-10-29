@@ -4,7 +4,7 @@ use super::{offset,
     content, content_or_empty, flag, limit, open_after_write, optional_content, optional_names, optional_text,
     require_write, shorten, text, tool, version_name_property, workspace_property, write_retrying,
 };
-use crate::files::document::{read_file_snapshot_impl, snapshot_of, text_from_bytes};
+use crate::files::document::{snapshot_of, text_from_bytes};
 use crate::files::error::FileCommandError;
 use crate::files::gate;
 use crate::history::Source;
@@ -383,7 +383,7 @@ fn update_note(core: &Core, arguments: &Value) -> Result<Value, String> {
         }
         None => {
             let (changed, next) = write_retrying(
-                core, &note, Source::Agent, version_name.as_deref(),
+                core, &vault, &note, Source::Agent, version_name.as_deref(),
                 |current| compose(current, &edit),
             )?;
             (changed, next, None)
@@ -439,7 +439,7 @@ fn write_with_expected_revision(
     expected: &str,
     version_name: Option<&str>,
 ) -> Result<(bool, String, String), String> {
-    let snapshot = read_file_snapshot_impl(note).map_err(|error| error.to_string())?;
+    let snapshot = snapshot_of(vault.read_note_bytes(note)?).map_err(|error| error.to_string())?;
     if snapshot.hash != expected {
         return Err(revision_conflict(vault, note, expected, Some(&snapshot.hash)));
     }
@@ -450,7 +450,7 @@ fn write_with_expected_revision(
     match gate::write(core, note, &content, Some(expected), Source::Agent, version_name) {
         Ok(published) => Ok((true, content, published.hash)),
         Err(FileCommandError::Conflict { .. }) => {
-            let actual = read_file_snapshot_impl(note).ok().map(|latest| latest.hash);
+            let actual = vault.read_note_bytes(note).ok().and_then(|bytes| snapshot_of(bytes).ok()).map(|latest| latest.hash);
             Err(revision_conflict(vault, note, expected, actual.as_deref()))
         }
         Err(error) => Err(error.to_string()),

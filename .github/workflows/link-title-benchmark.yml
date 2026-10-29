@@ -1,0 +1,44 @@
+name: HTML title parser paired benchmark (diagnostic only)
+
+on:
+  # Diagnostic-only benchmark: manual runs avoid adding production paths to CI fanout.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: link-title-paired
+      - name: Verify original output equivalence
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-core --test link_title_legacy_equivalence
+      - name: Measure old and new parser on same runner in ABBA order
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-core --test link_title_legacy_equivalence benchmark_link_title_parse_abba -- --ignored --nocapture --test-threads=1 2>&1 | tee ../link-title-abba.log
+          grep 'BENCH-LINK-TITLE' ../link-title-abba.log | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload raw paired measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-title-abba-${{ github.sha }}
+          path: link-title-abba.log
+          retention-days: 14
