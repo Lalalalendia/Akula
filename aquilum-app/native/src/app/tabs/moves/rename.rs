@@ -20,8 +20,13 @@ impl App {
             // SnapshotQueue keeps its original document path. Merely changing
             // Note.path would stage all future recovery drafts against a missing
             // pre-rename file. Rebind after the File Gate move is confirmed.
+            let mut disk_reconciled_text = None;
             if let Some(mut note) = self.note.take() {
                 note.path = path.clone();
+                // A folder rename can rewrite links inside the active child,
+                // despite the folder result containing no note hash. Re-read
+                // only clean notes and never overwrite a pending local edit.
+                disk_reconciled_text = note.reload_after_restore();
                 if let (Some(vault), Some(session)) = (self.tree.root(), self.session.as_ref()) {
                     let vault = vault.to_path_buf();
                     let workspace = session.workspace_id;
@@ -39,6 +44,9 @@ impl App {
             self.workspace.core.active_note.set(Some(path.clone()));
             self.tree.set_active(root, Some(path));
             self.refresh_note_names(root);
+            if let Some(text) = disk_reconciled_text {
+                self.set_text(root, text);
+            }
             self.refresh_save_error(root);
         }
         self.relocate_tabs(root, from, to);
