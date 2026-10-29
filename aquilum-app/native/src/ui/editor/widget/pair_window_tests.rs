@@ -33,3 +33,17 @@ fn pair_typing_and_backspace_at_an_unloaded_caret_keep_exact_rope_bytes() {
     assert!(!editor.handle_pair_typing("'"));
     assert_eq!(editor.doc.whole(), without_pair);
 }
+
+
+#[test]
+fn distant_backtick_fence_uses_the_full_line_only_when_necessary() {
+    let original = format!("  ``\n{}", "текст 🐈\n".repeat(60_000));
+    let mut editor = TextEditor::windowed(crop::Rope::from(original.as_str())).markdown();
+    editor.doc.include(original.len());
+    assert!(editor.doc.loaded().0 > 4, "the fence opener must be outside the mounted window");
+    editor.anchor = 4;
+    editor.focus = 4;
+    assert!(editor.handle_pair_typing("`"));
+    assert!(editor.doc.whole().starts_with("  ```\n```\n"));
+    assert_eq!(editor.doc.whole().split_once("\n```\n").unwrap().1, original.split_once('\n').unwrap().1);
+}
