@@ -113,9 +113,13 @@ mod tests {
         let mut callee =
             CallSession::incoming(&offer, a, b, LocalPeerPolicy::Allowed, 101).unwrap();
         let ring = callee.ring_local(101).unwrap();
-        caller.receive(&ring, b, LocalPeerPolicy::Allowed, 101).unwrap();
+        caller
+            .receive(&ring, b, LocalPeerPolicy::Allowed, 101)
+            .unwrap();
         let accept = callee.accept_local(102).unwrap();
-        caller.receive(&accept, b, LocalPeerPolicy::Allowed, 102).unwrap();
+        caller
+            .receive(&accept, b, LocalPeerPolicy::Allowed, 102)
+            .unwrap();
         assert!(matches!(
             start_muted_media(&caller, true, b, PeerPolicy::Revoked, [8; 16]),
             Err(VoiceError::Denied)

@@ -114,7 +114,7 @@ fn typing_markdown_never_breaks_layout() {
     let styles = StyleSet::new(16.0);
     let fonts = Fonts { size: 16.0, mono: crate::ui::theme::editor_font("iA Writer Mono"), ch: 8.0, callouts: true, tags: true };
     let unresolved = HashSet::new();
-    let context = markdown::Context { fonts: &fonts, unresolved: &unresolved, resolver: None };
+    let context = markdown::Context { fonts: &fonts, unresolved: &unresolved, resolver: None, source_selection: None };
     for line in TYPED.lines() {
         for end in line.char_indices().map(|(i, _)| i).chain([line.len()]) {
             let text = &line[..end];
@@ -260,4 +260,24 @@ fn indented_code_and_math_keep_existing_wrapping() {
     assert!(!doc.fenced_code(2), "indented code must not be treated as a fence");
     assert!(!doc.fenced_code(5), "math must remain excluded");
     assert!(doc.paragraph(2).layout().lines().count() > 1, "indented code preserves wrapping");
+}
+
+#[test]
+fn selection_outside_paragraph_never_underflows_offset() {
+    let mut doc = Document::new("first\nsecond\nthird");
+    assert_eq!(doc.local_selection(0), None, "no selection");
+
+    // Selection is wholly after paragraph 0, but wholly before paragraph 2.
+    // Both cases must avoid eager unsigned subtraction in Option::then_some.
+    doc.selection = Some(6..12);
+    assert_eq!(doc.local_selection(0), None, "selection after this paragraph");
+    assert_eq!(doc.local_selection(1), Some(0..6), "selected paragraph");
+    assert_eq!(doc.local_selection(2), None, "selection before this paragraph");
+
+    // A selection that extends across several paragraphs must clip each
+    // local range without skipping or copying bytes from neighbouring lines.
+    doc.selection = Some(2..14);
+    assert_eq!(doc.local_selection(0), Some(2..5));
+    assert_eq!(doc.local_selection(1), Some(0..6));
+    assert_eq!(doc.local_selection(2), Some(0..1));
 }
