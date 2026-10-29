@@ -33,10 +33,12 @@ impl FileTree {
     fn scroll_to(&mut self, root: &mut RenderRoot, index: usize) {
         let top = index as f64 * step();
         let bottom = top + step() - size::SPACE_2;
-        if let Some(offset) = self.scroll.and_then(|scroll| scroll.edit(root, |mut scroll| {
-            ScrollArea::reveal(&mut scroll, top, bottom);
-            scroll.widget.offset()
-        })) {
+        if let Some(offset) = self.scroll.and_then(|scroll| {
+            scroll.edit(root, |mut scroll| {
+                ScrollArea::reveal(&mut scroll, top, bottom);
+                scroll.widget.offset()
+            })
+        }) {
             self.offset = offset;
         }
     }

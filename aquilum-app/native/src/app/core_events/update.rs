@@ -7,13 +7,20 @@ impl App {
         if status != self.update_shown {
             self.update_shown = status.clone();
             let splash = match &status {
-                Status::Downloading { done, total, .. } => Some((false, total.filter(|t| *t > 0).map(|t| *done as f64 * 100.0 / t as f64))),
+                Status::Downloading { done, total, .. } => Some((
+                    false,
+                    total
+                        .filter(|t| *t > 0)
+                        .map(|t| *done as f64 * 100.0 / t as f64),
+                )),
                 Status::Ready(_) | Status::Installing => Some((true, None)),
                 _ => None,
             };
             match (splash, self.update_layer) {
                 (Some((installing, percent)), Some(layer)) => {
-                    root.edit_widget(layer, |mut w| crate::ui::update::UpdateSplash::set(&mut w.downcast(), installing, percent));
+                    root.edit_widget(layer, |mut w| {
+                        crate::ui::update::UpdateSplash::set(&mut w.downcast(), installing, percent)
+                    });
                 }
                 (Some((installing, percent)), None) => {
                     let widget = crate::ui::update::UpdateSplash::new(installing, percent);

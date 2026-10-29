@@ -23,7 +23,12 @@ impl FileTree {
         self.model.color(path)
     }
 
-    pub fn set_color(&mut self, root: &mut RenderRoot, folders: &[PathBuf], color: Option<&'static str>) {
+    pub fn set_color(
+        &mut self,
+        root: &mut RenderRoot,
+        folders: &[PathBuf],
+        color: Option<&'static str>,
+    ) {
         self.model.set_color(folders, color);
         self.save_colors();
         self.refresh(root);
