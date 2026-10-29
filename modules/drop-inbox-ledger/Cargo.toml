@@ -1,0 +1,23 @@
+[package]
+name = "akula-inbox-ledger-lab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "Opt-in local checked Inbox ledger; no network, auth, Vault or sender ACK"
+
+[workspace]
+
+[features]
+default = []
+# Creates synthetic completion evidence only in disposable test builds.
+# Never enabled in normal signed Akula.
+disposable-removal-lab = []
+
+[dependencies]
+blake3 = "1.8.5"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+uuid = { version = "1.23.5", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

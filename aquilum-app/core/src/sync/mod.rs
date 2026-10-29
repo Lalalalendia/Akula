@@ -1,5 +1,4 @@
-//! Inert sync contracts, types and deterministic fake provider.
-//! Local history is not distributed; File Gate protects dirty editor buffers.
+//! Local-only sync contracts and fake provider; File Gate protects dirty editors, no distributed history.
 mod core_scan;
 mod dag;
 mod delta;
@@ -71,6 +70,7 @@ mod cold_oracle_report;
 mod profile_binding;
 mod path;
 mod pinned_read;
+pub(crate) mod p2p_stage;
 #[cfg(windows)]
 mod filegate_windows_acl;
 #[cfg(windows)]

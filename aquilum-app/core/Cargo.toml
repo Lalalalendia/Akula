@@ -239,6 +239,7 @@ path = "src/bin/akula_p2p_identity.rs"
 required-features = ["p2p-device-identity"]
 
 [dev-dependencies]
+akula-inbox-ledger-lab = { path = "../../modules/drop-inbox-ledger", features = ["disposable-removal-lab"] }
 tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]

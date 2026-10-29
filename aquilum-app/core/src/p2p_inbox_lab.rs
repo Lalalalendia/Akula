@@ -3,8 +3,6 @@
 //! This optional manual P2P inbox path is deliberately NOT Akula Vault sync,
 //! File Gate application or an ACK. The caller must independently trust the
 //! expected root and size from an approved OfferSession. This code checks the
-//! actual opened stage bytes again and NEVER replaces an existing destination.
-//! No server, transport, UI action or unattended write is started here.
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -12,6 +10,16 @@ use std::{
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
+
+#[cfg(feature = "p2p-inbox-lab")]
+pub mod file_gate;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+pub use windows::{
+    create_pinned_windows_inbox_stage, pin_windows_export_parent, pin_windows_inbox_read,
+    PinnedWindowsExportParent, PinnedWindowsInboxRead,
+};
 
 pub const MAX_INBOX_ITEM_BYTES: u64 = 8 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
@@ -89,11 +97,23 @@ pub fn save_verified_stage_as_new(
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    // A caller chooses the destination. Reject a symlinked immediate parent,
-    // but do not claim that all ancestor path races are solved by this check.
+    // Static path checks reject observed reparse points, but do not close
+    // ancestor-swap races. Windows release acceptance remains on HOLD.
     let parent_info = fs::symlink_metadata(parent)?;
     if !parent_info.is_dir() || parent_info.file_type().is_symlink() {
         return Err(InboxError::InvalidDestination);
+    }
+    #[cfg(windows)]
+    let _pinned_export_dir = pin_windows_export_parent(parent)?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        for ancestor in parent.ancestors() {
+            let meta = fs::symlink_metadata(ancestor)?;
+            if !meta.is_dir() || meta.file_attributes() & 0x0000_0400 != 0 {
+                return Err(InboxError::InvalidDestination);
+            }
+        }
     }
     // Catch existing destinations including dangling symlinks. hard_link below
     // enforces the same no-replace rule atomically if another writer races us.
@@ -157,130 +177,4 @@ pub fn save_verified_stage_as_new(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn opened(root: &Path, bytes: &[u8]) -> File {
-        let path = root.join("private-stage.bin");
-        fs::write(&path, bytes).unwrap();
-        File::open(path).unwrap()
-    }
-
-    #[test]
-    fn creates_new_verified_file_with_bounded_copy_and_exact_receipt() {
-        let dir = tempfile::tempdir().unwrap();
-        let bytes = (0..(64 * 1024 + 23))
-            .map(|i| ((i * 31 + 5) % 251) as u8)
-            .collect::<Vec<_>>();
-        let mut stage = opened(dir.path(), &bytes);
-        let output = dir.path().join("user-chosen-name.bin");
-        let expected = *blake3::hash(&bytes).as_bytes();
-        let receipt =
-            save_verified_stage_as_new(&mut stage, bytes.len() as u64, expected, &output).unwrap();
-        assert_eq!(receipt.path, output);
-        assert_eq!(receipt.bytes, bytes.len() as u64);
-        assert_eq!(receipt.blake3_root, expected);
-        assert_eq!(fs::read(&output).unwrap(), bytes);
-        assert_eq!(
-            fs::read(dir.path().join("private-stage.bin")).unwrap(),
-            bytes
-        );
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
-    }
-
-    #[test]
-    fn a_preexisting_destination_is_never_replaced() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut stage = opened(dir.path(), b"selected bytes");
-        let output = dir.path().join("keep.bin");
-        fs::write(&output, b"my existing document").unwrap();
-        let outcome = save_verified_stage_as_new(
-            &mut stage,
-            14,
-            *blake3::hash(b"selected bytes").as_bytes(),
-            &output,
-        );
-        assert!(matches!(outcome, Err(InboxError::AlreadyExists)));
-        assert_eq!(fs::read(&output).unwrap(), b"my existing document");
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
-    }
-
-    #[test]
-    fn wrong_root_and_changed_size_never_publish_partial_output() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut stage = opened(dir.path(), b"byte-for-byte sample");
-        let output = dir.path().join("never-created.bin");
-        let bad_hash = *blake3::hash(b"forged commitment").as_bytes();
-        assert!(matches!(
-            save_verified_stage_as_new(&mut stage, 20, bad_hash, &output),
-            Err(InboxError::DigestMismatch)
-        ));
-        assert!(!output.exists());
-        assert!(matches!(
-            save_verified_stage_as_new(&mut stage, 19, bad_hash, &output),
-            Err(InboxError::SizeMismatch)
-        ));
-        assert!(!output.exists());
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
-    }
-
-    #[test]
-    fn zero_or_oversized_manifest_is_refused_before_publication() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut stage = opened(dir.path(), b"stage bytes");
-        let target = dir.path().join("invalid.bin");
-        let hash = *blake3::hash(b"stage bytes").as_bytes();
-        assert!(matches!(
-            save_verified_stage_as_new(&mut stage, 0, hash, &target),
-            Err(InboxError::InvalidManifest)
-        ));
-        assert!(matches!(
-            save_verified_stage_as_new(&mut stage, MAX_INBOX_ITEM_BYTES + 1, hash, &target),
-            Err(InboxError::InvalidManifest)
-        ));
-        assert!(!target.exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn stage_path_swap_after_open_cannot_change_published_bytes() {
-        let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("private-stage.bin");
-        fs::write(&source, b"pinned original data").unwrap();
-        let mut opened_stage = File::open(&source).unwrap();
-        fs::rename(&source, dir.path().join("renamed-stage.bin")).unwrap();
-        fs::write(&source, b"attacker replacement").unwrap();
-        let output = dir.path().join("correct-copy.bin");
-        save_verified_stage_as_new(
-            &mut opened_stage,
-            20,
-            *blake3::hash(b"pinned original data").as_bytes(),
-            &output,
-        )
-        .unwrap();
-        assert_eq!(fs::read(&output).unwrap(), b"pinned original data");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn symlinked_destination_parent_is_refused() {
-        use std::os::unix::fs::symlink;
-        let dir = tempfile::tempdir().unwrap();
-        let outside = dir.path().join("outside");
-        fs::create_dir(&outside).unwrap();
-        let parent_link = dir.path().join("redirect");
-        symlink(&outside, &parent_link).unwrap();
-        let mut stage = opened(dir.path(), b"trusted");
-        let target = parent_link.join("unexpected.bin");
-        assert!(matches!(
-            save_verified_stage_as_new(
-                &mut stage,
-                7,
-                *blake3::hash(b"trusted").as_bytes(),
-                &target
-            ),
-            Err(InboxError::InvalidDestination)
-        ));
-        assert!(!outside.join("unexpected.bin").exists());
-    }
-}
+mod tests;
