@@ -27,6 +27,10 @@ node-v1-runtime = ["node-live-read-lab", "aquilum-core/node-v1", "dep:tokio", "d
 sender-arm-lab = []
 # Explicit Windows two-PC OS-backed QUIC HELLO/OK. Never sends user bytes.
 os-pinned-lan-probe = ["p2p-live-identity", "dep:tokio"]
+# Independent default-OFF CALL-01 QUIC/TLS two-process trust test.
+call-quic-lab = ["aquilum-core/call-signaling-lab", "dep:tokio"]
+# Windows-only OS pin + owner-witnessed roster checked before and after Accept.
+call-live-identity-lab = ["call-quic-lab", "p2p-live-identity", "aquilum-core/device-roster-lab"]
 # Isolated real software Opus 20ms PCM roundtrip, NO device, QUIC or recording.
 call-voice-codec-lab = ["aquilum-core/voice-jitter-lab", "dep:opus"]
 # Two ephemeral OS processes over genuine Iroh/QUIC TLS, synthetic encoded PCM only.
