@@ -139,10 +139,31 @@ fn graph_snapshot() {
 fn typing_suggests_notes_and_enter_links_them() {
     let mut h = Harness::new();
     let vault = h.vault.path().to_path_buf();
-    std::fs::write(vault.join("Проектирование.md"), "x").unwrap();
+    let title_note = vault.join("Проектирование.md");
+    std::fs::write(&title_note, "x").unwrap();
     let note = vault.join("Черновик.md");
     std::fs::write(&note, "").unwrap();
-    h.app.tree.paths_changed(&mut h.root, &[vault.join("Проектирование.md"), note.clone()]);
+    h.app.tree.paths_changed(&mut h.root, &[title_note.clone(), note.clone()]);
+
+    // FileTree::paths_changed updates only the UI. Make the test fixture
+    // visible to the asynchronous search worker before testing suggestions.
+    // Otherwise a cold CI index can cache an empty result for the first key.
+    let workspace = vault.to_string_lossy().into_owned();
+    h.app.workspace.core.search.prepare(&workspace).unwrap();
+    h.app.workspace.core.search.notify_paths(vec![title_note, note.clone()]);
+    let mut indexed = false;
+    for _ in 0..300 {
+        h.app.on_core_events(&mut h.root);
+        let _ = h.root.redraw();
+        if h.app.workspace.core.search.suggest_notes(&workspace, "Прое", 12)
+            .is_ok_and(|notes| notes.iter().any(|note| note.title == "Проектирование"))
+        {
+            indexed = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(indexed, "fixture title did not reach the search index before typing");
     h.app.open(&mut h.root, note);
     let _ = h.root.redraw();
     let editor = h.app.editor_id().unwrap();
