@@ -47,6 +47,13 @@ jobs:
         run: |
           cargo metadata --manifest-path aquilum-app/Cargo.toml --locked --format-version 1 > /dev/null
           git diff --exit-code -- aquilum-app/Cargo.lock
+      - name: Enforce the default-OFF Core watcher boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --no-default-features --lib files::watcher::classify::tests::qa_import_copy_stays_invisible_to_default_watcher -- --exact --nocapture --test-threads=1 2>&1 | tee "$RUNNER_TEMP/p2p-default-off.txt"
+          grep -F 'test files::watcher::classify::tests::qa_import_copy_stays_invisible_to_default_watcher ... ok' "$RUNNER_TEMP/p2p-default-off.txt"
+          echo 'AKULA_P2P_B3_DEFAULT_OFF_WATCHER_PASS'
       - name: Format and test verified receipt, import and removal audits
         shell: bash
         run: |
