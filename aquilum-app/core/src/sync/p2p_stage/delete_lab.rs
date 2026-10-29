@@ -2,22 +2,16 @@
 use super::{pinned_windows, VaultPortError};
 use std::{
     ffi::c_void,
-    fs::{self, OpenOptions},
+    fs,
     io::Read,
-    os::windows::{
-        fs::{MetadataExt, OpenOptionsExt},
-        io::AsRawHandle,
-    },
+    os::windows::{fs::MetadataExt, io::AsRawHandle},
     path::Path,
 };
+
+mod relative;
+use relative::open_delete_candidate;
 use uuid::Uuid;
 
-const READ_DATA: u32 = 1;
-const READ_ATTR: u32 = 0x80;
-const DELETE_ACCESS: u32 = 0x10000;
-const SYNCHRONIZE: u32 = 0x100000;
-const SHARE_READ: u32 = 1;
-const OPEN_REPARSE: u32 = 0x0020_0000;
 const REPARSE_ATTRIBUTE: u32 = 0x0000_0400;
 const FILE_DISPOSITION_INFO: u32 = 4;
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
@@ -32,8 +26,7 @@ extern "system" {
     ) -> i32;
 }
 
-/// Lab-only; the production wrapper still needs authenticated SQLite consent
-/// and strict NT RootDirectory identity. No network or user path is accepted.
+/// Lab-only. Production still requires explicit authenticated SQLite consent.
 fn delete_disposable_fixture(
     root: &Path,
     id: Uuid,
@@ -53,16 +46,9 @@ fn delete_disposable_fixture(
         return Err(VaultPortError::FileChanged);
     }
 
-    // Reopen with DELETE access and no write/delete sharing; accept only the
-    // SAME volume/file ID as the root-relative witness. Path swap fails closed.
-    let mut opts = OpenOptions::new();
-    opts.read(true);
-    opts.access_mode(READ_DATA | READ_ATTR | DELETE_ACCESS | SYNCHRONIZE);
-    opts.share_mode(SHARE_READ);
-    opts.custom_flags(OPEN_REPARSE);
-    let mut candidate = opts
-        .open(root.join("objects").join(&name))
-        .map_err(|e| VaultPortError::Io(e.to_string()))?;
+    // Open DELETE-capable HANDLE using NtCreateFile RootDirectory = the
+    // pinned objects directory. Never re-resolve its ambient pathname.
+    let mut candidate = open_delete_candidate(&objects, &name)?;
     let meta = candidate
         .metadata()
         .map_err(|e| VaultPortError::Io(e.to_string()))?;
