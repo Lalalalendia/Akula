@@ -506,8 +506,18 @@ impl CallSession {
         false
     }
 
+    /// Losing the independently authenticated network channel ends this call.
+    /// A new QUIC path or connection cannot implicitly restore its permission.
+    /// The host MUST also stop any OS media capture and obtain fresh call and
+    /// device consent on a new session with a fresh CSPRNG call ID.
+    pub fn transport_lost(&mut self) {
+        self.phase = CallPhase::Closed;
+        self.remote_muted = true;
+    }
+
     pub fn revoke(&mut self) {
         self.phase = CallPhase::Closed;
+        self.remote_muted = true;
     }
 }
 
@@ -780,5 +790,175 @@ mod tests {
         assert_eq!(caller.receive(&receiver.notify_local_muted(true).unwrap(),
             b,LocalPeerPolicy::Allowed,NOW+2),Err(CallError::Closed));
         assert!(caller.accept_local(NOW+2).is_err());
+    }
+
+    #[test]
+    fn late_ringing_and_accept_from_previous_call_do_not_activate_new_one() {
+        let (a, b) = peers();
+        let (mut old_caller, mut old_receiver, _) = started();
+        let old_ring = old_receiver.ring_local(NOW + 1).unwrap();
+        old_caller.receive(&old_ring, b, LocalPeerPolicy::Allowed, NOW + 1).unwrap();
+        let old_accept = old_receiver.accept_local(NOW + 2).unwrap();
+
+        // A new authenticated attempt needs a fresh call ID; stale packets
+        // from the previous connection are not valid just because peers match.
+        let (mut caller, offer) = CallSession::outbound(
+            a, b, [8; 16], NOW + 10, 60, LocalPeerPolicy::Allowed
+        ).unwrap();
+        let mut receiver = CallSession::incoming(
+            &offer, a, b, LocalPeerPolicy::Allowed, NOW + 11
+        ).unwrap();
+        for old in [old_ring, old_accept] {
+            assert_eq!(
+                caller.receive(&old, b, LocalPeerPolicy::Allowed, NOW + 11),
+                Err(CallError::WrongCall)
+            );
+        }
+        assert_eq!(caller.phase(), CallPhase::Dialing);
+        let ringing = receiver.ring_local(NOW + 11).unwrap();
+        assert_eq!(
+            caller.receive(&ringing, b, LocalPeerPolicy::Allowed, NOW + 11),
+            Ok(RemoteEvent::Ringing)
+        );
+        let accept = receiver.accept_local(NOW + 12).unwrap();
+        assert_eq!(
+            caller.receive(&accept, b, LocalPeerPolicy::Allowed, NOW + 12),
+            Ok(RemoteEvent::Accepted)
+        );
+    }
+
+    #[test]
+    fn stale_end_cannot_close_successor_even_with_correct_sequence_number() {
+        let (_, mut old_receiver) = connected();
+        let old_end = old_receiver.end_local().unwrap().unwrap();
+        let (a, b) = peers();
+        let (mut caller, offer) = CallSession::outbound(
+            a, b, [9; 16], NOW + 10, 60, LocalPeerPolicy::Allowed
+        ).unwrap();
+        let mut receiver = CallSession::incoming(
+            &offer, a, b, LocalPeerPolicy::Allowed, NOW + 11
+        ).unwrap();
+        let ringing = receiver.ring_local(NOW + 11).unwrap();
+        caller.receive(&ringing, b, LocalPeerPolicy::Allowed, NOW + 11).unwrap();
+        let accept = receiver.accept_local(NOW + 12).unwrap();
+        caller.receive(&accept, b, LocalPeerPolicy::Allowed, NOW + 12).unwrap();
+        // Both old End and new End have receiver sequence=3.
+        assert_eq!(
+            caller.receive(&old_end, b, LocalPeerPolicy::Allowed, NOW + 13),
+            Err(CallError::WrongCall)
+        );
+        assert_eq!(caller.phase(), CallPhase::Active);
+        let real_end = receiver.end_local().unwrap().unwrap();
+        assert_eq!(
+            caller.receive(&real_end, b, LocalPeerPolicy::Allowed, NOW + 13),
+            Ok(RemoteEvent::Ended)
+        );
+        assert_eq!(caller.phase(), CallPhase::Closed);
+    }
+
+    #[test]
+    fn transport_loss_while_ringing_needs_fresh_offer_and_consent() {
+        let (a, b) = peers();
+        let (mut caller, mut receiver, _) = started();
+        let old_ring = receiver.ring_local(NOW + 1).unwrap();
+        caller.transport_lost();
+        assert_eq!(caller.phase(), CallPhase::Closed);
+        assert_eq!(
+            caller.receive(&old_ring, b, LocalPeerPolicy::Allowed, NOW + 2),
+            Err(CallError::Closed)
+        );
+        assert!(caller.end_local().unwrap().is_none());
+
+        // Merely creating a new transport path does not revive the old call.
+        let (mut next_caller, new_offer) = CallSession::outbound(
+            a, b, [10; 16], NOW + 10, 60, LocalPeerPolicy::Allowed
+        ).unwrap();
+        let mut next_receiver = CallSession::incoming(
+            &new_offer, a, b, LocalPeerPolicy::Allowed, NOW + 11
+        ).unwrap();
+        assert_eq!(
+            next_caller.receive(&old_ring, b, LocalPeerPolicy::Allowed, NOW + 11),
+            Err(CallError::WrongCall)
+        );
+        assert_eq!(next_caller.phase(), CallPhase::Dialing);
+        let new_ring = next_receiver.ring_local(NOW + 11).unwrap();
+        assert_eq!(
+            next_caller.receive(&new_ring, b, LocalPeerPolicy::Allowed, NOW + 11),
+            Ok(RemoteEvent::Ringing)
+        );
+    }
+
+    #[test]
+    fn transport_loss_after_accept_is_terminal_for_late_control_packets() {
+        let (mut caller, mut receiver) = connected();
+        let (_, b) = peers();
+        let late_unmute = receiver.notify_local_muted(false).unwrap();
+        let late_end = receiver.end_local().unwrap().unwrap();
+        caller.transport_lost();
+        assert_eq!(caller.phase(), CallPhase::Closed);
+        assert!(caller.remote_muted());
+        for late in [late_unmute, late_end] {
+            assert_eq!(
+                caller.receive(&late, b, LocalPeerPolicy::Allowed, NOW + 4),
+                Err(CallError::Closed)
+            );
+        }
+        assert_eq!(caller.notify_local_muted(false), Err(CallError::InvalidTransition));
+        assert!(caller.end_local().unwrap().is_none());
+        // The host, not this passive module, must stop microphone/camera access.
+    }
+
+    #[test]
+    fn reordered_and_replayed_control_after_path_change_preserves_state() {
+        let (mut caller, mut receiver) = connected();
+        let (_, b) = peers();
+        let unmute = receiver.notify_local_muted(false).unwrap();
+        let mute = receiver.notify_local_muted(true).unwrap();
+
+        // A delayed packet arriving on the new path cannot skip a sequence.
+        assert_eq!(
+            caller.receive(&mute, b, LocalPeerPolicy::Allowed, NOW + 4),
+            Err(CallError::OutOfOrder)
+        );
+        assert!(caller.remote_muted());
+        assert_eq!(
+            caller.receive(&unmute, b, LocalPeerPolicy::Allowed, NOW + 4),
+            Ok(RemoteEvent::RemoteMuted(false))
+        );
+        assert!(!caller.remote_muted());
+        assert_eq!(
+            caller.receive(&unmute, b, LocalPeerPolicy::Allowed, NOW + 4),
+            Err(CallError::Replay)
+        );
+        assert_eq!(
+            caller.receive(&mute, b, LocalPeerPolicy::Allowed, NOW + 4),
+            Ok(RemoteEvent::RemoteMuted(true))
+        );
+        assert!(caller.remote_muted());
+        assert_eq!(caller.phase(), CallPhase::Active);
+    }
+
+    #[test]
+    fn expired_offer_stays_invalid_after_new_process_or_network_path() {
+        let (a, b) = peers();
+        let (_, _, old_offer) = started();
+        // Freshly allocated session state is not permission to accept
+        // an already expired OFFER replayed from an old network path.
+        assert!(matches!(
+            CallSession::incoming(
+                &old_offer, a, b, LocalPeerPolicy::Allowed, NOW + 60
+            ),
+            Err(CallError::Expired)
+        ));
+        let (fresh, offer) = CallSession::outbound(
+            a, b, [11; 16], NOW + 61, 60, LocalPeerPolicy::Allowed
+        ).unwrap();
+        let receiver = CallSession::incoming(
+            &offer, a, b, LocalPeerPolicy::Allowed, NOW + 62
+        ).unwrap();
+        assert_eq!(fresh.phase(), CallPhase::Dialing);
+        assert_eq!(receiver.phase(), CallPhase::IncomingRinging);
+        // Durable anti-replay across restarts *within* TTL is still a host
+        // requirement; this isolated laboratory does not implement it.
     }
 }
