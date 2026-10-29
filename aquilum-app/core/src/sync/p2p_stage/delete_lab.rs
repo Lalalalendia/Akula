@@ -9,7 +9,7 @@ use std::{
 };
 
 mod relative;
-use akula_inbox_ledger_lab::InboxLedger;
+use akula_inbox_ledger_lab::{InboxLedger, RemovalDispositionWitness};
 use relative::open_delete_candidate;
 use uuid::Uuid;
 
@@ -34,7 +34,7 @@ fn delete_disposable_fixture(
     expected_bytes: u64,
     expected_hash: [u8; 32],
 ) -> Result<(), VaultPortError> {
-    delete_disposable_fixture_matching(root, id, expected_bytes, expected_hash, None)
+    delete_disposable_fixture_matching(root, id, expected_bytes, expected_hash, None).map(|_| ())
 }
 
 /// Require the OS identity of the independently verified Ledger file as well
@@ -45,7 +45,7 @@ fn delete_disposable_fixture_matching(
     expected_bytes: u64,
     expected_hash: [u8; 32],
     ledger_identity: Option<(u32, u64, u32)>,
-) -> Result<(), VaultPortError> {
+) -> Result<(u32, u64, u32), VaultPortError> {
     if id.is_nil() || expected_bytes == 0 || expected_bytes > MAX_BYTES || expected_hash == [0; 32]
     {
         return Err(VaultPortError::UnsafePath);
@@ -125,7 +125,9 @@ fn delete_disposable_fixture_matching(
     if pinned_windows::open_optional_child(&objects, &name)?.is_some() {
         return Err(VaultPortError::FileChanged);
     }
-    Ok(())
+    // Return identity of the verified DELETE-capable HANDLE only after the
+    // kernel disposition and root-relative absence check both succeed.
+    Ok(identity)
 }
 
 /// Synthetic explicit user confirmation; no GUI can invoke this test module.
@@ -185,7 +187,7 @@ fn delete_after_explicit_consent(
     }
     after_request();
 
-    delete_disposable_fixture_matching(
+    let observed_identity = delete_disposable_fixture_matching(
         root,
         selected_id,
         receipt.bytes,
@@ -196,8 +198,17 @@ fn delete_after_explicit_consent(
     if cut == CrashCut::AfterDisposition {
         return Err("simulated crash after HANDLE disposition".into());
     }
+    let witnessed = RemovalDispositionWitness::for_disposable_lab(
+        selected_id,
+        receipt.bytes,
+        receipt.blake3,
+        observed_identity.0,
+        observed_identity.1,
+        observed_identity.2,
+    )
+    .map_err(|e| format!("invalid HANDLE outcome evidence: {e:?}"))?;
     ledger
-        .finish_removal(selected_id)
+        .finish_removal(selected_id, witnessed)
         .map_err(|e| format!("SQLite finish refused: {e:?}"))?;
     Ok(())
 }

@@ -9,6 +9,52 @@ pub enum RemovalAuditStatus {
     NeedsReview,
 }
 
+/// Opaque completion capability. Normal builds have no public constructor:
+/// an absent filename cannot, by itself, authorize `Removed`.
+/// Disposable lab evidence is not a kernel or power-loss attestation.
+#[derive(Debug)]
+pub struct RemovalDispositionWitness {
+    transfer_id: Uuid,
+    bytes: u64,
+    digest: [u8; 32],
+    volume_serial: u32,
+    file_index: u64,
+    hard_links: u32,
+}
+
+impl RemovalDispositionWitness {
+    /// Synthetic fixture-only evidence. Windows Core calls this only after
+    /// root-relative same-HANDLE disposition and an observed absent name.
+    #[cfg(any(test, feature = "disposable-removal-lab"))]
+    pub fn for_disposable_lab(
+        id: Uuid,
+        bytes: u64,
+        digest: [u8; 32],
+        volume_serial: u32,
+        file_index: u64,
+        hard_links: u32,
+    ) -> Result<Self, LedgerError> {
+        if id.is_nil()
+            || bytes == 0
+            || bytes > MAX_ITEM_BYTES
+            || digest == [0; 32]
+            || volume_serial == 0
+            || file_index == 0
+            || hard_links != 1
+        {
+            return Err(LedgerError::InvalidIntent);
+        }
+        Ok(Self {
+            transfer_id: id,
+            bytes,
+            digest,
+            volume_serial,
+            file_index,
+            hard_links,
+        })
+    }
+}
+
 impl InboxLedger {
     /// Local user intent only. Future OS deletion must commit this first.
     pub fn request_removal(&self, id: Uuid) -> Result<(), LedgerError> {
@@ -37,11 +83,26 @@ impl InboxLedger {
         Ok(())
     }
 
-    /// Does not remove files. The OS-scoped worker must have already removed
-    /// the exact pinned object; a crash between steps remains NeedsReview.
-    pub fn finish_removal(&self, id: Uuid) -> Result<(), LedgerError> {
+    /// Record only a witnessed OS outcome, never absence by arbitrary unlink.
+    /// The pure SQLite layer cannot independently attest to the OS worker.
+    pub fn finish_removal(
+        &self,
+        id: Uuid,
+        witness: RemovalDispositionWitness,
+    ) -> Result<(), LedgerError> {
         if self.removal_row(id)? != Some(0) {
             return Err(LedgerError::ConflictingIntent);
+        }
+        let receipt = self.get(id)?.ok_or(LedgerError::UnknownTransfer)?;
+        if receipt.state != 1
+            || witness.transfer_id != id
+            || witness.bytes != receipt.expected.bytes
+            || witness.digest != receipt.expected.blake3
+            || witness.volume_serial == 0
+            || witness.file_index == 0
+            || witness.hard_links != 1
+        {
+            return Err(LedgerError::InvalidLocalObject);
         }
         match fs::symlink_metadata(self.object_path(id)) {
             Ok(_) => return Err(LedgerError::InvalidLocalObject),
@@ -189,7 +250,11 @@ mod tests {
             RemovalAuditStatus::Requested
         );
         assert!(ledger.open_verified_file(intent.id).is_err());
-        assert!(ledger.finish_removal(intent.id).is_err());
+        let premature = RemovalDispositionWitness::for_disposable_lab(
+            intent.id, intent.bytes, intent.blake3, 1, 2, 1,
+        )
+        .unwrap();
+        assert!(ledger.finish_removal(intent.id, premature).is_err());
         assert_eq!(fs::read(ledger.object_path(intent.id)).unwrap(), bytes);
         drop(ledger);
         let reader = InboxLedger::open_existing(&root).unwrap().unwrap();
@@ -204,8 +269,32 @@ mod tests {
             ledger.removal_status(intent.id).unwrap(),
             RemovalAuditStatus::NeedsReview
         );
-        ledger.finish_removal(intent.id).unwrap();
-        assert!(ledger.finish_removal(intent.id).is_err());
+        // Synthetic fixture evidence tests the SQLite contract only; no
+        // claim of actual OS disposition is made by this isolated unit test.
+        let wrong_id = RemovalDispositionWitness::for_disposable_lab(
+            Uuid::new_v4(), intent.bytes, intent.blake3, 1, 2, 1,
+        )
+        .unwrap();
+        assert!(ledger.finish_removal(intent.id, wrong_id).is_err());
+        let wrong_hash = RemovalDispositionWitness::for_disposable_lab(
+            intent.id, intent.bytes, [91; 32], 1, 2, 1,
+        )
+        .unwrap();
+        assert!(ledger.finish_removal(intent.id, wrong_hash).is_err());
+        assert_eq!(
+            ledger.removal_status(intent.id).unwrap(),
+            RemovalAuditStatus::NeedsReview
+        );
+        let witnessed = RemovalDispositionWitness::for_disposable_lab(
+            intent.id, intent.bytes, intent.blake3, 1, 2, 1,
+        )
+        .unwrap();
+        ledger.finish_removal(intent.id, witnessed).unwrap();
+        let duplicate = RemovalDispositionWitness::for_disposable_lab(
+            intent.id, intent.bytes, intent.blake3, 1, 2, 1,
+        )
+        .unwrap();
+        assert!(ledger.finish_removal(intent.id, duplicate).is_err());
         assert_eq!(
             ledger.removal_status(intent.id).unwrap(),
             RemovalAuditStatus::Removed

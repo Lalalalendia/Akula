@@ -8,6 +8,12 @@ description = "Opt-in local checked Inbox ledger; no network, auth, Vault or sen
 
 [workspace]
 
+[features]
+default = []
+# Creates synthetic completion evidence only in disposable test builds.
+# Never enabled in normal signed Akula.
+disposable-removal-lab = []
+
 [dependencies]
 blake3 = "1.8.5"
 rusqlite = { version = "0.40.1", features = ["bundled"] }

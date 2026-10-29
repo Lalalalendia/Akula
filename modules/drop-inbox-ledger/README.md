@@ -47,9 +47,17 @@ identical-byte object swapping, consent refusal, duplicate grants and
 independent SQLite connections racing to remove a disposable object.
 
 These tests do not establish power-loss durability or hostile SQLite
-replacement protection. Missing-path-only finish still needs an authenticated
-OS outcome proof before any product exposure. UI Delete, normal signed
-installed builds and release publishing stay OFF.
+replacement protection. The Ledger now requires an opaque
+`RemovalDispositionWitness` to finish a deletion; absence of a pathname is
+insufficient. Its constructor exists only under internal crate tests or the
+explicit `disposable-removal-lab` dev-dependency feature. In the Core
+Windows test, the witness is created only after checking the original file
+identity against the digest-checked DELETE-capable HANDLE, successful
+disposition, and absent name relative to the pinned objects directory.
+Isolated Ledger tests deliberately synthesize witnesses to check SQL rules;
+such synthetic evidence is NOT independent kernel attestation. A future
+production-grade authenticated OS outcome and crash recovery protocol are
+still required. GUI Delete, normal signed builds and release remain OFF.
 
 ## Known gaps / intentionally absent features
 
