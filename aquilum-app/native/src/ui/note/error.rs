@@ -59,11 +59,9 @@ pub fn open_error_page(path: &Path, error: &str) -> (NewWidget<Flex>, OpenErrorI
     let actions = NewWidget::new(actions).with_props(PropertySet::new().with(Gap::new(Length::px(size::SPACE_8))));
 
     let icon = NewWidget::new(IconButton::new(icons::FILE_X, t("editor.openFailedTitle"))).disabled(true);
-    // Caption measures zero horizontal width here and clips errors to "...".
     let leading = Leading::Px(size::SIZE_20 as f32);
     let title = crate::ui::text::label(&t("editor.openFailedTitle"), |theme| theme.text_secondary, None, leading);
     let desc_w = crate::ui::text::selectable(&desc, |theme| theme.text_tertiary, None, leading);
-
     let content = Flex::column()
         .cross_axis_alignment(CrossAxisAlignment::Center)
         .main_axis_alignment(MainAxisAlignment::Center)
