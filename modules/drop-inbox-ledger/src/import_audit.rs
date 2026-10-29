@@ -249,7 +249,6 @@ mod tests {
         (dir, ledger, intent, bytes, target)
     }
 
-
     #[test]
     fn vault_projection_includes_only_verified_recorded_copies() {
         let (dir, mut ledger, intent, bytes, target) = fixture();

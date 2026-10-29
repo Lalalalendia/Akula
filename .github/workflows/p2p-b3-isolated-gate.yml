@@ -65,6 +65,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
+          rustfmt --edition 2024 --check aquilum-app/native/src/ui/file_tree/imported.rs
           cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::inbox::import::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::file_tree::imported::tests -- --nocapture
