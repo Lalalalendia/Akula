@@ -29,7 +29,7 @@ pub fn classify(result: notify::Result<Event>, root: &Path) -> Option<WatchBatch
     let notes = event
         .paths
         .iter()
-        .filter(|path| is_markdown(path) || is_plain_text(path))
+        .filter(|path| is_markdown(path) || is_plain_text(path) || is_qa_import_copy(path))
         .cloned()
         .collect::<Vec<_>>();
     if !notes.is_empty() {
@@ -44,6 +44,22 @@ pub fn classify(result: notify::Result<Event>, root: &Path) -> Option<WatchBatch
         .filter(|path| !is_hidden(root, path))
         .collect::<Vec<_>>();
     (!listed.is_empty()).then(|| WatchBatch::new(listed, WatchScope::Listing))
+}
+
+/// Only opt-in P2P may observe content changes of deterministic QA Vault copies.
+/// This is an invalidation event, not indexing or File Gate authorization.
+#[cfg(feature = "p2p-inbox-lab")]
+fn is_qa_import_copy(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|file| file.to_str())
+        .and_then(|file| file.strip_prefix("received-"))
+        .and_then(|file| file.strip_suffix(".bin"))
+        .is_some_and(|identity| uuid::Uuid::parse_str(identity).is_ok())
+}
+
+#[cfg(not(feature = "p2p-inbox-lab"))]
+fn is_qa_import_copy(_path: &Path) -> bool {
+    false
 }
 
 fn is_structural(kind: &EventKind) -> bool {

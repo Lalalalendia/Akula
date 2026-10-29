@@ -7,8 +7,10 @@ on:
       - 'aquilum-app/core/src/p2p_inbox_lab/**'
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
       - 'aquilum-app/core/src/files/gate/mod.rs'
+      - 'aquilum-app/core/src/files/watcher/**'
       - 'aquilum-app/native/src/app/transfer/**'
       - 'aquilum-app/native/src/app/transfer.rs'
+      - 'aquilum-app/native/src/app/core_events.rs'
       - 'aquilum-app/native/src/ui/transfer/**'
       - 'aquilum-app/native/src/ui/transfer.rs'
       - 'aquilum-app/native/Cargo.toml'
@@ -55,6 +57,7 @@ jobs:
         run: |
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::file_gate::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab files::watcher::classify::tests -- --nocapture
       - name: Confirm unaccepted P2P excluded from signed installed graph
         if: runner.os == 'Windows'
         shell: bash

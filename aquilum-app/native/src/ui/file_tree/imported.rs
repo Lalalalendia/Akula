@@ -9,6 +9,7 @@ use std::{
 };
 
 use akula_inbox_ledger_lab::{InboxLedger, user_inbox_root};
+use masonry::app::RenderRoot;
 use masonry::core::{NewWidget, PropertySet};
 use masonry::layout::Length;
 use masonry::properties::types::CrossAxisAlignment;
@@ -101,6 +102,21 @@ impl FileTree {
         };
         self.imported.poll(vault, Arc::clone(&self.wake))
     }
+
+    pub(crate) fn imported_content_changed(&mut self, root: &mut RenderRoot, paths: &[PathBuf]) {
+        if paths.iter().any(|path| is_qa_import_copy(path)) && self.request_imported() {
+            // Remove stale "verified" labels before the new worker hashes bytes.
+            self.refresh(root);
+        }
+    }
+}
+
+fn is_qa_import_copy(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|file| file.to_str())
+        .and_then(|file| file.strip_prefix("received-"))
+        .and_then(|file| file.strip_suffix(".bin"))
+        .is_some_and(|identity| uuid::Uuid::parse_str(identity).is_ok())
 }
 
 fn verified_names(vault: &Path, inbox: &Path) -> Vec<String> {
@@ -200,6 +216,18 @@ mod tests {
         fs::write(&target, b"modified after import").unwrap();
         assert!(verified_names(&vault, &inbox).is_empty());
         assert_eq!(fs::read(&original).unwrap(), bytes);
+    }
+
+    #[test]
+    fn only_deterministic_receipt_names_trigger_content_recheck() {
+        assert!(is_qa_import_copy(Path::new(
+            "received-550e8400-e29b-41d4-a716-446655440000.bin"
+        )));
+        assert!(!is_qa_import_copy(Path::new("received-invalid.bin")));
+        assert!(!is_qa_import_copy(Path::new("other.bin")));
+        assert!(!is_qa_import_copy(Path::new(
+            "received-550e8400-e29b-41d4-a716-446655440000.txt"
+        )));
     }
 
     #[test]
