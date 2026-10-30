@@ -4,15 +4,15 @@ use super::Document;
 
 impl Document {
     pub fn slice(&self, range: Range<usize>) -> &str {
-        &self.text[range.start - self.base..range.end - self.base]
+        range.start.checked_sub(self.base).zip(range.end.checked_sub(self.base)).and_then(|(a, b)| self.text.get(a..b)).unwrap_or("")
     }
 
     pub fn before(&self, at: usize) -> &str {
-        &self.text[..at - self.base]
+        at.checked_sub(self.base).and_then(|end| self.text.get(..end)).unwrap_or("")
     }
 
     pub fn after(&self, at: usize) -> &str {
-        &self.text[at - self.base..]
+        at.checked_sub(self.base).and_then(|start| self.text.get(start..)).unwrap_or("")
     }
 
     pub fn loaded(&self) -> (usize, &str) {
