@@ -410,6 +410,7 @@ dependencies = [
  "softbuffer",
  "tempfile",
  "tokio",
+ "unicode-normalization",
  "unicode-segmentation",
  "uuid",
  "vello_cpu",
