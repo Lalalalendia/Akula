@@ -5,3 +5,4 @@ mod find;
 mod page;
 mod saving;
 mod suggest;
+mod rename_paths;
