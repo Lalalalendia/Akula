@@ -147,6 +147,8 @@ fn overlapping_registered_vaults_still_block_a_real_rename() {
         "real moves must still pass through File Gate; do not discard them as no-op");
 
     h.app.open(&mut h.root, original.clone());
+    h.app.rename_file(&mut h.root, original.clone(), original.clone());
+    assert!(h.app.popup.is_none(), "an unchanged title must never enter cross-vault admission");
     h.app.rename_file(&mut h.root, original.clone(), nested.join("Мой заметки.md"));
     assert!(h.app.popup.is_none(), "normalization-only Enter must not hit the cross-vault gate");
     assert!(h.app.note.as_ref().is_some_and(|note| note.is(&original)));
