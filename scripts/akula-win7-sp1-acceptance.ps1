@@ -79,6 +79,42 @@ $utf8 = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList @($false)
 [IO.File]::WriteAllText($txt, 'AKULA_WIN7_TXT_FOLDER_NEEDLE', $utf8)
 [IO.File]::WriteAllText($upperTxt, 'AKULA_WIN7_UPPERCASE_TXT', $utf8)
 [IO.File]::WriteAllText($nestedTxt, 'AKULA_WIN7_NESTED_TXT', $utf8)
+# Source files must be opened from the actual Win7 vault tree. This tests
+# non-UTF8 formats used by Windows Notepad without modifying their bytes.
+$legacyAnsi = Join-Path $vault 'Legacy-ANSI.txt'
+$legacyUtf16 = Join-Path $txtFolder 'Legacy-UTF16.TXT'
+$legacyBroken = Join-Path $vault 'Legacy-Corrupt.TXT'
+$acp = [Text.Encoding]::Default.CodePage
+$strictAnsi = [Text.Encoding]::GetEncoding($acp,
+    [Text.EncoderFallback]::ExceptionFallback, [Text.DecoderFallback]::ExceptionFallback)
+$strictUtf8 = New-Object -TypeName System.Text.UTF8Encoding -ArgumentList @($false, $true)
+# Find a character that this machine's real ACP can encode, but that does
+# not also happen to be UTF-8. Windows 7 must exercise the ANSI fallback.
+$ansiSymbol = $null
+$candidates = @(
+    (UnicodeLabel @(0x041f,0x0440,0x0438,0x0432,0x0435,0x0442)),
+    (UnicodeLabel @(0x00e9)),
+    (UnicodeLabel @(0x65e5)),
+    (UnicodeLabel @(0x4e2d)),
+    (UnicodeLabel @(0x03a9))
+)
+foreach ($candidate in $candidates) {
+    try { [byte[]]$trial = $strictAnsi.GetBytes($candidate) }
+    catch [Text.EncoderFallbackException] { continue }
+    try { $null = $strictUtf8.GetString($trial) }
+    catch [Text.DecoderFallbackException] { $ansiSymbol = $candidate; break }
+}
+if ($null -eq $ansiSymbol) { throw "Cannot create strict non-UTF8 TXT for Windows ANSI CP$acp" }
+$ansiText = 'AKULA_WIN7_ANSI_NEEDLE ' + $ansiSymbol
+[IO.File]::WriteAllBytes($legacyAnsi, $strictAnsi.GetBytes($ansiText))
+$utf16Text = 'AKULA_WIN7_UTF16_NEEDLE ' + (UnicodeLabel @(0x041f,0x0440,0x0438,0x0432,0x0435,0x0442))
+$utf16Bytes = [byte[]](@(0xff, 0xfe) + @([Text.Encoding]::Unicode.GetBytes($utf16Text)))
+[IO.File]::WriteAllBytes($legacyUtf16, $utf16Bytes)
+# Bad UTF-16 with a dangling unit: must show an error, never an editable Note.
+[IO.File]::WriteAllBytes($legacyBroken, [byte[]](0xff, 0xfe, 0x01))
+$ansiHash = Sha256 $legacyAnsi
+$utf16Hash = Sha256 $legacyUtf16
+$brokenHash = Sha256 $legacyBroken
 $log = Join-Path $base 'evidence.txt'
 [IO.File]::WriteAllText($log, 'os=Windows 7 SP1 x64' + [Environment]::NewLine +
     'os_caption=' + $os.Caption + [Environment]::NewLine +
@@ -86,6 +122,10 @@ $log = Join-Path $base 'evidence.txt'
     'acceptance_script_sha256=' + (Sha256 $MyInvocation.MyCommand.Path) + [Environment]::NewLine +
     'installer_sha256=' + (Sha256 $Installer) + [Environment]::NewLine)
 function Record([string]$line) { [IO.File]::AppendAllText($log, $line + [Environment]::NewLine) }
+Record ('legacy_txt_ansi_codepage=' + $acp)
+Record ('legacy_txt_ansi_original_sha256=' + $ansiHash)
+Record ('legacy_txt_utf16_original_sha256=' + $utf16Hash)
+Record ('legacy_txt_corrupt_original_sha256=' + $brokenHash)
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
@@ -233,6 +273,32 @@ try {
         throw 'Win7 TXT content was not rendered in the editor'
     }
     Record 'txt_body=PASS_MANUAL'
+    # These are manual real-Win7 GUI observations. Hashes are independently
+    # checked by the script; do not equate Windows Server packaging with Win7.
+    Write-Host ('Click ' + [IO.Path]::GetFileName($legacyAnsi) + ' in the Akula tree.')
+    Write-Host ('Expected body: ' + $ansiText)
+    Write-Host ('Expected label: Windows ANSI (' + $acp + '), read only.')
+    if ((Read-Host 'Type PASS only if exact ANSI text opens without editable controls') -cne 'PASS') {
+        throw 'Win7 legacy ANSI TXT failed to open read-only from vault'
+    }
+    Record 'legacy_txt_ansi=PASS_MANUAL'
+    Write-Host ('Expand the nested folder and click ' + [IO.Path]::GetFileName($legacyUtf16))
+    Write-Host ('Expected body: ' + $utf16Text)
+    Write-Host 'Expected label: UTF-16 LE, read only.'
+    if ((Read-Host 'Type PASS only if exact UTF-16 text opens without editable controls') -cne 'PASS') {
+        throw 'Win7 legacy UTF-16 TXT failed to open read-only from nested vault'
+    }
+    Record 'legacy_txt_utf16=PASS_MANUAL'
+    Write-Host ('Click ' + [IO.Path]::GetFileName($legacyBroken) + ' in the Akula tree.')
+    if ((Read-Host 'Type PASS only if a safe open-error page appears, not an editable note') -cne 'PASS') {
+        throw 'Win7 corrupt UTF-16 TXT was not rejected safely'
+    }
+    Record 'legacy_txt_corrupt=PASS_MANUAL'
+    if ((Sha256 $legacyAnsi) -cne $ansiHash -or (Sha256 $legacyUtf16) -cne $utf16Hash -or
+        (Sha256 $legacyBroken) -cne $brokenHash) {
+        throw 'Opening legacy Win7 TXT changed at least one original file'
+    }
+    Record 'legacy_txt_bytes_unchanged=PASS'
     if ($UninstallAfterTest) {
         [void]$akula.CloseMainWindow()
         if (-not $akula.WaitForExit(15000)) { $akula.Kill(); [void]$akula.WaitForExit(10000) }
