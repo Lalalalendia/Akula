@@ -139,9 +139,16 @@ fn overlapping_registered_vaults_still_block_a_real_rename() {
     let desired = nested.join("Другое имя.md");
 
     let result = aquilum_core::files::gate::rename(&h.app.workspace.core, &original, &desired);
-    assert!(result.is_err(), "overlapping registered owners need a separate custody protocol");
+    assert!(matches!(&result, Err(aquilum_core::files::error::FileCommandError::Task { message })
+        if message.contains("Cross-workspace")), "expected cross-vault hold: {result:?}");
     assert_eq!(std::fs::read_to_string(&original).unwrap(), "Неприкосновенный текст");
     assert!(!desired.exists());
     assert!(crate::file_ops::rename_target(&original, "Другое имя").is_some(),
         "real moves must still pass through File Gate; do not discard them as no-op");
+
+    h.app.open(&mut h.root, original.clone());
+    h.app.rename_file(&mut h.root, original.clone(), nested.join("Мой заметки.md"));
+    assert!(h.app.popup.is_none(), "normalization-only Enter must not hit the cross-vault gate");
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&original)));
+    assert_eq!(std::fs::read_to_string(&original).unwrap(), "Неприкосновенный текст");
 }
