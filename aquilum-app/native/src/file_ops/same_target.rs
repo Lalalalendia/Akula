@@ -1,12 +1,19 @@
-//! A rename to a differently spelled representation of the SAME filename
-//! must not enter File Gate as a move. Preserve intentional case-only renames.
+//! Suppress normalization-only filename changes in an unchanged parent.
+//! Different parent spellings always require File Gate admission.
 use std::path::Path;
 use aquilum_core::search::paths::same_path;
 use unicode_normalization::UnicodeNormalization;
 
 pub(crate) fn is_noop_rename(from: &Path, to: &Path) -> bool {
-    if from == to {
+    if from.as_os_str() == to.as_os_str() {
         return true;
+    }
+    // same_path NFC-normalizes parent components and folds their case on
+    // Windows/macOS. Two such paths may still be different real directories,
+    // especially on Linux or on Windows with case-sensitive folders. Never
+    // silently swallow a parent change as a filename-only no-op.
+    if from.parent().map(Path::as_os_str) != to.parent().map(Path::as_os_str) {
+        return false;
     }
     if !same_path(from, to) {
         return false;
@@ -50,6 +57,15 @@ mod tests {
     }
 
 
+    #[test]
+    fn normalized_parent_aliases_remain_real_moves_for_file_gate() {
+        let left = Path::new("vault/Мои\u{306}/Note.md");
+        let right = Path::new("vault/Мой/Note.md");
+        assert!(same_path(left, right));
+        assert!(!is_noop_rename(left, right));
+        assert!(!is_noop_rename(right, left));
+    }
+
     #[cfg(any(windows, target_os = "macos"))]
     #[test]
     fn case_change_with_different_unicode_normalization_is_not_noop() {
@@ -74,14 +90,20 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn windows_drive_case_and_slash_alias_of_the_same_name_is_noop() {
-        assert!(is_noop_rename(
-            Path::new(r"D:\Книги\Без названия 3.md"),
-            Path::new("d:/Книги/Без названия 3.md"),
+    fn windows_parent_aliases_require_gate_admission() {
+        let source = Path::new(r"D:\Книги\Без названия 3.md");
+        let parent_alias = Path::new("d:/Книги/Без названия 3.md");
+        // Search identity ignores drive case and separator spelling. That
+        // alone does not authorize treating a relocation as a UI no-op.
+        assert!(same_path(source, parent_alias));
+        assert!(!is_noop_rename(source, parent_alias));
+        assert!(!is_noop_rename(
+            source,
+            Path::new(r"D:\Книги\БЕЗ НАЗВАНИЯ 3.md"),
         ));
         assert!(!is_noop_rename(
-            Path::new(r"D:\Книги\Без названия 3.md"),
-            Path::new(r"D:\Книги\БЕЗ НАЗВАНИЯ 3.md"),
+            Path::new(r"D:\Книги\Folder\Note.md"),
+            Path::new(r"D:\Книги\folder\Note.md"),
         ));
     }
 }
