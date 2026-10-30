@@ -128,3 +128,20 @@ fn case_only_title_change_is_still_a_requested_rename() {
     assert_eq!(to, std::path::Path::new("vault/note.md"));
     assert_eq!(label, "note");
 }
+
+#[test]
+fn overlapping_registered_vaults_still_block_a_real_rename() {
+    let mut h = Harness::new();
+    let nested = h.vault.path().join("Nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    h.app.workspace.core.ui_state.resolve_workspace(nested.to_str().unwrap(), 2).unwrap();
+    let original = h.write_note("Nested/Мои\u{306} заметки.md", "Неприкосновенный текст");
+    let desired = nested.join("Другое имя.md");
+
+    let result = aquilum_core::files::gate::rename(&h.app.workspace.core, &original, &desired);
+    assert!(result.is_err(), "overlapping registered owners need a separate custody protocol");
+    assert_eq!(std::fs::read_to_string(&original).unwrap(), "Неприкосновенный текст");
+    assert!(!desired.exists());
+    assert!(crate::file_ops::rename_target(&original, "Другое имя").is_some(),
+        "real moves must still pass through File Gate; do not discard them as no-op");
+}
