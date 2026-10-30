@@ -99,3 +99,32 @@ fn core_relocation_event_requests_window_title_refresh() {
     assert_eq!(std::fs::read_to_string(&to).unwrap(), "текст");
     assert!(h.app.note.as_ref().is_some_and(|note| note.is(&to)));
 }
+
+#[test]
+fn normalization_equivalent_title_is_noop_without_an_error_or_disk_move() {
+    let mut h = Harness::new();
+    let original = h.write_note("Мои\u{306} заметки.md", "Исходные байты");
+    let composed = h.vault.path().join("Мой заметки.md");
+    let original_bytes = std::fs::read(&original).unwrap();
+    assert_ne!(original, composed, "different Unicode spellings must be exercised");
+    assert!(aquilum_core::search::paths::same_path(&original, &composed));
+
+    h.app.open(&mut h.root, original.clone());
+    assert!(crate::file_ops::rename_target(&original, "Мой заметки").is_none(),
+        "title blur and Enter must not invent a Unicode-only rename");
+    h.app.rename_file(&mut h.root, original.clone(), composed);
+
+    assert!(h.app.popup.is_none(), "equivalent path must not show cross-vault failure");
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&original)));
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(original.as_path()));
+    assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+}
+
+#[test]
+fn case_only_title_change_is_still_a_requested_rename() {
+    let from = std::path::Path::new("vault/Note.md");
+    let (to, label) = crate::file_ops::rename_target(from, "note")
+        .expect("case-only rename should still be offered to File Gate");
+    assert_eq!(to, std::path::Path::new("vault/note.md"));
+    assert_eq!(label, "note");
+}
