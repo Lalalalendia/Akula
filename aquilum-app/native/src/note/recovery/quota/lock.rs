@@ -23,7 +23,7 @@ pub(super) fn validate(path: &Path) -> io::Result<()> {
 
 /// The File retains the lock through quota admission, sync and publication.
 /// A timeout fails closed instead of blocking the disk worker forever.
-pub(in crate::note::recovery) fn acquire(bucket: &Path) -> io::Result<File> {
+fn open_validated(bucket: &Path) -> io::Result<File> {
     let root = bucket.parent().ok_or_else(|| invalid("missing recovery root"))?;
     let path = root.join(FILENAME);
     let mut options = OpenOptions::new();
@@ -44,6 +44,24 @@ pub(in crate::note::recovery) fn acquire(bucket: &Path) -> io::Result<File> {
     validate(&path)?;
     #[cfg(target_os = "windows")]
     super::super::acl::restrict(&path)?;
+    Ok(file)
+}
+
+/// Never wait for a snapshot writer while blocking the GUI rename action.
+/// A busy cooperative writer causes an immediate, visible retryable refusal.
+pub(in crate::note::recovery) fn try_acquire(bucket: &Path) -> io::Result<File> {
+    let file = open_validated(bucket)?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(TryLockError::WouldBlock) => {
+            Err(denied("recovery writer busy; retry the rename"))
+        }
+        Err(TryLockError::Error(error)) => Err(error),
+    }
+}
+
+pub(in crate::note::recovery) fn acquire(bucket: &Path) -> io::Result<File> {
+    let file = open_validated(bucket)?;
     let started = Instant::now();
     loop {
         match file.try_lock() {
@@ -107,6 +125,18 @@ mod tests {
         assert!(child.wait().unwrap().success(), "child failed to acquire lock after release");
         assert_eq!(fs::read(root.join("acquired")).unwrap(), b"locked");
         assert_eq!(fs::metadata(bucket.parent().unwrap().join(FILENAME)).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn ui_move_lease_refuses_live_snapshot_writer_without_five_second_wait() {
+        let temp = tempfile::tempdir().unwrap();
+        let bucket = bucket(temp.path());
+        let writer = acquire(&bucket).unwrap();
+        let started = Instant::now();
+        assert!(try_acquire(&bucket).is_err(), "busy snapshot writer must block rename");
+        assert!(started.elapsed() < Duration::from_secs(3), "UI lock attempt must not wait five seconds");
+        drop(writer);
+        assert!(try_acquire(&bucket).is_ok(), "released snapshot writer must allow retry");
     }
 
     #[test]

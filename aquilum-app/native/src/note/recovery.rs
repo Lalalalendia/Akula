@@ -9,7 +9,7 @@ mod quota;
 #[cfg(target_os = "windows")]
 mod acl;
 pub(super) use queue::{CaptureStatus, SnapshotQueue};
-pub(crate) use move_inventory::has_unreviewed_shadow_under_move;
+pub(crate) use move_inventory::{acquire_move_guard, has_unreviewed_shadow_under_move};
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};

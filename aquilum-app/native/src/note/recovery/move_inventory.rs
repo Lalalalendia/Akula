@@ -11,6 +11,14 @@ use super::{checked_relative, decode, denied, folder, invalid, key, read_bounded
 const MAX_MOVE_RECORDS: usize = 1_024;
 const MAX_MOVE_BYTES: u64 = 64 * 1024 * 1024;
 
+/// The same lock that spans staging, sync and shadow publication must
+/// cover the preflight-to-File-Gate rename window. Do not wait on the UI.
+pub(crate) fn acquire_move_guard(data: &Path, workspace: Uuid) -> io::Result<fs::File> {
+    let bucket = folder(data, workspace, true)?
+        .ok_or_else(|| invalid("missing recovery workspace"))?;
+    super::quota::try_acquire(&bucket)
+}
+
 pub(crate) fn has_unreviewed_shadow_under_move(
     data: &Path, vault: &Path, workspace: Uuid, from: &Path,
 ) -> io::Result<bool> {

@@ -97,20 +97,24 @@ impl App {
             return;
         }
 
-        // Block moves that would strand an outstanding draft from any open tab.
-        let shadow_blocker = self.rename_shadow_blocker(&from);
-        if let Some(reason) = shadow_blocker {
-            report!("{} не переименован: {reason}", from.display());
-            // The title commit remembers the last destination. Reset it on
-            // rejection or repeated Enter on the same name becomes a no-op.
-            if self.note.as_ref().is_some_and(|note| note.path.starts_with(&from)) {
-                self.refresh_note_names(root);
+        // A held AppData lease prevents new old-path snapshots between the
+        // recovery preflight and the verified File Gate rename.
+        let move_guard = match self.guarded_rename_shadow_check(&from) {
+            Ok(guard) => guard,
+            Err(reason) => {
+                report!("{} не переименован: {reason}", from.display());
+                // Reset the attempted title to keep repeated Enter retryable.
+                if self.note.as_ref().is_some_and(|note| note.path.starts_with(&from)) {
+                    self.refresh_note_names(root);
+                }
+                self.show_rename_error(root, &from, &to, &reason);
+                return;
             }
-            self.show_rename_error(root, &from, &to, &reason);
-            return;
-        }
+        };
 
-        match aquilum_core::files::gate::rename(&self.workspace.core, &from, &to) {
+        let result = aquilum_core::files::gate::rename(&self.workspace.core, &from, &to);
+        drop(move_guard); // Never hold the recovery lock through UI reconciliation.
+        match result {
             Ok(result) => {
                 // The File Gate result is authoritative: a wiki-link rewrite can
                 // change this file's bytes as part of the rename transaction.

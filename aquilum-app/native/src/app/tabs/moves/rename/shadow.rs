@@ -2,6 +2,26 @@ use super::{App, Path};
 use crate::i18n::{t, t_with};
 
 impl App {
+    /// Hold the cross-process recovery publication lease until File Gate returns.
+    /// If a writer is busy, reject immediately instead of freezing the UI.
+    pub(super) fn guarded_rename_shadow_check(&self, from: &Path) -> Result<std::fs::File, String> {
+        let workspace = self.session.as_ref()
+            .map(|session| session.workspace_id)
+            .ok_or_else(|| t_with(
+                "editor.renameRecoveryCheck",
+                &[("reason", "workspace recovery context unavailable")],
+            ))?;
+        let guard = crate::note::bridge::acquire_move_guard(&self.workspace.data_dir, workspace)
+            .map_err(|error| t_with(
+                "editor.renameRecoveryCheck",
+                &[("reason", &error.to_string())],
+            ))?;
+        if let Some(reason) = self.rename_shadow_blocker(from) {
+            return Err(reason);
+        }
+        Ok(guard)
+    }
+
     /// A detached tab may retain an unreviewed shadow under its old filename.
     /// Do not move its file or parent folder before explicit recovery review.
     pub(super) fn rename_shadow_blocker(&self, from: &Path) -> Option<String> {

@@ -365,6 +365,27 @@ fn folder_rename_refuses_to_orphan_inactive_tab_recovery() {
 }
 
 #[test]
+fn folder_rename_refuses_busy_recovery_writer_without_moving_disk_bytes() {
+    let mut h = Harness::new();
+    let folder = h.vault.path().join("Concurrent");
+    let destination = h.vault.path().join("RenamedConcurrent");
+    std::fs::create_dir_all(&folder).unwrap();
+    let child = h.write_note("Concurrent/child.md", "unchanged original");
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    crate::disk::wait();
+
+    // A separate process uses this same exclusive quota/publication lock.
+    let writer = crate::note::bridge::acquire_move_guard(h._data.path(), workspace).unwrap();
+    h.app.rename_file(&mut h.root, folder.clone(), destination.clone());
+
+    assert!(folder.is_dir(), "busy recovery publication must block folder rename");
+    assert!(!destination.exists(), "File Gate must not run under a busy writer");
+    assert_eq!(std::fs::read_to_string(&child).unwrap(), "unchanged original");
+    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
+    drop(writer);
+}
+
+#[test]
 fn folder_rename_blocks_closed_tab_unreviewed_draft() {
     let mut h = Harness::new();
     let folder = h.vault.path().join("ClosedFolder");
