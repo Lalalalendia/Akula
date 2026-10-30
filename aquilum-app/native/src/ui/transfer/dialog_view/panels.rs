@@ -36,12 +36,19 @@ pub(super) fn base(
     #[cfg(feature = "p2p-device-contacts-preview")] contacts: &TransportContactView,
     consent_only: bool,
 ) -> Flex {
-    let card = if consent_only { card } else { card.with_fixed(info) };
+    let card = if consent_only {
+        card
+    } else {
+        card.with_fixed(info)
+    };
     #[cfg(feature = "p2p-device-contacts-preview")]
     let card = if consent_only {
         card
     } else {
-        card.with(NewWidget::new(ScrollArea::new(contact_preview::render(contacts))), 1.0)
+        card.with(
+            NewWidget::new(ScrollArea::new(contact_preview::render(contacts))),
+            1.0,
+        )
     };
     card
 }
