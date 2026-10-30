@@ -1,7 +1,7 @@
 //! Persistent cross-process quota lock; never unlink/replace the lock file.
 mod open;
 mod nonblocking;
-pub(super) use nonblocking::try_acquire;
+pub(in crate::note::recovery) use nonblocking::try_acquire;
 
 use std::{
     fs::{self, File, TryLockError},
