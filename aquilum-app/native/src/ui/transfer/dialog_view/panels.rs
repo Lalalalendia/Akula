@@ -1,6 +1,7 @@
 //! Explicit opt-in P2P and W4 sections inside the existing transfer modal.
 use super::super::*;
 
+#[derive(Default)]
 pub(super) struct SectionActions {
     pub(super) identity_actions: Vec<(WidgetId, IdentityAction)>,
     #[cfg(feature = "p2p-device-ui")]
@@ -15,6 +16,50 @@ pub(super) struct SectionActions {
     pub(super) native_receive_actions: Vec<(WidgetId, NativeReceiveAction)>,
     #[cfg(feature = "messaging-w4-pilot")]
     pub(super) w4_actions: Vec<(WidgetId, PilotAction)>,
+}
+
+/// A pending signed-Offer proposal takes over the modal. Other file,
+/// peer, inbox and draft controls are not mounted during the decision.
+#[cfg(feature = "p2p-offer-consent-qa")]
+pub(super) fn consent_only(extras: &TransferExtras<'_>) -> bool {
+    extras.offer_consent.is_some()
+}
+
+#[cfg(not(feature = "p2p-offer-consent-qa"))]
+pub(super) fn consent_only(_: &TransferExtras<'_>) -> bool {
+    false
+}
+
+pub(super) fn base(
+    card: Flex,
+    info: NewWidget<Flex>,
+    #[cfg(feature = "p2p-device-contacts-preview")] contacts: &TransportContactView,
+    consent_only: bool,
+) -> Flex {
+    let card = if consent_only { card } else { card.with_fixed(info) };
+    #[cfg(feature = "p2p-device-contacts-preview")]
+    let card = if consent_only {
+        card
+    } else {
+        card.with(NewWidget::new(ScrollArea::new(contact_preview::render(contacts))), 1.0)
+    };
+    card
+}
+
+pub(super) fn finish(
+    card: Flex,
+    queue: NewWidget<ScrollArea<Flex>>,
+    footer: NewWidget<Flex>,
+    consent_only: bool,
+) -> NewWidget<Flex> {
+    NewWidget::new(if consent_only {
+        card
+    } else {
+        card.with_fixed(rule())
+            .with(queue, 1.0)
+            .with_fixed(rule())
+            .with_fixed(footer)
+    })
 }
 
 pub(super) fn choose_button(choosing: bool) -> NewWidget<TextButton> {
@@ -36,6 +81,17 @@ pub(super) fn render(
     extras: TransferExtras<'_>,
     #[cfg(feature = "p2p-device-contacts-preview")] contacts: &TransportContactView,
 ) -> (Flex, SectionActions) {
+    #[cfg(feature = "p2p-offer-consent-qa")]
+    if let Some(offer) = extras.offer_consent {
+        let (panel, actions) = super::offer_consent_view::render(offer);
+        return (
+            card.with(NewWidget::new(ScrollArea::new(panel)), 1.0),
+            SectionActions {
+                offer_consent_actions: actions,
+                ..SectionActions::default()
+            },
+        );
+    }
     let mut identity_actions = Vec::new();
     #[cfg(feature = "p2p-device-ui")]
     let mut peer_controls = None;
@@ -56,16 +112,7 @@ pub(super) fn render(
             .with(NewWidget::new(ScrollArea::new(panel)), 1.0);
     }
     #[cfg(feature = "p2p-offer-consent-qa")]
-    let (card, offer_consent_actions) = if let Some(offer) = extras.offer_consent {
-        let (panel, actions) = super::offer_consent_view::render(offer);
-        (
-            card.with_fixed(rule())
-                .with(NewWidget::new(ScrollArea::new(panel)), 1.0),
-            actions,
-        )
-    } else {
-        (card, Vec::new())
-    };
+    let offer_consent_actions = Vec::new();
     #[cfg(feature = "p2p-inbox-preview")]
     let (card, inbox_save_actions) = if let Some(inbox) = extras.inbox {
         let (panel, buttons) = inbox_view::render(inbox);

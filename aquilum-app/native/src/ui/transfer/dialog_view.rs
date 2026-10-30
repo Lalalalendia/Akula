@@ -14,11 +14,12 @@ pub fn dialog(
 ) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
+    let consent_only = panels::consent_only(&extras);
     let choose = panels::choose_button(choosing);
     let choose_id = choose.id();
-    let (queue, actions) = queue_view::render(rows);
+    let (queue, actions) = queue_view::render(if consent_only { &[] } else { rows });
     let queue = NewWidget::new(ScrollArea::new(queue));
-    let (info, device_actions) = devices::render(devices, error);
+    let (info, device_actions) = devices::render(if consent_only { &[] } else { devices }, error);
     let footer = NewWidget::new(
         Flex::row()
             .main_axis_alignment(MainAxisAlignment::End)
@@ -28,23 +29,16 @@ pub fn dialog(
     let card = Flex::column()
         .cross_axis_alignment(CrossAxisAlignment::Stretch)
         .with_fixed(header(&t("transfer.title"), Some(close)))
-        .with_fixed(rule())
-        .with_fixed(info);
+        .with_fixed(rule());
     #[cfg(feature = "p2p-device-contacts-preview")]
-    let card = card.with(
-        NewWidget::new(ScrollArea::new(contact_preview::render(contacts))),
-        1.0,
-    );
+    let card = panels::base(card, info, contacts, consent_only);
+    #[cfg(not(feature = "p2p-device-contacts-preview"))]
+    let card = panels::base(card, info, consent_only);
     #[cfg(feature = "p2p-device-contacts-preview")]
     let (card, sections) = panels::render(card, extras, contacts);
     #[cfg(not(feature = "p2p-device-contacts-preview"))]
     let (card, sections) = panels::render(card, extras);
-    let card = NewWidget::new(
-        card.with_fixed(rule())
-            .with(queue, 1.0)
-            .with_fixed(rule())
-            .with_fixed(footer),
-    );
+    let card = panels::finish(card, queue, footer, consent_only);
     let layer = Modal::new(
         card,
         &t("transfer.title"),

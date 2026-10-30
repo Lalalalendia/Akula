@@ -154,3 +154,40 @@ fn actual_pointer_event_on_visible_accept_button_creates_one_decision() {
     assert_eq!(reply.decision().manifest_commitment, offer.commitment());
     assert!(h.app.transfer.offer_consent.take_response().is_none());
 }
+
+#[test]
+fn pending_offer_hides_background_file_request_controls() {
+    let mut h = Harness::new();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let offer = offer(now);
+    h.app
+        .transfer
+        .offer_consent
+        .present_from_authenticated_transport(
+            &offer.encode(now).unwrap(),
+            offer.sender,
+            offer.receiver,
+            now,
+        )
+        .unwrap();
+    let transfer_button = h.app.chrome.as_ref().unwrap().transfer_button;
+    h.act(transfer_button, Pressed);
+    let Some(Popup::Transfers(dialog)) = &h.app.popup else {
+        panic!("Offer consent modal missing");
+    };
+    assert_eq!(dialog.offer_consent_actions.len(), 2);
+    assert!(dialog.actions.is_empty());
+    assert!(dialog.device_actions.is_empty());
+    assert!(dialog.identity_actions.is_empty());
+    assert!(dialog.peer_controls.is_none());
+    #[cfg(feature = "p2p-inbox-preview")]
+    assert!(dialog.inbox_save_actions.is_empty());
+    #[cfg(feature = "p2p-native-send-beta")]
+    assert!(dialog.native_send_actions.is_empty());
+    #[cfg(feature = "p2p-native-receive-beta")]
+    assert!(dialog.native_receive_actions.is_empty());
+    assert!(h.app.transfer.offer_consent.take_response().is_none());
+}
