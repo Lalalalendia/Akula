@@ -42,7 +42,7 @@ impl App {
             Some(TreeAction::Open { path, new_tab }) => return self.open_tree_file(root, path, new_tab),
             Some(TreeAction::Rename { from, to }) => {
                 self.rename_file(root, from, to);
-                return false;
+                return true;
             }
             Some(TreeAction::CreateNote) => return self.create_note_titled(root, None),
             Some(TreeAction::NewNote { folder }) => return self.create_note_in(root, &folder),
