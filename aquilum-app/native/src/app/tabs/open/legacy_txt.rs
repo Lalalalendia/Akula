@@ -16,6 +16,12 @@ use crate::ui::widgets::{Font, Label, Leading};
 
 const MAX_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
 
+// Legacy preview must not display arbitrary binary control bytes as text.
+// Preserve the whitespace that occurs in ordinary Windows TXT documents.
+fn binary_controls(text: &str) -> bool {
+    text.chars().any(|c| c.is_control() && !matches!(c, '\t' | '\r' | '\n' | '\u{000c}'))
+}
+
 fn utf16(bytes: &[u8], little_endian: bool) -> Result<String, String> {
     if bytes.len() % 2 != 0 {
         return Err("Неполный символ UTF-16 в TXT".into());
@@ -26,8 +32,8 @@ fn utf16(bytes: &[u8], little_endian: bool) -> Result<String, String> {
     }).collect::<Vec<_>>();
     let text = String::from_utf16(&words)
         .map_err(|_| "Повреждённая последовательность UTF-16".to_owned())?;
-    if text.contains('\0') {
-        return Err("TXT содержит нулевые символы UTF-16: возможно, это двоичный файл".into());
+    if binary_controls(&text) {
+        return Err("TXT содержит управляющие символы UTF-16: возможно, это двоичный файл".into());
     }
     Ok(text)
 }
@@ -55,6 +61,9 @@ fn ansi(bytes: &[u8]) -> Result<(String, String), String> {
         return Err("TXT изменился при декодировании ANSI".to_owned());
     }
     let text = String::from_utf16(&decoded).map_err(|_| "Недопустимые символы ANSI".to_owned())?;
+    if binary_controls(&text) {
+        return Err("TXT содержит управляющие символы ANSI: возможно, это двоичный файл".into());
+    }
     Ok((text, format!("Windows ANSI ({page})")))
 }
 
@@ -174,6 +183,26 @@ mod tests {
         assert!(decode(&[0xfe, 0xff, 0, 0]).is_err());
         assert!(decode(&[0xff, 0xfe, 0x41, 0, 0, 0]).is_err());
         assert!(decode(&[0xef, 0xbb, 0xbf, 0xff]).is_err());
+    }
+
+    #[test]
+    fn utf16_binary_controls_are_rejected_but_text_whitespace_survives() {
+        assert!(decode(&[0xff, 0xfe, 0x01, 0x00]).is_err());
+        assert!(decode(&[0xfe, 0xff, 0x00, 0x1b]).is_err());
+        let original = "строка\r\nс табуляцией\tи формой\u{000c}";
+        let mut bytes = vec![0xff, 0xfe];
+        for word in original.encode_utf16() {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        assert_eq!(decode(&bytes).unwrap().0, original);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn ansi_binary_controls_fail_closed_without_rejecting_lines_and_tabs() {
+        assert!(decode(b"header\x01payload").is_err());
+        assert!(decode(b"header\x1b[0m").is_err());
+        assert_eq!(decode(b"line\r\ncolumn\tvalue").unwrap().0, "line\r\ncolumn\tvalue");
     }
 
     #[test]
