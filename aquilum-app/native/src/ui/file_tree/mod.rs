@@ -4,6 +4,7 @@ mod drag;
 mod ghost;
 pub mod model;
 mod parts;
+mod paths;
 mod pinned;
 mod pins;
 mod row;
@@ -124,11 +125,6 @@ impl FileTree {
 
     pub fn clear_selection(&mut self, root: &mut RenderRoot) {
         self.model.clear_selection();
-        self.refresh(root);
-    }
-
-    pub fn paths_changed(&mut self, root: &mut RenderRoot, paths: &[PathBuf]) {
-        self.model.refresh_paths(paths);
         self.refresh(root);
     }
 

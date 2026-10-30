@@ -77,7 +77,6 @@ impl App {
             renaming_to: None,
             hero_shown: None,
             picked_tx,
-            failed_renames: channel(),
             picked_rx,
             transfer_tx,
             transfer_rx,

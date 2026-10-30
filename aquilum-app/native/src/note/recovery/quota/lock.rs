@@ -1,13 +1,17 @@
 //! Persistent cross-process quota lock; never unlink/replace the lock file.
+mod open;
+mod nonblocking;
+pub(in crate::note::recovery) use nonblocking::try_acquire;
+
 use std::{
-    fs::{self, File, OpenOptions, TryLockError},
+    fs::{self, File, TryLockError},
     io,
     path::Path,
     thread,
     time::{Duration, Instant},
 };
 
-use super::super::{denied, invalid, reparse};
+use super::super::{denied, reparse};
 
 pub(super) const FILENAME: &str = ".quota.lock";
 const RETRY: Duration = Duration::from_millis(25);
@@ -24,26 +28,7 @@ pub(super) fn validate(path: &Path) -> io::Result<()> {
 /// The File retains the lock through quota admission, sync and publication.
 /// A timeout fails closed instead of blocking the disk worker forever.
 pub(in crate::note::recovery) fn acquire(bucket: &Path) -> io::Result<File> {
-    let root = bucket.parent().ok_or_else(|| invalid("missing recovery root"))?;
-    let path = root.join(FILENAME);
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let file = match options.open(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-            validate(&path)?;
-            OpenOptions::new().read(true).write(true).open(&path)?
-        }
-        Err(error) => return Err(error),
-    };
-    validate(&path)?;
-    #[cfg(target_os = "windows")]
-    super::super::acl::restrict(&path)?;
+    let file = open::validated(bucket)?;
     let started = Instant::now();
     loop {
         match file.try_lock() {
@@ -62,7 +47,7 @@ pub(in crate::note::recovery) fn acquire(bucket: &Path) -> io::Result<File> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{path::PathBuf, process::Command};
+    use std::{fs::OpenOptions, path::PathBuf, process::Command};
 
     fn bucket(root: &Path) -> PathBuf {
         let bucket = root.join("akula-note-recovery-v1").join(uuid::Uuid::new_v4().to_string());

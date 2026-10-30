@@ -1,5 +1,6 @@
 //! Controlled bridge from Note to the DESK-15 snapshot sink.
 //! Live editor edits are captured; a confirmed File Gate save retires only matching shadows.
+mod lifecycle;
 use std::io;
 use std::path::Path;
 
@@ -8,6 +9,7 @@ use uuid::Uuid;
 
 use super::Note;
 use super::recovery::{CaptureStatus, SnapshotQueue};
+pub(crate) use super::recovery::{acquire_move_guard, has_unreviewed_shadow_under_move};
 
 /// Read-only candidate. No automatic write to user documents is possible here.
 pub(crate) struct RecoveryCandidate {
@@ -35,15 +37,6 @@ pub(crate) fn inspect_for_recovery(
 }
 
 impl Note {
-    /// Only arm the sink after a verified source read and a real workspace ID.
-    pub(crate) fn arm_shadow(&mut self, data: &Path, vault: &Path, workspace: Uuid) -> io::Result<()> {
-        if self.shadow.is_none() {
-            let baseline = self.hash.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
-            self.shadow = Some(SnapshotQueue::new(data, vault, workspace, &self.path, &baseline)?);
-        }
-        Ok(())
-    }
-
     /// Queued != durable. The App must not report recovery as safe until the
     /// separate worker has returned a real revision acknowledgment.
     pub(crate) fn snapshot_unsaved(&self, source: &Rope) -> io::Result<Option<u64>> {

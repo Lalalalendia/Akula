@@ -174,3 +174,293 @@ fn malformed_legacy_txt_does_not_touch_source_or_activate_an_editor() {
     assert!(h.app.note.is_none());
     assert_eq!(std::fs::read(path).unwrap(), bytes);
 }
+
+
+#[test]
+fn renaming_an_edited_note_commits_its_text_before_moving_the_file() {
+    let mut h = Harness::new();
+    let from = h.vault.path().join("a.md");
+    let to = h.vault.path().join("After.md");
+    h.app.open(&mut h.root, from.clone());
+    h.app.commit_text(&mut h.root, crop::Rope::from("текст до переименования"));
+
+    h.app.rename_file(&mut h.root, from.clone(), to.clone());
+
+    assert!(!from.exists(), "old name should disappear after a successful rename");
+    assert_eq!(std::fs::read_to_string(&to).unwrap(), "текст до переименования");
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&to)));
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(to.as_path()));
+    assert!(h.app.open_error.is_none(), "the renamed note must stay open");
+}
+
+#[test]
+fn failed_rename_never_switches_the_active_note_or_tab_to_an_unavailable_file() {
+    let mut h = Harness::new();
+    let from = h.vault.path().join("a.md");
+    let to = h.vault.path().join("Taken.md");
+    h.app.open(&mut h.root, from.clone());
+    std::fs::write(&to, "чужой текст").unwrap();
+
+    h.app.rename_file(&mut h.root, from.clone(), to.clone());
+
+    assert_eq!(std::fs::read_to_string(&from).unwrap(), "текст");
+    assert_eq!(std::fs::read_to_string(&to).unwrap(), "чужой текст");
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&from)));
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(from.as_path()));
+    assert!(h.app.open_error.is_none(), "failed rename must not strand the tab on an error page");
+    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })), "failure reason must be visible");
+}
+
+#[test]
+fn failed_sidebar_rename_does_not_patch_the_tree_before_the_file_moves() {
+    use crate::ui::editor::TextAction;
+    let mut h = Harness::new();
+    let from = h.vault.path().join("a.md");
+    let taken = h.vault.path().join("Taken.md");
+    std::fs::write(&taken, "другая заметка").unwrap();
+    h.app.tree.paths_changed(&mut h.root, std::slice::from_ref(&taken));
+    h.app.open(&mut h.root, from.clone());
+    h.app.tree.start_rename(&mut h.root, from.clone());
+    let field = h.app.tree.rename_field().expect("sidebar rename input");
+
+    h.act(field, TextAction::Entered("Taken".to_owned()));
+
+    assert!(from.exists(), "source file must remain after a rejected rename");
+    assert!(h.app.tree.row_id("a").is_some(), "old sidebar row must remain");
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&from)));
+    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
+}
+
+#[test]
+fn renaming_folder_preserves_dirty_nested_note_and_other_open_tabs() {
+    let mut h = Harness::new();
+    let from = h.vault.path().join("Folder");
+    let to = h.vault.path().join("Renamed");
+    std::fs::create_dir_all(from.join("nested")).unwrap();
+    let first = h.write_note("Folder/first.md", "первый");
+    let second = h.write_note("Folder/nested/second.md", "второй");
+    let unrelated = h.write_note("Folder-copy.md", "в стороне");
+    h.app.open(&mut h.root, first.clone());
+    h.app.open_in(&mut h.root, second.clone(), true);
+    h.app.open_in(&mut h.root, unrelated.clone(), true);
+    h.app.open(&mut h.root, first.clone());
+    let original_tab_count = h.app.tabs.tabs().len();
+    h.app.commit_text(&mut h.root, crop::Rope::from("изменено до переименования"));
+
+    h.app.rename_file(&mut h.root, from.clone(), to.clone());
+
+    let moved_first = to.join("first.md");
+    let moved_second = to.join("nested").join("second.md");
+    assert!(!from.exists(), "old folder must disappear after successful rename");
+    assert_eq!(std::fs::read_to_string(&moved_first).unwrap(), "изменено до переименования");
+    assert_eq!(std::fs::read_to_string(&moved_second).unwrap(), "второй");
+    assert_eq!(std::fs::read_to_string(&unrelated).unwrap(), "в стороне");
+    assert_eq!(h.app.tabs.tabs().len(), original_tab_count);
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(moved_first.as_path()));
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&moved_first)));
+    assert!(h.app.tabs.tabs().iter().any(|tab| tab.path.as_deref() == Some(moved_second.as_path())));
+    assert!(h.app.tabs.tabs().iter().any(|tab| tab.path.as_deref() == Some(unrelated.as_path())));
+    assert!(h.app.open_error.is_none());
+}
+
+#[test]
+fn rename_rebinds_crash_recovery_capture_to_the_destination_path() {
+    let mut h = Harness::new();
+    let from = h.vault.path().join("a.md");
+    let to = h.vault.path().join("Rebound.md");
+    h.app.open(&mut h.root, from.clone());
+    h.app.rename_file(&mut h.root, from.clone(), to.clone());
+    assert!(to.exists());
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&to)));
+    h.app.note.as_ref().unwrap()
+        .snapshot_unsaved(&crop::Rope::from("Черновик после переименования"))
+        .unwrap();
+    crate::disk::wait();
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    let candidate = crate::note::bridge::inspect_for_recovery(h._data.path(), h.vault.path(), workspace, &to)
+        .unwrap().expect("new destination must have a recoverable shadow");
+    assert_eq!(candidate.body.to_string(), "Черновик после переименования");
+    assert!(!candidate.already_saved);
+    assert!(h.app.note.as_ref().unwrap().shadow_error().is_none());
+}
+
+#[test]
+fn rename_refuses_to_orphan_an_unreviewed_recovery_draft() {
+    use crate::ui::editor::TextAction;
+    let mut h = Harness::new();
+    let from = h.vault.path().join("a.md");
+    let to = h.vault.path().join("Unsafe.md");
+    h.app.open(&mut h.root, from.clone());
+    h.app.note.as_ref().unwrap()
+        .snapshot_unsaved(&crop::Rope::from("Невосстановленный черновик"))
+        .unwrap();
+    crate::disk::wait();
+
+    let title = h.app.note_ids.as_ref().unwrap().title.id();
+    h.act(title, TextAction::Entered("Unsafe".into()));
+    assert!(from.exists());
+    assert!(!to.exists());
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&from)));
+    assert!(h.app.renaming_to.is_none(), "the same title must be retryable");
+    assert_eq!(h.app.note_ids.as_ref().unwrap().title.get(&h.root).unwrap().inner().text(), "a");
+    match &h.app.popup {
+        Some(Popup::RenameFailed { dialog, .. }) => {
+            assert_eq!(h.root.focused_widget(), Some(dialog.layer), "error dialog should retain keyboard focus");
+        }
+        _ => panic!("unsafe rename must show the failure dialog"),
+    }
+}
+
+
+#[test]
+fn untitled_note_title_enter_persists_file_and_body_after_restart() {
+    use crate::ui::editor::TextAction;
+    let mut h = Harness::new();
+    assert!(h.app.new_note(&mut h.root));
+    let original = h.app.note.as_ref().unwrap().path.clone();
+    h.app.commit_text(&mut h.root, crop::Rope::from("Содержимое после переименования"));
+    let title = h.app.note_ids.as_ref().unwrap().title.id();
+    h.act(title, TextAction::Entered("Название через Enter".into()));
+    let destination = h.vault.path().join("Название через Enter.md");
+
+    assert!(destination.is_file(), "the entered title must rename the file on disk");
+    assert!(!original.exists());
+    assert_eq!(std::fs::read_to_string(&destination).unwrap(), "Содержимое после переименования");
+    assert!(h.app.open_error.is_none());
+
+    let mut h = h.restarted(1.0);
+    h.app.open(&mut h.root, destination.clone());
+    assert!(h.app.open_error.is_none(), "renamed note must reopen after restart");
+    assert_eq!(h.body_text(), "Содержимое после переименования");
+}
+
+#[test]
+fn successful_sidebar_rename_persists_and_reopens_after_restart() {
+    use crate::ui::editor::TextAction;
+    let mut h = Harness::new();
+    let original = h.vault.path().join("a.md");
+    let renamed = h.vault.path().join("Через дерево.md");
+    h.app.open(&mut h.root, original.clone());
+    h.app.tree.start_rename(&mut h.root, original.clone());
+    let field = h.app.tree.rename_field().expect("sidebar rename input");
+    h.act(field, TextAction::Entered("Через дерево".into()));
+
+    assert!(!original.exists());
+    assert!(renamed.is_file(), "sidebar rename must update the real file");
+    assert_eq!(std::fs::read_to_string(&renamed).unwrap(), "текст");
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&renamed)));
+    assert!(h.app.open_error.is_none());
+
+    let mut h = h.restarted(1.0);
+    h.app.open(&mut h.root, renamed.clone());
+    assert!(h.app.open_error.is_none(), "sidebar-renamed note must reopen");
+    assert_eq!(h.body_text(), "текст");
+}
+
+
+#[test]
+fn physical_enter_key_commits_title_to_real_file_not_just_a_widget_action() {
+    use crate::ui::editor::TextEditor;
+    let mut h = Harness::new();
+    let old = h.vault.path().join("a.md");
+    h.app.open(&mut h.root, old.clone());
+    let title = h.app.note_ids.as_ref().unwrap().title;
+    h.root.focus_on(Some(title.id()));
+    title.edit(&mut h.root, |mut editor| TextEditor::select_byte_range(&mut editor, 0, 0));
+    let _ = h.root.redraw();
+
+    // Exercise the actual keyboard -> TextEditor -> TitleAction -> File Gate path.
+    h.key(Key::Character("Z".into()), Modifiers::empty());
+    h.key(Key::Named(NamedKey::Enter), Modifiers::empty());
+
+    let next = h.vault.path().join("Za.md");
+    assert!(next.is_file(), "physical Enter must rename the file, not merely update the widget");
+    assert!(!old.exists());
+    assert_eq!(std::fs::read_to_string(&next).unwrap(), "текст");
+    assert!(h.app.note.as_ref().is_some_and(|n| n.is(&next)));
+    assert!(h.app.open_error.is_none());
+}
+
+#[test]
+fn folder_rename_refuses_to_orphan_inactive_tab_recovery() {
+    let mut h = Harness::new();
+    let folder = h.vault.path().join("Folder");
+    let moved = h.vault.path().join("Renamed");
+    std::fs::create_dir_all(&folder).unwrap();
+    let child = h.write_note("Folder/child.md", "disk child");
+    let other = h.vault.path().join("a.md");
+
+    h.app.open(&mut h.root, child.clone());
+    h.app.note.as_ref().unwrap()
+        .snapshot_unsaved(&crop::Rope::from("unsaved child draft"))
+        .unwrap();
+    crate::disk::wait();
+    h.app.open_in(&mut h.root, other.clone(), true);
+
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&other)));
+    assert!(h.app.tabs.tabs().iter().any(|tab| tab.path.as_deref() == Some(child.as_path())));
+
+    h.app.rename_file(&mut h.root, folder.clone(), moved.clone());
+
+    assert!(folder.is_dir(), "folder with a held inactive draft must not move");
+    assert!(!moved.exists());
+    assert_eq!(std::fs::read_to_string(&child).unwrap(), "disk child");
+    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    let candidate = crate::note::bridge::inspect_for_recovery(
+        h._data.path(), h.vault.path(), workspace, &child,
+    ).unwrap().expect("inactive tab recovery must retain its original identity");
+    assert_eq!(candidate.body.to_string(), "unsaved child draft");
+    assert!(!candidate.already_saved);
+}
+
+#[test]
+fn folder_rename_refuses_busy_recovery_writer_without_moving_disk_bytes() {
+    let mut h = Harness::new();
+    let folder = h.vault.path().join("Concurrent");
+    let destination = h.vault.path().join("RenamedConcurrent");
+    std::fs::create_dir_all(&folder).unwrap();
+    let child = h.write_note("Concurrent/child.md", "unchanged original");
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+    crate::disk::wait();
+
+    // A separate process uses this same exclusive quota/publication lock.
+    let writer = crate::note::bridge::acquire_move_guard(h._data.path(), workspace).unwrap();
+    h.app.rename_file(&mut h.root, folder.clone(), destination.clone());
+
+    assert!(folder.is_dir(), "busy recovery publication must block folder rename");
+    assert!(!destination.exists(), "File Gate must not run under a busy writer");
+    assert_eq!(std::fs::read_to_string(&child).unwrap(), "unchanged original");
+    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
+    drop(writer);
+}
+
+#[test]
+fn folder_rename_blocks_closed_tab_unreviewed_draft() {
+    let mut h = Harness::new();
+    let folder = h.vault.path().join("ClosedFolder");
+    let moved = h.vault.path().join("MovedFolder");
+    std::fs::create_dir_all(&folder).unwrap();
+    let child = h.write_note("ClosedFolder/closed.md", "original disk bytes");
+    let workspace = h.app.session.as_ref().unwrap().workspace_id;
+
+    // This document has no open tab, but it still has a durable recovery draft.
+    let (mut detached, _) = crate::note::Note::open(child.clone()).unwrap();
+    detached.arm_shadow(h._data.path(), h.vault.path(), workspace).unwrap();
+    detached.snapshot_unsaved(&crop::Rope::from("unsaved closed-tab text")).unwrap();
+    crate::disk::wait();
+    drop(detached);
+    assert!(!h.app.tabs.tabs().iter().any(|tab| tab.path.as_deref() == Some(child.as_path())));
+
+    h.app.rename_file(&mut h.root, folder.clone(), moved.clone());
+
+    assert!(folder.is_dir(), "folder containing a closed-tab draft must not move");
+    assert!(!moved.exists());
+    assert_eq!(std::fs::read_to_string(&child).unwrap(), "original disk bytes");
+    assert!(matches!(h.app.popup, Some(Popup::RenameFailed { .. })));
+    let restored = crate::note::bridge::inspect_for_recovery(
+        h._data.path(), h.vault.path(), workspace, &child,
+    ).unwrap().expect("recovery record must stay discoverable");
+    assert_eq!(restored.body.to_string(), "unsaved closed-tab text");
+    assert!(!restored.already_saved);
+}
