@@ -154,3 +154,33 @@ fn overlapping_registered_vaults_still_block_a_real_rename() {
     assert!(h.app.note.as_ref().is_some_and(|note| note.is(&original)));
     assert_eq!(std::fs::read_to_string(&original).unwrap(), "Неприкосновенный текст");
 }
+
+#[test]
+fn sidebar_unicode_normalization_enter_stays_noop_with_nested_vault() {
+    use crate::ui::editor::TextAction;
+
+    let mut h = Harness::new();
+    let nested = h.vault.path().join("Nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    h.app
+        .workspace
+        .core
+        .ui_state
+        .resolve_workspace(nested.to_str().unwrap(), 2)
+        .unwrap();
+
+    let original = h.write_note("Nested/Мои\u{306} заметки.md", "Текст сохранён");
+    let original_bytes = std::fs::read(&original).unwrap();
+    let normalized = nested.join("Мой заметки.md");
+    h.app.open(&mut h.root, original.clone());
+    h.app.tree.start_rename(&mut h.root, original.clone());
+    let field = h.app.tree.rename_field().expect("sidebar rename field");
+    let _ = h.act(field, TextAction::Entered("Мой заметки".to_owned()));
+
+    assert!(h.app.popup.is_none(), "equivalent Enter must not reach File Gate");
+    assert!(original.is_file());
+    assert!(!normalized.exists(), "no new Unicode spelling must be written");
+    assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&original)));
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(original.as_path()));
+}

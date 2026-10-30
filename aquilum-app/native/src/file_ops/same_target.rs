@@ -2,6 +2,7 @@
 //! must not enter File Gate as a move. Preserve intentional case-only renames.
 use std::path::Path;
 use aquilum_core::search::paths::same_path;
+use unicode_normalization::UnicodeNormalization;
 
 pub(crate) fn is_noop_rename(from: &Path, to: &Path) -> bool {
     if from == to {
@@ -10,15 +11,21 @@ pub(crate) fn is_noop_rename(from: &Path, to: &Path) -> bool {
     if !same_path(from, to) {
         return false;
     }
-    let (Some(a), Some(b)) = (from.file_name(), to.file_name()) else {
+    // Never equate two OS paths through to_string_lossy(): distinct invalid
+    // byte sequences can otherwise collapse to the same replacement character.
+    if from.to_str().is_none() || to.to_str().is_none() {
+        return false;
+    }
+    let (Some(a), Some(b)) = (
+        from.file_name().and_then(|name| name.to_str()),
+        to.file_name().and_then(|name| name.to_str()),
+    ) else {
         return false;
     };
-    if a == b {
-        return true; // Parent path spelling differs, but filename is unchanged.
-    }
-    // same_path uses NFC and, on Windows, case folding. Only a spelling /
-    // normalization-only change is a no-op: case-only renames still run.
-    a.to_string_lossy().to_lowercase() != b.to_string_lossy().to_lowercase()
+    // NFC preserves case. same_path also folds case on Windows/macOS, so
+    // comparing lowercased raw spellings would wrongly hide an intentional
+    // case-only rename combined with a Unicode normalization difference.
+    a.nfc().eq(b.nfc())
 }
 
 #[cfg(test)]
@@ -40,6 +47,29 @@ mod tests {
         assert!(!is_noop_rename(Path::new("vault/a.md"), Path::new("vault/b.md")));
         assert!(!is_noop_rename(Path::new("vault/a.md"), Path::new("elsewhere/a.md")));
         assert!(!is_noop_rename(Path::new("vault/Note.md"), Path::new("vault/note.md")));
+    }
+
+
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn case_change_with_different_unicode_normalization_is_not_noop() {
+        let original = Path::new("vault/É.md");
+        let changed = Path::new("vault/e\u{301}.md");
+        assert!(same_path(original, changed));
+        assert!(!is_noop_rename(original, changed));
+        assert!(!is_noop_rename(changed, original));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_unicode_parent_aliases_are_not_assumed_identical() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+        use std::path::PathBuf;
+
+        let left = PathBuf::from(OsString::from_vec(b"vault/\xff/Note.md".to_vec()));
+        let right = PathBuf::from(OsString::from_vec(b"vault/\xfe/Note.md".to_vec()));
+        assert!(!is_noop_rename(&left, &right));
     }
 
     #[cfg(windows)]
