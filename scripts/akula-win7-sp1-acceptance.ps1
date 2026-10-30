@@ -108,7 +108,11 @@ if ($null -eq $ansiSymbol) { throw "Cannot create strict non-UTF8 TXT for Window
 $ansiText = 'AKULA_WIN7_ANSI_NEEDLE ' + $ansiSymbol
 [IO.File]::WriteAllBytes($legacyAnsi, $strictAnsi.GetBytes($ansiText))
 $utf16Text = 'AKULA_WIN7_UTF16_NEEDLE ' + (UnicodeLabel @(0x041f,0x0440,0x0438,0x0432,0x0435,0x0442))
-$utf16Bytes = [byte[]](@(0xff, 0xfe) + @([Text.Encoding]::Unicode.GetBytes($utf16Text)))
+[byte[]]$utf16Body = [Text.Encoding]::Unicode.GetBytes($utf16Text)
+$utf16Bytes = New-Object byte[] ($utf16Body.Length + 2)
+$utf16Bytes[0] = 0xff
+$utf16Bytes[1] = 0xfe
+[Array]::Copy($utf16Body, 0, $utf16Bytes, 2, $utf16Body.Length)
 [IO.File]::WriteAllBytes($legacyUtf16, $utf16Bytes)
 # Bad UTF-16 with a dangling unit: must show an error, never an editable Note.
 [IO.File]::WriteAllBytes($legacyBroken, [byte[]](0xff, 0xfe, 0x01))
