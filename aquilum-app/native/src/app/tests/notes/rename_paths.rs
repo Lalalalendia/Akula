@@ -173,6 +173,11 @@ fn sidebar_unicode_normalization_enter_stays_noop_with_nested_vault() {
     let original_bytes = std::fs::read(&original).unwrap();
     let normalized = nested.join("Мой заметки.md");
     h.app.open(&mut h.root, original.clone());
+    // The Harness tree was built before this nested folder and note existed.
+    // Refresh its root inventory, then expand the parent for a real sidebar row.
+    h.app.tree.paths_changed(&mut h.root, std::slice::from_ref(&original));
+    h.app.tree.reveal(&mut h.root, &original);
+    assert!(h.app.tree.row_id("Мои\u{306} заметки").is_some(), "the nested note must be visible");
     h.app.tree.start_rename(&mut h.root, original.clone());
     let field = h.app.tree.rename_field().expect("sidebar rename field");
     let _ = h.act(field, TextAction::Entered("Мой заметки".to_owned()));
