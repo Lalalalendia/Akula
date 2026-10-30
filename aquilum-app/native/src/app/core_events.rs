@@ -74,7 +74,7 @@ impl App {
                         changed.push(PathBuf::from(&moved.to));
                     }
                     let removed: Vec<PathBuf> = relocation.removed.iter().map(PathBuf::from).collect();
-                    title |= self.close_missing_tabs(root, &removed);
+                    title |= !relocation.moves.is_empty() | self.close_missing_tabs(root, &removed);
                     changed.extend(removed);
                 }
                 _ => {}

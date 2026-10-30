@@ -56,7 +56,7 @@ impl App {
                 Some(TextAction::Cancelled) => self.cancel_tab_rename(root),
                 _ => {}
             }
-            return Outcome::default();
+            return Outcome { title: matches!(action.downcast_ref::<TextAction>(), Some(TextAction::Entered(_))), ..Outcome::default() };
         }
         if self.renaming_tab.is_some() && action.downcast_ref::<TextAction>().is_none() {
             self.finish_tab_rename(root, None);
