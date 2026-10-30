@@ -127,6 +127,56 @@ fn pdf_export_keeps_what_the_editor_shows() {
 
 
 #[test]
+fn utf16_txt_in_vault_opens_readonly_without_reencoding_or_save() {
+    let mut h = Harness::new();
+    let path = h.vault.path().join("Старый текст.TXT");
+    let mut bytes = vec![0xff, 0xfe];
+    for value in "Привет из блокнота Windows 7 🐈".encode_utf16() {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    std::fs::write(&path, &bytes).unwrap();
+    h.app.tree.paths_changed(&mut h.root, std::slice::from_ref(&path));
+    assert!(h.app.tree.names().iter().any(|name| name == "Старый текст.TXT"));
+    let _ = h.root.redraw();
+    let row = h.app.tree.row_id("Старый текст.TXT").expect("TXT must be visible in the vault");
+    let center = h.root.get_widget(row).unwrap().ctx().bounding_box().center();
+    h.click(center.x, center.y);
+    assert!(h.app.open_error.is_none(), "UTF-16 TXT must not display a failed-open page");
+    assert!(h.app.note.is_none(), "legacy text must not accidentally enter the UTF-8 save path");
+    assert!(h.app.note_ids.is_none(), "the preview must have no editable note widget");
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(path.as_path()));
+    h.app.close_active_tab(&mut h.root);
+    assert_eq!(std::fs::read(&path).unwrap(), bytes, "preview must not alter the original bytes");
+}
+
+#[test]
+fn utf8_txt_in_vault_remains_editable_without_legacy_conversion() {
+    let mut h = Harness::new();
+    let path = h.vault.path().join("обычный.txt");
+    std::fs::write(&path, "Обычный UTF-8 текст").unwrap();
+    h.app.tree.paths_changed(&mut h.root, std::slice::from_ref(&path));
+    assert!(h.app.open(&mut h.root, path.clone()));
+    assert!(h.app.open_error.is_none());
+    assert!(h.app.note.as_ref().is_some_and(|note| note.is(&path)));
+    assert_eq!(h.body_text(), "Обычный UTF-8 текст");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "Обычный UTF-8 текст");
+}
+
+#[test]
+fn malformed_legacy_txt_does_not_touch_source_or_activate_an_editor() {
+    let mut h = Harness::new();
+    let path = h.vault.path().join("corrupt.txt");
+    let bytes = [0xff, 0xfe, 0x00, 0xd8];
+    std::fs::write(&path, bytes).unwrap();
+    h.app.tree.paths_changed(&mut h.root, std::slice::from_ref(&path));
+    assert!(h.app.open(&mut h.root, path.clone()));
+    assert!(h.app.open_error.is_some(), "truncated UTF-16 must fail closed");
+    assert!(h.app.note.is_none());
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+}
+
+
+#[test]
 fn renaming_an_edited_note_commits_its_text_before_moving_the_file() {
     let mut h = Harness::new();
     let from = h.vault.path().join("a.md");
