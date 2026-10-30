@@ -3,7 +3,7 @@
 use std::path::Path;
 use aquilum_core::search::paths::same_path;
 
-pub(super) fn is_noop_rename(from: &Path, to: &Path) -> bool {
+pub(crate) fn is_noop_rename(from: &Path, to: &Path) -> bool {
     if from == to {
         return true;
     }
