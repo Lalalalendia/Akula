@@ -165,6 +165,11 @@ jobs:
                                    'if ([int]$os.ProductType -ne 1)', 'acceptance_script_sha256=',
                                    'if (-not $DisposableVm)', 'installed_app_and_shiva_hashes=PASS',
                                    'pdf_roundtrip=PASS', 'cover_uncover_20=COMPLETED_REQUIRES_VISUAL_REVIEW',
+                                   'legacy_txt_ansi=PASS_MANUAL', 'legacy_txt_utf16=PASS_MANUAL',
+                                   'legacy_txt_corrupt=PASS_MANUAL', 'legacy_txt_bytes_unchanged_after_exit=PASS',
+                                   "LegacySnapshot 'legacy-ansi.png'", "LegacySnapshot 'legacy-utf16.png'",
+                                   "LegacySnapshot 'legacy-corrupt.png'", 'GetForegroundWindow',
+                                   'Cannot create strict non-UTF8 TXT for Windows ANSI CP',
                                    'Cold-reopened', 'Sha256 $Installer', 'Start-Process -FilePath $Installer')) {
             if (-not $script.Contains($required)) { throw "Win7 acceptance scenario missing: $required" }
           }
