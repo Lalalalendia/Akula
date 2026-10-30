@@ -141,6 +141,7 @@ namespace AkulaWin7QA {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h,int x,int y,int w,int hgt,bool repaint);
   }
 }
@@ -164,6 +165,22 @@ function OpenAkula([string]$exe) {
         if ($proc.MainWindowHandle -ne [IntPtr]::Zero) { return $proc }
     }
     throw 'No Akula window within 60 seconds on Windows 7'
+}
+# Capture the actual Akula GUI, not the PowerShell prompt used to confirm it.
+# Evidence is rejected if Windows leaves a different process foreground.
+function LegacySnapshot([string]$name,[string]$key) {
+    $akula.Refresh()
+    if ($akula.HasExited -or $akula.MainWindowHandle -eq [IntPtr]::Zero) {
+        throw "Akula is not running during legacy TXT screenshot: $key"
+    }
+    [void][AkulaWin7QA.Native]::ShowWindow($akula.MainWindowHandle, 9)
+    [void][AkulaWin7QA.Native]::SetForegroundWindow($akula.MainWindowHandle)
+    Start-Sleep -Milliseconds 500
+    if ([AkulaWin7QA.Native]::GetForegroundWindow() -ne $akula.MainWindowHandle) {
+        throw "Refusing a screenshot of another application: $key"
+    }
+    Snapshot $name
+    Record ($key + '_screenshot_sha256=' + (Sha256 (Join-Path $shots $name)))
 }
 $akula = $null
 $notepad = $null
@@ -286,6 +303,7 @@ try {
         throw 'Win7 legacy ANSI TXT failed to open read-only from vault'
     }
     Record 'legacy_txt_ansi=PASS_MANUAL'
+    LegacySnapshot 'legacy-ansi.png' 'legacy_txt_ansi'
     Write-Host ('Expand the nested folder and click ' + [IO.Path]::GetFileName($legacyUtf16))
     Write-Host ('Expected body: ' + $utf16Text)
     Write-Host 'Expected label: UTF-16 LE, read only.'
@@ -293,20 +311,24 @@ try {
         throw 'Win7 legacy UTF-16 TXT failed to open read-only from nested vault'
     }
     Record 'legacy_txt_utf16=PASS_MANUAL'
+    LegacySnapshot 'legacy-utf16.png' 'legacy_txt_utf16'
     Write-Host ('Click ' + [IO.Path]::GetFileName($legacyBroken) + ' in the Akula tree.')
     if ((Read-Host 'Type PASS only if a safe open-error page appears, not an editable note') -cne 'PASS') {
         throw 'Win7 corrupt UTF-16 TXT was not rejected safely'
     }
     Record 'legacy_txt_corrupt=PASS_MANUAL'
+    LegacySnapshot 'legacy-corrupt.png' 'legacy_txt_corrupt'
+    # The legacy file must survive not only GUI preview but also app shutdown.
+    if (-not $akula.CloseMainWindow() -or -not $akula.WaitForExit(15000)) {
+        throw 'Akula did not close cleanly after legacy TXT previews'
+    }
+    $akula = $null
     if ((Sha256 $legacyAnsi) -cne $ansiHash -or (Sha256 $legacyUtf16) -cne $utf16Hash -or
         (Sha256 $legacyBroken) -cne $brokenHash) {
         throw 'Opening legacy Win7 TXT changed at least one original file'
     }
-    Record 'legacy_txt_bytes_unchanged=PASS'
+    Record 'legacy_txt_bytes_unchanged_after_exit=PASS'
     if ($UninstallAfterTest) {
-        [void]$akula.CloseMainWindow()
-        if (-not $akula.WaitForExit(15000)) { $akula.Kill(); [void]$akula.WaitForExit(10000) }
-        $akula = $null
         $uninstaller = Join-Path $install 'uninstall.exe'
         if (-not [IO.File]::Exists($uninstaller)) { throw 'Akula uninstall.exe missing' }
         $remove = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
