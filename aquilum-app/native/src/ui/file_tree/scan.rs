@@ -1,4 +1,5 @@
 pub(super) mod worker;
+mod poll;
 
 use std::sync::Arc;
 
@@ -10,6 +11,8 @@ impl FileTree {
     pub fn reload(&mut self, root: &mut RenderRoot) {
         self.model.reload_all();
         self.count_notes(Arc::clone(&self.wake));
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        self.request_imported();
         self.refresh(root);
     }
 
@@ -17,12 +20,4 @@ impl FileTree {
         if let Some(path) = self.model.root() {
             self.counting.request(path.to_path_buf(), wake);
         }
-    }
-
-    pub fn poll(&mut self, root: &mut RenderRoot) {
-        let Some(path) = self.model.root() else { return };
-        let Some(counts) = self.counting.poll(path, Arc::clone(&self.wake)) else { return };
-        self.model.set_counts(counts);
-        self.refresh(root);
-    }
-}
+    }}

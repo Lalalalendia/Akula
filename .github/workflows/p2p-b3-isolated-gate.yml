@@ -1,0 +1,169 @@
+name: P2P B3 isolated Inbox to Vault File Gate acceptance (not release)
+on:
+  push:
+    branches:
+      - integration/p2p-b3-filegate-20261029
+      - integration/p2p-b3-main-qa-20261029
+    paths:
+      - 'aquilum-app/core/src/p2p_inbox_lab/**'
+      - 'aquilum-app/core/src/p2p_inbox_lab.rs'
+      - 'aquilum-app/core/src/files/gate/**'
+      - 'aquilum-app/core/src/files/workspace.rs'
+      - 'aquilum-app/core/src/p2p_offer_lab.rs'
+      - 'aquilum-app/core/src/p2p_offer_lab/**'
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/files/watcher/**'
+      - 'aquilum-app/native/src/app/transfer/**'
+      - 'aquilum-app/native/src/app/transfer.rs'
+      - 'aquilum-app/native/src/app/core_events.rs'
+      # Changes to app graph tests can change the installed/default-OFF boundary.
+      - 'aquilum-app/native/src/app/tests/graph.rs'
+      - 'aquilum-app/native/src/ui/transfer/**'
+      - 'aquilum-app/native/src/ui/transfer.rs'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/native/src/messaging_w4_pilot.rs'
+      - 'aquilum-app/Cargo.lock'
+      - 'aquilum-app/native/src/ui/file_tree/**'
+      - 'aquilum-app/native/assets/locales/**'
+      - 'modules/drop-inbox-ledger/**'
+      - 'interop/akula-staya/**'
+      - '.github/workflows/p2p-b3-isolated-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p2p-b3-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ledger-and-core:
+    name: Ledger and Core File Gate on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Verify no dependency resolution changes
+        shell: bash
+        run: |
+          cargo metadata --manifest-path aquilum-app/Cargo.toml --locked --format-version 1 > /dev/null
+          git diff --exit-code -- aquilum-app/Cargo.lock
+      - name: Rustfmt newly extracted Core watcher QA leaves
+        shell: bash
+        run: |
+          rustfmt --edition 2021 --check aquilum-app/core/src/files/watcher/classify/event_kinds.rs aquilum-app/core/src/files/watcher/classify/qa_import.rs
+      - name: Enforce the default-OFF Core watcher boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --no-default-features --lib files::watcher::classify::tests::qa_import_copy_stays_invisible_to_default_watcher -- --exact --nocapture --test-threads=1 2>&1 | tee "$RUNNER_TEMP/p2p-default-off.txt"
+          grep -F 'test files::watcher::classify::tests::qa_import_copy_stays_invisible_to_default_watcher ... ok' "$RUNNER_TEMP/p2p-default-off.txt"
+          echo 'AKULA_P2P_B3_DEFAULT_OFF_WATCHER_PASS'
+      - name: Format and test verified receipt, import and removal audits
+        shell: bash
+        run: |
+          cargo fmt --manifest-path modules/drop-inbox-ledger/Cargo.toml -- --check
+          cargo test --manifest-path modules/drop-inbox-ledger/Cargo.toml -- --nocapture
+      - name: Run Core Inbox File Gate tests (Linux fail-closed / Windows real)
+        shell: bash
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::file_gate::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab files::watcher::classify::tests -- --nocapture
+      - name: Verify opt-in Offer to receipt candidate denial tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check aquilum-app/core/src/p2p_offer_lab.rs aquilum-app/core/src/p2p_offer_lab/tests.rs aquilum-app/core/src/p2p_offer_lab/receipt_binding.rs
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-offer-lab --lib p2p_offer_lab::receipt_binding::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-receipt-binding.txt"
+          grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$RUNNER_TEMP/p2p-receipt-binding.txt"
+          echo 'AKULA_P2P_RECEIPT_CANDIDATE_TESTS_PASS'
+      - name: Verify dual-signed cold receipt V2 denial contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed.rs aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed/journal.rs aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed/journal/tests.rs
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-offer-lab --lib p2p_offer_lab::receipt_binding::signed::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-signed-cold-receipt.txt"
+          grep -F 'test result: ok. 8 passed; 0 failed;' "$RUNNER_TEMP/p2p-signed-cold-receipt.txt"
+          grep -F 'test p2p_offer_lab::receipt_binding::signed::tests::signed_two_endpoint_proof_survives_cold_read_after_offer_expiry ... ok' "$RUNNER_TEMP/p2p-signed-cold-receipt.txt"
+          grep -F 'test p2p_offer_lab::receipt_binding::signed::tests::one_use_sqlite_fence_survives_cold_restart_without_retry ... ok' "$RUNNER_TEMP/p2p-signed-cold-receipt.txt"
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-offer-lab --lib p2p_offer_lab::receipt_binding::signed::journal::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-cold-journal-independent-handles.txt"
+          grep -F 'test result: ok. 2 passed; 0 failed;' "$RUNNER_TEMP/p2p-cold-journal-independent-handles.txt"
+          grep -F 'test p2p_offer_lab::receipt_binding::signed::journal::tests::two_open_sqlite_handles_cannot_consume_same_receipt_twice ... ok' "$RUNNER_TEMP/p2p-cold-journal-independent-handles.txt"
+          echo 'AKULA_P2P_SIGNED_COLD_PROOF_V2_TESTS_PASS'
+      - name: Verify non-shipping OS-backed signed V2 issuance contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed/issuance.rs aquilum-app/core/src/p2p_offer_lab/receipt_binding/signed/issuance/tests.rs
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-offer-lab,p2p-device-identity --lib p2p_offer_lab::receipt_binding::signed::issuance::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
+          grep -Eq 'test result: ok\. (6|7) passed; 0 failed;' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
+          grep -F 'test p2p_offer_lab::receipt_binding::signed::issuance::tests::genuine_two_key_half_to_cold_v2_roundtrip ... ok' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
+          grep -F 'test p2p_offer_lab::receipt_binding::signed::issuance::tests::pending_declined_and_unselected_session_cannot_sign ... ok' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
+          grep -F 'test p2p_offer_lab::receipt_binding::signed::issuance::tests::rejected_sender_request_fails_before_os_credential_lookup ... ok' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
+          grep -F 'test p2p_offer_lab::receipt_binding::signed::issuance::tests::receiver_half_preflight_rejects_forgery_before_os_credential_lookup ... ok' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
+          echo 'AKULA_P2P_OS_SIGNED_ISSUANCE_QA_TESTS_PASS'
+      - name: Confirm unaccepted P2P excluded from signed installed graph
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo tree --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --target x86_64-pc-windows-msvc --edges normal,build --format '{p}' > "$RUNNER_TEMP/installed.txt"
+          if grep -Eq '^(akula-inbox-ledger-lab|akula-staya-integration) v' "$RUNNER_TEMP/installed.txt"; then
+            echo "::error::Unaccepted P2P leaked into signed installed dependencies"
+            exit 1
+          fi
+      - name: Compile and test opt-in Native Inbox to Vault UI on Windows only
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          rustfmt --edition 2024 --check aquilum-app/native/src/ui/file_tree/imported.rs
+          rustfmt --edition 2024 --check aquilum-app/native/src/app/core_events/update.rs aquilum-app/native/src/ui/file_tree/persistence.rs aquilum-app/native/src/ui/file_tree/scroll_ops.rs aquilum-app/native/src/ui/file_tree/scan/poll.rs
+          cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::inbox::import::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::file_tree::imported::tests -- --nocapture
+          echo 'AKULA_P2P_B3_WINDOWS_QA_PASS installed_default_off=1 copy_only=1'
+      - name: Verify non-shipping Native explicit Offer UI consent on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2024 --check aquilum-app/native/src/app/transfer/offer_consent.rs aquilum-app/native/src/ui/transfer/dialog_view/offer_consent_view.rs aquilum-app/native/src/app/tests/offer_consent.rs
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta,p2p-offer-consent-qa offer_consent -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::forged_peer_or_multiple_files_never_show_accept ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::old_revision_cancel_and_duplicate_press_never_create_a_reply ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::tests::offer_consent::modal_accept_comes_only_from_explicit_button_press_and_consumes_once ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::tests::offer_consent::actual_pointer_event_on_visible_accept_button_creates_one_decision ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::accepted_ui_reply_binds_once_to_unchanged_offer_and_live_peers ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::forged_offer_preflight_fails_before_os_peer_pin_lookup ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::bad_peer_pin_identifier_cannot_use_accepted_ui_reply ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          grep -F 'test app::transfer::offer_consent::tests::declined_ui_reply_cannot_become_an_acceptance ... ok' "$RUNNER_TEMP/p2p-ui-consent.txt"
+          echo 'AKULA_P2P_NATIVE_OFFER_CONSENT_UI_QA_PASS non_authorizing=1'
+
+  one-file-interop:
+    name: B3 local two-endpoint QUIC plus cold Inbox on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify exact-head local QUIC sender, persistent Inbox and Internet opt-in fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta real_quic_sender_ignores_unselected_peer_and_admits_expected_peer -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta actual_iroh_native_received_inbox_only_roundtrip_without_user_credentials -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta native_internet_entrypoints_reject_bad_peer_before_n0_network -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta internet_routing_is_never_selected_by_legacy_lan_modes -- --nocapture

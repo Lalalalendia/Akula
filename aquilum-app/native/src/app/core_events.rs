@@ -1,3 +1,5 @@
+mod update;
+
 use super::*;
 impl App {
     pub fn on_core_events(&mut self, root: &mut RenderRoot) -> bool {
@@ -98,6 +100,12 @@ impl App {
             self.tree.paths_changed(root, &changed);
             title |= self.close_missing_tabs(root, &changed);
         }
+        // QA Vault copies are not notes. Their content modifications reach
+        // CoreEvent::ContentChanged only in the opt-in P2P Core watcher.
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        if !rescan {
+            self.tree.imported_content_changed(root, &edited);
+        }
         // A worker's wake brings results here; a superseded tab, local edit,
         // or newer filesystem event may discard them before the UI is touched.
         if let Some(text) = self.note.as_mut().and_then(|note| note.take_reload(&self.workspace.wake)) {
@@ -116,45 +124,4 @@ impl App {
             self.load_history(root);
         }
         title
-    }
-
-    pub(super) fn on_update(&mut self, root: &mut RenderRoot) {
-        use crate::updater::Status;
-        let status = self.updater.status();
-        if status != self.update_shown {
-            self.update_shown = status.clone();
-            let splash = match &status {
-                Status::Downloading { done, total, .. } => Some((false, total.filter(|t| *t > 0).map(|t| *done as f64 * 100.0 / t as f64))),
-                Status::Ready(_) | Status::Installing => Some((true, None)),
-                _ => None,
-            };
-            match (splash, self.update_layer) {
-                (Some((installing, percent)), Some(layer)) => {
-                    root.edit_widget(layer, |mut w| crate::ui::update::UpdateSplash::set(&mut w.downcast(), installing, percent));
-                }
-                (Some((installing, percent)), None) => {
-                    let widget = crate::ui::update::UpdateSplash::new(installing, percent);
-                    self.update_layer = Some(widget.id());
-                    root.add_layer(widget, Point::ORIGIN);
-                }
-                (None, Some(layer)) => {
-                    root.remove_layer(layer);
-                    self.update_layer = None;
-                }
-                (None, None) => {}
-            }
-            if let Some(Popup::Settings { dialog, .. }) = &self.popup
-                && dialog.section == crate::ui::settings::schema::Section::System
-            {
-                self.refresh_settings(root);
-            }
-        }
-        if let Some(payload) = self.updater.take_ready(&self.workspace.data_dir) {
-            let _ = root.redraw();
-            if let Err(error) = crate::updater::apply(&payload, || self.shutdown()) {
-                report!("обновление не установлено: {error}");
-                self.updater.fail(error);
-            }
-        }
-    }
-}
+    }}

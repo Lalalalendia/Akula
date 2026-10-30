@@ -17,14 +17,25 @@ use crate::ui::widgets::Pressed;
 const MAX_DRAFTS: usize = 32;
 const MAX_DEVICE_ROWS: usize = 32;
 
-mod model;
-mod dialog;
-#[cfg(feature = "messaging-w4-pilot")]
-mod w4_pilot;
+mod actions;
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contacts;
+mod dialog;
+#[cfg(feature = "p2p-inbox-preview")]
+mod inbox;
 #[cfg(feature = "p2p-device-ui")]
 mod local_identity;
+mod model;
+#[cfg(feature = "p2p-offer-consent-qa")]
+mod offer_consent;
+#[cfg(feature = "p2p-native-receive-beta")]
+mod native_receive;
+#[cfg(feature = "p2p-native-send-beta")]
+mod native_send;
+#[cfg(feature = "p2p-device-ui")]
+mod peer_pair;
+#[cfg(feature = "messaging-w4-pilot")]
+mod w4_pilot;
 
 /// A display-only identity observation. The first-party owner registry still
 /// needs to supply a verified snapshot. No production path populates this
@@ -53,6 +64,16 @@ pub(super) struct TransferState {
     #[cfg(feature = "p2p-device-contacts-preview")]
     transport_contacts: transfer_ui::TransportContactView,
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
+    #[cfg(feature = "p2p-offer-consent-qa")]
+    pub(super) offer_consent: offer_consent::OfferConsentUi,
+    #[cfg(feature = "p2p-device-ui")]
+    pub(super) peer_pair: peer_pair::PeerUi,
+    #[cfg(feature = "p2p-inbox-preview")]
+    pub(super) inbox: inbox::InboxPreview,
+    #[cfg(feature = "p2p-native-send-beta")]
+    pub(super) sender: native_send::NativeSender,
+    #[cfg(feature = "p2p-native-receive-beta")]
+    pub(super) receiver: native_receive::NativeReceiver,
     #[cfg(feature = "messaging-w4-pilot")]
     pub(super) w4_pilot: w4_pilot::PilotUi,
     #[cfg(feature = "p2p-device-ui")]
@@ -66,6 +87,8 @@ impl App {
         }
         #[cfg(feature = "p2p-device-contacts-preview")]
         self.transfer.refresh_transport_contacts();
+        #[cfg(feature = "p2p-inbox-preview")]
+        self.begin_inbox_preview();
         self.show_transfers(root);
     }
 
@@ -78,6 +101,35 @@ impl App {
         }
         #[cfg(feature = "p2p-device-ui")]
         if self.transfer.local_identity.poll() {
+            changed = true;
+        }
+        #[cfg(feature = "p2p-device-ui")]
+        if self.transfer.peer_pair.poll() {
+            // A contact can be revoked while a dialog is open.
+            #[cfg(feature = "p2p-device-contacts-preview")]
+            self.transfer.refresh_transport_contacts();
+            changed = true;
+        }
+        #[cfg(feature = "p2p-inbox-preview")]
+        if self.transfer.inbox.poll() {
+            changed = true;
+        }
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        if std::mem::take(&mut self.transfer.inbox.refresh_vault_copies)
+            && self.tree.request_imported()
+        {
+            // Do not display a stale "verified" label while the worker rehashes.
+            self.tree.refresh(root);
+        }
+        #[cfg(feature = "p2p-native-send-beta")]
+        if self.transfer.sender.poll() {
+            changed = true;
+        }
+        #[cfg(feature = "p2p-native-receive-beta")]
+        if self.transfer.receiver.poll() {
+            if self.transfer.receiver.view.success {
+                self.begin_inbox_preview();
+            }
             changed = true;
         }
         #[cfg(feature = "messaging-w4-pilot")]
@@ -102,60 +154,6 @@ impl App {
                 wake();
             }
         });
-    }
-
-    pub(super) fn on_transfer_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction) -> Outcome {
-        let Some(Popup::Transfers(dialog)) = self.popup.take() else { return Outcome::default() };
-        let pressed = action.downcast_ref::<Pressed>().is_some();
-        let dismiss = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
-            || (id == dialog.close && pressed);
-        if dismiss {
-            ui_dialog::close(root, dialog.layer);
-            return Outcome::default();
-        }
-        let mut refresh = false;
-        if id == dialog.choose && pressed {
-            self.choose_transfer_files();
-            refresh = true;
-        } else if pressed
-            && let Some((_, index, command)) = dialog.actions.iter().find(|(button, _, _)| *button == id)
-        {
-            match command {
-                QueueAction::Toggle => self.transfer.toggle(*index),
-                QueueAction::Remove => self.transfer.remove(*index),
-            }
-            refresh = true;
-        } else if pressed
-            && let Some((_, device_id, key)) = dialog.device_actions.iter().find(|(button, _, _)| *button == id)
-        {
-            self.transfer.choose_peer((*device_id, *key));
-            refresh = true;
-        }
-        #[cfg(feature = "p2p-device-ui")]
-        if pressed && !refresh {
-            if let Some((_, command)) = dialog.identity_actions.iter()
-                .find(|(button, _)| *button == id)
-            {
-                self.transfer.local_identity.action(
-                    *command, Arc::clone(&self.workspace.wake),
-                );
-                refresh = true;
-            }
-        }
-        #[cfg(feature = "messaging-w4-pilot")]
-        if pressed && !refresh {
-            if let Some((_, command)) = dialog.w4_actions.iter()
-                .find(|(button, _)| *button == id)
-            {
-                self.transfer.w4_pilot.action(*command, Arc::clone(&self.workspace.wake));
-                refresh = true;
-            }
-        }
-        self.popup = Some(Popup::Transfers(dialog));
-        if refresh {
-            self.refresh_transfers(root);
-        }
-        Outcome::default()
     }
 }
 

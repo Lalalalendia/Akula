@@ -27,6 +27,8 @@ node-v1-runtime = ["node-live-read-lab", "aquilum-core/node-v1", "dep:tokio", "d
 sender-arm-lab = []
 # Explicit Windows two-PC OS-backed QUIC HELLO/OK. Never sends user bytes.
 os-pinned-lan-probe = ["p2p-live-identity", "dep:tokio"]
+# User-invoked Native P2P file transfer, never a background listener.
+p2p-one-file-lan-beta = ["p2p-live-identity", "dep:tokio", "dep:akula-inbox-ledger-lab"]
 
 [[bin]]
 name = "akula-p2p-lan"
@@ -34,11 +36,17 @@ path = "src/bin/lan_probe.rs"
 required-features = ["os-pinned-lan-probe"]
 
 [[bin]]
+name = "akula-p2p-one-file-beta"
+path = "src/bin/p2p_one_file_beta.rs"
+required-features = ["p2p-one-file-lan-beta"]
+
+[[bin]]
 name = "akula-node-v1-service"
 path = "src/bin/akula_node_v1_service.rs"
 required-features = ["node-v1-runtime"]
 
 [dependencies]
+akula-inbox-ledger-lab = { path = "../../modules/drop-inbox-ledger", optional = true }
 aquilum-core = { path = "../../aquilum-app/core", features = ["p2p-inbox-lab"] }
 staya-transfer = { git = "https://github.com/Lalalalendia/staya-transfer", rev = "ccfe82dc6125e2810e95043a6a4ac55954b710e0", default-features = false }
 blake3 = "=1.8.5"

@@ -2,12 +2,16 @@ mod actions;
 mod build;
 mod drag;
 mod ghost;
+#[cfg(all(windows, feature = "p2p-inbox-preview"))]
+mod imported;
 pub mod model;
 mod parts;
 mod pinned;
+mod persistence;
 mod pins;
 mod row;
 mod scan;
+mod scroll_ops;
 mod store;
 #[cfg(test)]
 mod testing;
@@ -49,6 +53,8 @@ pub struct FileTree {
     scroll: Option<Handle<ScrollArea<Flex>>>,
     pinned: Option<Handle<Pinned>>,
     counting: scan::worker::CountScan,
+    #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+    imported: imported::ImportedScan,
     wake: std::sync::Arc<dyn Fn() + Send + Sync>,
     rename: Option<Handle<TextEditor>>,
     store: ExpandedStore,
@@ -80,6 +86,8 @@ impl FileTree {
             scroll: None,
             pinned: None,
             counting: scan::worker::CountScan::default(),
+            #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+            imported: imported::ImportedScan::default(),
             wake: std::sync::Arc::clone(&wake),
             rename: None,
             store,
@@ -88,21 +96,9 @@ impl FileTree {
             toolbar: None,
         };
         tree.count_notes(wake);
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        tree.request_imported();
         tree
-    }
-
-    pub fn sort(&self) -> Sort {
-        self.model.sort()
-    }
-
-    pub fn set_sort(&mut self, root: &mut RenderRoot, sort: Sort) {
-        if !self.model.set_sort(sort) {
-            return;
-        }
-        if let Some(workspace) = self.model.root().map(Path::to_path_buf) {
-            self.store.set_sort(&workspace, sort);
-        }
-        self.refresh(root);
     }
 
     pub fn root(&self) -> Option<&Path> {
@@ -129,28 +125,13 @@ impl FileTree {
 
     pub fn paths_changed(&mut self, root: &mut RenderRoot, paths: &[PathBuf]) {
         self.model.refresh_paths(paths);
-        self.refresh(root);
-    }
-
-    pub fn color(&self, path: &Path) -> Option<&'static str> {
-        self.model.color(path)
-    }
-
-    pub fn set_color(&mut self, root: &mut RenderRoot, folders: &[PathBuf], color: Option<&'static str>) {
-        self.model.set_color(folders, color);
-        self.save_colors();
-        self.refresh(root);
-    }
-
-    fn save_colors(&mut self) {
-        if let Some(root) = self.model.root().map(Path::to_path_buf) {
-            self.store.set_colors(&root, &self.model.color_entries());
+        #[cfg(all(windows, feature = "p2p-inbox-preview"))]
+        if paths.iter().any(|path| {
+            path.extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("bin"))
+        }) {
+            self.request_imported();
         }
-    }
-
-    fn save_expanded(&mut self) {
-        if let Some(root) = self.model.root().map(Path::to_path_buf) {
-            self.store.set(&root, &self.model.expanded_paths());
-        }
-    }
-}
+        self.refresh(root);
+    }}
