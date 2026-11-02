@@ -268,6 +268,25 @@ try {
     throw 'AKULA_RENAME_UNICODE_HOLD: clipboard is not the exact NFC fixture'
   }
   [AkulaBetaGuiInput]::PasteSyntheticTitleFromClipboard($hwnd, $process.Id)
+  $enteredNfc = $false
+  for ($attempt = 0; $attempt -lt 30 -and !$enteredNfc; $attempt++) {
+    Start-Sleep -Milliseconds 150
+    try {
+      foreach ($item in @(Visible-Editors $hwnd)) {
+        $pattern = $null
+        if ($item.Current.HasKeyboardFocus -and
+            $item.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$pattern) -and
+            [string]::Equals(([Windows.Automation.ValuePattern]$pattern).Current.Value,
+              $composedStem, [StringComparison]::Ordinal)) {
+          $enteredNfc = $true
+          break
+        }
+      }
+    } catch [Windows.Automation.ElementNotAvailableException] {}
+  }
+  if (!$enteredNfc) {
+    throw 'AKULA_RENAME_UNICODE_HOLD: native title never received the actual NFC paste'
+  }
   if (!(Test-Path -LiteralPath $sourcePath -PathType Leaf) -or (Test-Path -LiteralPath $composedPath)) {
     throw 'AKULA_RENAME_UNICODE_HOLD: Unicode paste renamed a file before Enter'
   }
