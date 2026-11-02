@@ -66,7 +66,8 @@ mod tests {
         std::fs::write(&target, "different file").unwrap();
         assert!(!is_noop_rename(&source, &target),
             "an occupied Unicode-equivalent path must go through File Gate");
-        assert_eq!(std::fs::read_to_string(&source).unwrap(), "source");
+        // Some file systems resolve both Unicode spellings to the same file.
+        // Either way, an occupied target must be admitted by File Gate.
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "different file");
     }
 
