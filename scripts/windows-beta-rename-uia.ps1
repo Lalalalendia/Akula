@@ -237,3 +237,110 @@ foreach ($mode in @('Enter', 'Blur')) {
     }
   }
 }
+
+
+# NFC/NFD is not the same as a case-only rename. Exercise an actual installed
+# Windows title editor with a synthetic UTF-16 clipboard payload, not just a
+# direct Core/Harness call. The original spelling and bytes must survive.
+$sourceStem = 'Мои' + [char]0x0306 + ' заметки'
+$composedStem = $sourceStem.Normalize([Text.NormalizationForm]::FormC)
+if ([string]::Equals($sourceStem, $composedStem, [StringComparison]::Ordinal)) {
+  throw 'AKULA_RENAME_UNICODE_HOLD: fixture must use different NFC/NFD spellings'
+}
+$sourcePath = Join-Path $vault ($sourceStem + '.md')
+$composedPath = Join-Path $vault ($composedStem + '.md')
+if ((Test-Path -LiteralPath $sourcePath) -or (Test-Path -LiteralPath $composedPath)) {
+  throw 'AKULA_RENAME_UNICODE_HOLD: both fixture names must be absent before test'
+}
+$unicodeBody = 'AKULA_UNICODE_NFC_NFD_' + [guid]::NewGuid().ToString('N')
+$unicodeText = '# Unicode filename' + [char]10 + $unicodeBody + [char]10
+[IO.File]::WriteAllText($sourcePath, $unicodeText, [Text.UTF8Encoding]::new($false))
+$sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash
+$process = $null
+try {
+  $argsForApp = '--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $vault, $DataDir, $sourcePath
+  $process = Start-Process -FilePath $installed -ArgumentList $argsForApp -PassThru
+  Wait-Window $process $sourceStem
+  $hwnd = Focus-Title $process $sourceStem
+  [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $process.Id, [uint16]0x41)
+  Set-Clipboard -Value $composedStem -ErrorAction Stop
+  if (![string]::Equals((Get-Clipboard -Raw), $composedStem, [StringComparison]::Ordinal)) {
+    throw 'AKULA_RENAME_UNICODE_HOLD: clipboard is not the exact NFC fixture'
+  }
+  [AkulaBetaGuiInput]::PasteSyntheticTitleFromClipboard($hwnd, $process.Id)
+  if (!(Test-Path -LiteralPath $sourcePath -PathType Leaf) -or (Test-Path -LiteralPath $composedPath)) {
+    throw 'AKULA_RENAME_UNICODE_HOLD: Unicode paste renamed a file before Enter'
+  }
+  [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $process.Id, [uint16]0x0d, $false)
+  Start-Sleep -Milliseconds 900
+
+  $process.Refresh()
+  if ($process.HasExited) { throw 'AKULA_RENAME_UNICODE_HOLD: installed Akula exited' }
+  $root = [Windows.Automation.AutomationElement]::FromHandle($hwnd)
+  if ($null -eq $root) { throw 'AKULA_RENAME_UNICODE_HOLD: no GUI automation root' }
+  $elements = $root.FindAll(
+    [Windows.Automation.TreeScope]::Descendants,
+    [Windows.Automation.Condition]::TrueCondition)
+  for ($i = 0; $i -lt $elements.Count; $i++) {
+    $element = $elements.Item($i)
+    if (!$element.Current.IsOffscreen -and $element.Current.Name -match
+        'Cross-workspace|Rename failed|Failed to rename|Could not rename|Не удалось переименовать') {
+      throw "AKULA_RENAME_UNICODE_HOLD: visible rename error: $($element.Current.Name)"
+    }
+  }
+  Wait-Window $process $sourceStem
+  if (!(Test-Path -LiteralPath $sourcePath -PathType Leaf) -or
+      (Test-Path -LiteralPath $composedPath -PathType Leaf) -or
+      (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash -cne $sourceHash) {
+    throw 'AKULA_RENAME_UNICODE_HOLD: no-op changed original bytes or created an NFC path'
+  }
+  if (!$process.CloseMainWindow() -or !$process.WaitForExit(25000)) {
+    throw 'AKULA_RENAME_UNICODE_HOLD: Akula failed graceful close'
+  }
+  $process.Dispose()
+  $process = $null
+
+  $reopenArgs = '--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $vault, $DataDir, $sourcePath
+  $process = Start-Process -FilePath $installed -ArgumentList $reopenArgs -PassThru
+  Wait-Window $process $sourceStem
+  $hwnd = Focus-Body $process
+  $sentinel = 'AKULA_UNICODE_CLIPBOARD_' + [guid]::NewGuid().ToString('N')
+  Set-Clipboard -Value $sentinel -ErrorAction Stop
+  [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $process.Id, [uint16]0x41)
+  Start-Sleep -Milliseconds 200
+  [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $process.Id, [uint16]0x43)
+  $copied = $null
+  for ($attempt = 0; $attempt -lt 55; $attempt++) {
+    Start-Sleep -Milliseconds 150
+    try {
+      $candidate = Get-Clipboard -Raw -ErrorAction Stop
+      if ($null -ne $candidate -and $candidate -cne $sentinel) {
+        $copied = $candidate
+        break
+      }
+    } catch {}
+  }
+  if ($null -eq $copied -or
+      ![string]::Equals((Normalize-Text $copied), (Normalize-Text $unicodeText), [StringComparison]::Ordinal)) {
+    throw 'AKULA_RENAME_UNICODE_HOLD: post-restart installed GUI readback drift'
+  }
+  if (!$process.CloseMainWindow() -or !$process.WaitForExit(25000)) {
+    throw 'AKULA_RENAME_UNICODE_HOLD: reopened Akula did not close gracefully'
+  }
+  $process.Dispose()
+  $process = $null
+  if (!(Test-Path -LiteralPath $sourcePath -PathType Leaf) -or
+      (Test-Path -LiteralPath $composedPath -PathType Leaf) -or
+      (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash -cne $sourceHash) {
+    throw 'AKULA_RENAME_UNICODE_HOLD: post-restart filesystem or SHA changed'
+  }
+  Write-Host 'AKULA_RENAME_UNICODE_INSTALLED_PASS os_paste=1 nfc_nfd=1 dialog=0 restart=1 gui_readback=1 sha256=1'
+} finally {
+  if ($null -ne $process) {
+    $process.Refresh()
+    if (!$process.HasExited) {
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    }
+    $process.Dispose()
+  }
+}
