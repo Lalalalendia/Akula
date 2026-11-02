@@ -73,7 +73,7 @@ impl App {
     /// This synchronous path is intentional until an async edit/navigation
     /// fence exists; changing the path before the disk operation loses notes.
     pub(in crate::app) fn rename_file(&mut self, root: &mut RenderRoot, from: PathBuf, to: PathBuf) {
-        if from == to {
+        if crate::file_ops::is_noop_rename(&from, &to) {
             return;
         }
         let save_error = if let Some(note) = self.note.as_mut().filter(|n| n.path.starts_with(&from)) {
