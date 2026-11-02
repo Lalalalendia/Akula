@@ -23,6 +23,12 @@ pub(crate) fn is_noop_rename(from: &Path, to: &Path) -> bool {
     if from.to_str().is_none() || to.to_str().is_none() {
         return false;
     }
+    // Do not swallow a genuine error when the source vanished or is a
+    // symlink. File Gate must judge any non-regular source itself.
+    match std::fs::symlink_metadata(from) {
+        Ok(metadata) if metadata.is_file() || metadata.is_dir() => {}
+        _ => return false,
+    }
     // NFC and NFD names may identify two *different existing files* (NTFS
     // and Linux), even when the search index considers them equivalent.
     // Inspect the destination only for matching spellings; ordinary renames
@@ -50,12 +56,26 @@ mod tests {
 
     #[test]
     fn same_filename_and_unicode_normalization_do_not_relocate_a_note() {
-        let original = Path::new("vault/Мои\u{306} заметки.md");
-        let composed = Path::new("vault/Мой заметки.md");
+        let vault = tempfile::tempdir().unwrap();
+        let original = vault.path().join("Мои\u{306} заметки.md");
+        let composed = vault.path().join("Мой заметки.md");
+        std::fs::write(&original, "source").unwrap();
         assert_ne!(original, composed);
-        assert!(same_path(original, composed));
-        assert!(is_noop_rename(original, composed));
-        assert!(is_noop_rename(original, original));
+        assert!(same_path(&original, &composed));
+        // On normalization-insensitive file systems the alternate spelling
+        // may already point to the source; File Gate handles that ambiguity.
+        let target_absent = std::fs::symlink_metadata(&composed).is_err();
+        assert_eq!(is_noop_rename(&original, &composed), target_absent);
+        assert!(is_noop_rename(&original, &original));
+        assert_eq!(std::fs::read_to_string(&original).unwrap(), "source");
+    }
+
+    #[test]
+    fn vanished_unicode_source_must_reach_file_gate_instead_of_disappearing() {
+        let vault = tempfile::tempdir().unwrap();
+        let missing = vault.path().join("Мои\u{306} заметки.md");
+        let composed = vault.path().join("Мой заметки.md");
+        assert!(!is_noop_rename(&missing, &composed));
     }
 
     #[test]
