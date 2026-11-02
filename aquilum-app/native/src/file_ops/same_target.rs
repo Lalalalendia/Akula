@@ -15,6 +15,14 @@ pub(crate) fn is_noop_rename(from: &Path, to: &Path) -> bool {
     if from.parent().map(Path::as_os_str) != to.parent().map(Path::as_os_str) {
         return false;
     }
+    // NFC and NFD names may identify two *different existing files* (NTFS
+    // and Linux), even when the search index considers them equivalent.
+    // Fail closed and let File Gate reject the occupied destination.
+    match std::fs::symlink_metadata(to) {
+        Ok(_) => return false,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return false,
+    }
     if !same_path(from, to) {
         return false;
     }
@@ -47,6 +55,19 @@ mod tests {
         assert!(same_path(original, composed));
         assert!(is_noop_rename(original, composed));
         assert!(is_noop_rename(original, original));
+    }
+
+    #[test]
+    fn existing_normalized_destination_is_not_silently_ignored() {
+        let vault = tempfile::tempdir().unwrap();
+        let source = vault.path().join("Мои\u{306} заметки.md");
+        let target = vault.path().join("Мой заметки.md");
+        std::fs::write(&source, "source").unwrap();
+        std::fs::write(&target, "different file").unwrap();
+        assert!(!is_noop_rename(&source, &target),
+            "an occupied Unicode-equivalent path must go through File Gate");
+        assert_eq!(std::fs::read_to_string(&source).unwrap(), "source");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "different file");
     }
 
     #[test]
