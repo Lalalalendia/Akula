@@ -15,14 +15,6 @@ pub(crate) fn is_noop_rename(from: &Path, to: &Path) -> bool {
     if from.parent().map(Path::as_os_str) != to.parent().map(Path::as_os_str) {
         return false;
     }
-    // NFC and NFD names may identify two *different existing files* (NTFS
-    // and Linux), even when the search index considers them equivalent.
-    // Fail closed and let File Gate reject the occupied destination.
-    match std::fs::symlink_metadata(to) {
-        Ok(_) => return false,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return false,
-    }
     if !same_path(from, to) {
         return false;
     }
@@ -30,6 +22,15 @@ pub(crate) fn is_noop_rename(from: &Path, to: &Path) -> bool {
     // byte sequences can otherwise collapse to the same replacement character.
     if from.to_str().is_none() || to.to_str().is_none() {
         return false;
+    }
+    // NFC and NFD names may identify two *different existing files* (NTFS
+    // and Linux), even when the search index considers them equivalent.
+    // Inspect the destination only for matching spellings; ordinary renames
+    // must not pay for a filesystem lookup on the UI thread.
+    match std::fs::symlink_metadata(to) {
+        Ok(_) => return false,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return false,
     }
     let (Some(a), Some(b)) = (
         from.file_name().and_then(|name| name.to_str()),
