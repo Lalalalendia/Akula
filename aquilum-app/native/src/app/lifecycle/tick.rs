@@ -17,10 +17,8 @@ impl App {
         }
         #[cfg(all(windows, feature = "server-readonly-preflight"))]
         self.on_server_probe(root);
-        #[cfg(feature = "notion-offline-preview")]
-        self.poll_notion(root);
-        if self.view_due.is_some_and(|t| t <= now) {
-            self.flush_view();
+        #[cfg(feature = "notion-offline-preview")] self.poll_notion(root);
+        if self.view_due.is_some_and(|t| t <= now) { self.flush_view();
         }
         if let Some(note) = self.note.as_mut()
             && note.tick(&self.workspace.core, &self.text, now)

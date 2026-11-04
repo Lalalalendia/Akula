@@ -1,8 +1,6 @@
 use super::*;
 mod tick;
-#[cfg(feature = "notion-offline-preview")]
-mod notion;
-
+#[cfg(feature = "notion-offline-preview")] mod notion;
 impl App {
     pub fn title(&self) -> String {
         let product = if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" };
