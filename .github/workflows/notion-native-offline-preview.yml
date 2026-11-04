@@ -12,6 +12,7 @@ on:
       - 'aquilum-app/native/src/notion_sync.rs'
       - 'aquilum-app/native/src/notion_import.rs'
       - 'aquilum-app/native/src/notion_bases.rs'
+      - 'scripts/windows-notion-native-uia.ps1'
       - 'aquilum-app/native/src/notion_bases/**'
       - 'aquilum-app/native/src/ui/settings/cloud/notion/bases/**'
       - 'aquilum-app/native/src/app/settings/notion.rs'
@@ -31,6 +32,7 @@ on:
       - 'aquilum-app/native/src/notion_sync.rs'
       - 'aquilum-app/native/src/notion_import.rs'
       - 'aquilum-app/native/src/notion_bases.rs'
+      - 'scripts/windows-notion-native-uia.ps1'
       - 'aquilum-app/native/src/notion_bases/**'
       - 'aquilum-app/native/src/ui/settings/cloud/notion/bases/**'
       - 'aquilum-app/native/src/app/settings/notion.rs'
@@ -97,3 +99,13 @@ jobs:
       - name: Core read-only cached root catalog regression
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features notion-api-probe read_only_catalog_lists_only_caches
+      - name: Build feature-gated native Akula for offline Windows UIA
+        working-directory: aquilum-app
+        run: cargo build --locked -p aquilum-native --features notion-offline-preview
+      - name: Real Windows UIA confirms Notion catalog and no-source no-write boundary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\debug\aquilum-native.exe'
+          & "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File './scripts/windows-notion-native-uia.ps1' -ExePath $exe
+          if ($LASTEXITCODE -ne 0) { throw 'Notion offline native UIA boundary failed' }
