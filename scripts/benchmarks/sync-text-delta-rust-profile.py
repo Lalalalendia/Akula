@@ -33,12 +33,11 @@ def ensure(condition: bool, explanation: str) -> None:
 def select_binary(repo: Path) -> Path:
     """Compile once. Choose the exact Cargo lib-test executable, not a stale file."""
     cmd = [
-        "cargo", "test", "--locked", "-p", "aquilum-core",
-        "--no-default-features", "--features", "sync-text-delta",
+        "cargo", "test", "--manifest-path", "modules/text-delta-codec/Cargo.toml",
         "--lib", "--no-run", "--message-format=json",
     ]
     proc = subprocess.run(
-        cmd, cwd=repo / "aquilum-app", text=True, stdout=subprocess.PIPE,
+        cmd, cwd=repo, text=True, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, check=False, timeout=1200,
     )
     if proc.returncode != 0:
@@ -51,13 +50,13 @@ def select_binary(repo: Path) -> Path:
             continue
         if (
             message.get("reason") == "compiler-artifact"
-            and message.get("target", {}).get("name") == "aquilum_core"
+            and message.get("target", {}).get("name") == "akula_text_delta_codec"
             and message.get("profile", {}).get("test")
             and message.get("executable")
         ):
             candidates.append(Path(message["executable"]))
     if len(candidates) != 1 or not candidates[0].is_file():
-        raise RuntimeError(f"Expected exactly one fresh aquilum-core lib test binary; got {candidates}")
+        raise RuntimeError(f"Expected exactly one fresh standalone codec lib test binary; got {candidates}")
     return candidates[0]
 
 
@@ -69,7 +68,7 @@ def run_mode(repo: Path, executable: Path, mode: str, reps: int):
     env["AKULA_DELTA_RUST_BENCH_MODE"] = mode
     env["AKULA_DELTA_RUST_BENCH_REPS"] = str(reps)
     args = [
-        str(executable), "text_delta_codec::tests::real_git_markdown_pairs_mode_report",
+        str(executable), "codec::tests::real_git_markdown_pairs_mode_report",
         "--ignored", "--nocapture", "--test-threads=1",
     ]
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as output:

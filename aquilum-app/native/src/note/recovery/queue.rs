@@ -1,0 +1,310 @@
+//! Off-thread shadow snapshots; only stage() success acknowledges durability.
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use crop::Rope;
+use uuid::Uuid;
+
+use super::{checked_relative, clear_after_verified_save, denied, inspect, invalid, retire_superseded, stage};
+#[cfg(test)]
+mod oversized_tests;
+
+struct Context {
+    data: PathBuf,
+    vault: PathBuf,
+    workspace: Uuid,
+    document: PathBuf,
+    baseline: String,
+}
+
+#[derive(Default)]
+struct State {
+    next_revision: u64,
+    blocked_by_existing: bool,
+    pending: Option<(u64, Rope)>,
+    running: bool,
+    durable: Option<u64>,
+    failure: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::note) struct CaptureStatus {
+    pub(in crate::note) durable_revision: Option<u64>,
+    pub(in crate::note) error: Option<String>,
+    pub(in crate::note) pending: bool,
+}
+
+/// Coalesced private snapshots for an opened note.
+pub(in crate::note) struct SnapshotQueue {
+    context: Arc<Context>,
+    state: Arc<Mutex<State>>,
+}
+
+impl SnapshotQueue {
+    pub(in crate::note) fn new(data: &Path, vault: &Path, workspace: Uuid, document: &Path, baseline: &str) -> io::Result<Self> {
+        if baseline.len() != 64 || !baseline.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(invalid("invalid File Gate baseline digest"));
+        }
+        checked_relative(vault, document)?;
+        // Prior revisions may survive a process crash. Never reuse a revision
+        // number after restart and silently overwrite a different snapshot.
+        let prior = inspect(data, vault, workspace, document)?;
+        let previous = prior.as_ref().map_or(0, |entry| entry.revision);
+        let blocked = prior.as_ref().is_some_and(|entry| !entry.already_saved);
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH)
+            .map_err(io::Error::other)?
+            .as_nanos();
+        let stamp = u64::try_from(stamp).map_err(|_| invalid("snapshot timestamp overflow"))?;
+        Ok(Self {
+            context: Arc::new(Context {
+                data: data.to_path_buf(),
+                vault: vault.to_path_buf(),
+                workspace,
+                document: document.to_path_buf(),
+                baseline: baseline.to_owned(),
+            }),
+            state: Arc::new(Mutex::new(State { next_revision: stamp.max(previous), blocked_by_existing: blocked, ..State::default() })),
+        })
+    }
+
+    /// Returns a revision, not a durability acknowledgment.
+    pub(in crate::note) fn request(&self, body: Rope) -> io::Result<u64> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.blocked_by_existing {
+            state.failure = Some("unreviewed crash draft is held for recovery".into());
+            return Err(denied("unreviewed recovery draft must not be superseded"));
+        }
+        if body.byte_len() > super::MAX_TEXT {
+            return Err(invalid("recovery draft exceeds 24 MiB; save the note to protect the latest edits"));
+        }
+        let revision = state.next_revision.checked_add(1)
+            .ok_or_else(|| invalid("recovery revision counter exhausted"))?;
+        state.next_revision = revision;
+        state.pending = Some((revision, body));
+        let start = !state.running;
+        state.running = true;
+        drop(state);
+        if start {
+            let context = Arc::clone(&self.context);
+            let state = Arc::clone(&self.state);
+            crate::disk::run(move || drain(context, state));
+        }
+        Ok(revision)
+    }
+
+    /// A prior-session draft is protected until the user explicitly elects
+    /// to recover it. Ordinary note edits or automatic File Gate ACKs cannot
+    /// silently replace or delete the only copy of that draft.
+    pub(in crate::note) fn allow_after_review(&self) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.blocked_by_existing = false;
+        state.failure = None;
+    }
+
+    /// Never clear a shadow on enqueue or a guessed save: a successful File
+    /// Gate response only schedules an exact disk-byte comparison in the same
+    /// serial worker used for shadow creation and normal note saves.
+    pub(in crate::note) fn after_save_ack(&self) {
+        let context = Arc::clone(&self.context);
+        let state = Arc::clone(&self.state);
+        crate::disk::run(move || {
+            let revision = state.lock().unwrap_or_else(PoisonError::into_inner).durable;
+            if let Some(revision) = revision {
+                let result = clear_after_verified_save(
+                    &context.data, &context.vault, context.workspace, &context.document, revision,
+                );
+                if let Err(error) = result {
+                    state.lock().unwrap_or_else(PoisonError::into_inner).failure =
+                        Some(format!("recovery cleanup needs review: {error}"));
+                }
+            }
+        });
+    }
+
+    pub(in crate::note) fn status(&self) -> CaptureStatus {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        CaptureStatus {
+            durable_revision: state.durable,
+            error: state.failure.clone(),
+            pending: state.running || state.pending.is_some(),
+        }
+    }
+}
+
+fn drain(context: Arc<Context>, state: Arc<Mutex<State>>) {
+    loop {
+        let task = {
+            let mut entry = state.lock().unwrap_or_else(PoisonError::into_inner);
+            match entry.pending.take() {
+                Some(task) => task,
+                None => {
+                    entry.running = false;
+                    return;
+                }
+            }
+        };
+        let (revision, rope) = task;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            stage(
+                &context.data,
+                &context.vault,
+                context.workspace,
+                &context.document,
+                &context.baseline,
+                revision,
+                &rope.to_string(),
+            )
+        }))
+        .unwrap_or_else(|_| Err(io::Error::other("background snapshot worker panicked")));
+        let mut entry = state.lock().unwrap_or_else(PoisonError::into_inner);
+        match result {
+            Ok(_) => {
+                let previous = entry.durable.replace(revision);
+                entry.failure = None;
+                drop(entry);
+                // Do not retain a full 100k-line copy for every keystroke.
+                // Only a newer fully-published/verified snapshot can replace
+                // an earlier snapshot produced by this same live queue.
+                if let Some(previous) = previous {
+                    if let Err(error) = retire_superseded(
+                        &context.data, &context.vault, context.workspace,
+                        &context.document, previous, revision,
+                    ) {
+                        state.lock().unwrap_or_else(PoisonError::into_inner).failure =
+                            Some(format!("recovery snapshot retention needs review: {error}"));
+                    }
+                }
+            }
+            Err(error) => {
+                // Status remains observable; never mark a failed write durable.
+                entry.failure = Some(format!("recovery snapshot failed: {error}"));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::mpsc::channel;
+
+    fn digest(path: &Path) -> String {
+        blake3::hash(&fs::read(path).unwrap()).to_hex().to_string()
+    }
+
+    #[test]
+    fn rapid_edit_burst_coalesces_and_only_final_bytes_become_durable() {
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("draft.md");
+        fs::write(&doc, "before").unwrap();
+        let queue = SnapshotQueue::new(data.path(), vault.path(), Uuid::new_v4(), &doc, &digest(&doc)).unwrap();
+        let (tx, rx) = channel::<()>();
+        // Hold the one serial disk worker to make coalescing deterministic.
+        crate::disk::run(move || { rx.recv().unwrap(); });
+        let first = queue.request(Rope::from("а")).unwrap();
+        let last = queue.request(Rope::from("абв 😀")).unwrap();
+        assert!(last > first);
+        assert!(queue.status().pending);
+        assert_eq!(queue.status().durable_revision, None);
+        tx.send(()).unwrap();
+        crate::disk::wait();
+        let candidate = inspect(data.path(), vault.path(), queue.context.workspace, &doc).unwrap().unwrap();
+        assert_eq!(candidate.body, "абв 😀");
+        assert_eq!(candidate.revision, last);
+        assert_eq!(queue.status().durable_revision, Some(last));
+        assert!(!queue.status().pending);
+        assert!(queue.status().error.is_none());
+        assert_eq!(fs::read_to_string(doc).unwrap(), "before");
+    }
+
+    #[test]
+    fn many_durable_100k_style_edits_keep_one_latest_shadow_not_a_disk_filling_history() {
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("large.md");
+        fs::write(&doc, "disk source").unwrap();
+        let workspace = Uuid::new_v4();
+        let queue = SnapshotQueue::new(data.path(), vault.path(), workspace, &doc, &digest(&doc)).unwrap();
+        let large = format!("{}\n", "Unicode 🐱漢字".repeat(300_000));
+        let mut last = None;
+        for index in 0..12 {
+            let body = Rope::from(format!("{large} edit #{index}"));
+            let revision = queue.request(body).unwrap();
+            crate::disk::wait();
+            assert_eq!(queue.status().durable_revision, Some(revision));
+            assert!(queue.status().error.is_none(), "retention cannot silently fail");
+            last = Some((revision, index));
+        }
+        let bucket = super::super::folder(data.path(), workspace, false).unwrap().unwrap();
+        let relative = super::super::checked_relative(vault.path(), &doc).unwrap();
+        let records = super::super::records(&bucket, &format!("{}-", super::super::key(&relative))).unwrap();
+        assert_eq!(records.len(), 1, "successive full-text edits must not exhaust AppData");
+        let restored = inspect(data.path(), vault.path(), workspace, &doc).unwrap().unwrap();
+        assert_eq!(restored.revision, last.unwrap().0);
+        assert!(restored.body.ends_with(" edit #11"));
+        assert_eq!(fs::read_to_string(&doc).unwrap(), "disk source");
+    }
+
+    #[test]
+    fn failure_never_reports_durability_or_modifies_original_note() {
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("fail.md");
+        fs::write(&doc, "before").unwrap();
+        let queue = SnapshotQueue::new(data.path(), vault.path(), Uuid::new_v4(), &doc, &digest(&doc)).unwrap();
+        fs::remove_file(&doc).unwrap();
+        queue.request(Rope::from("unpublished")).unwrap();
+        crate::disk::wait();
+        let status = queue.status();
+        assert!(status.durable_revision.is_none());
+        assert!(status.error.is_some());
+        assert!(!status.pending);
+        assert!(!doc.exists());
+    }
+
+    #[test]
+    fn old_unsaved_draft_survives_new_process_edits_and_ack_until_review() {
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("note.md");
+        fs::write(&doc, "last confirmed").unwrap();
+        let workspace = Uuid::new_v4();
+        let baseline = digest(&doc);
+        stage(data.path(), vault.path(), workspace, &doc, &baseline, 31, "prior crash draft").unwrap();
+        let new_process = SnapshotQueue::new(data.path(), vault.path(), workspace, &doc, &baseline).unwrap();
+        assert!(new_process.request(Rope::from("new edit")).is_err());
+        fs::write(&doc, "new edit saved by File Gate").unwrap();
+        new_process.after_save_ack();
+        crate::disk::wait();
+        let candidate = inspect(data.path(), vault.path(), workspace, &doc).unwrap().unwrap();
+        assert_eq!(candidate.revision, 31);
+        assert_eq!(candidate.body, "prior crash draft");
+        assert!(candidate.source_changed);
+    }
+
+    #[test]
+    fn reopening_queue_chooses_revision_above_previous_snapshot() {
+        let data = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let doc = vault.path().join("restart.md");
+        fs::write(&doc, "before").unwrap();
+        let workspace = Uuid::new_v4();
+        let baseline = digest(&doc);
+        // Simulate a prior run that left a newer-than-clock revision behind.
+        let previous = u64::MAX - 2;
+        stage(data.path(), vault.path(), workspace, &doc, &baseline, previous, "unsaved old").unwrap();
+        let queue = SnapshotQueue::new(data.path(), vault.path(), workspace, &doc, &baseline).unwrap();
+        assert!(queue.request(Rope::from("unreviewed new")).is_err());
+        assert_eq!(inspect(data.path(), vault.path(), workspace, &doc).unwrap().unwrap().body, "unsaved old");
+        queue.allow_after_review(); // explicitly approved previous draft
+        let next = queue.request(Rope::from("unsaved new")).unwrap();
+        assert_eq!(next, u64::MAX - 1);
+        crate::disk::wait();
+        assert_eq!(inspect(data.path(), vault.path(), workspace, &doc).unwrap().unwrap().body, "unsaved new");
+        assert_eq!(fs::read_to_string(doc).unwrap(), "before");
+    }
+}

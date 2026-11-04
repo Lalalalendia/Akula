@@ -60,6 +60,24 @@ jobs:
           cargo test --locked -p aquilum-native --bin aquilum-native app::tests::reader::pages:: -- --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Native EPUB TOC pointer navigation and restore
+        shell: pwsh
+        working-directory: aquilum-app
+        env:
+          AQ_OUT: ${{ runner.temp }}/epub-toc-shots
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path $env:AQ_OUT | Out-Null
+          cargo test --locked -p aquilum-native --bin aquilum-native app::tests::reader::toc:: -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: epub-toc-windows-native-screenshots
+          path: ${{ runner.temp }}/epub-toc-shots/*.png
+          if-no-files-found: ignore
+
       - name: Acceptance scope
         shell: pwsh
         run: |

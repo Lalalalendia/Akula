@@ -1,6 +1,6 @@
 [package]
 name = "aquilum-native"
-version = "0.3.14"
+version = "0.3.18"
 description = "Aquilum native UI (Masonry on winit + vello_cpu), no WebView"
 authors = ["Dmitriy Chaplinskiy"]
 license = "AGPL-3.0-only"
@@ -26,12 +26,14 @@ signingIdentity = "-"
 linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh" }
 
 [features]
-# Public install includes read-only Dropbox authorization; cloud writes remain disabled.
 # QA-only Notion source and credential preview; never included in installed.
 notion-offline-preview = ["aquilum-core/notion-api-probe"]
+# Public install includes read-only Dropbox authorization; cloud writes remain disabled.
 installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
 messaging-w4-pilot = []
 memory-probe = []
+# Opt-in experimental local DICOM viewing. Not included in the installed build.
+dicom-preview = ["dep:dicom-core", "dep:dicom-object", "dep:dicom-pixeldata", "dep:zip"]
 # User-visible Windows read-only SSH verification. No install grant.
 server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
@@ -70,7 +72,14 @@ rayon = "1.12"
 arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
+# Pinned after upstream #844: crates.io 0.10.0 incorrectly decodes 8-bit monochrome RLE.
+# All three packages share the same exact source revision.
+dicom-core = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
+dicom-object = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
+dicom-pixeldata = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", features = ["image"], optional = true }
+# ZIP is read directly by a bounded ZIP reader; nothing is unpacked to the vault.
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"], optional = true }
 uuid = { version = "1.23.5", features = ["v4"] }
 rfd = "0.16"
 pulldown-cmark = { version = "0.13", default-features = false }
@@ -96,7 +105,8 @@ aq_trace = { path = "vendor/aq_trace" }
 crop = { version = "0.4", features = ["utf16-metric", "graphemes"] }
 blake3 = { version = "1.8.5", features = ["rayon"] }
 
-[target.'cfg(not(target_os = "windows"))'.dependencies]
+# Keep the software output available in the SAME executable for Win7 fallback.
+[target.'cfg(any(not(target_os = "windows"), target_os = "windows"))'.dependencies]
 softbuffer = "0.4.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -3,13 +3,13 @@ mod authority_inventory;
 mod frontmatter;
 mod history;
 mod notes;
+#[cfg(all(test, unix))] mod pinned_prewrite_tests;
 mod search;
 mod trash;
 mod workspace;
 mod workspace_locator;
-
 use super::vault::Vault;
-use crate::files::document::read_file_snapshot_impl;
+use crate::files::document::snapshot_of;
 use crate::files::error::FileCommandError;
 use crate::files::gate;
 use crate::history::Source;
@@ -78,7 +78,7 @@ pub fn version_name_property() -> Value {
 }
 
 pub fn write_retrying(
-    core: &Core,
+    core: &Core, vault: &Vault,
     note: &Path,
     source: Source,
     version_name: Option<&str>,
@@ -86,7 +86,7 @@ pub fn write_retrying(
 ) -> Result<(bool, String), String> {
     let mut conflicts = 0;
     loop {
-        let snapshot = read_file_snapshot_impl(note).map_err(|error| error.to_string())?;
+        let snapshot = snapshot_of(vault.read_note_bytes(note)?).map_err(|error| error.to_string())?;
         let content = next(&snapshot.content)?;
         if content == snapshot.content {
             return Ok((false, content));

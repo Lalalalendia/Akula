@@ -1,8 +1,7 @@
 mod quote;
-
+mod toc;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-
 use aquilum_core::history::Source;
 use aquilum_core::settings::models::AppConfig;
 use aquilum_core::ui_state::models::SaveReaderStateInput;
@@ -11,7 +10,6 @@ use masonry::core::{ErasedAction, NewWidget, PropertySet, WidgetId};
 use masonry::kurbo::Point;
 use masonry::layout::Length;
 use masonry::properties::Padding;
-
 use super::book::synthetic_pages;
 use super::{App, Outcome, Popup};
 use crate::frontmatter::{self, BOOK_FILE, PAGES, READ_PERCENT, READER_POSITION};
@@ -171,6 +169,8 @@ impl App {
         } else if action.downcast_ref::<Pressed>().is_some() && id == state.ids.close {
             self.close_reader_layer(root, state);
             return Outcome::default();
+        } else if action.downcast_ref::<Pressed>().is_some() && Some(id) == state.ids.contents {
+            self.toggle_reader_contents(root, &mut state);
         } else if action.downcast_ref::<Pressed>().is_some() && id == state.ids.settings {
             self.toggle_reader_settings(root, &mut state);
         } else {

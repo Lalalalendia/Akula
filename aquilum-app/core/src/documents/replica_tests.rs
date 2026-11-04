@@ -102,6 +102,57 @@ fn garbage_positions_do_not_resolve() {
 }
 
 
+#[test]
+fn stage_rejects_surrogate_split_without_mutating_the_live_replica() {
+    let replica = Replica::new();
+    replica.apply_edits(&[edit(0, 0, "a😀b")], "setup");
+    let original = replica.state();
+
+    for bad in [edit(2, 2, "X"), edit(2, 3, ""), edit(1, 2, ""), edit(2, 4, "")] {
+        let outcome = replica.stage_edits(&[vec![bad]]);
+        assert!(outcome.is_err(), "surrogate split must be rejected");
+        assert_eq!(replica.text(), "a😀b");
+        assert_eq!(replica.state(), original);
+    }
+}
+
+#[test]
+fn stage_accepts_edits_on_both_sides_of_a_surrogate_pair() {
+    let replica = Replica::new();
+    replica.apply_edits(&[edit(0, 0, "a😀b")], "setup");
+    let delta = replica.stage_edits(&[vec![edit(1, 3, "🎉")]]).expect("scalar-aligned");
+    replica.apply_update(&delta, "test").expect("apply");
+    assert_eq!(replica.text(), "a🎉b");
+}
+
+#[test]
+fn stage_rejects_a_late_invalid_batch_atomically() {
+    let replica = Replica::new();
+    replica.apply_edits(&[edit(0, 0, "a😀b")], "setup");
+    let original = replica.state();
+    assert!(replica.stage_edits(&[
+        vec![edit(0, 1, "A")],
+        vec![edit(2, 2, "X")],
+    ]).is_err());
+    assert_eq!(replica.state(), original);
+}
+
+#[test]
+fn stage_rejects_out_of_bounds_and_overlapping_edits() {
+    let replica = Replica::new();
+    replica.apply_edits(&[edit(0, 0, "abc")], "setup");
+    for edits in [
+        vec![edit(2, 4, "")],
+        vec![edit(2, 1, "")],
+        vec![edit(1, 2, ""), edit(0, 0, "!")],
+        vec![edit(0, 2, ""), edit(1, 3, "")],
+        vec![edit(u32::MAX as usize + 1, u32::MAX as usize + 1, "!")],
+    ] {
+        assert!(replica.stage_edits(&[edits]).is_err());
+        assert_eq!(replica.text(), "abc");
+    }
+}
+
 /// Diagnostic only. Compare staging against an ordinary Yrs edit on the same
 /// document size. Do not use a brittle elapsed-time threshold on shared CI.
 #[test]

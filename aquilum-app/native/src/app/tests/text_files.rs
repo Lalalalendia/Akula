@@ -39,3 +39,64 @@ fn text_file_follows_outside_edits_and_has_properties_like_a_note() {
         "правка .txt снаружи не подтянулась в редактор"
     );
 }
+
+#[test]
+fn opening_a_folder_with_existing_txt_files_shows_and_opens_them_from_the_tree() {
+    // The ordinary folder-picker route: the TXT files are already on disk
+    // before Workspace::open and FileTree::new run.
+    let folder = crate::test_dir::tempdir();
+    let top = folder.path().join("Новый текстовый документ.txt");
+    let upper = folder.path().join("С ПРОБЕЛАМИ.TXT");
+    let nested = folder.path().join("Тексты");
+    std::fs::create_dir(&nested).unwrap();
+    let deep = nested.join("Вложенный.txt");
+    std::fs::write(&top, "первая строка").unwrap();
+    std::fs::write(&upper, "второй файл").unwrap();
+    std::fs::write(&deep, "вложенный файл").unwrap();
+
+    let mut h = Harness::with(Some(folder.path()), 1.0);
+    assert_eq!(h.app.tree.root(), Some(folder.path()));
+    for name in ["Новый текстовый документ.txt", "С ПРОБЕЛАМИ.TXT", "Тексты"] {
+        assert!(h.app.tree.names().iter().any(|row| row == name), "{name}: пропал при первичном открытии папки");
+    }
+
+    let click = |h: &mut Harness, name: &str| {
+        let id = h.app.tree.row_id(name).expect("строка видна в дереве");
+        let center = h.root.get_widget(id).unwrap().ctx().bounding_box().center();
+        h.click(center.x, center.y);
+    };
+    click(&mut h, "Новый текстовый документ.txt");
+    assert_eq!(h.app.note.as_ref().map(|note| note.path.as_path()), Some(top.as_path()));
+    assert_eq!(h.body_text(), "первая строка");
+
+    click(&mut h, "С ПРОБЕЛАМИ.TXT");
+    assert_eq!(h.app.note.as_ref().map(|note| note.path.as_path()), Some(upper.as_path()));
+    assert_eq!(h.body_text(), "второй файл");
+
+    click(&mut h, "Тексты");
+    assert!(h.app.tree.names().iter().any(|row| row == "Вложенный.txt"));
+    click(&mut h, "Вложенный.txt");
+    assert_eq!(h.app.note.as_ref().map(|note| note.path.as_path()), Some(deep.as_path()));
+    assert_eq!(h.body_text(), "вложенный файл");
+}
+
+#[test]
+fn choosing_an_existing_txt_only_folder_switches_the_tree_and_opens_its_file() {
+    let chosen = crate::test_dir::tempdir();
+    let path = chosen.path().join("Документ из Windows 7.txt");
+    std::fs::write(&path, "открывается после выбора папки").unwrap();
+
+    let mut h = Harness::new();
+    let outcome = h.app.switch_workspace(&mut h.root, chosen.path().to_path_buf());
+    assert!(outcome.title);
+    assert_eq!(h.app.tree.root(), Some(chosen.path()));
+    assert_eq!(h.app.tree.names(), ["Документ из Windows 7.txt"]);
+    h.settle();
+
+    let row = h.app.tree.row_id("Документ из Windows 7.txt").expect("TXT не виден после выбора папки");
+    let center = h.root.get_widget(row).unwrap().ctx().bounding_box().center();
+    h.click(center.x, center.y);
+
+    assert_eq!(h.app.note.as_ref().map(|note| note.path.as_path()), Some(path.as_path()));
+    assert_eq!(h.body_text(), "открывается после выбора папки");
+}

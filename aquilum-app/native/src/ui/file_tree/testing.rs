@@ -27,7 +27,7 @@ impl FileTree {
     }
 
     pub fn counted(&self) -> bool {
-        self.counting.is_none()
+        self.counting.idle()
     }
 
     pub fn offset(&self) -> f64 {

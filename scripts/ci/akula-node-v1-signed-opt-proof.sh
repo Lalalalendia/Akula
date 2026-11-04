@@ -44,7 +44,7 @@ test ! -e "$MOUNT_ROOT" && test ! -L "$MOUNT_ROOT" ||
 # Multiple stale/other-feature test binaries may legitimately coexist in deps.
 # The JSON artifact selection is bound to the explicit B1d0 --test command.
 TEST_BIN="$(cargo test --locked --manifest-path "$ROOT/aquilum-app/Cargo.toml" \
-  -p aquilum-core --features server-bootstrap-b1d0-durable-node \
+  -p aquilum-core --features server-root-b0v3-gate-lab \
   --test server_bootstrap_b1d0 --no-run --message-format=json |
   python3 -c '
 import json, sys
@@ -92,11 +92,21 @@ sudo -n unshare --mount --propagation private -- bash -c '
   export RUNNER_OS=Linux
   export AKULA_B1D0_CI=STRICT_ROOT_ONE_SHOT_FILE_ONLY
   export AKULA_B1D0_REAL_ELF="$2"
-  "$3" --exact b1d0_actual_built_linux_node_elf_uses_one_root_signed_fd_and_opt_receipt --nocapture
+  # The old direct B1d0 proof must still pass independently.
+  direct_proof="$("$3" --exact b1d0_actual_built_linux_node_elf_uses_one_root_signed_fd_and_opt_receipt --nocapture)"
+  printf "%s\n" "$direct_proof"
+  [[ "$direct_proof" == *B1D0_SIGNED_REAL_AKULA_NODE_ELF_DIRECT_OPT_HOLD_PASS* ]] ||
+    { echo "B1D0_FAIL: missing direct signed ELF proof" >&2; exit 1; }
+  # New integration: the actual B0 v3 plan hash and pinned host are carried
+  # through detached owner signature, durable CAS, /opt and process reopen.
+  v3_proof="$("$3" --exact b1d0_actual_node_v1_elf_v3_review_owner_scope_cas_reopen_hold --nocapture)"
+  printf "%s\n" "$v3_proof"
+  [[ "$v3_proof" == *B1D0_B0_V3_SIGNED_REAL_NODE_OWNER_CAS_REOPEN_HOLD_PASS* ]] ||
+    { echo "B1D0_FAIL: missing B0 v3 bound owner-CAS proof" >&2; exit 1; }
   test ! -e /opt/akula-b1d0-ci-node
   test ! -e /opt/akula-node
 ' node-v1-b1d0 "$MOUNT_ROOT" "$NODE" "$TEST_BIN"
 
 test ! -e /opt/akula-node
 test ! -e /opt/akula-b1d0-ci-node
-echo "NODE_V1_REAL_SIGNED_ELF_OPT_RECEIPT_AND_CAS_HOLD_PASS"
+echo "NODE_V1_REAL_SIGNED_ELF_B0_V3_OWNER_OPT_RECEIPT_AND_CAS_HOLD_PASS"

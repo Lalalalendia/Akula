@@ -1,4 +1,5 @@
 mod fields;
+mod template_guard;
 
 use std::ops::Range;
 
@@ -118,8 +119,7 @@ pub fn end(text: &str) -> Option<usize> {
 }
 
 pub fn template(fields: &[(&str, &str)]) -> String {
-    let lines: String = fields.iter().map(|(key, value)| format!("{key}: {value}\n")).collect();
-    format!("---\n{lines}---\n")
+    template_guard::render(fields)
 }
 
 pub fn parse_pages(value: &str) -> Option<(u32, u32)> {

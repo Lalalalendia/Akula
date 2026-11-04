@@ -172,7 +172,8 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
     'GetWindowThreadProcessId',
     'GetForegroundWindow',
     'Refusing shortcut on nonforeground window',
-    'Only selection/copy shortcuts are authorized',
+    'Only selection/copy/search shortcuts are authorized',
+    'key != 0x41 && key != 0x43 && key != 0x4F && key != 0x46',
     'VK_CONTROL',
     'KEYEVENTF_KEYUP',
   ]) {
@@ -181,6 +182,21 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
   const middle = script.slice(script.indexOf('if ($VerifyRestoredContent) {'));
   assert.doesNotMatch(middle, /Set-Content -LiteralPath \$note|Add-Content -LiteralPath \$note|WriteAllText\(\$note/,
     'UI readback must never simulate success by writing to the note');
+});
+
+test('installed DESK-10 Ctrl+F checks only the open TXT while Markdown is separate', () => {
+  const script = read('scripts/windows-txt-search-uia.ps1');
+  for (const token of [
+    'AKULA_WINDOWS_TXT_SEARCH_UIA_PASS',
+    'AKULA_WINDOWS_TXT_FIND_SCOPE_PASS',
+    'Wait-InstalledFindCount',
+    "Expected @('0/1', '1/1')",
+    "Expected @('0/0')",
+    '[uint16]0x46',
+    'source_sha256_unchanged=1',
+  ]) {
+    assert.ok(script.includes(token), 'missing installed current-note search evidence: ' + token);
+  }
 });
 
 test('CI candidate manifest records actual checkout and hashes after the GUI test', () => {
@@ -235,4 +251,19 @@ test('Windows beta NSIS apply only accepts signed typed candidate and remains ga
     'unsealing an authenticated Windows candidate before apply is prohibited');
   assert.match(release, /pub\(super\) const PUBLIC_KEY: &str = "[^"]*"/);
   assert.match(release, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(target_os = "windows", feature = "installed"\)\)\s*\}/);
+});
+
+test('installed large-note replacement uses an isolated, PID-bound Win32 shortcut helper', () => {
+  const proof = read('scripts/windows-beta-replace-all.ps1');
+  assert.match(script, /Test-AkulaBetaReplaceAll -Executable \$exe -Vault \$vault -DataDir \$akulaData -LineCount \$lines/);
+  assert.match(proof, /RUNNER_ENVIRONMENT -ne 'github-hosted'/);
+  assert.match(proof, /MainWindowTitle -notlike 'Large paste proof\*'/);
+  assert.match(proof, /GetWindowThreadProcessId/);
+  assert.match(proof, /GetForegroundWindow/);
+  assert.match(proof, /Only synthetic SelectAll\/Copy\/Paste\/Undo\/Redo shortcuts are permitted/);
+  assert.match(proof, /AKULA_WINDOWS_REPLACE_ALL_PASS lines=\$LineCount/);
+  assert.match(proof, /Ctrl\+Y redo paste/);
+  assert.match(proof, /Ctrl\+Y then Ctrl\+Z did not recover exact original source bytes/);
+  assert.doesNotMatch(guiInput, /ValidateSet\('SelectAll', 'Copy', 'Paste'/,
+    'production readback helper must never gain destructive shortcuts');
 });

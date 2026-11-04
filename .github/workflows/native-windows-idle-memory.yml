@@ -1,0 +1,83 @@
+name: Akula M2 Win32 10-minute idle-memory pilot (diagnostic only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/benchmarks/native_windows_idle_memory.py'
+      - '.github/workflows/native-windows-idle-memory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  idle:
+    name: Win32 GUI 60s settle and 600s true idle
+    runs-on: windows-2025
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-memory-pilot-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Validate standalone Win32 memory instrumentation and source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'Windows runner required' }
+          git rev-parse HEAD
+          python -m py_compile scripts/benchmarks/native_windows_idle_memory.py scripts/benchmarks/native_windows_memory_pilot.py scripts/benchmarks/native_mipmap_window_ab.py scripts/benchmarks/native_scroll_window_ab.py
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid Python source' }
+          python -c "import sys,os;sys.path.insert(0,'scripts/benchmarks');from native_windows_memory_pilot import sample;z=sample(os.getpid());assert z['private_bytes']>0 and z['working_set_bytes']>0"
+          if ($LASTEXITCODE -ne 0) { throw 'Win32 process memory API unavailable' }
+      - name: Build standard Windows Release, installed feature, no memory-probe
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native --features installed
+          if ($LASTEXITCODE -ne 0) { throw 'Akula Windows release build failed' }
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $binary)) { throw 'Missing release executable' }
+          Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Measure real GUI idle after 60s settle for 600s (one process)
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'windows-m2-idle'
+          $env:AKULA_PROBE_SOURCE_HEAD = (git rev-parse HEAD).Trim()
+          python scripts/benchmarks/native_windows_idle_memory.py --binary $binary --out $out
+          if ($LASTEXITCODE -ne 0) { throw 'Win32 idle diagnostic failed; no RAM claim' }
+          $report = Join-Path $out 'summary.md'
+          if (!(Test-Path -LiteralPath $report)) { throw 'Missing M2 summary' }
+          Get-Content -LiteralPath $report | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Archive idle time series, witnesses, and exact source identity
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-m2-windows-idle-${{ github.sha }}
+          path: |
+            windows-m2-idle/environment.json
+            windows-m2-idle/results.json
+            windows-m2-idle/summary.md
+            windows-m2-idle/trial-1/empty_vault_cold/samples.csv
+            windows-m2-idle/trial-1/empty_vault_cold/witness.json
+            windows-m2-idle/trial-1/empty_vault_cold/process.log
+          if-no-files-found: warn
+          retention-days: 14

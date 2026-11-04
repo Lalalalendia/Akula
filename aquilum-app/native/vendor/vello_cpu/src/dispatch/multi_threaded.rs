@@ -289,7 +289,17 @@ impl MultiThreadedDispatcher {
 
     fn record_finished_commands(&mut self, abort_empty: bool) {
         loop {
-            match self.recorded_command_receiver.as_mut().unwrap().try_recv() {
+            // Draining during recording must remain non-blocking. Once flush()
+            // has dropped the final task sender, block until a worker produces
+            // a command or all workers disconnect; spinning here can starve
+            // those very workers on CPU-constrained hosts (upstream #2021).
+            let receiver = self.recorded_command_receiver.as_mut().unwrap();
+            let received = if abort_empty {
+                receiver.try_recv()
+            } else {
+                receiver.recv().map_err(|_| TryRecvError::Disconnected)
+            };
+            match received {
                 Ok(mut task) => {
                     let num_tasks = task.allocation_group.recorded_commands.len();
                     for cmd in task.allocation_group.recorded_commands.drain(0..num_tasks) {
@@ -917,6 +927,23 @@ mod tests {
         assert_eq!(dispatcher.allocations.strips.entries.len(), 1);
         assert_eq!(dispatcher.allocations.render_tasks.entries.len(), 1);
         assert_eq!(dispatcher.allocations.recorded_commands.entries.len(), 1);
+    }
+
+    #[test]
+    fn flush_completes_with_one_cpu_worker() {
+        // The blocking flush must not require a second runnable core.
+        let mut dispatcher = MultiThreadedDispatcher::new(100, 100, 1, Level::new());
+        dispatcher.fill_path(
+            &Rect::new(5.0, 5.0, 60.0, 60.0).to_path(0.1),
+            Fill::NonZero,
+            Affine::IDENTITY,
+            Paint::Solid(PremulColor::from_alpha_color(BLUE)),
+            BlendMode::default(),
+            None,
+            None,
+        );
+        dispatcher.flush();
+        dispatcher.flush(); // idempotent; does not wait for an absent sender
     }
 
     #[test]

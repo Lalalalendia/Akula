@@ -1,3 +1,4 @@
+mod context;
 use std::path::PathBuf;
 
 use masonry::app::RenderRoot;
@@ -102,17 +103,6 @@ impl FileTree {
         }
     }
 
-    fn context_menu(&mut self, root: &mut RenderRoot, index: usize, at: Point) -> Option<TreeAction> {
-        let row = self.model.rows()[index].clone();
-        let note = aquilum_core::search::paths::is_markdown(&row.path) || aquilum_core::search::paths::is_plain_text(&row.path);
-        if !row.folder && !note && !row.path.to_string_lossy().to_ascii_lowercase().ends_with(".pdf") {
-            return None;
-        }
-        let targets = self.model.focus(index);
-        self.refresh(root);
-        Some(TreeAction::ContextMenu { targets, clicked: row.path, folder: row.folder, at })
-    }
-
     pub fn start_rename(&mut self, root: &mut RenderRoot, path: PathBuf) {
         self.model.start_rename(path);
         self.rename = None;
@@ -128,13 +118,11 @@ impl FileTree {
     fn commit_rename(&mut self, root: &mut RenderRoot, input: &str) -> Option<TreeAction> {
         let from = self.model.renaming()?.to_path_buf();
         self.model.stop_rename();
-        let Some((to, name)) = crate::file_ops::rename_target(&from, input) else {
+        let Some((to, _)) = crate::file_ops::rename_target(&from, input) else {
             self.refresh(root);
             return None;
         };
-        self.model.patch(&from, &to, &name);
-        self.save_expanded();
-        self.save_colors();
+        // Do not invent the destination row before the actual file move.
         self.refresh(root);
         Some(TreeAction::Rename { from, to })
     }

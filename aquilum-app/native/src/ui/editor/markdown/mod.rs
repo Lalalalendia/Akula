@@ -19,7 +19,7 @@ pub use inline::bare_urls;
 #[cfg(test)]
 pub use inline::{Kind as SpanKind, hashtags, inline as inline_spans};
 pub use mark::{Mark, enclosing, word_at};
-pub use metrics::{CHECKBOX, Fonts, LIST_START, QUOTE_BAR};
+pub use metrics::{CHECKBOX, Fonts, LIST_LEVEL, LIST_START, QUOTE_BAR};
 pub use paint::{paint_backgrounds, paint_boxes, range_rects};
 #[cfg(test)]
 pub use paint::tag_chips;

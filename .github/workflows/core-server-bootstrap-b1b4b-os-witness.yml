@@ -3,8 +3,8 @@ name: Akula Bootstrap B1b4b OS-owned CAS witness proof
 on:
   workflow_call:
   pull_request:
+    # main PRs use required Main gate; retain the independent experimental proof.
     branches:
-      - main
       - experiment/akula-server-bootstrap-b1b4a-cas-fence
     paths:
 

@@ -9,31 +9,33 @@ impl App {
             None => (None, Tabs::default()),
         };
         let (panel_tx, panel_rx) = channel(); let (search_tx, search_rx) = channel();
-        let (picked_tx, picked_rx) = channel(); let (transfer_tx, transfer_rx) = channel();
+        let (picked_tx, picked_rx) = channel();
+        let (transfer_tx, transfer_rx) = channel();
         let (home_tx, home_rx) = channel();
         let (titles_tx, titles_rx) = channel();
         let workspace_wake = Arc::clone(&workspace.wake);
         let auto_update = workspace.core.settings.get_config().updates.auto;
-        let mut yandex_probe = crate::yandex_probe_session::ProbeSession::new(workspace_wake.clone());
+        let mut yandex_probe = crate::yandex_probe_session::ProbeSession::new(Arc::clone(&workspace_wake));
         yandex_probe.set_bucket(&workspace.core.settings.get_config().s3_onboarding.bucket);
         let mut app = App {
             workspace,
             #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview::new(),
             tree,
+            #[cfg(feature = "dicom-preview")] dicom_external_sources: HashSet::new(),
             chrome: None,
             interface,
             popup: None,
             typing: None,
             server_probe: settings::server_state::ServerProbeState::default(),
-            graph: graph_page::GraphState::default(),
+            graph: graph_page::GraphState::default(), canvas: canvas::CanvasState::default(),
             transfer: transfer::TransferState::default(),
             suggest_layer: None,
             find: None,
             note: None,
+            recovery: note_recovery::RecoveryUi::default(),
             text: crop::Rope::from(initial_text),
             inactive_notes: Vec::new(),
-            #[cfg(test)]
-            parley_trial_enabled: false,
+            #[cfg(test)] parley_trial_enabled: false,
             #[cfg(test)]
             parley_capture: None,
             #[cfg(test)]
@@ -52,8 +54,14 @@ impl App {
             panel_body: None,
             retention_done: Arc::default(),
             yandex_probe,
-            #[cfg(feature = "notion-offline-preview")] notion_bases: crate::notion_bases::BasesSession::new(Arc::clone(&workspace_wake)), #[cfg(feature = "notion-offline-preview")] notion_session: crate::notion_offline::NotionSession::new(Arc::clone(&workspace_wake)),
-            #[cfg(feature = "notion-offline-preview")] notion_sync: crate::notion_sync::RefreshSession::new(Arc::clone(&workspace_wake)), #[cfg(feature = "notion-offline-preview")] notion_import: crate::notion_import::ImportSession::new(Arc::clone(&workspace_wake)),
+            #[cfg(feature = "notion-offline-preview")]
+            notion_bases: crate::notion_bases::BasesSession::new(Arc::clone(&workspace_wake)),
+            #[cfg(feature = "notion-offline-preview")]
+            notion_session: crate::notion_offline::NotionSession::new(Arc::clone(&workspace_wake)),
+            #[cfg(feature = "notion-offline-preview")]
+            notion_sync: crate::notion_sync::RefreshSession::new(Arc::clone(&workspace_wake)),
+            #[cfg(feature = "notion-offline-preview")]
+            notion_import: crate::notion_import::ImportSession::new(Arc::clone(&workspace_wake)),
             #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
             s3_pair: crate::s3_pair_session::PairSession::new(Arc::clone(&workspace_wake)),
             controls: None,
@@ -77,7 +85,6 @@ impl App {
             renaming_to: None,
             hero_shown: None,
             picked_tx,
-            failed_renames: channel(),
             picked_rx,
             transfer_tx,
             transfer_rx,

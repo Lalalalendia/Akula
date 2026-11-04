@@ -2,6 +2,7 @@ use super::*;
 mod tick;
 #[cfg(feature = "notion-offline-preview")]
 mod notion;
+
 impl App {
     pub fn title(&self) -> String {
         let product = if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" };
@@ -10,6 +11,7 @@ impl App {
             None => product.to_owned(),
         }
     }
+
     pub fn deadline(&self) -> Option<Instant> {
         [self.note.as_ref().and_then(Note::deadline), self.view_due, self.hold].into_iter().flatten().min()
     }
@@ -24,7 +26,7 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
-        self.flush_view();
+        self.flush_canvas_on_shutdown(); self.flush_view();
         match &mut self.note {
             Some(note) => note.flush(&self.workspace.core, &self.text),
             None => crate::disk::wait(),

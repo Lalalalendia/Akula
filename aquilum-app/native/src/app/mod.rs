@@ -1,18 +1,21 @@
-mod actions; mod commands;
-mod book;
+mod actions;
+mod commands;
+mod book; mod canvas;
 mod core_events; #[cfg(feature = "dropbox-readonly-preview")] mod dropbox_preview;
-mod embeds; mod file_menu;
+mod embeds;
+mod file_menu;
 mod find;
 mod editor_requests;
 mod graph_page;
-mod history; mod home;
+mod history;
+mod home;
 mod init;
 mod lifecycle;
 mod media;
 mod pdf_preview;
-mod note_page; mod panel;
-#[cfg(feature = "memory-probe")]
-mod probe;
+mod note_page; mod note_recovery;
+mod panel;
+#[cfg(feature = "memory-probe")] mod probe;
 mod reader;
 mod root_ui;
 mod search;
@@ -22,12 +25,10 @@ mod templates;
 mod transfer;
 mod widths;
 mod workspaces;
-#[cfg(test)]
-mod tests;
-use std::collections::HashMap;
+#[cfg(test)] mod tests;
+use std::{collections::HashMap, path::{Path, PathBuf}, sync::Arc};
+#[cfg(feature = "dicom-preview")] use std::collections::HashSet;
 use crate::ui::editor::TextEditor;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 use aquilum_core::CoreEvent;
@@ -68,11 +69,13 @@ enum Popup {
     Viewer { layer: WidgetId },
     PdfImport { dialog: DialogIds, source: PathBuf },
     PdfNotice { dialog: DialogIds },
+    RenameFailed { dialog: DialogIds, reveal: PathBuf },
     Reader(Box<reader::ReaderState>),
     Search(search::SearchState),
     Templates(templates::TemplatesState),
     Workspaces(workspaces::WorkspacesState),
     Transfers(crate::ui::transfer::TransferDialog),
+    Recovery(note_recovery::RecoveryPrompt),
 }
 #[derive(Default)]
 pub struct Outcome {
@@ -98,16 +101,18 @@ pub struct App {
     workspace: Workspace,
     #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview,
     tree: FileTree,
+    #[cfg(feature = "dicom-preview")] dicom_external_sources: HashSet<PathBuf>,
     chrome: Option<Chrome>,
     interface: Interface,
     popup: Option<Popup>,
     typing: Option<(crate::ui::settings::schema::Setter, String, usize)>,
     server_probe: settings::server_state::ServerProbeState,
-    graph: graph_page::GraphState,
+    graph: graph_page::GraphState, canvas: canvas::CanvasState,
     transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,
     find: Option<crate::ui::find::FindBar>,
     note: Option<Note>,
+    recovery: note_recovery::RecoveryUi,
     text: crop::Rope,
     // At most two clean, hash-verified Rope snapshots from inactive tabs.
     inactive_notes: Vec<tabs::open::CachedNote>,
@@ -134,7 +139,11 @@ pub struct App {
     #[cfg(feature = "notion-offline-preview")]
     notion_session: crate::notion_offline::NotionSession,
     #[cfg(feature = "notion-offline-preview")]
-    notion_sync: crate::notion_sync::RefreshSession, #[cfg(feature = "notion-offline-preview")] notion_import: crate::notion_import::ImportSession, #[cfg(feature = "notion-offline-preview")] notion_bases: crate::notion_bases::BasesSession,
+    notion_sync: crate::notion_sync::RefreshSession,
+    #[cfg(feature = "notion-offline-preview")]
+    notion_import: crate::notion_import::ImportSession,
+    #[cfg(feature = "notion-offline-preview")]
+    notion_bases: crate::notion_bases::BasesSession,
     #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
     s3_pair: crate::s3_pair_session::PairSession,
     controls: Option<(WidgetId, Handle<WindowButton>)>,
@@ -158,7 +167,6 @@ pub struct App {
     renaming_to: Option<PathBuf>,
     hero_shown: Option<Vec<String>>,
     picked_tx: Sender<book::Picked>,
-    failed_renames: (Sender<(PathBuf, PathBuf)>, Receiver<(PathBuf, PathBuf)>),
     picked_rx: Receiver<book::Picked>,
     transfer_tx: Sender<Vec<PathBuf>>,
     transfer_rx: Receiver<Vec<PathBuf>>,

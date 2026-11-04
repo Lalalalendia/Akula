@@ -33,7 +33,7 @@ jobs:
         working-directory: aquilum-app
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo test --locked -p aquilum-core --lib mcp::vault::tests:: -- --nocapture --test-threads=1 2>&1 |
+          cargo test --locked -p aquilum-core --lib mcp::vault:: -- --nocapture --test-threads=1 2>&1 |
             Tee-Object -FilePath ../mcp-path-windows.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Keep platform acceptance transcript

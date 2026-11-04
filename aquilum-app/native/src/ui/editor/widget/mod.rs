@@ -1,12 +1,10 @@
 use std::ops::Range;
-
 use masonry::accesskit::{Node, Role};
 pub(super) use masonry::core::keyboard::{Key, KeyState, NamedKey};
-pub(super) use masonry::core::Ime;
+pub(super) use masonry::core::{BrushIndex, Ime};
 pub(super) use masonry::imaging::Painter;
 pub(super) use masonry::kurbo::{Affine, Axis, BezPath, Cap, Circle, Join, Point, Rect, RoundedRect, Size, Stroke, Vec2};
 pub(super) use masonry::parley::{Affinity, BoundingBox, Cursor, Layout, Selection};
-pub(super) use masonry::core::BrushIndex;
 pub(super) use super::markdown;
 pub(super) use super::document::{Fold, Paragraph};
 pub(super) use super::markdown::{Block, Callout};
@@ -19,12 +17,9 @@ use masonry::core::{
 };
 use masonry::layout::{LenReq, Length};
 use crate::ui::editor::TextAction;
-
-use super::document::Document;
-use super::markdown::Fonts;
+use super::{document::Document, markdown::Fonts};
 use super::history::History;
 use crate::ui::theme;
-
 mod api;
 mod build;
 mod caret;
@@ -42,9 +37,11 @@ mod geometry;
 use geometry::{rect, visible};
 mod keys;
 mod lifecycle;
+mod source_shortcut;
 mod links;
 mod media;
 mod marks;
+mod list_guides;
 mod multicursor;
 mod outline;
 mod pages;
@@ -59,8 +56,11 @@ pub use state::TextEditor;
 mod suggest;
 mod table;
 #[cfg(test)]
+mod pair_window_tests;
+#[cfg(test)]
 mod testing;
 mod widget_events;
 mod widget_impl;
 mod widget_layout;
 mod widget_paint;
+mod range_paint;

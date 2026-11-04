@@ -26,7 +26,6 @@ fn picture(builder: &mut RangedBuilder<'_, BrushIndex>, source: &str, at: usize,
     builder.push_inline_box(InlineBox { id: decor.boxes.len() as u64, kind: InlineBoxKind::InFlow, index: at, width, height, baseline: Some(height), vertical_align: VerticalAlign::BASELINE });
     decor.boxes.push(Boxed::Image { image, crop: view.crop() });
 }
-
 pub(super) fn style_spans(builder: &mut RangedBuilder<'_, BrushIndex>, text: &str, content: usize, caret: Option<usize>, context: &Context, room: f64, decor: &mut Decor) {
     let (fonts, unresolved) = (context.fonts, context.unresolved);
     let tags: Vec<_> = hashtags(&text[content..]).into_iter().map(|tag| tag.start + content..tag.end + content).collect();
@@ -54,7 +53,8 @@ pub(super) fn style_spans(builder: &mut RangedBuilder<'_, BrushIndex>, text: &st
         let inner = span.inner.start + content..span.inner.end + content;
         let shown = touches(caret, &whole);
         if span.kind == Kind::Image {
-            let shown = shown || links.iter().any(|link| link.start <= whole.start && whole.end <= link.end && touches(caret, link));
+            let selected = context.source_selection.as_ref().is_some_and(|r| r.start < whole.end && whole.start < r.end);
+            let shown = shown || selected || links.iter().any(|link| link.start <= whole.start && whole.end <= link.end && touches(caret, link));
             if let Some(resolver) = context.resolver {
                 picture(builder, &text[whole.clone()], whole.start, shown, resolver, room, decor);
             }

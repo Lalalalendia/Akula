@@ -23,6 +23,7 @@ pub struct Context<'a> {
     pub fonts: &'a Fonts,
     pub unresolved: &'a HashSet<String>,
     pub resolver: Option<&'a dyn Resolver>,
+    pub source_selection: Option<std::ops::Range<usize>>,
 }
 
 fn style_item(builder: &mut RangedBuilder<'_, BrushIndex>, item: &Item, from: usize, caret: Option<usize>, fonts: &Fonts, decor: &mut Decor) {
@@ -46,10 +47,9 @@ fn style_item(builder: &mut RangedBuilder<'_, BrushIndex>, item: &Item, from: us
     }
     decor.hang = Some(marker.end);
 }
-
 pub fn style(builder: &mut RangedBuilder<'_, BrushIndex>, block: &Block, text: &str, caret: Option<usize>, context: &Context, width: Option<f32>) -> Decor {
     let fonts = context.fonts;
-    let mut decor = Decor { caret, ..Decor::default() };
+    let mut decor = Decor { caret, source_selection: context.source_selection.clone(), ..Decor::default() };
     for (i, _) in text.match_indices('\t') {
         hide(builder, i..i + 1, fonts.ch * TAB_SIZE);
     }

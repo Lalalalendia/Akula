@@ -7,7 +7,6 @@ use masonry::core::{
 use masonry::imaging::Painter;
 use masonry::kurbo::{Affine, Axis, Line as Segment, Point, Rect, RoundedRect, Size, Stroke, Vec2};
 use masonry::layout::{LayoutSize, LenDef, LenReq, Length, SizeDef};
-
 use super::icons;
 use super::menu::box_shadow;
 use super::text::{Line, Style};
@@ -18,20 +17,18 @@ use super::widgets::{ButtonSize, IconButton, TextButton, Variant};
 use crate::i18n::t;
 use crate::reader::page::{Item, Settings};
 use crate::reader::session::{Session, Spot};
-
 mod arrange;
 mod input;
 mod motion;
 mod paint;
+mod toc;
 mod view;
 mod widget;
-
 const POPOVER_WIDTH: f64 = 352.0;
 const PROGRESS: f64 = 3.0;
 const WHEEL_STEP: f64 = 120.0;
 const TOOLBAR_WIDTH: f64 = 576.0;
 const MARK_SCALE: f64 = 0.6;
-
 #[derive(Debug)]
 pub enum ReaderAction {
     Close,
@@ -56,6 +53,8 @@ pub struct ReaderView {
     report: bool,
     wheel: f64,
     settings_button: WidgetPod<IconButton>,
+    contents_button: Option<WidgetPod<IconButton>>,
+    toc: toc::Panel,
     close: WidgetPod<IconButton>,
     popover: Option<WidgetPod<dyn Widget>>,
     title_line: Line,
@@ -84,6 +83,7 @@ pub struct ReaderView {
 pub struct ReaderIds {
     pub settings: WidgetId,
     pub close: WidgetId,
+    pub contents: Option<WidgetId>,
     pub quote: Option<WidgetId>,
 }
 

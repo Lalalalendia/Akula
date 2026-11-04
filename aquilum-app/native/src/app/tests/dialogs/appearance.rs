@@ -110,3 +110,34 @@ fn a_preset_swatch_sets_the_accent_at_once_and_is_saved_on_close() {
     h.escape();
     assert_eq!(h.config().ui.primary_color, "#9333ea");
 }
+
+#[test]
+fn pc_desk05_white_accent_setting_preserves_focus_contrast_and_restart() {
+    let mut h = Harness::new();
+    h.click(242.0, 578.0);
+    assert_eq!(h.section(), Some(Section::Ui));
+
+    // Use the settings dialog rather than directly calling theme::apply_setting:
+    // the visible field, focus, live style and persisted profile must agree.
+    h.click(807.0, 236.0);
+    assert_eq!(h.config().ui.theme, "light");
+    let field = color_field(&h);
+    h.root.focus_on(Some(field));
+    h.send(field, TextAction::Changed("#FFFFFF".into()));
+
+    assert_eq!(h.config().ui.primary_color, "#ffffff");
+    assert_eq!(theme::current().bg_accent.to_rgba8().to_u8_array(), [255, 255, 255, 255]);
+    assert_eq!(theme::current().text_on_accent, masonry::peniko::Color::BLACK,
+        "white accent in the light UI must never produce white-on-white selected text");
+    assert_eq!(h.root.focused_widget(), Some(field),
+        "changing the accent must not discard keyboard focus from the settings field");
+    let _painted = h.frame(W as u16, H as u16, 1.0);
+
+    h.escape();
+    let mut h = h.restarted(1.0);
+    assert_eq!(h.config().ui.theme, "light");
+    assert_eq!(h.config().ui.primary_color, "#ffffff");
+    assert_eq!(theme::current().text_on_accent, masonry::peniko::Color::BLACK,
+        "restart must preserve readable foreground on the white accent");
+    let _painted_after_restart = h.frame(W as u16, H as u16, 1.0);
+}

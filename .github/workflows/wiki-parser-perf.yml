@@ -1,10 +1,11 @@
 name: Wiki parser performance
 
 on:
+  # Ignored performance benchmarks are diagnostics, not correctness gates.
   pull_request:
     paths:
-      - "aquilum-app/core/src/search/wiki/parser.rs"
       - ".github/workflows/wiki-parser-perf.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,7 +13,7 @@ permissions:
 # New commits on one PR supersede its older experimental/diagnostic checks.
 # Explicit workflow_dispatch runs are never preempted automatically.
 concurrency:
-  group: akula-wiki-parser-perf-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

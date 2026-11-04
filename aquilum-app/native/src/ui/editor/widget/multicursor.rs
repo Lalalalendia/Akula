@@ -71,9 +71,22 @@ impl TextEditor {
             return false;
         }
         let mut ranges: Vec<Range<usize>> = self.extra_cursors.iter().chain([&(self.anchor, self.focus)]).map(|&(a, f)| a.min(f)..a.max(f)).collect();
-        ranges.sort_unstable_by_key(|range| (range.start, range.end));
-        ranges.dedup_by(|next, previous| next.start < previous.end || next == previous);
-        let edits = ranges.into_iter().filter_map(|range| edit(&self.doc, range)).collect();
+        // Prefer the widest selection when two ranges begin at the same byte.
+        ranges.sort_unstable_by_key(|range| (range.start, std::cmp::Reverse(range.end)));
+        let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            if let Some(previous) = merged.last_mut() {
+                // Merge overlapping selections instead of losing the part
+                // extending past the earlier range. Keep adjacent selections
+                // separate and coalesce identical empty cursors.
+                if range.start < previous.end || range == *previous {
+                    previous.end = previous.end.max(range.end);
+                    continue;
+                }
+            }
+            merged.push(range);
+        }
+        let edits = merged.into_iter().filter_map(|range| edit(&self.doc, range)).collect();
         self.dispatch(edits, None, kind);
         for (anchor, focus) in std::iter::once((&mut self.anchor, &mut self.focus)).chain(self.extra_cursors.iter_mut().map(|(a, f)| (a, f))) {
             let end = (*anchor).max(*focus);
@@ -83,38 +96,6 @@ impl TextEditor {
     }
 }
 
+
 #[cfg(test)]
-mod tests {
-    use super::TextEditor;
-
-    fn cursors(editor: &TextEditor) -> (usize, Vec<usize>) {
-        let mut extra: Vec<usize> = editor.extra_cursors.iter().map(|&(_, f)| f).collect();
-        extra.sort_unstable();
-        (editor.focus, extra)
-    }
-
-    #[test]
-    fn every_cursor_keeps_its_place_after_typing_and_deleting() {
-        let mut editor = TextEditor::new("abcdefghij");
-        (editor.anchor, editor.focus) = (2, 2);
-        editor.add_cursor_at(5);
-        editor.add_cursor_at(8);
-        editor.apply_multicursor_typing("XY");
-        assert_eq!(editor.doc.whole(), "abXYcdeXYfghXYij");
-        assert_eq!(cursors(&editor), (4, vec![9, 14]));
-        editor.apply_multicursor_delete(false);
-        assert_eq!(editor.doc.whole(), "abXcdeXfghXij");
-        assert_eq!(cursors(&editor), (3, vec![7, 11]));
-    }
-
-    #[test]
-    fn every_cursor_deletes_a_whole_grapheme() {
-        let text = "a👍🏽b e\u{301} c";
-        let mut editor = TextEditor::new(text);
-        let (thumb, accent) = ("a👍🏽".len(), "a👍🏽b e\u{301}".len());
-        (editor.anchor, editor.focus) = (thumb, thumb);
-        editor.add_cursor_at(accent);
-        editor.apply_multicursor_delete(false);
-        assert_eq!(editor.doc.whole(), "ab  c");
-    }
-}
+mod tests;

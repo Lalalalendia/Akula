@@ -18,7 +18,7 @@ pub fn run(args: Args) -> Result<(), String> {
     let vsync_proxy = event_loop.create_proxy();
     let vsync = crate::vsync::Vsync::new(move || vsync_proxy.wake_up());
     let workspace = Workspace::open(Some(&data_dir), args.vault.as_deref(), move || proxy.wake_up())?;
-    install_crash_log(workspace.data_dir.join("crash.log"));
+    super::crash::install_crash_log(workspace.data_dir.join("crash.log"));
     let window_state = WindowState::load(&workspace.data_dir);
     let app = App::new(workspace, args.text.clone());
     let threads = args.threads;

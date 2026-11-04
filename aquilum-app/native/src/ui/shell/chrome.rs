@@ -1,0 +1,40 @@
+use masonry::core::WidgetId;
+use super::{Handle, Collapse, IndexedStack, Slot, backlinks};
+use super::super::titlebar::TabStrip;
+use super::super::widgets::Visible;
+
+pub struct Chrome {
+    pub toggle_sidebar: WidgetId,
+    pub settings: WidgetId,
+    pub new_tab: WidgetId,
+    pub tab_list: WidgetId,
+    pub tab_strip: Handle<TabStrip>,
+    pub panel_toggle: WidgetId,
+    pub controls_inset: Handle<Collapse>,
+    pub panel: Handle<Collapse>,
+    pub panel_parts: backlinks::Panel,
+    pub pages: Handle<IndexedStack>,
+    pub version_page: Handle<Slot>,
+    pub create_note: WidgetId,
+    pub open_file: WidgetId,
+    pub close_tab: WidgetId,
+    pub workspaces: WidgetId,
+    pub open_vault: WidgetId,
+    pub dicom_no_vault_folder: Option<WidgetId>,
+    pub dicom_no_vault_file: Option<WidgetId>,
+    pub dicom_new_tab_folder: Option<WidgetId>,
+    pub dicom_new_tab_file: Option<WidgetId>,
+    pub sidebar: Handle<Collapse>,
+    pub sidebar_sash: WidgetId,
+    pub note_page: Handle<Slot>,
+    pub rail: Handle<Collapse>,
+    pub rail_settings: WidgetId,
+    pub search_button: WidgetId,
+    pub home_slot: Handle<Slot>,
+    pub home_button: Option<WidgetId>,
+    pub graph_page: Handle<Slot>,
+    pub graph_button: Option<WidgetId>,
+    pub transfer_button: WidgetId,
+    pub focus_hidden: Vec<Handle<Visible>>,
+    pub focus_shown: Handle<Visible>,
+}

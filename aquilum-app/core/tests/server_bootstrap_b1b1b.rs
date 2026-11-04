@@ -289,3 +289,37 @@ fn mismatched_proposed_floor_or_transition_cannot_be_committed() {
         ApprovalError::InvalidTransition
     );
 }
+
+#[test]
+fn linux_b1b1b_signature_bytes_stay_identical_to_original_contract() {
+    // Independent historical encoder, test only: catches silent changes
+    // to owner approval signatures when a Windows signer is introduced.
+    let claim = Fixture::new().claim();
+    let mut historical = Vec::new();
+    historical.extend_from_slice(b"Akula B1b1b owner approval v1: inert witness CAS\0");
+    historical.push(1);
+    historical.push(claim.approver_id.len() as u8);
+    historical.extend_from_slice(claim.approver_id.as_bytes());
+    historical.extend_from_slice(&claim.scope_binding.install_id.0);
+    historical.extend_from_slice(&claim.scope_binding.plan_digest.0);
+    historical.extend_from_slice(&claim.scope_binding.pinned_host_key_sha256);
+    historical.extend_from_slice(&claim.scope_binding.signed_manifest_fingerprint);
+    for head in [claim.previous_head, claim.proposed_head] {
+        historical.extend_from_slice(&head.generation.to_be_bytes());
+        historical.extend_from_slice(&head.floor.sequence.to_be_bytes());
+        for version in [head.floor.version.major, head.floor.version.minor,
+            head.floor.version.patch]
+        {
+            historical.extend_from_slice(&version.to_be_bytes());
+        }
+        historical.extend_from_slice(&head.floor.signed_manifest_fingerprint);
+        historical.extend_from_slice(&head.chain_tip);
+    }
+    historical.extend_from_slice(&claim.staged_package_sha256);
+    historical.extend_from_slice(&claim.staged_package_size.to_be_bytes());
+    historical.extend_from_slice(&claim.expected_witness_revision.to_be_bytes());
+    historical.extend_from_slice(&claim.approval_nonce);
+    historical.extend_from_slice(&claim.issued_at_unix.to_be_bytes());
+    historical.extend_from_slice(&claim.expires_at_unix.to_be_bytes());
+    assert_eq!(claim.canonical_bytes(), historical);
+}

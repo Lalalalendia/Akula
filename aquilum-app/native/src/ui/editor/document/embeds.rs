@@ -146,7 +146,7 @@ impl Document {
         stamp.hash(&mut hasher);
         self.unresolved.1.hash(&mut hasher);
         let key = hasher.finish();
-        let context = self.context(fonts);
+        let context = self.context(fonts, None);
         if let Some(embed) = self.embeds.get(first).filter(|e| e.key == key && !context.resolver.is_some_and(|r| e.view.decors().any(|decor| decor.stale(r)))) {
             return Some(embed.view.height());
         }

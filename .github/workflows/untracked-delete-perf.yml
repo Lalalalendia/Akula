@@ -1,11 +1,11 @@
 name: Untracked deletion performance
 
 on:
+  # Removed production-source fan-out; required Core tests still run.
   pull_request:
     paths:
-      - "aquilum-app/core/src/search/sync.rs"
-      - "aquilum-app/core/src/search/index_document.rs"
       - ".github/workflows/untracked-delete-perf.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,7 +13,7 @@ permissions:
 # New commits on one PR supersede its older experimental/diagnostic checks.
 # Explicit workflow_dispatch runs are never preempted automatically.
 concurrency:
-  group: akula-untracked-delete-perf-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

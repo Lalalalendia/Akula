@@ -98,10 +98,9 @@ pub fn from_civil(year: i64, month: i64, day: i64, seconds: i64) -> i64 {
         * NANOS_PER_SECOND
 }
 
-#[cfg(test)]
 fn start_of_day_at(nanos: i64, offset: i64) -> i64 {
-    let (year, month, day, _) = to_civil_at(nanos, offset);
-    (days_from_civil(year, month, day) * SECONDS_PER_DAY - offset) * NANOS_PER_SECOND
+    let day = (nanos.div_euclid(NANOS_PER_SECOND) + offset).div_euclid(SECONDS_PER_DAY);
+    (day * SECONDS_PER_DAY - offset) * NANOS_PER_SECOND
 }
 
 pub fn take_now_used() -> bool {
@@ -117,8 +116,7 @@ pub fn now() -> i64 {
 }
 
 pub fn start_of_day(nanos: i64) -> i64 {
-    let (year, month, day, _) = to_civil(nanos);
-    from_civil(year, month, day, 0)
+    start_of_day_at(nanos, local_offset())
 }
 
 pub fn weekday(nanos: i64) -> i64 {

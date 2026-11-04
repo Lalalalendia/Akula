@@ -1,4 +1,5 @@
 mod negative;
+mod filters;
 use super::analyzer::indexing_tokenizer;
 use super::error::SearchError;
 use super::hits;
@@ -7,10 +8,10 @@ use super::models::SearchResult;
 use crate::text::cancel::Cancel;
 use std::path::Path;
 use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, Query, TermQuery, TermSetQuery};
+use tantivy::query::{BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, Query, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::tokenizer::TokenStream;
-use tantivy::{Searcher, Term};
+use tantivy::Term;
 
 const MIN_FUZZY_CHARS: usize = 5;
 const DEFAULT_LIMIT: usize = 50;
@@ -49,6 +50,7 @@ pub fn analyzed_query_terms(input: &str) -> Vec<String> {
 
 pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchError> {
     let (terms, excluded) = negative::search_terms(request.text);
+    let phrases = filters::quoted_phrases(request.text);
     if terms.is_empty() {
         return Ok(Found { terms, results: Vec::new(), has_more: false });
     }
@@ -56,8 +58,9 @@ pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchErr
     let searcher = index.reader.searcher();
     let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, Box::new(combined_query(index, &terms)))];
     if let Some(folder) = request.folder {
-        clauses.push((Occur::Must, Box::new(folder_query(&searcher, index.fields.id, folder)?)));
+        clauses.push((Occur::Must, Box::new(filters::folder_query(&searcher, index.fields.id, folder)?)));
     }
+    clauses.extend(filters::extra_clauses(index, &phrases));
     negative::add_exclusions(index, &excluded, &mut clauses);
     let top = searcher.search(&BooleanQuery::new(clauses), &TopDocs::with_limit(limit + 1).order_by_score())?;
     if request.cancel.is_cancelled() {
@@ -65,24 +68,9 @@ pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchErr
     }
     let has_more = top.len() > limit;
     let addresses = top.into_iter().take(limit).map(|(_, address)| address).collect::<Vec<_>>();
-    let results = hits::results(&searcher, index.fields, &terms, &addresses, &request.cancel)?;
+    let quoted: Vec<String> = phrases.into_iter().map(|(text, _)| text).collect();
+    let results = hits::results(&searcher, index.fields, &terms, &quoted, &addresses, &request.cancel)?;
     Ok(Found { terms, results, has_more })
-}
-
-fn folder_query(searcher: &Searcher, id: Field, folder: &Path) -> Result<TermSetQuery, SearchError> {
-    let mut inside = Vec::new();
-    for segment in searcher.segment_readers() {
-        let inverted = segment.inverted_index(id)?;
-        let mut paths = inverted.terms().stream()?;
-        while paths.advance() {
-            if let Ok(path) = std::str::from_utf8(paths.key()) {
-                if Path::new(path).starts_with(folder) {
-                    inside.push(Term::from_field_text(id, path));
-                }
-            }
-        }
-    }
-    Ok(TermSetQuery::new(inside))
 }
 
 fn combined_query(index: &SearchIndex, terms: &[String]) -> BooleanQuery {

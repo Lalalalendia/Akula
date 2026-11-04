@@ -125,7 +125,7 @@ fn restore_version(core: &Core, arguments: &Value) -> Result<Value, String> {
         .version(&|| core.known_roots(), &note, Some(&id))
         .ok_or_else(|| missing_version(&id))?;
     let version_name = optional_text(arguments, "versionName");
-    let (changed, _) = write_retrying(core, &note, Source::Restore(from_ms), version_name.as_deref(), |_| {
+    let (changed, _) = write_retrying(core, &vault, &note, Source::Restore(from_ms), version_name.as_deref(), |_| {
         Ok(texts.text.clone())
     })?;
     if changed {

@@ -1,9 +1,9 @@
 use super::*;
 use crate::reader::tests::sample_fb2;
-
 mod pages;
 mod quotes;
 mod shots;
+mod toc;
 
 impl Harness {
     pub(super) fn reader(&self) -> bool {

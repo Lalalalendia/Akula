@@ -1,7 +1,7 @@
 use masonry::kurbo::Point;
 use masonry::parley::Selection;
 
-use super::{Drag, Outcome, Session, caret_in};
+use super::{text::caret_in, Drag, Outcome, Session};
 use crate::ui::editor::table::model::Range2;
 use crate::ui::editor::table::view::{Hit, TableView};
 

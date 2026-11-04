@@ -5,7 +5,7 @@ const cp=require('node:child_process');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const {classify,changed,safeManifestOnly,updaterSecurityAffected}=require('./ci-rust-scope.cjs');
+const {classify,changed,safeManifestOnly,textDeltaModuleRequired,textDeltaPackFastPath,textDeltaPackBoundaryChanged,updaterSecurityAffected}=require('./ci-rust-scope.cjs');
 
 test('pure documentation and CI telemetry do not compile Rust',()=>{
   assert.equal(classify(['README.md','docs/engineering-budgets.md',
@@ -213,7 +213,7 @@ test('B1b1 signed ledger and approval tests are covered on shared Cargo/Core cha
     assert.ok(gate.includes('--test '+suite),suite+' retained in mandatory contract');
 });
 
-test('File Gate timing-only workflow runs on own sources, not every Core manifest change',()=>{
+test('File Gate timing-only workflow is manual or self-triggered, never source fan-out',()=>{
   const {parse,matches}=require('./ci-file-ratchet.cjs');
   const w=fs.readFileSync(path.join(__dirname,
     '../workflows/filegate-history-stage-profile.yml'),'utf8');
@@ -223,10 +223,11 @@ test('File Gate timing-only workflow runs on own sources, not every Core manifes
     'aquilum-app/core/src/files/document.rs',
     'aquilum-app/core/src/files/gate/write.rs',
     'aquilum-app/core/src/history/service.rs',
-    'aquilum-app/core/src/history/store.rs',
-    '.github/workflows/filegate-history-stage-profile.yml'
-  ]) assert.equal(matches(policy,file),true,file);
-  assert.match(w,/workflow_dispatch:/,'manual profiling stays available');
+    'aquilum-app/core/src/history/store.rs'
+  ]) assert.equal(matches(policy,file),false,'optional stage profiler must not run on '+file);
+  assert.equal(matches(policy,'.github/workflows/filegate-history-stage-profile.yml'),true,
+    'profiler workflow edits still exercise the profiler');
+  assert.match(w,/^  workflow_dispatch:/m,'manual profiling stays available');
   assert.match(w,/Six fresh Core processes per note size/);
 });
 
@@ -413,4 +414,141 @@ test('Linux first-GUI ACK real-process security moved into the required owner fa
   }
   assert.match(app,/needs: \[classify, required-tests, native-frames, shared-labs\]/,
     'security stage continues to block Main PR gate on failure');
+});
+
+
+test('every standalone Rust module has a protected CI owner and executable Cargo test',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  // Explicitly approved owned standalone packages. Adding a module without
+  // a direct PR test owner is unsafe: Main PR gate otherwise sees mode=none.
+  const owners={
+    'bootstrap-b0':'bootstrap-b0-isolated.yml',
+    'bootstrap-b1a':'core-server-bootstrap-b1a-release.yml',
+    'bootstrap-b1b0':'core-server-bootstrap-b1b0-staging.yml',
+    'node-catalog':'node-catalog-isolated.yml',
+    'dropbox-t0':'dropbox-t0-isolated.yml',
+    'dropbox-auth-lab':'dropbox-t0-isolated.yml',
+    'dropbox-secret-store':'dropbox-t0-isolated.yml',
+    'dropbox-connect-lab':'dropbox-t0-isolated.yml',
+    'text-delta-codec':'text-delta-codec-isolated.yml',
+    'game-session':'game-session-isolated.yml',
+  };
+  const moduleRoot=path.join(__dirname,'../../modules');
+  const found=fs.readdirSync(moduleRoot,{withFileTypes:true})
+    .filter(entry=>entry.isDirectory()&&fs.existsSync(path.join(moduleRoot,entry.name,'Cargo.toml')))
+    .map(entry=>entry.name).sort();
+  assert.deepEqual(found,Object.keys(owners).sort(),
+    'new standalone Cargo module must have a reviewed direct CI owner');
+  for(const [name,workflowName] of Object.entries(owners)){
+    const manifest='modules/'+name+'/Cargo.toml';
+    const workflow=fs.readFileSync(path.join(__dirname,'../workflows',workflowName),'utf8');
+    const policy=parse(workflow);
+    if(name==='text-delta-codec'){
+      assert.equal(matches(policy,manifest),false,'no duplicate top-level Text Delta PR workflow');
+      const app=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+      assert.match(app,/text_delta_module_required: \$\{\{ steps\.scope\.outputs\.text_delta_module_required \}\}/);
+      assert.match(app,/name: Require standalone Text Delta wire and hostile-input tests/);
+      assert.match(app,/cargo test --manifest-path modules\/text-delta-codec\/Cargo\.toml -- --nocapture/);
+      assert.match(app,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+    }else assert.equal(matches(policy,manifest),true,'missing direct PR subscription: '+manifest);
+    const testLine=new RegExp('^\\s*(?:run:\\s*)?cargo test --manifest-path modules/'+name+'/Cargo\\.toml(?:\\s|$)','m');
+    assert.match(workflow,testLine,'standalone crate test must run in owner workflow: '+name);
+  }
+});
+
+
+test('ignored Search performance suites are opt-in while Core correctness remains required',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const {policyErrors}=require('./ci-pr-concurrency.cjs');
+  const perWorkflow={
+    'wiki-parser-perf.yml':['aquilum-app/core/src/search/wiki/parser.rs'],
+    'untracked-delete-perf.yml':[
+      'aquilum-app/core/src/search/sync.rs',
+      'aquilum-app/core/src/search/index_document.rs',
+    ],
+    'search-hits-perf.yml':[
+      'aquilum-app/core/src/search/hits/repository.rs',
+      'aquilum-app/core/src/search/index_tests.rs',
+    ],
+  };
+  for(const [name,sourcePaths] of Object.entries(perWorkflow)){
+    const workflow='.github/workflows/'+name;
+    const body=fs.readFileSync(path.join(__dirname,'../workflows',name),'utf8');
+    const rule=parse(body);
+    assert.equal(matches(rule,workflow),true,'self-edits must still test '+name);
+    for(const source of sourcePaths){
+      assert.equal(matches(rule,source),false,'no automatic expensive Search benchmark on '+source);
+      assert.equal(classify([source]),'workspace','required Core tests for '+source);
+    }
+    assert.match(body,/^  workflow_dispatch:\s*$/m,'manual benchmark remains '+name);
+    assert.deepEqual(policyErrors(body,workflow),[],'manual benchmark must not be canceled by unrelated run: '+name);
+    assert.match(body,/--ignored/,'only optional timing measurements are routed: '+name);
+  }
+  const read=source=>fs.readFileSync(path.join(__dirname,'../../',source),'utf8');
+  const parser=read('aquilum-app/core/src/search/wiki/parser.rs');
+  assert.match(parser,/#\[test\]\s+fn fast_path_is_identical_to_the_full_markdown_scanner/);
+  const sync=read('aquilum-app/core/src/search/sync.rs');
+  assert.match(sync,/#\[test\]\s+fn deleting_an_untracked_note_does_not_acquire_writer_or_commit/);
+  assert.match(sync,/#\[test\]\s+fn orphaned_index_document_is_still_deleted_without_sqlite_metadata/);
+  const document=read('aquilum-app/core/src/search/index_document.rs');
+  assert.match(document,/#\[test\]\s+fn a_crlf_note_is_indexed_as_lf/);
+  const indexing=read('aquilum-app/core/src/search/index_tests.rs');
+  assert.match(indexing,/#\[test\]\s+fn disk_index_searches_title_and_body_by_case_insensitive_prefix/);
+  const app=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(app,/Run full Rust workspace and sync-engine tests/);
+  assert.match(app,/cargo test --workspace --locked/);
+});
+
+
+test('Text Delta parity lab never duplicates Core source PR workflow runs',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const workflow='.github/workflows/text-delta-codec-isolated.yml';
+  const body=fs.readFileSync(path.join(__dirname,'../workflows/text-delta-codec-isolated.yml'),'utf8');
+  const policy=parse(body);
+  const corePaths=[
+    'aquilum-app/core/src/sync/text_delta_codec.rs',
+    'aquilum-app/core/src/sync/text_delta_codec_profile_tests.rs',
+  ];
+  for(const file of corePaths){
+    assert.equal(matches(policy,file),false,'no extra top-level parity workflow for Core edit: '+file);
+    assert.equal(classify([file]),'sync','Core source still gets mandatory sync test route');
+  }
+  assert.equal(require('./ci-shared-manifest-route.cjs').ownedRoutes([corePaths[0]]).owned_text_delta,
+    true,'security codec owner must still exercise Core code changes');
+  assert.equal(matches(policy,'modules/text-delta-codec/Cargo.toml'),false);
+  assert.equal(matches(policy,'modules/text-delta-codec/src/lib.rs'),false);
+  assert.equal(matches(policy,workflow),false);
+  assert.match(body,/^  workflow_dispatch:\s*$/m,'manual standalone parity available');
+  const app=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(app,/if: needs\.classify\.outputs\.text_delta_module_required == 'true'/);
+  for(const leaf of ['modules/text-delta-codec/Cargo.toml',
+    'modules/text-delta-codec/src/lib.rs',workflow]){
+    assert.equal(textDeltaModuleRequired([leaf]),true,'required Text Delta owner: '+leaf);
+    assert.equal(classify([leaf]),'none','no redundant workspace test: '+leaf);
+  }
+  for(const other of ['modules/node-catalog/src/catalog.rs',
+    'aquilum-app/core/src/sync/text_delta_codec.rs','docs/ci.md'])
+    assert.equal(textDeltaModuleRequired([other]),false,'no unrelated module route: '+other);
+  assert.equal(textDeltaModuleRequired(null),true,'missing change detection fails closed');
+  assert.equal(textDeltaModuleRequired(['']),true,'bad path fails closed');
+});
+
+test('only module-only Text Delta source changes can avoid AWS SDK regression',()=>{
+  const moduleFiles=['modules/text-delta-codec/src/codec.rs',
+    'modules/text-delta-codec/tests/full_envelope_safety.rs'];
+  assert.equal(textDeltaPackFastPath(moduleFiles),true);
+  assert.equal(textDeltaModuleRequired(moduleFiles),true);
+  assert.equal(textDeltaPackBoundaryChanged(moduleFiles),false);
+  for(const mixed of ['aquilum-app/core/Cargo.toml','aquilum-app/Cargo.lock',
+    'aquilum-app/core/src/sync/s3_transport/pack_probe.rs',
+    '.github/workflows/sync-text-delta-rust.yml','README.md']){
+    assert.equal(textDeltaPackFastPath([...moduleFiles,mixed]),false,'AWS regression remains: '+mixed);
+  }
+  for(const invalid of [null,[],[''],['modules/text-delta-codec/'],['docs/a.md']])
+    assert.equal(textDeltaPackFastPath(invalid),false,'fail closed');
+  assert.equal(textDeltaPackBoundaryChanged(null),true);
+  for(const p of ['aquilum-app/core/Cargo.toml',
+    'aquilum-app/core/src/sync/mod.rs',
+    'aquilum-app/core/src/sync/s3_transport/pack_probe.rs'])
+    assert.equal(textDeltaPackBoundaryChanged([p]),true,'both modes: '+p);
 });

@@ -1,4 +1,10 @@
 {
+  "dicom": {
+    "openFolder": "DICOM: open folder without import",
+    "openFile": "DICOM: open ZIP or file",
+    "openCurrentFolder": "DICOM: view this folder without import",
+    "openCurrentFile": "Open DICOM without import"
+  },
   "transfer": {
     "title": "File transfers",
     "close": "Close transfers",
@@ -49,6 +55,11 @@
     "saveRetry": "Save again",
     "resetUiState": "Reset and restart",
     "openFailedTitle": "Could not open the note",
+    "renameFailedTitle": "Could not rename the file",
+    "renameFailed": "Could not rename \"{{path}}\": {{reason}}. Check the file on disk before trying again.",
+    "renameNeedsSave": "Unsaved changes must be resolved before renaming: {{reason}}",
+    "renameRecoveryHold": "An unreviewed crash-recovery draft exists for this note. Review it before renaming.",
+    "renameRecoveryCheck": "Could not safely rebind or verify crash-recovery snapshots: {{reason}}",
     "revealFile": "Show the file in its folder",
     "copyFileName": "Copy filename",
     "fileNameCopied": "Filename copied",
@@ -245,6 +256,7 @@
       "probing": "Checking SSH and server compatibility…",
       "verifiedReadOnly": "Server verified · Node not installed",
       "unsupported": "Server is not suitable for installing Node",
+      "adminAuthorizationRequired": "SSH verified · administrator authorization required for installation",
       "verificationFailed": "Could not verify server or its host key",
       "observedFacts": "Server information",
       "observedFactsHint": "Collected after authenticated SSH key exchange",
@@ -779,6 +791,7 @@
     "title": "Reader",
     "book": "Book",
     "settings": "Reading settings",
+    "contents": "Table of contents",
     "closeSettings": "Close the reading settings",
     "close": "Close",
     "back": "Back",
@@ -880,6 +893,7 @@
     "forgetPending": "Removing…",
     "listFailed": "Could not read the list of knowledge bases: {{reason}}",
     "closeActive": "Close knowledge base",
-    "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning."
+    "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning.",
+    "switchSaveFailed": "Could not switch folders because a note was not saved. The current folder stays open. Check the editor warning."
   }
 }

@@ -1,0 +1,112 @@
+name: Native large editor journey (diagnostic)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/app/tests/perf/editor_journey.rs'
+      - 'aquilum-app/native/src/app/tests/perf/timing.rs'
+      - '.github/workflows/native-large-editor-journey.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  benchmark:
+    name: Editor open, scroll, type and save (4k/30k/100k lines)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore shared Rust cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Compile and run native Release UI journey
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            benchmark_native_large_editor_journey -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/editor-journey.log"
+          test "$(grep -c 'EDITOR_JOURNEY lines=' "$GITHUB_WORKSPACE/editor-journey.log")" -eq 3
+      - name: Validate samples and publish diagnostic summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          samples = []
+          for line in Path("editor-journey.log").read_text().splitlines():
+              if "EDITOR_JOURNEY lines=" not in line:
+                  continue
+              fields = line.split("EDITOR_JOURNEY ", 1)[1].split()
+              samples.append(dict(pair.split("=", 1) for pair in fields))
+          assert sorted(int(row["lines"]) for row in samples) == [4000, 30000, 100000]
+          assert all(row["persisted"] == "true" and row["scrolled"] == "true" for row in samples)
+          metric = ("open_ms", "first_frame_ms", "jump_ms",
+                    "scroll_p50_ms", "scroll_p95_ms", "typing_p50_ms",
+                    "typing_p95_ms", "save_ms")
+          assert all(float(row[key]) >= 0 for row in samples for key in metric)
+          summary = [
+              "## Native large-editor user journey",
+              "",
+              "Linux Release, real Masonry keyboard/scroll event handlers and CPU raster.",
+              "Not a real window, display presentation, or human-perceived FPS.",
+              "No machine-to-machine timing gate: compare with future same-runner runs.",
+              "",
+              "| Lines | Source MiB | Open ms | First CPU frame ms | Jump ms | Scroll p50/p95 ms | Typing p50/p95 ms | Persist ms |",
+              "|---:|---:|---:|---:|---:|---:|---:|---:|",
+          ]
+          for row in sorted(samples, key=lambda row: int(row["lines"])):
+              summary.append(
+                  f'| {row["lines"]} | {int(row["bytes"])/(1024**2):.2f} | '
+                  f'{row["open_ms"]} | {row["first_frame_ms"]} | {row["jump_ms"]} | '
+                  f'{row["scroll_p50_ms"]} / {row["scroll_p95_ms"]} | '
+                  f'{row["typing_p50_ms"]} / {row["typing_p95_ms"]} | '
+                  f'{row["save_ms"]} |'
+              )
+          summary += [
+              "",
+              "Scroll: 32 pointer events, layout, CPU raster; typing: 24 UTF-8",
+              "keyboard events, action delivery and CPU raster; byte-for-byte",
+              "file readback is required. Reported event/scene/raster p95 fields",
+              "are also in raw logs and cannot be added to reconstruct a p95 total.",
+              "All timings include runner noise; renderer warm-up excluded from scroll.",
+          ]
+          report = "\n".join(summary) + "\n"
+          Path("editor-journey-summary.md").write_text(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
+              output.write(report)
+          print(report)
+          PY
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-large-editor-journey-${{ github.sha }}
+          path: |
+            editor-journey.log
+            editor-journey-summary.md
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,4 +1,7 @@
 mod popup;
+mod open;
+#[cfg(feature = "dicom-preview")]
+mod dicom;
 
 use super::*;
 use crate::ui::menu::{Submenu, Swatch};
@@ -6,48 +9,18 @@ use crate::ui::palette;
 
 const MENU_PDF_PREVIEW: usize = 3;
 const MENU_PDF_PICK: usize = 4;
+#[cfg(feature = "dicom-preview")]
+const MENU_DICOM_OPEN: usize = 5;
+#[cfg(feature = "dicom-preview")]
+const MENU_DICOM_PICK_FOLDER: usize = 6;
+#[cfg(feature = "dicom-preview")]
+const MENU_DICOM_PICK_FILE: usize = 7;
+#[cfg(feature = "dicom-preview")]
+const MENU_DICOM_FILE: usize = 3;
+#[cfg(feature = "dicom-preview")]
+use dicom::readonly_dicom_target;
 
 impl App {
-    pub(super) fn open_file_menu(
-        &mut self,
-        root: &mut RenderRoot,
-        targets: Vec<PathBuf>,
-        clicked: PathBuf,
-        folder: bool,
-        at: Point,
-        window: Size,
-        tab: Option<Uuid>,
-    ) {
-        let label = if tab.is_some() {
-            t("tabs.actions")
-        } else if folder {
-            t("fileTree.folderActions")
-        } else {
-            t("fileTree.fileActions")
-        };
-        let mut labels = vec![(t("common.rename"), crate::ui::icons::PENCIL), (t("common.duplicate"), crate::ui::icons::COPY), (t("common.delete"), crate::ui::icons::TRASH)];
-        if tab.is_some() {
-            labels.push((t("tabs.close"), crate::ui::icons::X));
-        } else if !folder && targets.len() == 1 && pdf_preview::is_pdf_path(&clicked) {
-            labels.push(("Найти текст PDF в Akula".to_owned(), crate::ui::icons::SEARCH));
-        }
-        let colored = folder && tab.is_none();
-        if colored {
-            labels.push((t("palette.color"), crate::ui::icons::PALETTE));
-            labels.push(("Импортировать PDF в Akula".to_owned(), crate::ui::icons::UPLOAD));
-        }
-        let items: Vec<crate::ui::menu::Entry<'_>> = labels.iter().map(|(label, icon)| crate::ui::menu::Entry { label, icon: Some(*icon), disabled: false }).collect();
-        let names: Vec<String> = std::iter::once(t("palette.none")).chain(palette::NAMES.iter().map(|name| palette::label(name))).collect();
-        let theme = crate::ui::theme::current();
-        let swatches: Vec<Swatch<'_>> = names.iter().zip(std::iter::once(None).chain(palette::NAMES.iter().map(|name| palette::color(name, &theme)))).map(|(label, color)| Swatch { label, color }).collect();
-        let current = self.tree.color(&clicked).and_then(|name| palette::NAMES.iter().position(|known| *known == name)).map_or(0, |at| at + 1);
-        let menu = if colored { Menu::with_submenu(&label, &items, &Submenu { at: MENU_COLOR, items: &swatches, checked: current }) } else { Menu::entries(&label, &items) };
-        let layer = menu.id();
-        root.add_layer(menu, Menu::context_origin(at, items.len(), window));
-        root.focus_on(Some(layer));
-        self.popup = Some(Popup::FileMenu { layer, targets, clicked, tab });
-    }
-
     pub(super) fn open_sort_menu(&mut self, root: &mut RenderRoot, button: WidgetId) {
         let Some(trigger) = root.get_widget(button).map(|w| w.ctx().bounding_box()) else { return };
         let labels: Vec<String> = crate::ui::file_tree::Sort::ALL.iter().map(|s| t(s.label())).collect();

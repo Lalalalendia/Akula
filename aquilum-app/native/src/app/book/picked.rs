@@ -3,13 +3,14 @@ use crate::frontmatter::PAGES;
 use crate::vault_files::{self, Source};
 use masonry::app::RenderRoot;
 use std::path::PathBuf;
-
 impl App {
     pub(in crate::app) fn on_picked(&mut self, root: &mut RenderRoot, picked: Picked) -> bool {
         let current = |note: &PathBuf| self.note.as_ref().is_some_and(|n| n.is(note));
         match picked {
             Picked::Workspace(path) => return self.switch_workspace(root, path).title,
             Picked::PdfChosen(file) => self.prompt_pdf_preview(root, file),
+            #[cfg(feature = "dicom-preview")]
+            Picked::DicomExternal(path) => return self.open_dicom_external(root, path),
             Picked::PdfIndexed(Ok(note)) => {
                 self.tree.paths_changed(root, std::slice::from_ref(&note));
                 return self.open(root, note);
@@ -38,5 +39,4 @@ impl App {
         }
         false
     }
-
 }

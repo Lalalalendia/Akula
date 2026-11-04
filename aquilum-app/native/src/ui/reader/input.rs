@@ -1,5 +1,4 @@
 use super::*;
-
 impl ReaderView {
     pub(super) fn key_event(&mut self, ctx: &mut EventCtx<'_>, event: &TextEvent) {
         let TextEvent::Keyboard(k) = event else { return };
@@ -7,6 +6,7 @@ impl ReaderView {
             return;
         }
         let command = keymap::command(&[Scope::Text, Scope::Reader], &k.key, k.modifiers);
+        if self.toc_key(ctx, command) { return; }
         if command == Some(Command::Copy) && self.popover.is_none() {
             if let Some((from, to)) = self.ordered() {
                 ctx.set_clipboard(self.session.text(from, to));
@@ -25,8 +25,8 @@ impl ReaderView {
         }
         ctx.set_handled();
     }
-
     pub(super) fn pointer_event(&mut self, ctx: &mut EventCtx<'_>, event: &PointerEvent) {
+        if self.toc_pointer(ctx, event) { return; }
         match event {
             PointerEvent::Move(update) => {
                 let p = ctx.local_position(update.current.position);

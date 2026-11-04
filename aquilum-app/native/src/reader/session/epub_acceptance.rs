@@ -31,7 +31,7 @@ fn long(out: &mut Vec<u8>, value: u32) {
 
 // ZIP store-only writer for tiny tests. No Python, network or extra crate is
 // required; this also runs on a clean Windows Rust test worker.
-fn write_zip(path: &std::path::Path, members: &[(String, Vec<u8>)]) {
+pub(crate) fn write_zip(path: &std::path::Path, members: &[(String, Vec<u8>)]) {
     let mut zip = Vec::new();
     let mut central = Vec::new();
     for (name, bytes) in members {

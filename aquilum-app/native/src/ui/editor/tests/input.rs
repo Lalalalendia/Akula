@@ -1,3 +1,4 @@
+use masonry::core::{Ime, TextEvent};
 use masonry::core::keyboard::{Key, Modifiers, NamedKey};
 
 use super::support::{command_key, markdown_root, named, press, root, selected, text, typing};
@@ -81,4 +82,89 @@ fn double_hyphen_and_space_become_dash() {
     root.edit_widget(id, |mut w| TextEditor::set_smart(&mut w.downcast(), Smart::default()));
     typing(&mut root, " c-- d--- e");
     assert_eq!(text(&root), "a-- b c— d--- e");
+}
+
+fn ime(root: &mut masonry::app::RenderRoot, event: Ime) {
+    root.handle_text_event(TextEvent::Ime(event));
+    let _ = root.redraw();
+}
+
+#[test]
+fn ime_preedit_and_cancel_do_not_delete_selection_or_create_undo_history() {
+    let original = "слева мир справа";
+    let mut root = root(original);
+    let start = "слева ".len();
+    let end = start + "мир".len();
+    let id = super::support::editor_id(&root);
+    root.edit_widget(id, |mut w| TextEditor::select_byte_range(&mut w.downcast(), start, end));
+    let _ = root.redraw();
+    assert_eq!(selected(&root), "мир");
+
+    ime(&mut root, Ime::Enabled);
+    ime(&mut root, Ime::Preedit("に".into(), Some((3, 3))));
+    ime(&mut root, Ime::Preedit("日本".into(), Some((6, 6))));
+    assert_eq!(text(&root), original, "preedit must not change the document");
+    assert_eq!(selected(&root), "мир", "preedit must retain the selection");
+
+    ime(&mut root, Ime::Disabled);
+    assert_eq!(text(&root), original, "cancelling must preserve the document");
+    assert_eq!(selected(&root), "мир", "cancelling must preserve the selection");
+    command_key(&mut root, "z");
+    assert_eq!(text(&root), original, "cancel must not add an undo step");
+}
+
+#[test]
+fn ime_commit_replaces_selection_once_and_one_undo_restores_it() {
+    let original = "слева мир справа";
+    let mut root = root(original);
+    let start = "слева ".len();
+    let end = start + "мир".len();
+    let id = super::support::editor_id(&root);
+    root.edit_widget(id, |mut w| TextEditor::select_byte_range(&mut w.downcast(), start, end));
+    let _ = root.redraw();
+
+    ime(&mut root, Ime::Enabled);
+    ime(&mut root, Ime::Preedit("に".into(), Some((3, 3))));
+    ime(&mut root, Ime::Preedit("日本".into(), Some((6, 6))));
+    ime(&mut root, Ime::Preedit(String::new(), None));
+    assert_eq!(text(&root), original, "empty preedit is transient too");
+    ime(&mut root, Ime::Commit("日本語".into()));
+    assert_eq!(text(&root), "слева 日本語 справа");
+
+    command_key(&mut root, "z");
+    assert_eq!(text(&root), original, "one undo restores the full selection");
+    command_key(&mut root, "z");
+    assert_eq!(text(&root), original, "preedit must not add a second undo step");
+    command_key(&mut root, "y");
+    assert_eq!(text(&root), "слева 日本語 справа");
+}
+
+#[test]
+fn ime_empty_commit_preserves_multiline_selection_and_undo() {
+    let original = "начало\nсередина\n日本語";
+    let mut root = root(original);
+    let start = original.find("середина").unwrap();
+    let end = original.len();
+    let selected_original = &original[start..end];
+    let id = super::support::editor_id(&root);
+    root.edit_widget(id, |mut w| TextEditor::select_byte_range(&mut w.downcast(), start, end));
+    let _ = root.redraw();
+    assert_eq!(selected(&root), selected_original);
+
+    // OS IMEs may finish a cancelled or emptied composition with Commit("").
+    // Unlike a real nonempty Commit, it must not delete any selected bytes.
+    ime(&mut root, Ime::Enabled);
+    ime(&mut root, Ime::Preedit("に".into(), Some((3, 3))));
+    ime(&mut root, Ime::Preedit(String::new(), None));
+    ime(&mut root, Ime::Commit(String::new()));
+    assert_eq!(text(&root), original, "empty commit must not alter document bytes");
+    assert_eq!(selected(&root), selected_original, "empty commit must retain selection");
+    command_key(&mut root, "z");
+    assert_eq!(text(&root), original, "no empty commit undo entry is allowed");
+
+    // A second empty commit while a nonempty preedit is active is also inert.
+    ime(&mut root, Ime::Preedit("日本".into(), Some((6, 6))));
+    ime(&mut root, Ime::Commit(String::new()));
+    assert_eq!(text(&root), original);
+    assert_eq!(selected(&root), selected_original);
 }

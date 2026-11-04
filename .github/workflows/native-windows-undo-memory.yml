@@ -1,0 +1,80 @@
+name: Akula M3b Windows real Undo Redo and memory diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/benchmarks/native_windows_undo_memory.ps1'
+      - 'scripts/windows-beta-gui-input.ps1'
+      - '.github/workflows/native-windows-undo-memory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  undo-e2e:
+    name: Real Win32 OS keyboard 30k/100k edit Undo Redo exact readback
+    runs-on: windows-2025
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-memory-pilot-v1
+          cache-workspace-crates: true
+          save-if: false
+      - name: Validate test-only PowerShell fixture generation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') { throw 'Disposable Windows runner only' }
+          $windowsPS = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $windowsPS -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File scripts/benchmarks/native_windows_undo_memory.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell M3b fixture selftest failed' }
+      - name: Build normal Windows Release with installed feature
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native --features installed
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Native Release build failed' }
+          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $exe)) { throw 'Windows Akula release missing' }
+          Get-FileHash -Algorithm SHA256 -LiteralPath $exe | Format-List
+      - name: Real foreground OS edit Undo Redo Undo and exact GUI readback
+        shell: pwsh
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'windows-m3b-undo'
+          $env:AKULA_PROBE_SOURCE_HEAD = (git rev-parse HEAD).Trim()
+          $windowsPS = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $windowsPS -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File scripts/benchmarks/native_windows_undo_memory.ps1 -Binary $exe -Out $out
+          if ($LASTEXITCODE -ne 0) { throw 'M3b real Undo E2E failed; not a success assertion' }
+          $summary = Join-Path $out 'summary.md'
+          if (!(Test-Path -LiteralPath $summary)) { throw 'M3b summary missing' }
+          Get-Content -LiteralPath $summary | Out-File -Append -Encoding utf8 -FilePath $env:GITHUB_STEP_SUMMARY
+      - name: Archive sanitized OS input, GUI, save and process memory witnesses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-m3b-win32-undo-${{ github.sha }}
+          path: |
+            windows-m3b-undo/environment.json
+            windows-m3b-undo/results.json
+            windows-m3b-undo/summary.md
+            windows-m3b-undo/size-*/events.json
+            windows-m3b-undo/size-*/result.json
+            windows-m3b-undo/size-*/samples.csv
+          if-no-files-found: warn
+          retention-days: 14

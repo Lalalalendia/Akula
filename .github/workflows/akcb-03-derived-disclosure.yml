@@ -1,0 +1,35 @@
+name: AKCB-03 Composite Disclosure Lab
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/mcp/akcb_03_composite_lab.rs'
+      - 'docs/research/akcb_03_derived_trace_check.py'
+      - 'docs/research/akcb-03-derived-disclosure-contract.md'
+      - '.github/workflows/akcb-03-derived-disclosure.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  composite-grant-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> target
+      - name: Exercise real agent and vault grant stores in Rust test-only lab
+        working-directory: aquilum-app
+        env:
+          AKCB_03_TRACE_OUT: ${{ runner.temp }}/akcb-03-trace.json
+        run: cargo test -p aquilum-core --locked akcb_03_native_grants_and_derived_disclosure_trace -- --nocapture
+      - name: Check real Rust evidence with independent bounded oracle
+        run: python3 docs/research/akcb_03_derived_trace_check.py "${{ runner.temp }}/akcb-03-trace.json" --self-test

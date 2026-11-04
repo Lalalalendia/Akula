@@ -8,6 +8,10 @@ impl TextEditor {
         if !self.table_active() || event.state != KeyState::Down {
             return self.table_active();
         }
+        if self.table.as_ref().is_some_and(|s| s.compose.is_some()) {
+            ctx.set_handled();
+            return true;
+        }
         let shift = event.modifiers.shift();
         let command = keymap::command(&[Scope::Text, Scope::Navigation, Scope::Table], &event.key, event.modifiers);
         let editing = self.table.as_ref().is_some_and(|s| s.active.is_some());
@@ -76,14 +80,4 @@ impl TextEditor {
         true
     }
 
-    pub(in super::super) fn table_text(&mut self, ctx: &mut EventCtx<'_>, text: &str) -> bool {
-        if !self.table.as_ref().is_some_and(|s| s.active.is_some()) {
-            return false;
-        }
-        let Some((session, view)) = self.table_parts() else { return false };
-        let outcome = session.insert(view, text);
-        self.apply(ctx, outcome);
-        ctx.set_handled();
-        true
-    }
 }

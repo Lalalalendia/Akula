@@ -3,7 +3,7 @@ use masonry::app::RenderRoot;
 use super::support::{scrolled, wheel, PAGE, TAG};
 use crate::ui::editor::TextEditor;
 use crate::ui::scroll::ScrollArea;
-
+mod focus;
 #[test]
 fn scrolling_far_repaints_visible_paragraphs() {
     let body: String = (0..400).map(|i| format!("Абзац {i}\n")).collect();

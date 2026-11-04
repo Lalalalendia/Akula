@@ -1,4 +1,4 @@
-use masonry::core::{EventCtx, Ime, PointerButton, PointerButtonEvent, PointerEvent, PointerUpdate, PropertiesMut, TextEvent, UpdateCtx};
+use masonry::core::{EventCtx, PointerButton, PointerButtonEvent, PointerEvent, PointerUpdate, PropertiesMut, TextEvent, UpdateCtx};
 use super::Kind;
 use super::paste;
 use super::TextEditor;
@@ -158,12 +158,12 @@ impl TextEditor {
             self.include_caret();
         }
         match event {
-            TextEvent::Keyboard(key) if self.laid_out() => {
-                if !self.media_key(ctx, key) && !self.table_key(ctx, key) {
+            TextEvent::Keyboard(key) if self.laid_out() || self.source_shortcut(key) => {
+                if !self.laid_out() || (!self.media_key(ctx, key) && !self.table_key(ctx, key)) {
                     self.keyboard(ctx, key);
                 }
             }
-            TextEvent::Ime(Ime::Commit(text)) if self.table_text(ctx, text) => {}
+            TextEvent::Ime(ime) if self.table_ime(ctx, ime) => {}
             TextEvent::Ime(ime) => self.ime(ctx, ime),
             TextEvent::ClipboardPaste(text) if self.table_text(ctx, text) => {}
             TextEvent::ClipboardPaste(text) => {

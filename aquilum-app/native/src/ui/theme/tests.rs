@@ -100,7 +100,7 @@ fn a_system_family_is_asked_for_by_its_own_name_with_a_fallback() {
     let masonry::parley::FontFamily::Source(stack) = super::editor_font("Georgia") else { panic!("ожидался список имён") };
     assert!(stack.starts_with("\"Georgia\", \"iA Writer Quattro\""), "{stack}");
     let masonry::parley::FontFamily::Source(mono) = super::editor_font("iA Writer Mono") else { panic!("ожидался список имён") };
-    assert!(mono.contains("monospace"));
+    for family in ["monospace", "Microsoft YaHei", "Microsoft JhengHei", "Yu Gothic", "Malgun Gothic", "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "Hiragino Sans", "Apple SD Gothic Neo", "Segoe UI Emoji"] { assert!(mono.contains(family), "missing {family} in {mono}"); }
 }
 
 #[test]

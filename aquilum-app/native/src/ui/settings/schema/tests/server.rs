@@ -107,6 +107,16 @@ fn b1_e2e_01_native_verify_button_never_grants_install() {
         row.label == t("settings.server.observedFacts")
     ));
     assert!(!buttons(&config, &ctx)[1].enabled);
+    ctx.server_probe = Some(ServerProbeView::NeedsAdminAuthorization {
+        facts: "Ubuntu / x86_64; sudo listing no".into(),
+    });
+    let blocked = blocks(Section::Server, &config, &ctx);
+    assert!(blocked[0].rows.iter().any(|row| {
+        row.label == t("settings.server.state")
+            && matches!(&row.control, Control::Status { text, tone: Tone::Danger }
+                if text == &t("settings.server.adminAuthorizationRequired"))
+    }), "missing sudo needs administrator, not unsupported OS");
+    assert!(!buttons(&config, &ctx)[1].enabled);
     let mut bad = config.clone();
     bad.server_setup.host_public_key = "-----BEGIN OPENSSH PRIVATE KEY-----".into();
     assert!(!bad.server_setup.valid_offline_pin());

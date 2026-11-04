@@ -31,7 +31,7 @@ pub fn same_workspace(root: &Path, workspace: &str) -> bool {
 }
 
 pub fn same_path(left: &Path, right: &Path) -> bool {
-    identity(left) == identity(right)
+    left.as_os_str() == right.as_os_str() || identity(left) == identity(right)
 }
 
 pub fn strip_root<'a>(root: &Path, path: &'a Path) -> Option<&'a Path> {

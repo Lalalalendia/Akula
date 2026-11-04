@@ -65,7 +65,7 @@ pub fn read_text(path: &Path) -> std::io::Result<String> {
     text_from_bytes(fs::read(path)?)
 }
 
-fn snapshot_of(bytes: Vec<u8>) -> Result<FileSnapshot, FileCommandError> {
+pub(crate) fn snapshot_of(bytes: Vec<u8>) -> Result<FileSnapshot, FileCommandError> {
     // Without CR, text_from_bytes validates UTF-8 but never modifies bytes.
     // The raw-file hash is therefore also the editor's normalized text hash.
     let has_cr = memchr::memchr(b'\r', &bytes).is_some();

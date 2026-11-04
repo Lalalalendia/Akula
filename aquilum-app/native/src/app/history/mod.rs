@@ -1,6 +1,6 @@
 mod actions;
+mod guard;
 mod version;
-
 use std::path::PathBuf;
 
 use masonry::app::RenderRoot;

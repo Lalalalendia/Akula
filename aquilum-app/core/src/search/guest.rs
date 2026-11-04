@@ -31,6 +31,7 @@ impl Guest {
 impl SearchService {
     pub fn open_guest(&self, workspace: &str) -> Result<SearchIndexStatus, SearchError> {
         let _guard = self.prepare_lock.lock().map_err(SearchError::task)?;
+        self.ensure_running()?;
         let root = workspace_root(workspace)?;
         if let Some(status) = self.status_for_root(&root) {
             return Ok(status);
@@ -242,7 +243,6 @@ mod tests {
         fixture.service.prepare(&home).unwrap();
         fixture.service.open_guest(&other).unwrap();
         let generation = fixture.generation();
-
         let status = fixture.service.prepare(&other).unwrap();
 
         assert_eq!(status.generation, generation, "индекс не открыт заново");

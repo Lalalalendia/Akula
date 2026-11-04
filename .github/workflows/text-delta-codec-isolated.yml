@@ -1,0 +1,34 @@
+name: Text Delta standalone wire parity lab (non-production)
+
+on:
+  # PR source owners run in the required Application checks / Main PR gate.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  parity:
+    name: Pure wire codec and hostile-input tests without Core workspace
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run standalone codec test suite
+        run: cargo test --manifest-path modules/text-delta-codec/Cargo.toml -- --nocapture
+      - name: Validate independent package boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fx '[workspace]' modules/text-delta-codec/Cargo.toml
+          ! grep -q 'aquilum-core' modules/text-delta-codec/Cargo.toml
+          test -f aquilum-app/core/src/sync/text_delta_codec.rs
+          git diff --exit-code -- aquilum-app/core/src/sync/text_delta_codec.rs

@@ -194,6 +194,9 @@ pub fn extract_scales(transform: &Affine) -> (f32, f32) {
 }
 
 /// Extension methods for rectangles.
+#[cfg(test)]
+#[path = "util/tile_snap_guard_tests.rs"]
+mod tile_snap_guard_tests;
 pub trait RectExt {
     /// Snap the rect to whole tile coordinates.
     fn snap_to_tile_coordinates(self) -> Self;
@@ -221,9 +224,6 @@ impl RectExt for Rect {
 impl RectExt for RectU16 {
     #[inline]
     fn snap_to_tile_coordinates(self) -> Self {
-        // This method will panic if we have a viewport of size u16::MAX and draw
-        // at the very edge, but better than returning a wrong result.
-
         let x0 = (self.x0 / Tile::WIDTH).checked_mul(Tile::WIDTH).unwrap();
         let y0 = (self.y0 / Tile::HEIGHT).checked_mul(Tile::HEIGHT).unwrap();
 
@@ -234,8 +234,8 @@ impl RectExt for RectU16 {
         Self::new(
             x0,
             y0,
-            self.x1.checked_next_multiple_of(Tile::WIDTH).unwrap(),
-            self.y1.checked_next_multiple_of(Tile::HEIGHT).unwrap(),
+            self.x1.checked_next_multiple_of(Tile::WIDTH).unwrap_or(u16::MAX),
+            self.y1.checked_next_multiple_of(Tile::HEIGHT).unwrap_or(u16::MAX),
         )
     }
 }
@@ -401,9 +401,7 @@ impl<T> IndexMut<usize> for RetainVec<T> {
 
 /// Calculate the bounding box of the strips.
 pub fn strip_bbox(strips: &[Strip]) -> Option<RectU16> {
-    // Fill and alpha fill segments internally store their coordinates in tile units,
-    // in order to avoid multiplications in every invocation of the closure we calculate
-    // the bbox in tile units first and then convert back to pixel units.
+    // Accumulate in tile units before saturating to u16 pixel bounds.
     let mut tile_bbox = RectU16::INVERTED;
 
     visit_strip_fill_segments(
@@ -419,15 +417,14 @@ pub fn strip_bbox(strips: &[Strip]) -> Option<RectU16> {
         |bbox, segment| bbox.union(segment.tile_rect()),
     );
 
-    // Convert to pixel units.
     if tile_bbox.is_empty() {
         None
     } else {
         Some(RectU16::new(
-            tile_bbox.x0.checked_mul(Tile::WIDTH).unwrap(),
-            tile_bbox.y0.checked_mul(Tile::HEIGHT).unwrap(),
-            tile_bbox.x1.checked_mul(Tile::WIDTH).unwrap(),
-            tile_bbox.y1.checked_mul(Tile::HEIGHT).unwrap(),
+            tile_bbox.x0.saturating_mul(Tile::WIDTH),
+            tile_bbox.y0.saturating_mul(Tile::HEIGHT),
+            tile_bbox.x1.saturating_mul(Tile::WIDTH),
+            tile_bbox.y1.saturating_mul(Tile::HEIGHT),
         ))
     }
 }
@@ -492,7 +489,7 @@ pub(crate) mod unpremultiply {
 
     #[inline(always)]
     pub(crate) fn scalar(component: u8, reciprocal: u16) -> u8 {
-        u16::from(component).wrapping_mul(reciprocal).div_256() as u8
+        ((u32::from(component) * u32::from(reciprocal) + 128) >> 8).min(255) as u8
     }
 
     #[inline(always)]
@@ -562,6 +559,9 @@ pub(crate) mod unpremultiply {
     }
 }
 
+#[cfg(test)]
+#[path = "util/strip_bbox_overflow_tests.rs"]
+mod strip_bbox_overflow_tests;
 #[cfg(test)]
 mod tests {
     use super::RectU16;

@@ -1,5 +1,4 @@
 use super::{refused, Failure};
-
 pub(in crate::mcp) struct Head {
     pub method: String,
     version: u8,
@@ -62,6 +61,7 @@ impl Head {
     }
 
     pub fn body(&self) -> Result<Body, Failure> {
+        super::body_guard::validate(self)?;
         if let Some(coding) = self.header("transfer-encoding") {
             return if coding.trim().eq_ignore_ascii_case("chunked") {
                 Ok(Body::Chunked)

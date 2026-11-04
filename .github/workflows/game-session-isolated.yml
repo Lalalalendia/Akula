@@ -1,0 +1,37 @@
+name: Game Session GNET-01 isolated
+
+on:
+  pull_request:
+    paths:
+      - 'modules/game-session/**'
+      - '.github/workflows/game-session-isolated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  game-session:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Keep Game Session standalone
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fqx '[workspace]' modules/game-session/Cargo.toml
+          ! grep -Eq '(iroh|noq|aquilum-core|aquilum-native)' modules/game-session/Cargo.toml
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path modules/game-session/Cargo.toml --all -- --check
+      - name: Test only the game session
+        run: cargo test --manifest-path modules/game-session/Cargo.toml --locked --offline --all-targets
+      - name: Reject warnings in the isolated package
+        run: cargo clippy --manifest-path modules/game-session/Cargo.toml --locked --offline --all-targets -- -D warnings

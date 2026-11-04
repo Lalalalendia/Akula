@@ -3,7 +3,7 @@ use super::{Document, classify, heights, lines};
 // Keep a bounded but generous initial scroll lookahead. The old 3000-line
 // preload eagerly classified and mounted far-offscreen Markdown on every tab
 // selection; 1536 preserves the existing incremental load/reach strategy.
-const MARGIN: usize = 1536;
+pub(super) const MARGIN: usize = 1536;
 const JUMP: usize = 256;
 
 #[cfg(not(test))]
@@ -22,7 +22,7 @@ fn window_margin() -> usize {
         .filter(|&value| (512..=4096).contains(&value))
         .unwrap_or(MARGIN)
 }
-const SPAN_BYTES: usize = 512 * 1024;
+pub(super) const SPAN_BYTES: usize = 512 * 1024;
 
 impl Document {
     fn back(&self, from: usize, lines: usize) -> usize {

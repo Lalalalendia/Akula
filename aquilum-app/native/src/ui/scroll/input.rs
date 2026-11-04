@@ -1,9 +1,7 @@
 use masonry::core::{EventCtx, PointerButton, PointerEvent, PointerScrollEvent, ScrollDelta, Widget};
 use masonry::kurbo::Axis;
-
 use super::LINE;
 use super::area::ScrollArea;
-
 impl<W: Widget> ScrollArea<W> {
     fn wheel_delta(&self, x: f64, y: f64, shift: bool) -> f64 {
         match self.axis {
@@ -13,7 +11,6 @@ impl<W: Widget> ScrollArea<W> {
             Axis::Horizontal => 0.0,
         }
     }
-
     pub(super) fn pointer(&mut self, ctx: &mut EventCtx<'_>, event: &PointerEvent) {
         match event {
             PointerEvent::Scroll(PointerScrollEvent { delta, state, .. }) => {
@@ -45,6 +42,9 @@ impl<W: Widget> ScrollArea<W> {
                 let at = ctx.local_position(e.state.position);
                 let span = self.span();
                 if let Some(next) = self.bar.press(at, &span) {
+                    if ctx.has_focus_target() && let Some(focused) = ctx.focus_target_id() {
+                        ctx.set_focus(focused);
+                    }
                     if self.bar.dragging() {
                         self.glide = None;
                         ctx.capture_pointer();

@@ -2,7 +2,7 @@ use masonry::imaging::record::Glyph as SceneGlyph;
 use masonry::imaging::{GeometryRef, GlyphRunRef};
 use masonry::kurbo::{Affine, Rect};
 use masonry::peniko::Style;
-use vello_cpu::Glyph;
+mod glyph_guard;
 
 use super::Painter;
 use super::convert;
@@ -32,7 +32,9 @@ impl Painter {
     }
 
     pub(in crate::render) fn draw_glyph_run(&mut self, run: GlyphRunRef<'_>, glyphs: &mut dyn Iterator<Item = SceneGlyph>) {
+        if let Err(err) = glyph_guard::validate_run(&run) { self.set_error_once(err); return; }
         let Some(first) = glyphs.next() else { return };
+        if let Err(err) = glyph_guard::validate_glyph(run.transform, &first) { self.set_error_once(err); return; }
         let outside_first = self.offscreen(convert::line_bounds(
             first.y, run.font_size, run.glyph_transform, run.transform,
         ));
@@ -43,37 +45,30 @@ impl Painter {
         if outside_first {
             return;
         }
+        let [a, b, c, d, _, _] = run.transform.as_coeffs();
+        let reach = f64::from(run.font_size) * 1.5 * a.abs().max(b.abs()).max(c.abs()).max(d.abs());
+        let area = self.frame.inflate(reach, reach);
+        let filtered = self.filtered();
+        let glyphs = match glyph_guard::collect(std::iter::once(first).chain(glyphs), run.transform, area, filtered) {
+            Ok(value) => value,
+            Err(err) => { self.set_error_once(err); return; }
+        };
+        if glyphs.is_empty() { return; }
         let paint = convert::brush_to_paint(run.brush, run.composite, &mut self.images);
         self.set_transform(run.transform);
         self.ctx.set_paint_transform(run.brush_transform.unwrap_or(Affine::IDENTITY));
         self.ctx.set_paint(paint);
         self.ctx.set_blend_mode(run.composite.blend);
-        let [a, b, c, d, _, _] = run.transform.as_coeffs();
-        let reach = f64::from(run.font_size) * 1.5 * a.abs().max(b.abs()).max(c.abs()).max(d.abs());
-        let area = self.frame.inflate(reach, reach);
-        let filtered = self.filtered();
-        let glyphs: Vec<Glyph> = std::iter::once(first)
-            .chain(glyphs)
-            .filter(|g| filtered || area.contains(run.transform * masonry::kurbo::Point::new(f64::from(g.x), f64::from(g.y))))
-            .map(|g| Glyph { id: g.id, x: g.x, y: g.y })
-            .collect();
-        if glyphs.is_empty() {
-            return;
-        }
         match run.style {
             Style::Fill(fill_rule) => self.ctx.set_fill_rule(*fill_rule),
             Style::Stroke(stroke) => self.ctx.set_stroke(stroke.clone()),
         }
-        // Experimental A/B switch applies equally to the incremental
-        // renderer and the independent fresh-full reference in test binaries.
-        // Release application builds always keep the current atlas setting.
+        // Keep the same glyph atlas policy for incremental and full reference draws.
         #[cfg(test)]
         let atlas_cache = *TEST_GLYPH_ATLAS;
         #[cfg(not(test))]
         let atlas_cache = true;
-        // Test-only A/B: font hinting may snap fractional glyph positions
-        // differently in cropped raster targets. Both the incremental path
-        // and independent full reference use the same mode.
+        // Keep test-only hinting parity across cropped and full-frame draws.
         #[cfg(test)]
         let hint = run.hint && std::env::var_os("AQ_TEST_DISABLE_GLYPH_HINTING").is_none();
         #[cfg(not(test))]

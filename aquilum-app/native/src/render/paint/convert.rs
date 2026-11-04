@@ -111,6 +111,9 @@ impl Images {
     fn source(&mut self, data: &ImageData) -> ImageSource {
         let frame = self.frame;
         let (source, used, _) = self.sources.entry(data.data.id()).or_insert_with(|| {
+            if data.width == 0 || data.height == 0 {
+                return (ImageSource::Pixmap(Arc::new(vello_cpu::Pixmap::new(1, 1))), frame, None);
+            }
             if let Some((pixmap, owner)) = crate::render::surface::find(data.data.id()) {
                 return (ImageSource::Pixmap(pixmap), frame, Some(owner));
             }
@@ -603,7 +606,6 @@ pub fn line_bounds(y: f32, font_size: f32, glyph_transform: Option<Affine>, tran
     transform.transform_rect_bbox(local)
 }
 
-
 #[cfg(test)]
 mod mipmap_integration_tests {
     use super::*;
@@ -913,7 +915,6 @@ mod mipmap_integration_tests {
     }
 }
 
-
 // This exercises the actual Akula image-brush converter and Vello CPU rasterizer
 // on an in-repository PNG. The reference is a direct full-footprint area sum,
 // independent of mipmap::half and of Vello's sampling implementation.
@@ -1110,7 +1111,6 @@ mod image_scene_tests {
     }
 }
 
-
 #[cfg(test)]
 mod mipmap_stage_benchmarks {
     use super::*;
@@ -1232,7 +1232,6 @@ mod mipmap_stage_benchmarks {
         }
     }
 }
-
 
 // Independent fractional-footprint reference for odd real-photo dimensions.
 // Unlike mipmap::half, expected output integrates the actual ORIGINAL RGBA.
@@ -1384,7 +1383,6 @@ mod fractional_odd_quality_tests {
     }
 }
 
-
 // Adversarial alpha/clip scene following the same brush transform and rounded
 // crop semantics as ui::editor::embed::media::paint::draw_image.
 // Transparent saturated RGB must never bleed onto a white background.
@@ -1518,7 +1516,6 @@ mod mipmap_crop_alpha_edge_tests {
         assert_eq!(checked, 16);
     }
 }
-
 
 // Independent coverage check for the exact 8px rounded image-frame radius used
 // by the editor. The expected mask is a supersampled *analytic shape*, not a
@@ -1693,3 +1690,5 @@ mod mipmap_rounded_coverage_tests {
 #[cfg(test)]
 #[path = "convert_adaptive_lod_tests.rs"]
 mod adaptive_lod_tests;
+#[cfg(test)]
+mod zero_size_tests;

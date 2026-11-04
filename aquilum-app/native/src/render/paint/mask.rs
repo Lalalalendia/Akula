@@ -1,5 +1,4 @@
 //! Кэширование и отрисовка масок групп.
-
 use std::collections::VecDeque;
 
 use masonry::imaging::MaskMode;
@@ -7,8 +6,9 @@ use masonry::imaging::record::{Scene, replay_transformed};
 use masonry::kurbo::Affine;
 use vello_cpu::{Mask, Pixmap, RenderSettings};
 
-use super::Painter;
-use super::error::PaintError;
+use super::{Painter, error::PaintError};
+mod cache_budget;
+mod filter_preflight;
 
 #[derive(Clone)]
 pub struct CachedMask {
@@ -19,7 +19,8 @@ pub struct CachedMask {
 }
 
 pub const MASK_CACHE_LIMIT: usize = 8;
-
+#[cfg(test)]
+mod failure_propagation_tests;
 pub fn get_or_render_mask(
     cache: &mut VecDeque<CachedMask>,
     scene: &Scene,
@@ -33,7 +34,8 @@ pub fn get_or_render_mask(
         return Ok(entry.mask.clone());
     }
 
-    let mut sub = Painter::new(width, height, settings);
+    let keep_cached = cache_budget::prepare(cache, width, height, MASK_CACHE_LIMIT);
+    let mut sub = Painter::new(width, height, filter_preflight::settings(scene, settings));
     replay_transformed(scene, &mut sub, transform);
     sub.finish()?;
     let mut pixmap = Pixmap::new(width, height);
@@ -42,10 +44,7 @@ pub fn get_or_render_mask(
         MaskMode::Alpha => Mask::new_alpha(&pixmap),
         MaskMode::Luminance => Mask::new_luminance(&pixmap),
     };
-    if cache.len() == MASK_CACHE_LIMIT {
-        cache.pop_front();
-    }
-    cache.push_back(CachedMask { scene: scene.clone(), mode, transform, mask: mask.clone() });
+    if keep_cached { cache.push_back(CachedMask { scene: scene.clone(), mode, transform, mask: mask.clone() }); }
     Ok(mask)
 }
 

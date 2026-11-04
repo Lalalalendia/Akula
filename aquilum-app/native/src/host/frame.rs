@@ -75,7 +75,7 @@ impl Host {
         let presented = !drawn.is_empty();
         #[cfg(all(any(target_os = "macos", target_os = "linux"), feature = "installed"))]
         let startup_frame_presented = !drawn.is_empty();
-        if !drawn.is_empty() {
+        if !drawn.is_empty() || cfg!(target_os = "windows") {
             output.present(&drawn);
         }
         self.layers = Some(layers);

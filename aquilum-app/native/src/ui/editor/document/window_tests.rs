@@ -19,6 +19,43 @@ fn agrees(doc: &Document, text: &str) {
 }
 
 #[test]
+fn undo_of_large_replacement_remounts_a_bounded_window_before_layout() {
+    let original = lines(30_000);
+    let replacement = "replacement";
+    let mut doc = windowed(replacement);
+    assert_eq!(doc.loaded_range(), (0, replacement.len()));
+
+    // Undo a select-all paste: the single-line mounted window must not
+    // become a 30,000-line synchronous layout workload.
+    doc.replace(0..replacement.len(), &original);
+    agrees(&doc, &original);
+    let (start, end) = doc.loaded_range();
+    assert!(start > 0, "large undo must remount near the insertion end");
+    assert_eq!(end, original.len(), "restored tail remains in the mounted window");
+    assert!(doc.line_count() < 2_000, "unbounded restored GUI window: {} lines", doc.line_count());
+
+    // Complete content must remain available through the persistent Rope,
+    // including the originally unloaded first line.
+    assert_eq!(doc.copy(0..original.find('\n').unwrap()), "строка 0");
+    doc.include(0);
+    assert_eq!(doc.loaded().0, 0);
+    agrees(&doc, &original);
+}
+
+#[test]
+fn large_few_line_replacement_is_bounded_by_bytes_too() {
+    // Long unbroken lines are indivisible by design. Use ordinary lines
+    // where the 512 KiB byte limit, rather than the line count, decides.
+    let original = ("X".repeat(700) + "\n").repeat(1_000);
+    let mut doc = windowed("tiny");
+    doc.replace(0..4, &original);
+    agrees(&doc, &original);
+    assert!(doc.loaded().0 > 0, "byte-bounded window was not remounted");
+    assert!(doc.loaded().1.len() <= super::window::SPAN_BYTES + 1_000,
+        "large insertion expanded the mounted source beyond the byte budget");
+}
+
+#[test]
 fn a_far_position_moves_the_window_instead_of_stretching_it() {
     let text = lines(50_000);
     let mut doc = windowed(&text);
@@ -142,4 +179,34 @@ fn checkpoints_identify_the_second_windowed_fence_not_the_first() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert_eq!(recovered, Some(second), "offset must never migrate to an older code block");
+}
+
+
+#[test]
+fn stale_window_byte_offsets_never_underflow_or_split_utf8() {
+    let source = lines(70_000);
+    let mut doc = windowed(&source);
+    doc.include(source.len());
+    let (base, loaded) = doc.loaded();
+    assert!(base > 0, "must reproduce a far-away mounted window");
+    assert!(loaded.starts_with("строка "), "window starts on a UTF-8 line boundary");
+
+    // The crash reported an absolute caret byte offset below Document::base.
+    // Window-only readers must not wrap usize, panic, or alter the full Rope.
+    assert_eq!(doc.before(0), "");
+    assert_eq!(doc.after(0), "");
+    assert_eq!(doc.slice(0..1), "");
+    assert_eq!(doc.before(doc.end() + 1), "");
+    assert_eq!(doc.after(doc.end() + 1), "");
+    assert_eq!(doc.slice(base..doc.end() + 1), "");
+
+    // A byte position inside the first Cyrillic character is not a valid
+    // UTF-8 boundary, even if it lies numerically within the loaded window.
+    assert_eq!(doc.before(base + 1), "");
+    assert_eq!(doc.after(base + 1), "");
+    assert_eq!(doc.slice(base..base + 1), "");
+
+    assert_eq!(doc.after(base), loaded);
+    assert_eq!(doc.slice(base..doc.end()), loaded);
+    assert_eq!(doc.whole(), source, "an invalid window read must never mutate the source");
 }

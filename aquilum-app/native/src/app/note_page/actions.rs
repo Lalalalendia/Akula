@@ -90,7 +90,7 @@ impl App {
                 Some(TextAction::Entered(text)) => {
                     let text = text.clone();
                     self.commit_title(root, &text);
-                    if let Some(ids) = &self.note_ids {
+                    if self.popup.is_none() && let Some(ids) = &self.note_ids {
                         let body = ids.body;
                         root.focus_on(Some(body.id()));
                         body.edit(root, |mut body| TextEditor::select_byte_range(&mut body, 0, 0));
@@ -98,13 +98,13 @@ impl App {
                 }
                 _ => {}
             }
-            return Some(Outcome::default());
+            return Some(Outcome { title: matches!(action.downcast_ref::<TextAction>(), Some(TextAction::Entered(_))), ..Outcome::default() });
         }
         if id == ids.title_box.id() && action.downcast_ref::<TitleAction>().is_some() {
             let title = ids.title;
             let text = title.get(root).map(|t| t.inner().text()).unwrap_or_default();
             self.commit_title(root, &text);
-            return Some(Outcome::default());
+            return Some(Outcome { title: true, ..Outcome::default() });
         }
         if action.downcast_ref::<Pressed>().is_some() {
             if id == ids.back {

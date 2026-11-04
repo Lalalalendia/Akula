@@ -3,6 +3,8 @@
 
 //! Drawing COLR glyphs.
 
+mod radial;
+
 use crate::atlas::commands::AtlasPaint;
 use crate::color::Srgb;
 use crate::color::{AlphaColor, DynamicColor};
@@ -409,19 +411,34 @@ impl ColorPainter for ColrPainter<'_, '_> {
                 color_stops,
                 extend,
             } => {
-                // TODO: Radial gradients with negative r0.
-
                 let p0 = convert_point(c0);
                 let p1 = convert_point(c1);
                 let extend = convert_extend(extend);
                 let stops = self.convert_stops(color_stops);
-
-                if r1 <= 0.0 || stops.len() == 1 {
-                    self.painter
-                        .fill_solid(fill_rect, stops[0].color.to_alpha_color());
-
+                if stops.is_empty() {
                     return;
                 }
+                if stops.len() == 1 {
+                    self.painter.fill_solid(fill_rect, stops[0].color.to_alpha_color());
+                    return;
+                }
+
+                // Vello #1982: skrifa's normalized endpoints may have
+                // negative radii. Truncate the PAD color line at radius zero
+                // (including its interpolated stop and moving center) before
+                // handing it to vello_common, which rejects negative radii.
+                let (p0, r0, p1, r1, stops) = if extend == Extend::Pad {
+                    let Some(normalized) = radial::clip_pad(p0, r0, p1, r1, stops) else {
+                        return;
+                    };
+                    normalized
+                } else {
+                    if r1 <= 0.0 || r0 < 0.0 {
+                        self.painter.fill_solid(fill_rect, stops[0].color.to_alpha_color());
+                        return;
+                    }
+                    (p0, r0, p1, r1, stops)
+                };
 
                 let grad = Gradient {
                     kind: RadialGradientPosition {
@@ -435,7 +452,6 @@ impl ColorPainter for ColrPainter<'_, '_> {
                     extend,
                     ..Default::default()
                 };
-
                 self.painter.set_paint_transform(self.cur_transform());
                 self.painter.fill_gradient(fill_rect, grad);
             }

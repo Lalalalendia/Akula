@@ -1,4 +1,6 @@
-//! Aquilum Core: notes, documents, search, history, settings, UI state; UI-independent.
+//! The Aquilum core: notes on disk, documents, search, history, settings and UI state, with no
+//! knowledge of the UI that hosts it.
+
 pub mod app_core;
 pub mod documents;
 pub mod files;
@@ -20,14 +22,14 @@ pub mod ui_state;
 pub mod web_agent;
 pub mod wikixiv;
 pub use app_core::{Core, CoreEvent, EventSink, TaskFailed};
+include!("lib_server_e2e07.rs");
 #[cfg(feature = "server-bootstrap-b0-lab")]
 pub mod server_bootstrap_lab;
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b0-openssh-lab"))]
 pub mod server_bootstrap_ssh_lab;
 #[cfg(all(target_os = "windows", feature = "server-bootstrap-b0-openssh-lab"))]
 pub mod server_bootstrap_ssh_windows_lab;
-#[cfg(feature = "server-bootstrap-b1a-release-lab")]
-pub mod server_release_lab;
+
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b-custody-lab"))]
 pub mod server_staging_lab;
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b1-floor-lab"))]

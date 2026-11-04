@@ -1,3 +1,4 @@
+mod tree_open;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -64,11 +65,6 @@ pub(in crate::app) fn local_image_preview(vault: &Path, source: &Path) -> Option
 }
 
 impl App {
-    // File-tree images open in a normal tab. Embedded images may still use the modal viewer.
-    pub(super) fn open_tree_file(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool) -> bool {
-        self.open_in(root, path, new_tab)
-    }
-
     pub(in crate::app) fn image_tab_widget(&self) -> Option<masonry::core::NewWidget<dyn masonry::core::Widget>> {
         let path = self.tabs.active().path.as_deref()?;
         if kind(&path.to_string_lossy()) != Some(MediaKind::Image) {

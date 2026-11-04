@@ -1,3 +1,4 @@
+use windows::core::Interface;
 use windows::Win32::Foundation::{HMODULE, HWND, RECT};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP};
 use windows::Win32::Graphics::Direct3D11::{
@@ -6,8 +7,8 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory2, DXGI_CREATE_FACTORY_FLAGS, DXGI_MWA_NO_ALT_ENTER, DXGI_SCALING_NONE,
-    DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIFactory2,
+    CreateDXGIFactory1, DXGI_MWA_NO_ALT_ENTER, DXGI_SCALING_NONE,
+    DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIFactory1, IDXGIFactory2,
     IDXGISwapChain1,
 };
 
@@ -28,7 +29,6 @@ pub(super) struct Gpu {
 pub(super) fn capacity(need: u32, have: u32) -> u32 {
     if need <= have { have } else { need.next_multiple_of(GROWTH) }
 }
-
 fn device(driver: D3D_DRIVER_TYPE) -> windows::core::Result<(ID3D11Device, ID3D11DeviceContext)> {
     let (mut device, mut context) = (None, None);
     unsafe {
@@ -69,7 +69,7 @@ pub(super) fn create(hwnd: HWND, width: u32, height: u32) -> Result<Gpu, String>
     #[cfg(not(feature = "memory-probe"))]
     let first = D3D_DRIVER_TYPE_WARP;
     let (device, context) = device(first).or_else(|_| device(D3D_DRIVER_TYPE_HARDWARE)).map_err(|e| format!("D3D11: {e}"))?;
-    let factory: IDXGIFactory2 = unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)) }.map_err(|e| format!("DXGI: {e}"))?;
+    let factory: IDXGIFactory2 = unsafe { CreateDXGIFactory1() }.and_then(|f: IDXGIFactory1| f.cast()).map_err(|e| format!("DXGI 1.2: {e}"))?;
     let desc = DXGI_SWAP_CHAIN_DESC1 {
         Width: width,
         Height: height,

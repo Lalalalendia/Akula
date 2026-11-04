@@ -222,13 +222,21 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Installed real Windows PDF pointer path; separate from native Rust harness.
+$canvasScript = Join-Path $PSScriptRoot 'windows-canvas-installed-uia.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $canvasScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -Editable -IncludeDelete -IncludeResize -IncludeConnect -IncludeGroup
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula Canvas UIA smoke failed: PowerShell exit $LASTEXITCODE" }
+
 $pdfPointerScript = Join-Path $PSScriptRoot 'windows-pdf-os-pointer.ps1'
 & $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf
 if ($LASTEXITCODE -ne 0) {
   throw "Installed Akula PDF OS-pointer acceptance failed: PowerShell exit $LASTEXITCODE"
 }
 
-& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-dot-folder-uia.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData; if ($LASTEXITCODE -ne 0) { throw "Installed Akula dot-folder UIA failed: PowerShell exit $LASTEXITCODE" }; Start-And-Close -EditNote
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-dot-folder-uia.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula dot-folder UIA failed: PowerShell exit $LASTEXITCODE" }
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-txt-search-uia.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula TXT global search UIA failed: PowerShell exit $LASTEXITCODE" }
+Start-And-Close -EditNote
 $state = Join-Path $akulaData 'window-state.json'
 if (!(Test-Path $state)) { throw 'Akula window state not persisted to its own AppData' }
 $savedText = [System.IO.File]::ReadAllText($note)
@@ -246,6 +254,81 @@ $clipboardSentinel = 'AKULA_CLIPBOARD_POISON_' + [Guid]::NewGuid().ToString('N')
 Set-Clipboard -Value $clipboardSentinel -ErrorAction Stop
 Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
+
+# U02 uses installed Akula to create/save a note, restart, find and reopen it.
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-beta-u02-user-journey.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw "Installed Akula U02 user journey failed: PowerShell exit $LASTEXITCODE" }
+$u02Note = Join-Path $vault 'AkulaU02Created.md'
+if (!(Test-Path -LiteralPath $u02Note -PathType Leaf)) { throw 'Installed U02 file not found' }
+$u02Hash = (Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash
+Assert-LegacyUntouched
+
+# Filename regression after #913: real installed title Enter and blur through
+# OS keyboard, File Gate, restart and UIA clipboard readback. No user vaults.
+$renameScript = Join-Path $PSScriptRoot 'windows-beta-rename-uia.ps1'
+$renameTokens = $null
+$renameParseErrors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+  $renameScript, [ref]$renameTokens, [ref]$renameParseErrors) | Out-Null
+if ($renameParseErrors.Count -ne 0) {
+  throw ('Installed rename QA syntax check failed: ' + ($renameParseErrors | Out-String))
+}
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $renameScript -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula title rename acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash -or
+    (Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash -ne $u02Hash) {
+  throw 'Installed rename QA altered another synthetic note'
+}
+Assert-LegacyUntouched
+
+# Installed NSIS + foreground OS keyboard regression for the 30k and 100k
+# whole-note replacement path. Test-only vault, never developer/user files.
+. (Join-Path $PSScriptRoot 'windows-beta-replace-all.ps1')
+foreach ($lines in @(30000,100000)) {
+  Test-AkulaBetaReplaceAll -Executable $exe -Vault $vault -DataDir $akulaData -LineCount $lines
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'Large-document acceptance changed the original smoke-test note'
+}
+Assert-LegacyUntouched
+
+# DESK-15 installed-app recovery in a fresh disposable vault/data directory.
+$recoveryScript = Join-Path $PSScriptRoot 'windows-beta-recovery.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $recoveryScript -ExePath $exe
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula hard-kill recovery acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'DESK-15 isolated acceptance changed the original beta smoke note'
+}
+Assert-LegacyUntouched
+
+# Exercise the separate two-tab path through the installed Windows GUI:
+# Ctrl+Shift+pointer click, detached File Gate ACK cleanup, and a second
+# unsaved tab recovered after a hard process kill.
+$recoveryTabs = Join-Path $PSScriptRoot 'windows-beta-recovery-tabs.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $recoveryTabs -ExePath $exe
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula two-tab hard-kill recovery failed: PowerShell exit $LASTEXITCODE"
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'DESK-15 two-tab test changed original beta source'
+}
+Assert-LegacyUntouched
+
+# Server 2022 installed-GUI 100k Unicode crash/Restore; not a Win7 runtime claim.
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-beta-recovery-large.ps1') -ExePath $exe
+if ($LASTEXITCODE -ne 0) { throw "Installed 100k-line crash recovery failed: PowerShell exit $LASTEXITCODE" }
+Assert-LegacyUntouched
+
+# R2 installed-application readback (nine synthetic notes + plain DOCX).
+# Windows GitHub-hosted STA only; not physical user acceptance.
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows-user-scenarios-installed.ps1') -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) { throw 'R2 Windows note/DOCX readback failed' }
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'R2 readback modified original beta note' }
+if ((Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash -ne $u02Hash) { throw 'R2 readback modified U02 note' }
 Assert-LegacyUntouched
 
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
@@ -259,5 +342,6 @@ if (Test-Path $exe) { throw 'Akula executable remains after uninstall' }
 if (Test-Path $akulaRegistry) { throw 'Akula uninstall registry key remains' }
 if (!(Test-Path $state)) { throw 'Uninstall removed Akula user state' }
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Uninstall changed the edited local document' }
+if ((Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash -ne $u02Hash) { throw 'Uninstall changed the U02-created Markdown note' }
 Assert-LegacyUntouched
 Write-Host 'AKULA_WINDOWS_BETA_GUI_EDIT_PASS: NSIS install, real OS keyboard edit, on-disk save, restart, uninstall and upstream sentinels'

@@ -4,6 +4,7 @@ mod drag;
 mod ghost;
 pub mod model;
 mod parts;
+mod paths;
 mod pinned;
 mod pins;
 mod row;
@@ -24,7 +25,7 @@ use crate::ui::scroll::ScrollArea;
 use crate::ui::tokens::size;
 
 use drag::Drag;
-use model::{Counts, TreeModel};
+use model::TreeModel;
 pub use model::{Press, Sort};
 use parts::Toolbar;
 use pinned::Pinned;
@@ -48,7 +49,7 @@ pub struct FileTree {
     row_ids: Vec<WidgetId>,
     scroll: Option<Handle<ScrollArea<Flex>>>,
     pinned: Option<Handle<Pinned>>,
-    counting: Option<std::sync::mpsc::Receiver<Counts>>,
+    counting: scan::worker::CountScan,
     wake: std::sync::Arc<dyn Fn() + Send + Sync>,
     rename: Option<Handle<TextEditor>>,
     store: ExpandedStore,
@@ -70,9 +71,8 @@ impl FileTree {
         let expanded = root.as_deref().map(|r| store.get(r)).unwrap_or_default();
         let sort = root.as_deref().map(|r| store.sort(r)).unwrap_or_default();
         let colors = root.as_deref().map(|r| store.colors(r)).unwrap_or_default();
-        let mut model = TreeModel::new(root, expanded);
-        model.set_sort(sort);
-        model.set_colors(colors);
+        let mut model = TreeModel::with_saved_sort(root, expanded, sort);
+        if !colors.is_empty() { model.set_colors(colors); }
         let mut tree = FileTree {
             model,
             drag: None,
@@ -80,7 +80,7 @@ impl FileTree {
             row_ids: Vec::new(),
             scroll: None,
             pinned: None,
-            counting: None,
+            counting: scan::worker::CountScan::default(),
             wake: std::sync::Arc::clone(&wake),
             rename: None,
             store,
@@ -125,11 +125,6 @@ impl FileTree {
 
     pub fn clear_selection(&mut self, root: &mut RenderRoot) {
         self.model.clear_selection();
-        self.refresh(root);
-    }
-
-    pub fn paths_changed(&mut self, root: &mut RenderRoot, paths: &[PathBuf]) {
-        self.model.refresh_paths(paths);
         self.refresh(root);
     }
 

@@ -141,10 +141,10 @@ public static class AkulaBetaGuiInput {
     }
 
     // Native OS keyboard chords for read-only GUI model acceptance after
-    // restart. Only Ctrl+A (select all) and Ctrl+C (copy) are allowed.
+    // restart. Only Ctrl+A/C, Ctrl+O (global search) and Ctrl+F (current note) are allowed.
     public static void PressCtrlShortcut(IntPtr hwnd, int expectedPid, ushort key) {
-        if (key != 0x41 && key != 0x43)
-            throw new InvalidOperationException("Only selection/copy shortcuts are authorized");
+        if (key != 0x41 && key != 0x43 && key != 0x4F && key != 0x46)
+            throw new InvalidOperationException("Only selection/copy/search shortcuts are authorized");
         if (hwnd == IntPtr.Zero || Marshal.SizeOf(typeof(Input)) != 40)
             throw new InvalidOperationException("Unexpected Windows shortcut window/input layout");
         uint owner;
@@ -223,6 +223,7 @@ function Send-AkulaBetaShortcut {
     }
   }
   if (!$focused) { throw 'Cannot focus reopened Akula before native Ctrl shortcut' }
-  $key = if ($Action -eq 'SelectAll') { [ushort]0x41 } else { [ushort]0x43 }
+  # Windows PowerShell has no [ushort] type accelerator; the Win32 helper expects UInt16.
+  $key = if ($Action -eq 'SelectAll') { [uint16]0x41 } else { [uint16]0x43 }
   [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $Process.Id, $key)
 }

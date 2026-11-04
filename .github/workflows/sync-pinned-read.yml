@@ -24,6 +24,8 @@ on:
       - "aquilum-app/core/src/sync/journal/sqlite_lifecycle.rs"
       - "aquilum-app/core/src/sync/journal/publication_recovery.rs"
       - "aquilum-app/core/src/sync/journal/phase_transitions.rs"
+      - "aquilum-app/core/src/sync/journal/tests/mod.rs"
+      - "aquilum-app/core/src/sync/journal/tests/recovery.rs"
       - "aquilum-app/core/src/sync/core_scan.rs"
       - "aquilum-app/core/src/sync/path.rs"
       - "aquilum-app/core/src/search/paths.rs"

@@ -1,0 +1,114 @@
+name: LAB Windows 7 modern Rust A/B probes
+on:
+  push:
+    branches: ['lab/win7-release-pe-imports-20261023']
+    paths:
+      - 'docs/research/win7-ab/**'
+      - '.github/workflows/akula-win7-ab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+          targets: x86_64-pc-windows-msvc
+      - name: Version and compiler evidence
+        shell: pwsh
+        run: |
+          rustc -Vv
+          cargo -V
+          rustup target list | Select-String 'win7|windows-msvc'
+          rustc --print target-list | Select-String 'win7-windows-msvc'
+          New-Item -ItemType Directory -Force -Path win7-results | Out-Null
+      - name: Find MSVC PE inspection tool
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+          if (!(Test-Path $vswhere)) { throw 'vswhere.exe absent on runner' }
+          $vsroot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (!$vsroot) { throw 'Visual Studio C++ tools not found' }
+          $msvcs = @(Get-ChildItem (Join-Path $vsroot 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending)
+          if ($msvcs.Count -eq 0) { throw 'MSVC tool directories missing' }
+          $dumpbin = Join-Path $msvcs[0].FullName 'bin/Hostx64/x64/dumpbin.exe'
+          if (!(Test-Path $dumpbin)) { throw "dumpbin.exe missing: $dumpbin" }
+          "AKULA_DUMPBIN=$dumpbin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "PE inspection executable: $dumpbin"
+      - name: Build A/B minimal components independently
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $targets = @('x86_64-pc-windows-msvc', 'x86_64-win7-windows-msvc')
+          $modes = @('normal', 'slim')
+          $built = 0
+          foreach ($target in $targets) {
+            foreach ($mode in $modes) {
+              $env:RUSTFLAGS = if ($mode -eq 'slim') { '--cfg windows_slim_errors' } else { '' }
+              foreach ($probe in @('std_probe','random_probe','error_probe','gui_probe')) {
+                $features = if ($probe -eq 'gui_probe') { @('--features', 'gui') } else { @() }
+                $args = @('build','--release','--manifest-path','docs/research/win7-ab/Cargo.toml','--target',$target,'--bin',$probe) + $features
+                if ($target -eq 'x86_64-win7-windows-msvc') { $args += @('-Z','build-std=std,panic_abort') }
+                $out = Join-Path 'win7-results' "$target-$mode-$probe"
+                New-Item -ItemType Directory -Force -Path $out | Out-Null
+                Write-Host "PROBE $target $mode $probe"
+                try {
+                  & cargo @args *> (Join-Path $out 'build.log')
+                  $exit = $LASTEXITCODE
+                } catch {
+                  $exit = 999
+                  "EXCEPTION: $_" | Add-Content (Join-Path $out 'build.log')
+                }
+                "exit_code=$exit" | Set-Content (Join-Path $out 'status.txt')
+                if ($exit -eq 0) {
+                  $exe = Join-Path 'docs/research/win7-ab/target' "$target/release/$probe.exe"
+                  if (Test-Path $exe) {
+                    Copy-Item $exe (Join-Path $out "$probe.exe")
+                    "sha256=$((Get-FileHash $exe -Algorithm SHA256).Hash)" | Add-Content (Join-Path $out 'status.txt')
+                    & $env:AKULA_DUMPBIN /imports $exe *> (Join-Path $out 'imports.txt')
+                    "imports_exit=$LASTEXITCODE" | Add-Content (Join-Path $out 'status.txt')
+                    & $env:AKULA_DUMPBIN /headers $exe *> (Join-Path $out 'headers.txt')
+                    "headers_exit=$LASTEXITCODE" | Add-Content (Join-Path $out 'status.txt')
+                    $built += 1
+                  } else {
+                    'exe_missing=1' | Add-Content (Join-Path $out 'status.txt')
+                  }
+                }
+              }
+            }
+          }
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          if ($built -eq 0) { throw 'No probe built successfully: inspect per-case build.log' }
+          Write-Host "PROBES_BUILT=$built / 16"
+      - name: Summarize binaries and known post-Win7 imports
+        if: always()
+        shell: pwsh
+        run: |
+          $list = @('GetSystemTimePreciseAsFileTime','WaitOnAddress','WakeByAddressSingle','WakeByAddressAll','ProcessPrng','RoOriginateErrorW','GetPointerType','CreateDXGIFactory2')
+          $rows = @()
+          foreach ($dir in @(Get-ChildItem win7-results -Directory)) {
+            $status = Get-Content (Join-Path $dir.FullName 'status.txt') -ErrorAction SilentlyContinue | Select-Object -First 1
+            $imports = Get-Content (Join-Path $dir.FullName 'imports.txt') -Raw -ErrorAction SilentlyContinue
+            $hits = @($list | Where-Object { $imports -and $imports.Contains($_) })
+            $rows += [pscustomobject]@{case=$dir.Name;status=$status;post_win7_imports=($hits -join ',')}
+          }
+          $rows | ConvertTo-Json | Out-File win7-results/summary.json -Encoding utf8
+          $rows | Format-Table -AutoSize | Out-String | Write-Host
+          $rows | ConvertTo-Csv -NoTypeInformation | Set-Content win7-results/summary.csv
+          $rows | Format-Table -AutoSize | Out-String | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Save evidence (no execution)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-win7-modern-toolchain-ab
+          path: win7-results/
+          retention-days: 14
+          if-no-files-found: warn

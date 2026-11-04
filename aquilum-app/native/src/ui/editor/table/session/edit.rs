@@ -17,28 +17,6 @@ impl Session {
         }
     }
 
-    fn edit(&mut self, view: &TableView, f: impl FnOnce(&mut String, &mut usize, &mut usize)) -> Outcome {
-        let Some((r, c)) = self.active else { return Outcome::None };
-        let mut value = view.model.value(r, c).to_owned();
-        f(&mut value, &mut self.caret, &mut self.anchor);
-        let mut model = view.model.clone();
-        model.set(r, c, &value);
-        let stored = model.value(r, c).len();
-        self.caret = self.caret.min(stored);
-        self.anchor = self.anchor.min(stored);
-        Outcome::Write(model)
-    }
-
-    pub fn insert(&mut self, view: &TableView, text: &str) -> Outcome {
-        let text = text.replace(['\r', '\n', '\t'], " ");
-        self.edit(view, |value, caret, anchor| {
-            let (a, b) = ((*caret).min(*anchor), (*caret).max(*anchor));
-            value.replace_range(a..b, &text);
-            *caret = a + text.len();
-            *anchor = *caret;
-        })
-    }
-
     pub fn delete(&mut self, view: &TableView, forward: bool, word: bool) -> Outcome {
         if self.caret == self.anchor {
             self.step(view, forward, word, true);

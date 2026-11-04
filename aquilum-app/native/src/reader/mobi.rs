@@ -1,4 +1,6 @@
+mod inflate;
 use std::cell::OnceCell;
+const MAX_MOBI_TEXT_BYTES: usize = 128 * 1024 * 1024;
 use super::epub::{self, Epub};
 use super::{Book, Section};
 
@@ -52,9 +54,10 @@ pub fn open(data: Vec<u8>) -> Option<Book> {
             continue;
         }
         let slice = strip_trailing(&data[start..end], trailing);
+        let remaining = MAX_MOBI_TEXT_BYTES.checked_sub(decompressed.len())?;
         match compression {
-            1 => decompressed.extend_from_slice(slice),
-            2 => decompressed.extend_from_slice(&decompress_palmdoc(slice)),
+            1 if slice.len() <= remaining => decompressed.extend_from_slice(slice),
+            2 => decompressed.extend_from_slice(&inflate::decompress_bounded(slice, remaining)?),
             _ => return None,
         }
     }
@@ -89,49 +92,9 @@ fn strip_trailing(mut record: &[u8], flags: u16) -> &[u8] {
     record
 }
 
+#[cfg(test)]
 fn decompress_palmdoc(src: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(src.len() * 2);
-    let mut i = 0;
-    while i < src.len() {
-        let b = src[i];
-        i += 1;
-        match b {
-            0x00 => out.push(0),
-            0x01..=0x08 => {
-                let count = b as usize;
-                let end = (i + count).min(src.len());
-                out.extend_from_slice(&src[i..end]);
-                i += count;
-            }
-            0x09..=0x7F => out.push(b),
-            0x80..=0xBF => {
-                if i < src.len() {
-                    let b2 = src[i];
-                    i += 1;
-                    let pair = ((b as usize) << 8 | b2 as usize) & 0x3FFF;
-                    let dist = pair >> 3;
-                    let len = (pair & 7) + 3;
-                    if dist > 0 && dist <= out.len() {
-                        let start = out.len() - dist;
-                        if dist >= len {
-                            out.extend_from_within(start..start + len);
-                        } else {
-                            // Overlapping references repeat bytes from their own output.
-                            for j in 0..len {
-                                let byte = out[start + (j % dist)];
-                                out.push(byte);
-                            }
-                        }
-                    }
-                }
-            }
-            0xC0..=0xFF => {
-                out.push(b' ');
-                out.push(b ^ 0x80);
-            }
-        }
-    }
-    out
+    inflate::decompress_bounded(src, MAX_MOBI_TEXT_BYTES).expect("small test fixture")
 }
 
 #[cfg(test)]

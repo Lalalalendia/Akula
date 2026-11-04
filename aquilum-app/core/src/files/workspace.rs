@@ -7,7 +7,7 @@ use std::path::Path;
 
 // Structured formats are listed like attachments until native dedicated views exist.
 // Never treat them as Markdown notes or send their content to the text editor.
-const DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "epub", "mobi", "azw3", "fb2", "txt", "canvas", "base"];
+const DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "epub", "mobi", "azw3", "fb2", "txt", "canvas", "base", "docx"];
 
 fn is_attachment(extension: &str) -> bool {
     MEDIA_EXTENSIONS.contains(&extension) || DOCUMENT_EXTENSIONS.contains(&extension)

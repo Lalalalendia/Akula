@@ -21,7 +21,7 @@ impl WindowsOpenSshPinnedProbe {
     }
 }
 
-fn discover_matching_ed25519(target: &ServerTarget) -> Result<String, B0Error> {
+pub(super) fn discover_matching_ed25519(target: &ServerTarget) -> Result<String, B0Error> {
     let scanner = super::ssh_system_binary()?.with_file_name("ssh-keyscan.exe");
     let md = fs::symlink_metadata(&scanner).map_err(|_| B0Error::KeyUnavailable)?;
     if !md.is_file() || md.file_type().is_symlink() {
