@@ -43,6 +43,16 @@ pub(super) fn append(
                 } else if let Some(draft)=&bases.schema_draft {
                     column=schema::append(column,draft,bases.stage,bindings);
                 } else {
+                // Place recovery ahead of the snapshot selector and column
+                // controls so the bounded native accessibility tree exposes it.
+                // A selected base is still mandatory; scan revalidates source
+                // and active overlay before advertising restore actions.
+                if bases.base_id.is_some() {
+                    column=column.with_fixed(action_button(
+                        "Найти архивы локальных правок для восстановления".into(),
+                        Action::NotionBasesScanArchives,bindings,
+                    ));
+                }
                 for choice in &bases.choices {
                     column=column.with_fixed(action_button(
                         format!("{} · {}",choice.label,&choice.digest[..10]),
@@ -65,12 +75,6 @@ pub(super) fn append(
                         &format!("Строк: {} · колонок: {} · локальная ревизия: {} · исходных views: {} (только снимки)",
                             bases.total_rows,bases.total_columns,bases.local_revision,bases.saved_source_views),
                         |t|t.text_primary,None,Leading::Times(1.3),
-                    ));
-                    // Archived values must remain discoverable even when the
-                    // current source has no active local edits after restart.
-                    column=column.with_fixed(action_button(
-                        "Найти архивы локальных правок для восстановления".into(),
-                        Action::NotionBasesScanArchives,bindings,
                     ));
                     if bases.local_revision>0 {
                         column=rebase::append(column,bases,bindings);
