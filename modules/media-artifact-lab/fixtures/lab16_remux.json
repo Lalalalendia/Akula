@@ -1,0 +1,32 @@
+{
+  "note": "LAB-16 observed ffprobe+PCM output, not model inference",
+  "samples": [
+    {
+      "name": "source",
+      "source_sha256": "b45ceaebc6edd38ef79a02a2103de4b6f74a89341f67aa69a0eea50ecf4f2db9",
+      "stream_index": 1,
+      "start_pts": 12384,
+      "time_num": 1,
+      "time_den": 48000,
+      "pcm_sha256": "900317a5836865002583e46637494af07750dba7158e8e02bf0f714adc65d4a2"
+    },
+    {
+      "name": "reordered",
+      "source_sha256": "859ed38e1ff199069beb4918f8742e6bff5d6fbfc0c24c01e4b63b01f804f132",
+      "stream_index": 0,
+      "start_pts": 12384,
+      "time_num": 1,
+      "time_den": 48000,
+      "pcm_sha256": "900317a5836865002583e46637494af07750dba7158e8e02bf0f714adc65d4a2"
+    },
+    {
+      "name": "shifted",
+      "source_sha256": "21ee3a78005c4ce2bc3faf4b25b4e6f9a9f608f609427cb9c3e429149f2c4e7f",
+      "stream_index": 0,
+      "start_pts": 84384,
+      "time_num": 1,
+      "time_den": 48000,
+      "pcm_sha256": "900317a5836865002583e46637494af07750dba7158e8e02bf0f714adc65d4a2"
+    }
+  ]
+}
