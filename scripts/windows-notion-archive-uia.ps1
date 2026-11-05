@@ -103,7 +103,7 @@ function Wait-Action([System.Windows.Automation.AutomationElement]$Root,[string]
     foreach ($element in $texts) {
         try {
             $name=[string]$element.Current.Name
-            if ($name -match 'ревизия|Локальная модель|Проверенный архив|Снимки:|Строк:') {
+            if ($name -match '\u0440\u0435\u0432\u0438\u0437\u0438\u044f|\u041b\u043e\u043a\u0430\u043b\u044c\u043d\u0430\u044f \u043c\u043e\u0434\u0435\u043b\u044c|\u041f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u043d\u044b\u0439 \u0430\u0440\u0445\u0438\u0432|\u0421\u043d\u0438\u043c\u043a\u0438:|\u0421\u0442\u0440\u043e\u043a:') {
                 if ($name.Length -gt 160) { $name=$name.Substring(0,160) }
                 [void]$inspect.Add($name)
                 if ($inspect.Count -ge 12) { break }
