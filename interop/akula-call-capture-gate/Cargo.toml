@@ -1,0 +1,19 @@
+[package]
+name = "akula-call-capture-gate"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91"
+publish = false
+
+# Separate opt-in lab: never part of the installed Akula Cargo workspace.
+[workspace]
+resolver = "2"
+
+[dependencies]
+aquilum-core = { path = "../../aquilum-app/core", features = ["call-authorized-media-lab"] }
+
+[target.'cfg(windows)'.dependencies]
+cpal = "=0.15.3"
+
+[dev-dependencies]
+uuid = "=1.23.5"

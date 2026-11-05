@@ -56,9 +56,8 @@ pub mod node_replica_lab;
 pub mod node_replica_auth_lab;
 #[cfg(all(target_os = "linux", feature = "node-v1"))]
 pub mod node_v1;
-// Optional, inert P2P offer/consent laboratory; not file authorization.
-#[cfg(feature = "p2p-offer-lab")]
-pub mod p2p_offer_lab;
+// Opt-in P2P/voice labs are isolated from default builds.
+include!("lib_p2p_lab_modules.rs");
 #[cfg(feature = "p2p-inbox-lab")]
 pub mod p2p_inbox_lab;
 #[cfg(feature = "p2p-device-identity")]
