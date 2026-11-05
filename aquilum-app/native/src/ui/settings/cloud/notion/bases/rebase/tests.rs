@@ -51,6 +51,9 @@ fn real_native_pointer_dispatches_scan_and_exact_archived_cell_identity() {
         digest:Some("a".repeat(64)),
         ..Default::default()
     };
+    view.choices.push(crate::notion_bases::BaseChoice {
+        base_id:"base".into(),digest:"b".repeat(64),label:"other snapshot".into(),
+    });
     view.archives.push(RestoreArchive {
         path:archived.into(),
         old_digest:"b".repeat(64),
@@ -99,6 +102,12 @@ fn real_native_pointer_dispatches_scan_and_exact_archived_cell_identity() {
     },options);
     theme::register_fonts(&mut root);
     let _=root.redraw();
+    let preview=bindings.iter().find_map(|(id,b)|matches!(
+        b,Binding::Button(Action::NotionBasesPreviewRebase(_))
+    ).then_some(*id)).expect("different snapshot compare mounted");
+    let restore_y=root.get_widget(restore).unwrap().ctx().bounding_box().center().y;
+    let preview_y=root.get_widget(preview).unwrap().ctx().bounding_box().center().y;
+    assert!(restore_y<preview_y,"recovery action must precede long comparison controls");
     click(&mut root,scan,&signals);
     click(&mut root,restore,&signals);
 }

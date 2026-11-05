@@ -23,6 +23,29 @@ pub(super) fn append(
 ) -> Flex {
     let (Some(base_id), Some(old_digest)) =
         (bases.base_id.as_deref(),bases.digest.as_deref()) else {return column;};
+    // The verified restore button must precede long source/archive labels:
+    // Windows UI Automation may expose only the current visible panel.
+    for archive in &bases.archives {
+        for cell in &archive.cells {
+            column=column.with_fixed(action_button(
+                format!("Восстановить из архива · {} / {}",
+                    cell.row_id.chars().take(10).collect::<String>(),
+                    cell.property_id.chars().take(10).collect::<String>()),
+                Action::NotionBasesRestoreListed(
+                    archive.path.clone(),cell.row_id.clone(),
+                    cell.property_id.clone()),bindings,
+            ));
+            column=column.with_fixed(selectable(
+                &format!("Прежнее локальное значение: {}",cell.value_preview),
+                |t|t.text_primary,None,Leading::Times(1.3),
+            ));
+        }
+        column=column.with_fixed(selectable(
+            &format!("Проверенный архив: {} · исходный снимок {}",
+                archive.path,archive.old_digest.chars().take(10).collect::<String>()),
+            |t|t.text_secondary,None,Leading::Times(1.3),
+        ));
+    }
     column=column.with_fixed(selectable(
         "C5b4 · сравнение снимков и ручное разрешение совместимых конфликтов, с подтверждением",
         |t|t.text_secondary,None,Leading::Times(1.3),
@@ -130,27 +153,6 @@ pub(super) fn append(
             column=column.with_fixed(selectable(
                 "Есть конфликты. Перенос заблокирован, старые локальные правки не изменены.",
                 |t|t.text_muted,None,Leading::Times(1.3),
-            ));
-        }
-    }
-    for archive in &bases.archives {
-        column=column.with_fixed(selectable(
-            &format!("Проверенный архив: {} · исходный снимок {}",
-                archive.path,archive.old_digest.chars().take(10).collect::<String>()),
-            |t|t.text_secondary,None,Leading::Times(1.3),
-        ));
-        for cell in &archive.cells {
-            column=column.with_fixed(selectable(
-                &format!("Прежнее локальное значение: {}",cell.value_preview),
-                |t|t.text_primary,None,Leading::Times(1.3),
-            ));
-            column=column.with_fixed(action_button(
-                format!("Восстановить из архива · {} / {}",
-                    cell.row_id.chars().take(10).collect::<String>(),
-                    cell.property_id.chars().take(10).collect::<String>()),
-                Action::NotionBasesRestoreListed(
-                    archive.path.clone(),cell.row_id.clone(),
-                    cell.property_id.clone()),bindings,
             ));
         }
     }
