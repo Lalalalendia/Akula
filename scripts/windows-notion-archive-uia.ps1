@@ -110,10 +110,10 @@ try {
     Click $syncButton
     Click (Wait-Action $ui 'Notion ')
     Click (Wait-Action $ui $meta.root.Substring(0,8))
-    Click (Wait-Action $ui ''+[regex]::Unescape('\u041e\u0442\u043a\u0440\u044b\u0442\u044c\u0020\u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0435\u0020\u0041\u006b\u0075\u006c\u0061\u0020\u0042\u0061\u0073\u0065\u0073')+'')
+    Click (Wait-Action $ui ([regex]::Unescape('\u041e\u0442\u043a\u0440\u044b\u0442\u044c\u0020\u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0435\u0020\u0041\u006b\u0075\u006c\u0061\u0020\u0042\u0061\u0073\u0065\u0073')))
     Click (Wait-Action $ui $meta.new_digest.Substring(0,10))
-    Click (Wait-Action $ui ''+[regex]::Unescape('\u041d\u0430\u0439\u0442\u0438\u0020\u0430\u0440\u0445\u0438\u0432\u044b\u0020\u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0445\u0020\u043f\u0440\u0430\u0432\u043e\u043a')+'')
-    Click (Wait-Action $ui ''+[regex]::Unescape('\u0412\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c\u0020\u0438\u0437\u0020\u0430\u0440\u0445\u0438\u0432\u0430')+'')
+    Click (Wait-Action $ui ([regex]::Unescape('\u041d\u0430\u0439\u0442\u0438\u0020\u0430\u0440\u0445\u0438\u0432\u044b\u0020\u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0445\u0020\u043f\u0440\u0430\u0432\u043e\u043a')))
+    Click (Wait-Action $ui ([regex]::Unescape('\u0412\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c\u0020\u0438\u0437\u0020\u0430\u0440\u0445\u0438\u0432\u0430')))
     $yes=$null
     for ($i=0;$i -lt 80;$i++) {
         $windows=[System.Windows.Automation.AutomationElement]::RootElement.FindAll(
@@ -123,7 +123,7 @@ try {
             try {
                 if ($window.Current.ProcessId -ne $process.Id -or
                     $window.Current.NativeWindowHandle -eq $hwnd.ToInt64()) { continue }
-                $choice=Find-Visible $window ''+[regex]::Unescape('\u0414\u0430')+''
+                $choice=Find-Visible $window ([regex]::Unescape('\u0414\u0430'))
                 if ($null -eq $choice) { $choice=Find-Visible $window 'Yes' }
                 if ($null -ne $choice) { $yes=$choice;break }
             } catch [System.Windows.Automation.ElementNotAvailableException] {}

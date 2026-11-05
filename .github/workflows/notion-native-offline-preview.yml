@@ -111,6 +111,16 @@ jobs:
           $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\debug\aquilum-native.exe'
           & "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File './scripts/windows-notion-native-uia.ps1' -ExePath $exe
           if ($LASTEXITCODE -ne 0) { throw 'Notion offline native UIA boundary failed' }
+      - name: Parse Windows native archive QA script before launching the app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-notion-archive-uia.ps1'),
+            [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { throw "Notion archive UIA parse failed: $($errors[0])" }
       - name: Seed two verified snapshots, an approved local change and a CAS archive
         shell: pwsh
         working-directory: aquilum-app
