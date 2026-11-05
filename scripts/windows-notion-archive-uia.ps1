@@ -72,8 +72,8 @@ function Wait-Action([System.Windows.Automation.AutomationElement]$Root,[string]
 }
 $loc=@()
 foreach ($lang in @('ru','en')) {
-    $loc+=([IO.File]::ReadAllText((Join-Path $env:GITHUB_WORKSPACE
-        "aquilum-app\native\assets\locales\$lang.json"),[Text.Encoding]::UTF8)|ConvertFrom-Json)
+    $localePath=Join-Path $env:GITHUB_WORKSPACE "aquilum-app\native\assets\locales\$lang.json"
+    $loc+=([IO.File]::ReadAllText($localePath,[Text.Encoding]::UTF8) | ConvertFrom-Json)
 }
 $settings=@($loc|ForEach-Object{[string]$_.settings.title})
 $sync=@($loc|ForEach-Object{[string]$_.settings.nav.sync})
