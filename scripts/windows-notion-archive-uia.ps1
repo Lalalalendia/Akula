@@ -61,13 +61,40 @@ function Next-Scroll([System.Windows.Automation.AutomationElement]$Root) {
     }
     return $false
 }
+function Scroll-ToTop([System.Windows.Automation.AutomationElement]$Root) {
+    $items=$Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$scrolls)
+    foreach ($node in $items) {
+        try {
+            $pat=[System.Windows.Automation.ScrollPattern]$node.GetCurrentPattern(
+                [System.Windows.Automation.ScrollPattern]::Pattern)
+            if ($pat.Current.VerticallyScrollable -and $pat.Current.VerticalScrollPercent -gt 0) {
+                $pat.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll,0)
+            }
+        } catch [System.Exception] {}
+    }
+}
+function Visible-Button-Diagnostic([System.Windows.Automation.AutomationElement]$Root) {
+    $found=New-Object 'System.Collections.Generic.List[string]'
+    $items=$Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$buttons)
+    for ($i=0;$i -lt $items.Count -and $found.Count -lt 60;$i++) {
+        try {
+            $node=$items.Item($i)
+            $label=[string]$node.Current.Name
+            if ($label.Length -gt 100) { $label=$label.Substring(0,100) }
+            [void]$found.Add(('{0}: {1}' -f $node.Current.IsOffscreen,$label))
+        } catch [System.Windows.Automation.ElementNotAvailableException] {}
+    }
+    return ($found -join ' | ')
+}
 function Wait-Action([System.Windows.Automation.AutomationElement]$Root,[string]$Text) {
     for ($n=0;$n -lt 120;$n++) {
         $node=Find-Visible $Root $Text
         if ($null -ne $node) { return $node }
-        if (($n % 5) -eq 4) { [void](Next-Scroll $Root) }
+        if ($n -eq 8) { Scroll-ToTop $Root }
+        if (($n % 5) -eq 4 -and $n -ge 9) { [void](Next-Scroll $Root) }
         Start-Sleep -Milliseconds 250
     }
+    Write-Host ('NOTION_UIA_VISIBLE_BUTTON_DIAG '+(Visible-Button-Diagnostic $Root))
     throw ('Expected real native button missing: '+$Text)
 }
 $loc=@()

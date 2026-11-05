@@ -27,6 +27,10 @@ pub(super) fn append(
         "C5b4 · сравнение снимков и ручное разрешение совместимых конфликтов, с подтверждением",
         |t|t.text_secondary,None,Leading::Times(1.3),
     ));
+    column=column.with_fixed(action_button(
+        "Найти архивы локальных правок для восстановления".into(),
+        Action::NotionBasesScanArchives,bindings,
+    ));
     let mut candidates=BTreeSet::new();
     for choice in &bases.choices {
         if choice.base_id==base_id && choice.digest!=old_digest
@@ -133,10 +137,6 @@ pub(super) fn append(
             ));
         }
     }
-    column=column.with_fixed(action_button(
-        "Найти архивы локальных правок для восстановления".into(),
-        Action::NotionBasesScanArchives,bindings,
-    ));
     for archive in &bases.archives {
         column=column.with_fixed(selectable(
             &format!("Проверенный архив: {} · исходный снимок {}",
