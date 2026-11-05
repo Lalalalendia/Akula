@@ -61,8 +61,20 @@ fn real_native_pointer_dispatches_scan_and_exact_archived_cell_identity() {
             value_preview:"Прежнее значение Akula".into(),
         }],
     });
+    // Scan is now mounted on the parent Bases panel, including when local
+    // overrides are absent; rebase::append only owns verified restore rows.
+    let source="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned();
+    let vault=std::path::PathBuf::from("notion-restore-test-vault");
+    view.source=Some(source.clone());
+    view.target=Some(vault.clone());
+    view.stage=crate::notion_bases::Stage::Ready;
+    view.local_revision=1;
+    let mut ctx=Context::new(1.0);
+    ctx.workspace=Some(vault);
+    ctx.notion_bases=view;
     let mut bindings=HashMap::new();
-    let widget=NewWidget::new(append(Flex::column(),&view,&mut bindings));
+    let widget=NewWidget::new(super::super::append(
+        Flex::column(),&ctx,&mut bindings,Some(&source)));
     let scan=bindings.iter().find_map(|(id,b)|matches!(
         b,Binding::Button(Action::NotionBasesScanArchives)
     ).then_some(*id)).expect("scan archive action mounted");
@@ -97,8 +109,19 @@ fn archive_restore_action_is_absent_without_verified_candidates() {
         digest:Some("a".repeat(64)),
         ..Default::default()
     };
+    let source="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned();
+    let vault=std::path::PathBuf::from("notion-restore-test-vault");
+    let mut ctx=Context::new(1.0);
+    ctx.workspace=Some(vault.clone());
+    ctx.notion_bases=BasesView {
+        source:Some(source.clone()),target:Some(vault),
+        stage:crate::notion_bases::Stage::Ready,
+        ..view
+    };
+    // No active local edits: archive discovery must remain reachable,
+    // but no unverified archive may enable direct restoration.
     let mut bindings=HashMap::new();
-    let _=append(Flex::column(),&view,&mut bindings);
+    let _=super::super::append(Flex::column(),&ctx,&mut bindings,Some(&source));
     assert!(bindings.values().any(|b|matches!(
         b,Binding::Button(Action::NotionBasesScanArchives)
     )));
