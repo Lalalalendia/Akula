@@ -177,24 +177,57 @@ try {
     }
     Click (Wait-Action $ui ([regex]::Unescape('\u041d\u0430\u0439\u0442\u0438\u0020\u0430\u0440\u0445\u0438\u0432\u044b\u0020\u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0445\u0020\u043f\u0440\u0430\u0432\u043e\u043a')))
     Click (Wait-Action $ui ([regex]::Unescape('\u0412\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c\u0020\u0438\u0437\u0020\u0430\u0440\u0445\u0438\u0432\u0430')))
+    # Only an app-owned native confirmation with the exact action title
+    # can authorize this QA click. Never click a desktop-wide generic "Yes".
+    $dialogTitle=([regex]::Unescape('Akula Bases \u2014 \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u043f\u043e\u0441\u043b\u0435 \u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0441\u043a\u0430'))
+    $modalKind=[System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Window)
     $yes=$null
-    for ($i=0;$i -lt 80;$i++) {
+    $dialogSeen=$false
+    for ($i=0;$i -lt 100;$i++) {
         $windows=[System.Windows.Automation.AutomationElement]::RootElement.FindAll(
             [System.Windows.Automation.TreeScope]::Children,
             [System.Windows.Automation.Condition]::TrueCondition)
-        foreach ($window in $windows) {
+        # Some native Windows dialogs are owned/nested instead of top-level.
+        $nested=$ui.FindAll([System.Windows.Automation.TreeScope]::Descendants,$modalKind)
+        foreach ($window in @($windows)+@($nested)) {
             try {
                 if ($window.Current.ProcessId -ne $process.Id -or
-                    $window.Current.NativeWindowHandle -eq $hwnd.ToInt64()) { continue }
+                    [string]$window.Current.Name -cne $dialogTitle) { continue }
+                $dialogSeen=$true
                 $choice=Find-Visible $window ([regex]::Unescape('\u0414\u0430'))
                 if ($null -eq $choice) { $choice=Find-Visible $window 'Yes' }
                 if ($null -ne $choice) { $yes=$choice;break }
             } catch [System.Windows.Automation.ElementNotAvailableException] {}
         }
         if ($null -ne $yes) { break }
+        $process.Refresh()
+        if ($process.HasExited) { throw 'Akula process exited before confirmation' }
         Start-Sleep -Milliseconds 250
     }
-    if ($null -eq $yes) { throw 'OS archive restore Yes/No dialog not found' }
+    if ($null -eq $yes) {
+        $details=New-Object 'System.Collections.Generic.List[string]'
+        $windows=[System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($window in $windows) {
+            try {
+                if ($window.Current.ProcessId -ne $process.Id) { continue }
+                $title=[string]$window.Current.Name
+                if ($title.Length -gt 120) { $title=$title.Substring(0,120) }
+                $btn=(Visible-Button-Diagnostic $window)
+                if ($btn.Length -gt 500) { $btn=$btn.Substring(0,500) }
+                [void]$details.Add(('{0} hwnd={1} buttons={2}' -f
+                    $title,$window.Current.NativeWindowHandle,$btn))
+                if ($details.Count -ge 6) { break }
+            } catch [System.Windows.Automation.ElementNotAvailableException] {}
+        }
+        Write-Host ('AKULA_NOTION_OS_WINDOW_DIAG dialog_seen={0} app_windows={1}' -f
+            $dialogSeen,($details -join ' | '))
+        throw 'OS archive restore Yes/No dialog not found'
+    }
+    Write-Host 'AKULA_NOTION_ARCHIVE_OS_DIALOG_VERIFIED'
     Click $yes
     Write-Host 'AKULA_NOTION_ARCHIVE_OS_CONFIRMATION_CLICKED'
     # The readback test independently checks exact restored numeric value.
