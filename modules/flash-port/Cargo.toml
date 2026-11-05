@@ -1,0 +1,15 @@
+[package]
+name = "akula-flash-port"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "SWF4 to standalone Rust proof of concept for Akula"
+publish = false
+
+[lib]
+name = "akula_flash_port"
+path = "src/lib.rs"
+
+[[bin]]
+name = "akula-flash-port"
+path = "src/main.rs"
