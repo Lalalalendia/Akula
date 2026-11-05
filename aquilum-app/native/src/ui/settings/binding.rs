@@ -12,5 +12,5 @@ pub enum Binding {
     Text { setter: Setter, commit: bool, value: String },
     Color(Setter),
     Commit(Handle<TextEditor>),
-    Button(Action),
+    #[cfg(feature = "notion-offline-preview")] BasesDraft, #[cfg(feature = "notion-offline-preview")] BasesSchemaDraft, Button(Action),
 }

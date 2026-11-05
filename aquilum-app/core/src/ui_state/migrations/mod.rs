@@ -1,4 +1,5 @@
 pub mod schema;
+pub mod notion_cache;
 pub mod v1_to_v2;
 pub mod v2_to_v3;
 pub mod v3_to_v4;
@@ -6,10 +7,10 @@ pub mod v4_to_v5;
 pub mod v5_to_v6;
 pub mod v6_to_v7;
 pub mod v7_to_v8;
-
 use super::error::UiStateError;
 use rusqlite::Connection;
 use schema::SCHEMA;
+use notion_cache::{migrate_v8_to_v9, NOTION_SCHEMA};
 use v1_to_v2::migrate_v1_to_v2;
 use v2_to_v3::migrate_v2_to_v3;
 use v3_to_v4::migrate_v3_to_v4;
@@ -17,10 +18,9 @@ use v4_to_v5::migrate_v4_to_v5;
 use v5_to_v6::migrate_v5_to_v6;
 use v6_to_v7::migrate_v6_to_v7;
 use v7_to_v8::migrate_v7_to_v8;
-
 type Step = fn(&Connection) -> Result<(), UiStateError>;
 
-const STEPS: [Step; 7] = [
+const STEPS: [Step; 8] = [
     migrate_v1_to_v2,
     migrate_v2_to_v3,
     migrate_v3_to_v4,
@@ -28,8 +28,8 @@ const STEPS: [Step; 7] = [
     migrate_v5_to_v6,
     migrate_v6_to_v7,
     migrate_v7_to_v8,
+    migrate_v8_to_v9,
 ];
-
 const LATEST_VERSION: i64 = STEPS.len() as i64 + 1;
 
 pub fn migrate(connection: &Connection) -> Result<(), UiStateError> {
@@ -57,7 +57,7 @@ pub fn migrate(connection: &Connection) -> Result<(), UiStateError> {
 fn create_latest(connection: &Connection) -> Result<(), UiStateError> {
     connection.execute_batch("PRAGMA auto_vacuum = INCREMENTAL;")?;
     connection.execute_batch(&format!(
-        "BEGIN IMMEDIATE; {SCHEMA} PRAGMA user_version = {LATEST_VERSION}; COMMIT;"
+        "BEGIN IMMEDIATE; {SCHEMA} {NOTION_SCHEMA} PRAGMA user_version = {LATEST_VERSION}; COMMIT;"
     ))?;
     Ok(())
 }

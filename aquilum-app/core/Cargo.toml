@@ -13,6 +13,8 @@ default = []
 canvas-crdt-lab = []
 # Opt-in pure messaging state machine; no network, storage, UI or workers.
 messaging-core-lab = []
+# Opt-in read-only Notion API, local snapshots and inert scheduling tests.
+notion-api-probe = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
 # Opt-in verified receiver staged-file create-new, no Vault apply.
@@ -158,7 +160,7 @@ rust-stemmers = "1.2.0"
 walkdir = "2.5.0"
 notify = "8.2.0"
 unicode-normalization = "0.1.25"
-pulldown-cmark = "0.13.5"
+pulldown-cmark = "=0.13.6"
 ureq = "2.12"
 httparse = "1"
 yrs = "0.28"
@@ -246,3 +248,13 @@ rustix = { version = "=0.38.44", features = ["fs", "process"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Credentials", "Win32_System_Threading"] }
+
+[[bin]]
+name = "akula-notion-api-probe"
+path = "src/bin/akula_notion_api_probe.rs"
+required-features = ["notion-api-probe"]
+
+[[bin]]
+name = "akula-notion-import-lab"
+path = "src/bin/akula_notion_import_lab.rs"
+required-features = ["notion-api-probe"]

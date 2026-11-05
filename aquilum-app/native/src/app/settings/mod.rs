@@ -9,7 +9,7 @@ use crate::ui::editor::TextAction;
 
 use super::{App, Outcome, Popup};
 mod action;
-mod cloud_action;
+mod cloud_action; #[cfg(feature = "notion-offline-preview")] mod notion;
 mod menu_action;
 mod apply;
 mod press;

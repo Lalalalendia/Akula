@@ -1,0 +1,132 @@
+# Opt-in, offline-only native Notion catalog. No OAuth, network or installer.
+# Route only new feature-owned files to avoid global CI fanout.
+name: Notion native offline catalog QA
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/notion-native-offline-preview.yml'
+      - 'aquilum-app/native/src/notion_offline.rs'
+      - 'aquilum-app/native/src/notion_offline/**'
+      - 'aquilum-app/native/src/notion_credentials.rs'
+      - 'aquilum-app/native/src/notion_sync.rs'
+      - 'aquilum-app/native/src/notion_import.rs'
+      - 'aquilum-app/native/src/notion_bases.rs'
+      - 'scripts/windows-notion-native-uia.ps1'
+      - 'scripts/windows-notion-archive-uia.ps1'
+      - 'aquilum-app/native/src/notion_bases/**'
+      - 'aquilum-app/native/src/ui/settings/cloud/notion/bases/**'
+      - 'aquilum-app/native/src/app/settings/notion.rs'
+      - 'aquilum-app/native/src/app/lifecycle/notion.rs'
+      - 'aquilum-app/native/src/ui/settings/cloud/notion.rs'
+      - 'aquilum-app/native/src/ui/settings/cloud/health.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/actions/kind.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/actions/cloud_provider/catalog.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/context/fields/schema.rs'
+  workflow_dispatch:
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native-offline:
+    runs-on: windows-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: notion-offline-native
+      - name: Prove no Notion feature in ordinary installed build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cargo = Get-Content -Raw aquilum-app/native/Cargo.toml
+          if ($cargo -notmatch 'notion-offline-preview\s*=\s*\["aquilum-core/notion-api-probe"\]') {
+            throw 'Expected explicit offline Notion-only native feature'
+          }
+          if ($cargo -match '(?m)^installed\s*=.*notion-offline-preview') {
+            throw 'Normal installer must not enable experimental Notion UI'
+          }
+          $entry = Get-Content -Raw aquilum-app/native/src/notion_offline.rs
+          if ($entry -notmatch '(?s)#\[cfg\(not\(debug_assertions\)\)\]\s*compile_error!') {
+            throw 'Notion QA preview must fail closed on release profiles'
+          }
+      - name: Compile native offline Notion GUI
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-native --features notion-offline-preview
+      - name: Akula Bases grid, drafts, schema and CAS conflict regression
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_bases
+      - name: Native offline worker, no-token and corrupt-cache regression
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_offline
+      - name: Isolated Notion credential target and manual refresh coordinator tests
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_credentials::tests
+          cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_sync::tests
+      - name: Native Notion tile and other provider regressions
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview ui::settings::cloud
+      - name: Native verified API cache import UI and fail-closed worker
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_import::tests
+      - name: Core read-only cached root catalog regression
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features notion-api-probe read_only_catalog_lists_only_caches
+      - name: Build feature-gated native Akula for offline Windows UIA
+        working-directory: aquilum-app
+        run: cargo build --locked -p aquilum-native --features notion-offline-preview
+      - name: Real Windows UIA confirms Notion catalog and no-source no-write boundary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\debug\aquilum-native.exe'
+          & "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File './scripts/windows-notion-native-uia.ps1' -ExePath $exe
+          if ($LASTEXITCODE -ne 0) { throw 'Notion offline native UIA boundary failed' }
+      - name: Parse Windows native archive QA script before launching the app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-notion-archive-uia.ps1'
+          # Windows PowerShell 5.1 interprets UTF-8 without BOM as ANSI.
+          # Keep this isolated UIA script ASCII and encode localized labels via \uNNNN.
+          if (@([IO.File]::ReadAllBytes($path) | Where-Object { $_ -gt 127 }).Count -gt 0) {
+            throw 'Notion Windows PowerShell 5.1 UIA script must be ASCII'
+          }
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            $path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { throw "Notion archive UIA parse failed: $($errors[0])" }
+      - name: Seed two verified snapshots, an approved local change and a CAS archive
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP ('akula-notion-archive-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null
+          "AKULA_NOTION_QA_FIXTURE_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $env:AKULA_NOTION_QA_FIXTURE_DIR = $dir
+          cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview qa_seed_cold_archive_for_windows_gui -- --ignored --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated Notion archive fixture seed failed' }
+      - name: Reopen Akula and recover archived local cell via real OS dialog
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\debug\aquilum-native.exe'
+          & "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File './scripts/windows-notion-archive-uia.ps1' -ExePath $exe -FixtureDir $env:AKULA_NOTION_QA_FIXTURE_DIR
+          if ($LASTEXITCODE -ne 0) { throw 'Native archive GUI/OS confirmation acceptance failed' }
+      - name: Independently read back restored CAS cell and original Notion bundles
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview qa_verify_cold_archive_restored_by_gui -- --ignored --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Cold archive independent readback failed' }
