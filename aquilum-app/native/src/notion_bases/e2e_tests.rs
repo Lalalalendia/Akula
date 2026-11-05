@@ -208,11 +208,19 @@ fn qa_seed_cold_archive_for_windows_gui() {
     let state=bases_edits::open(&vault,ROOT,&new).unwrap().unwrap();
     assert_ne!(state.state.local_value(&row,&property),
         Some(&LocalValue::Number(721.0)));
+    // Pin exact independent source and archive bytes before the GUI starts.
+    // A self-consistent but rewritten JSON document must not count as immutable.
+    let fingerprint=|relative:&str| blake3::hash(&fs::read(vault.join(relative))
+        .unwrap()).to_hex().to_string();
+    let old_bundle_hash=fingerprint(&old_bundle);
+    let new_bundle_hash=fingerprint(&new_bundle);
+    let archive_hash=fingerprint(&archive);
     fs::write(dir.join("fixture.json"),serde_json::to_vec(&json!({
         "root":ROOT,"old_digest":old,"new_digest":new,"base":base,
         "row":row,"property":property,"archive":archive,
         "old_bundle":old_bundle,"new_bundle":new_bundle,
-        "expected_restored_value":721.0,
+        "old_bundle_hash":old_bundle_hash,"new_bundle_hash":new_bundle_hash,
+        "archive_hash":archive_hash,"expected_restored_value":721.0,
     })).unwrap()).unwrap();
 }
 
@@ -233,10 +241,19 @@ fn qa_verify_cold_archive_restored_by_gui() {
     assert_eq!(state.state.local_value(row,prop),Some(&LocalValue::Number(721.0)));
     let archive=vault.join(meta["archive"].as_str().unwrap());
     assert!(archive.is_file(),"the archived original must remain available");
-    for key in ["old_bundle","new_bundle"] {
+    for (key,expected) in [
+        ("old_bundle","old_bundle_hash"),
+        ("new_bundle","new_bundle_hash"),
+        ("archive","archive_hash"),
+    ] {
         let path=vault.join(meta[key].as_str().unwrap());
-        let review=structured_bundle::inspect_existing(&path).unwrap();
-        assert_eq!(review.root,ROOT);
+        let hash=blake3::hash(&fs::read(&path).unwrap()).to_hex().to_string();
+        assert_eq!(hash,meta[expected].as_str().unwrap(),
+            "an independent source or archive was modified");
+        if key!="archive" {
+            let review=structured_bundle::inspect_existing(&path).unwrap();
+            assert_eq!(review.root,ROOT);
+        }
     }
     let loaded=SnapshotStore::open_read_only(&dir.join("appdata/ui-state.sqlite3"))
         .unwrap().load(ROOT).unwrap().unwrap();
