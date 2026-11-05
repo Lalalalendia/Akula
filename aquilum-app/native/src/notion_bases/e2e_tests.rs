@@ -208,6 +208,16 @@ fn qa_seed_cold_archive_for_windows_gui() {
     let state=bases_edits::open(&vault,ROOT,&new).unwrap().unwrap();
     assert_ne!(state.state.local_value(&row,&property),
         Some(&LocalValue::Number(721.0)));
+    // Prove a valid candidate exists independently of any GUI: a blank
+    // archive panel must not be blamed on the Windows automation alone.
+    let candidates=bases_edits::discover_restore_archives(
+        &vault,ROOT,&new,&state.expected_disk_hash,&base).unwrap();
+    assert_eq!(candidates.len(),1,"archive discovery must find one backup");
+    assert_eq!(candidates[0].path,archive);
+    assert_eq!(candidates[0].cells.len(),1);
+    assert_eq!(candidates[0].cells[0].row_id,row);
+    assert_eq!(candidates[0].cells[0].property_id,property);
+    assert_eq!(candidates[0].cells[0].value_preview,"721");
     // Pin exact independent source and archive bytes before the GUI starts.
     // A self-consistent but rewritten JSON document must not count as immutable.
     let fingerprint=|relative:&str| blake3::hash(&fs::read(vault.join(relative))

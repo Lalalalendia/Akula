@@ -52,6 +52,11 @@ pub(super) fn append(
                         "Найти архивы локальных правок для восстановления".into(),
                         Action::NotionBasesScanArchives,bindings,
                     ));
+                    // The native accessibility window truncates long panels:
+                    // expose verified archive actions before other controls.
+                    if bases.local_revision>0 {
+                        column=rebase::append(column,bases,bindings);
+                    }
                 }
                 for choice in &bases.choices {
                     column=column.with_fixed(action_button(
@@ -76,9 +81,6 @@ pub(super) fn append(
                             bases.total_rows,bases.total_columns,bases.local_revision,bases.saved_source_views),
                         |t|t.text_primary,None,Leading::Times(1.3),
                     ));
-                    if bases.local_revision>0 {
-                        column=rebase::append(column,bases,bindings);
-                    }
                     column=grid::append(column,bases,bindings);
                     if bases.row_start>0 {
                         column=column.with_fixed(action_button(
