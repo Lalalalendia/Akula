@@ -142,3 +142,103 @@ fn native_reimport_accept_archive_cold_reopen_and_restore_via_cas() {
     assert!(session.view().archives.is_empty(),
         "a recovered value must not be offered for restore twice");
 }
+
+
+/// A disposable, explicitly invoked QA fixture: it never runs in standard tests.
+#[cfg(target_os = "windows")]
+fn windows_gui_fixture_dir() -> std::path::PathBuf {
+    assert_eq!(std::env::var("RUNNER_OS").as_deref(),Ok("Windows"));
+    assert_eq!(std::env::var("RUNNER_ENVIRONMENT").as_deref(),Ok("github-hosted"));
+    let tmp=std::fs::canonicalize(std::env::var_os("RUNNER_TEMP").expect("runner temp"))
+        .expect("runner temporary directory");
+    let chosen=std::fs::canonicalize(
+        std::env::var_os("AKULA_NOTION_QA_FIXTURE_DIR").expect("explicit QA directory"))
+        .expect("existing QA fixture directory");
+    assert!(chosen.starts_with(&tmp),"QA fixture must stay in runner temp");
+    assert!(chosen.file_name().unwrap().to_string_lossy()
+        .starts_with("akula-notion-archive-"),"wrong QA fixture marker");
+    chosen
+}
+
+/// Prepare two real, checksum-verified offline snapshots, a local edit and
+/// a rebase archive for a subsequent *separate process* Windows GUI acceptance.
+#[cfg(target_os = "windows")]
+#[test]
+#[ignore = "explicit isolated Windows CI fixture, not a routine unit test"]
+fn qa_seed_cold_archive_for_windows_gui() {
+    let dir=windows_gui_fixture_dir();
+    let app=dir.join("appdata");
+    let vault=dir.join("vault");
+    assert!(!app.exists() && !vault.exists() && !dir.join("fixture.json").exists());
+    fs::create_dir(&app).unwrap();
+    fs::create_dir(&vault).unwrap();
+    fs::create_dir(vault.join("Notion-import")).unwrap();
+    let db=app.join("ui-state.sqlite3");
+    let old=SnapshotStore::open(&db).unwrap()
+        .publish(&source(5),25).unwrap().digest;
+    let first=structured_bundle::prepare_from_cached(&db,ROOT,&old).unwrap();
+    let core=Core::open(&app,Arc::new(|_:aquilum_core::CoreEvent|{}));
+    core.ui_state.resolve_workspace(vault.to_str().unwrap(),1).unwrap();
+    let old_bundle=structured_bundle::publish_approved(&core,&vault,&first,true)
+        .unwrap().relative_path;
+    let model=bases_model::from_independent_bundle(&vault.join(&old_bundle)).unwrap();
+    let base=model.bases.iter().find(|b|b.notion_id==DATA).unwrap().akula_id.clone();
+    let row=model.rows.iter().find(|r|r.notion_page_id==ROOT).unwrap().akula_id.clone();
+    let property=model.bases.iter().find(|b|b.notion_id==DATA).unwrap()
+        .columns.iter().find(|c|c.notion_property_id.as_deref()==Some("score"))
+        .unwrap().akula_property_id.clone().unwrap();
+    bases_edits::apply_approved(&core,&vault,ROOT,&old,None,
+        &[Change::Set{row_id:row.clone(),property_id:property.clone(),
+            value:LocalValue::Number(721.0)}],true).unwrap();
+    let new=SnapshotStore::open(&db).unwrap()
+        .publish(&source(91),26).unwrap().digest;
+    let second=structured_bundle::prepare_from_cached(&db,ROOT,&new).unwrap();
+    let new_bundle=structured_bundle::publish_approved(&core,&vault,&second,true)
+        .unwrap().relative_path;
+    let mut session=BasesSession::new(Arc::new(||{}));
+    session.open(vault.clone(),ROOT.into()).unwrap();finish(&mut session);
+    session.select(old.clone(),base.clone()).unwrap();finish(&mut session);
+    session.preview_new_snapshot(&new).unwrap();finish(&mut session);
+    assert_eq!(session.view().rebase_preview.unwrap().conflicted_cells,1);
+    assert!(session.toggle_accept_notion(&row,&property));
+    session.apply_reviewed_snapshot(Arc::clone(&core)).unwrap();finish(&mut session);
+    assert_eq!(session.view().digest.as_deref(),Some(new.as_str()));
+    let archive=session.view().last_archive.unwrap().path;
+    assert!(vault.join(&archive).is_file());
+    let state=bases_edits::open(&vault,ROOT,&new).unwrap().unwrap();
+    assert_ne!(state.state.local_value(&row,&property),
+        Some(&LocalValue::Number(721.0)));
+    fs::write(dir.join("fixture.json"),serde_json::to_vec(&json!({
+        "root":ROOT,"old_digest":old,"new_digest":new,"base":base,
+        "row":row,"property":property,"archive":archive,
+        "old_bundle":old_bundle,"new_bundle":new_bundle,
+        "expected_restored_value":721.0,
+    })).unwrap()).unwrap();
+}
+
+/// This runs AFTER the real Windows UIA click and OS confirmation, using a
+/// freshly opened local state; it never accepts a UI-only success message.
+#[cfg(target_os = "windows")]
+#[test]
+#[ignore = "explicit isolated Windows CI post-UIA readback"]
+fn qa_verify_cold_archive_restored_by_gui() {
+    let dir=windows_gui_fixture_dir();
+    let meta:serde_json::Value=serde_json::from_slice(
+        &fs::read(dir.join("fixture.json")).unwrap()).unwrap();
+    let vault=dir.join("vault");
+    let digest=meta["new_digest"].as_str().unwrap();
+    let row=meta["row"].as_str().unwrap();
+    let prop=meta["property"].as_str().unwrap();
+    let state=bases_edits::open(&vault,ROOT,digest).unwrap().unwrap();
+    assert_eq!(state.state.local_value(row,prop),Some(&LocalValue::Number(721.0)));
+    let archive=vault.join(meta["archive"].as_str().unwrap());
+    assert!(archive.is_file(),"the archived original must remain available");
+    for key in ["old_bundle","new_bundle"] {
+        let path=vault.join(meta[key].as_str().unwrap());
+        let review=structured_bundle::inspect_existing(&path).unwrap();
+        assert_eq!(review.root,ROOT);
+    }
+    let loaded=SnapshotStore::open_read_only(&dir.join("appdata/ui-state.sqlite3"))
+        .unwrap().load(ROOT).unwrap().unwrap();
+    assert_eq!(loaded.info.digest,digest,"the source snapshot cannot be overwritten");
+}

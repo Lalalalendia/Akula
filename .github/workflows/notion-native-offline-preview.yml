@@ -13,6 +13,7 @@ on:
       - 'aquilum-app/native/src/notion_import.rs'
       - 'aquilum-app/native/src/notion_bases.rs'
       - 'scripts/windows-notion-native-uia.ps1'
+      - 'scripts/windows-notion-archive-uia.ps1'
       - 'aquilum-app/native/src/notion_bases/**'
       - 'aquilum-app/native/src/ui/settings/cloud/notion/bases/**'
       - 'aquilum-app/native/src/app/settings/notion.rs'
@@ -33,6 +34,7 @@ on:
       - 'aquilum-app/native/src/notion_import.rs'
       - 'aquilum-app/native/src/notion_bases.rs'
       - 'scripts/windows-notion-native-uia.ps1'
+      - 'scripts/windows-notion-archive-uia.ps1'
       - 'aquilum-app/native/src/notion_bases/**'
       - 'aquilum-app/native/src/ui/settings/cloud/notion/bases/**'
       - 'aquilum-app/native/src/app/settings/notion.rs'
@@ -109,3 +111,28 @@ jobs:
           $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\debug\aquilum-native.exe'
           & "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File './scripts/windows-notion-native-uia.ps1' -ExePath $exe
           if ($LASTEXITCODE -ne 0) { throw 'Notion offline native UIA boundary failed' }
+      - name: Seed two verified snapshots, an approved local change and a CAS archive
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP ('akula-notion-archive-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null
+          "AKULA_NOTION_QA_FIXTURE_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $env:AKULA_NOTION_QA_FIXTURE_DIR = $dir
+          cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview qa_seed_cold_archive_for_windows_gui -- --ignored --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated Notion archive fixture seed failed' }
+      - name: Reopen Akula and recover archived local cell via real OS dialog
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\debug\aquilum-native.exe'
+          & "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File './scripts/windows-notion-archive-uia.ps1' -ExePath $exe -FixtureDir $env:AKULA_NOTION_QA_FIXTURE_DIR
+          if ($LASTEXITCODE -ne 0) { throw 'Native archive GUI/OS confirmation acceptance failed' }
+      - name: Independently read back restored CAS cell and original Notion bundles
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview qa_verify_cold_archive_restored_by_gui -- --ignored --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Cold archive independent readback failed' }
