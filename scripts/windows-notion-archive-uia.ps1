@@ -137,20 +137,30 @@ try {
     }
     if ($hwnd -eq [IntPtr]::Zero) { throw 'Native Akula main window absent' }
     $ui=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
-    $settingsButton=$null
-    foreach ($name in $settings) {
-        $settingsButton=Find-Visible $ui $name
-        if ($null -ne $settingsButton) { break }
+    # Settings navigation redraws asynchronously. Retry exact localized
+    # button names, as in the already passing no-source native Windows UIA.
+    foreach ($expected in @(@($settings),@($sync))) {
+        $found=$null
+        for ($attempt=0; $attempt -lt 100; $attempt++) {
+            $items=$ui.FindAll([System.Windows.Automation.TreeScope]::Descendants,$buttons)
+            for ($i=$items.Count-1; $i -ge 0 -and $null -eq $found; $i--) {
+                $item=$items.Item($i)
+                try {
+                    if ($item.Current.IsOffscreen -or !$item.Current.IsEnabled) { continue }
+                    if (@($expected | Where-Object {
+                        [string]$item.Current.Name -ceq [string]$_
+                    }).Count -gt 0) { $found=$item }
+                } catch [System.Windows.Automation.ElementNotAvailableException] {}
+            }
+            if ($null -ne $found) { break }
+            Start-Sleep -Milliseconds 200
+        }
+        if ($null -eq $found) {
+            Write-Host ('NOTION_UIA_NAV_BUTTON_DIAG '+(Visible-Button-Diagnostic $ui))
+            throw ('Expected native navigation button not found: '+($expected -join ' / '))
+        }
+        Click $found
     }
-    if ($null -eq $settingsButton) { throw 'Settings button absent' }
-    Click $settingsButton
-    $syncButton=$null
-    foreach ($name in $sync) {
-        $syncButton=Find-Visible $ui $name
-        if ($null -ne $syncButton) { break }
-    }
-    if ($null -eq $syncButton) { throw 'Sync section absent' }
-    Click $syncButton
     Click (Wait-Action $ui 'Notion ')
     Click (Wait-Action $ui $meta.root.Substring(0,8))
     Click (Wait-Action $ui ([regex]::Unescape('\u041e\u0442\u043a\u0440\u044b\u0442\u044c\u0020\u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0435\u0020\u0041\u006b\u0075\u006c\u0061\u0020\u0042\u0061\u0073\u0065\u0073')))
