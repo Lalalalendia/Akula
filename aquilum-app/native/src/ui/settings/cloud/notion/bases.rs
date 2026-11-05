@@ -66,6 +66,12 @@ pub(super) fn append(
                             bases.total_rows,bases.total_columns,bases.local_revision,bases.saved_source_views),
                         |t|t.text_primary,None,Leading::Times(1.3),
                     ));
+                    // Archived values must remain discoverable even when the
+                    // current source has no active local edits after restart.
+                    column=column.with_fixed(action_button(
+                        "Найти архивы локальных правок для восстановления".into(),
+                        Action::NotionBasesScanArchives,bindings,
+                    ));
                     if bases.local_revision>0 {
                         column=rebase::append(column,bases,bindings);
                     }

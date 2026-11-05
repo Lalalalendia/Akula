@@ -95,6 +95,22 @@ function Wait-Action([System.Windows.Automation.AutomationElement]$Root,[string]
         Start-Sleep -Milliseconds 250
     }
     Write-Host ('NOTION_UIA_VISIBLE_BUTTON_DIAG '+(Visible-Button-Diagnostic $Root))
+    $textFilter=[System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Text)
+    $texts=$Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$textFilter)
+    $inspect=New-Object 'System.Collections.Generic.List[string]'
+    foreach ($element in $texts) {
+        try {
+            $name=[string]$element.Current.Name
+            if ($name -match 'ревизия|Локальная модель|Проверенный архив|Снимки:|Строк:') {
+                if ($name.Length -gt 160) { $name=$name.Substring(0,160) }
+                [void]$inspect.Add($name)
+                if ($inspect.Count -ge 12) { break }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] {}
+    }
+    Write-Host ('NOTION_UIA_STATE_DIAG '+($inspect -join ' | '))
     throw ('Expected real native button missing: '+$Text)
 }
 $loc=@()
@@ -139,6 +155,16 @@ try {
     Click (Wait-Action $ui $meta.root.Substring(0,8))
     Click (Wait-Action $ui ([regex]::Unescape('\u041e\u0442\u043a\u0440\u044b\u0442\u044c\u0020\u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0435\u0020\u0041\u006b\u0075\u006c\u0061\u0020\u0042\u0061\u0073\u0065\u0073')))
     Click (Wait-Action $ui $meta.new_digest.Substring(0,10))
+    # Read-only fixture guard: distinguish absent local state from a hidden UI control.
+    $overlayPath=Join-Path (Join-Path $vault 'Notion-import') ($meta.root+'.akula-bases-edits.json')
+    if (!(Test-Path -LiteralPath $overlayPath)) { throw 'Seeded local overlay was lost before GUI recovery' }
+    $overlay=Get-Content -Raw -LiteralPath $overlayPath | ConvertFrom-Json
+    $sameBaseline=($overlay.baseline_digest -ceq $meta.new_digest)
+    Write-Host ('AKULA_NOTION_ARCHIVE_PRECONDITION revision={0} matches_new_digest={1}' -f
+        $overlay.revision,$sameBaseline)
+    if (!$sameBaseline -or [int64]$overlay.revision -lt 1) {
+        throw 'Seeded local overlay has wrong baseline or missing revision'
+    }
     Click (Wait-Action $ui ([regex]::Unescape('\u041d\u0430\u0439\u0442\u0438\u0020\u0430\u0440\u0445\u0438\u0432\u044b\u0020\u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0445\u0020\u043f\u0440\u0430\u0432\u043e\u043a')))
     Click (Wait-Action $ui ([regex]::Unescape('\u0412\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c\u0020\u0438\u0437\u0020\u0430\u0440\u0445\u0438\u0432\u0430')))
     $yes=$null
