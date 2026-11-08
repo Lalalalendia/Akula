@@ -22,12 +22,18 @@ pub(in crate::ui::transfer) fn render(
             let label = format!("{} · {}", received.id, display_size(received.bytes));
             let detail = match received.import_audit_key {
                 Some(key) => format!(
-                    "{} · {} · {}",
+                    "{} · {} · {} · {}",
                     received.sender,
+                    t(received.kind_key),
                     t(received.status_key),
                     t(key)
                 ),
-                None => format!("{} · {}", received.sender, t(received.status_key)),
+                None => format!(
+                    "{} · {} · {}",
+                    received.sender,
+                    t(received.kind_key),
+                    t(received.status_key)
+                ),
             };
             let labels = NewWidget::new(
                 Flex::column()
@@ -122,6 +128,7 @@ mod tests {
             id: "00000000-0000-4000-8000-000000000001".to_owned(),
             bytes: 4,
             sender: "sender".to_owned(),
+            kind_key: "transfer.inboxKindUnknown",
             status_key: "transfer.inboxPending",
             import_audit_key: None,
             #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
