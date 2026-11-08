@@ -1,6 +1,10 @@
 //! The Aquilum core: notes on disk, documents, search, history, settings and UI state, with no
 //! knowledge of the UI that hosts it.
 
+// A direct Core consumer must not ship the test-only Windows delete worker.
+#[cfg(all(feature = "p2p-inbox-delete-qa", not(debug_assertions)))]
+compile_error!("QA Core physical Inbox deletion cannot ship in a release build");
+
 pub mod app_core;
 pub mod documents;
 pub mod files;

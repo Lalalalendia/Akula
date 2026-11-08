@@ -126,6 +126,7 @@ jobs:
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-delete-qa --lib sync::p2p_stage::delete_lab::qa_entry::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-delete-qa-entry.txt"
           grep -F 'test sync::p2p_stage::delete_lab::qa_entry::tests::opt_in_qa_entry_requires_bound_confirmation_and_no_retry ... ok' "$RUNNER_TEMP/p2p-delete-qa-entry.txt"
           grep -F 'test sync::p2p_stage::delete_lab::qa_entry::tests::qa_entry_refuses_missing_root_without_creating_it ... ok' "$RUNNER_TEMP/p2p-delete-qa-entry.txt"
+          grep -F 'test sync::p2p_stage::delete_lab::qa_entry::tests::earlier_requested_intent_never_implicitly_reauthorizes_physical_deletion ... ok' "$RUNNER_TEMP/p2p-delete-qa-entry.txt"
           grep -Eq 'test result: ok[.] [1-9][0-9]* passed' "$RUNNER_TEMP/p2p-delete-lab.txt"
           echo 'AKULA_P2P_WIN7_DISPOSABLE_SAME_HANDLE_DELETE_LAB_PASS non_shipping=1'
       - name: Confirm unaccepted P2P excluded from signed installed graph
@@ -138,6 +139,16 @@ jobs:
             echo "::error::Unaccepted P2P leaked into signed installed dependencies"
             exit 1
           fi
+      - name: Refuse installed plus physical-delete QA in the same binary
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed,p2p-inbox-physical-delete-qa > "$RUNNER_TEMP/p2p-install-refusal.txt" 2>&1; then
+            echo "::error::Installed plus physical-delete QA unexpectedly compiled"
+            exit 1
+          fi
+          grep -F 'QA physical Inbox deletion cannot be combined with installed' "$RUNNER_TEMP/p2p-install-refusal.txt"
       - name: Verify separately confirmed physical deletion Native UI (QA-only)
         if: runner.os == 'Windows'
         shell: bash

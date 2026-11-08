@@ -120,6 +120,60 @@ mod tests {
         assert_eq!(fs::read(&unrelated).unwrap(), b"preserve");
     }
 
+
+    #[test]
+    fn earlier_requested_intent_never_implicitly_reauthorizes_physical_deletion() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("inbox");
+        let bytes = b"preserve bytes after earlier user request";
+        let receipt = ExpectedTransfer {
+            id: Uuid::new_v4(),
+            sender_key: [51; 32],
+            recipient_key: [52; 32],
+            source: Transport::P2p,
+            bytes: bytes.len() as u64,
+            blake3: *blake3::hash(bytes).as_bytes(),
+        };
+        let mut ledger = InboxLedger::open(&root).unwrap();
+        ledger.reserve(&receipt).unwrap();
+        let path = ledger.object_path(receipt.id);
+        fs::write(&path, bytes).unwrap();
+        assert_eq!(ledger.confirm(&receipt).unwrap(), LocalStatus::VerifiedLocal);
+        ledger.request_removal(receipt.id).unwrap();
+        drop(ledger);
+
+        assert!(qa_dispose_confirmed_inbox_file(
+            &root,
+            receipt.id,
+            receipt.bytes,
+            receipt.blake3,
+        )
+        .is_err());
+        let cold = InboxLedger::open_existing(&root).unwrap().unwrap();
+        assert_eq!(
+            cold.removal_status(receipt.id).unwrap(),
+            RemovalAuditStatus::Requested
+        );
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        drop(cold);
+
+        // A vanished pathname is not a disposition witness and cannot
+        // authorize a retry or a false "Removed" journal state.
+        fs::remove_file(&path).unwrap();
+        assert!(qa_dispose_confirmed_inbox_file(
+            &root,
+            receipt.id,
+            receipt.bytes,
+            receipt.blake3,
+        )
+        .is_err());
+        let cold = InboxLedger::open_existing(&root).unwrap().unwrap();
+        assert_eq!(
+            cold.removal_status(receipt.id).unwrap(),
+            RemovalAuditStatus::NeedsReview
+        );
+    }
+
     #[test]
     fn qa_entry_refuses_missing_root_without_creating_it() {
         let temp = tempfile::tempdir().unwrap();
