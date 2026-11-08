@@ -99,6 +99,7 @@ mod tests {
                 id: "00000000-0000-4000-8000-000000000001".to_owned(),
                 bytes: 4,
                 sender: "sender".to_owned(),
+                kind_key: "transfer.inboxKindUnknown",
                 status_key: "transfer.inboxVerified",
                 import_audit_key: None,
                 #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
