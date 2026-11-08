@@ -51,3 +51,53 @@ pub(super) fn attach(
     actions.push((removal.id(), InboxAction::AskRemoval(received.id.clone())));
     entry.with_fixed(removal)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> InboxView {
+        InboxView {
+            rows: vec![InboxRow {
+                id: "00000000-0000-4000-8000-000000000001".to_owned(),
+                bytes: 4,
+                sender: "sender".to_owned(),
+                status_key: "transfer.inboxVerified",
+                import_audit_key: None,
+            }],
+            ..InboxView::default()
+        }
+    }
+
+    fn rendered_actions(view: &InboxView) -> Vec<InboxAction> {
+        let mut actions = Vec::new();
+        let row = &view.rows[0];
+        let _widget = attach(Flex::row(), row, view, &mut actions);
+        actions.into_iter().map(|(_, action)| action).collect()
+    }
+
+    #[test]
+    fn confirmation_is_separate_from_request_and_blocks_other_rows() {
+        let mut view = sample();
+        let initial = rendered_actions(&view);
+        assert!(initial.iter().any(|action| matches!(action, InboxAction::AskRemoval(_))));
+        assert!(!initial.iter().any(|action| matches!(action, InboxAction::ConfirmRemoval(_))));
+
+        view.removal_confirmation = Some(view.rows[0].id.clone());
+        let confirmation = rendered_actions(&view);
+        assert_eq!(confirmation.len(), 2);
+        assert!(confirmation.iter().any(|action| matches!(action, InboxAction::ConfirmRemoval(_))));
+        assert!(confirmation.iter().any(|action| matches!(action, InboxAction::CancelRemoval)));
+        assert!(!confirmation.iter().any(|action| matches!(action, InboxAction::SaveCopy(_))));
+        assert!(!confirmation.iter().any(|action| matches!(action, InboxAction::Import(_))));
+
+        view.removing = true;
+        assert!(rendered_actions(&view).is_empty(), "no actions during SQLite request");
+        view.removing = false;
+        view.removal_confirmation = None;
+        view.rows[0].status_key = "transfer.inboxRemovalRequested";
+        assert!(rendered_actions(&view).is_empty(), "durable removal request revokes actions");
+        view.rows[0].status_key = "transfer.inboxReview";
+        assert!(rendered_actions(&view).is_empty(), "corrupt local receipt revokes actions");
+    }
+}

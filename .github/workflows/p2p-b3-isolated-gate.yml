@@ -131,6 +131,7 @@ jobs:
           rustfmt --edition 2024 --check aquilum-app/native/src/app/transfer/inbox/list.rs aquilum-app/native/src/app/transfer/inbox/list/removal_state.rs
           rustfmt --edition 2024 --check aquilum-app/native/src/app/transfer/inbox/removal.rs aquilum-app/native/src/app/transfer/inbox/preview.rs aquilum-app/native/src/app/transfer/actions/inbox.rs aquilum-app/native/src/ui/transfer/inbox_view/render/row_actions.rs aquilum-app/native/src/ui/transfer/types/inbox_types.rs
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::inbox::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::transfer::inbox_view::render::row_actions::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::inbox::import::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::file_tree::imported::tests -- --nocapture
           echo 'AKULA_P2P_B3_WINDOWS_QA_PASS installed_default_off=1 copy_only=1'
