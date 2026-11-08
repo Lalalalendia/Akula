@@ -71,7 +71,8 @@ pub(in crate::ui::transfer) fn render(
         }
         if view.page_offset > 0 {
             let newer = NewWidget::new(TextButton::new(
-                t("transfer.inboxNewer"), Variant::Ghost,
+                t("transfer.inboxNewer"),
+                Variant::Ghost,
             ));
             actions.push((newer.id(), InboxAction::NewerPage));
             panel = panel.with_fixed(newer);
@@ -80,7 +81,8 @@ pub(in crate::ui::transfer) fn render(
             .map_or(false, |shown| shown < view.total)
         {
             let older = NewWidget::new(TextButton::new(
-                t("transfer.inboxOlder"), Variant::Ghost,
+                t("transfer.inboxOlder"),
+                Variant::Ghost,
             ));
             actions.push((older.id(), InboxAction::OlderPage));
             panel = panel.with_fixed(older);
