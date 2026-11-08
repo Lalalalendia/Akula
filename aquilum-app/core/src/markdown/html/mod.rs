@@ -1,5 +1,6 @@
 mod blocks;
 mod convert;
+mod prose;
 mod style;
 #[cfg(test)]
 mod tests;

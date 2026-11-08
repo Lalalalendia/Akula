@@ -1,5 +1,5 @@
 use super::blocks::Container;
-use crate::markdown::escape;
+use super::prose;
 
 pub const BOLD: u8 = 1;
 pub const ITALIC: u8 = 2;
@@ -133,7 +133,7 @@ impl Writer {
             self.out.push_str(words);
         } else {
             let line_start = fresh && !heading && self.wanted == 0 && self.link.is_none();
-            let escaped = escape::prose(words, self.out.chars().next_back(), line_start);
+            let escaped = prose::prose(words, self.out.chars().next_back(), line_start);
             self.out.push_str(&escaped);
         }
     }
