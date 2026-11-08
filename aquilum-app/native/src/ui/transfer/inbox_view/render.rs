@@ -69,6 +69,22 @@ pub(in crate::ui::transfer) fn render(
             }
             panel = panel.with_fixed(rule());
         }
+        if view.page_offset > 0 {
+            let newer = NewWidget::new(TextButton::new(
+                t("transfer.inboxNewer"), Variant::Ghost,
+            ));
+            actions.push((newer.id(), InboxAction::NewerPage));
+            panel = panel.with_fixed(newer);
+        }
+        if u64::try_from(view.page_offset.saturating_add(view.rows.len()))
+            .map_or(false, |shown| shown < view.total)
+        {
+            let older = NewWidget::new(TextButton::new(
+                t("transfer.inboxOlder"), Variant::Ghost,
+            ));
+            actions.push((older.id(), InboxAction::OlderPage));
+            panel = panel.with_fixed(older);
+        }
     }
     if view.exporting {
         panel = panel.with_fixed(hint(&t("transfer.inboxSaving")));
