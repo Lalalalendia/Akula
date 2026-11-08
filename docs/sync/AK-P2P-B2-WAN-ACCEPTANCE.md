@@ -49,6 +49,31 @@ sufficient in the evidence packet. **No auto-trust or background listener.**
    sender filename/type, real Save to Vault and confirmed delete still need
    their own installed-client tests.
 
+## Optional offline A/B log correlation (not WAN proof)
+
+With the user's explicit permission, capture each endpoint's opt-in
+`AKULA_B2_QA_EVIDENCE` console output into **separate local UTF-8 text files**,
+and check them without uploading them or sending data to any service:
+
+```bash
+python3 interop/akula-staya/qa/b2_evidence_check.py --sender sender.log --receiver receiver.log
+```
+
+The stdlib-only checker rejects missing/duplicate records, incorrect sender or
+receiver phase, unexpected fields, a missing/noncanonical receiver receipt,
+invalid/nonmatching byte counts or full BLAKE3, and false claims of signed or
+durable delivery. Status `B2_CORRELATION=MATCHED PHYSICAL_WAN=UNVERIFIED`
+(exit 0) means **only** that the two untrusted diagnostic lines correlate.
+An `unknown` path returns `HOLD` (exit 2); invalid records return
+`REJECTED` (exit 1). The checker prints no log content or digest.
+Its isolated CI fixture tests are run with `--self-test`.
+
+The logs are not cryptographically signed, and matching diagnostic lines cannot
+prove the source file's actual digest, two physical Windows endpoints, independent
+WAN networks, live TLS pin validity, full QUIC path history, or survival of a
+cold restart. These require the separate operator observations above. **Never
+promote B2 to PASS on an offline MATCHED result alone.**
+
 ## Evidence and decision
 
 For each test store a redacted record:
