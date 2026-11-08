@@ -6,6 +6,10 @@ mod removal_state;
 use removal_state::status_key;
 
 pub(super) fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
+    read_checked_inbox_page(root, 0)
+}
+
+pub(super) fn read_checked_inbox_page(root: &Path, offset: usize) -> Result<InboxView, String> {
     let Some(ledger) =
         InboxLedger::open_existing(root).map_err(|error| format!("read-only ledger: {error:?}"))?
     else {
@@ -18,7 +22,7 @@ pub(super) fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
         .count()
         .map_err(|error| format!("count inbox: {error:?}"))?;
     let rows = ledger
-        .list_recent(24)
+        .list_page(24, offset)
         .map_err(|error| format!("check recent received files: {error:?}"))?
         .into_iter()
         .map(|(file, status)| -> Result<InboxRow, String> {
@@ -48,6 +52,7 @@ pub(super) fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
     Ok(InboxView {
         rows,
         total,
+        page_offset: offset,
         ..InboxView::default()
     })
 }
