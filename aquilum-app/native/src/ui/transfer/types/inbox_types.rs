@@ -24,6 +24,8 @@ pub struct InboxRow {
     pub id: String,
     pub bytes: u64,
     pub sender: String,
+    /// Inferred from locally revalidated bytes, never a remote MIME assertion.
+    pub kind_key: &'static str,
     pub status_key: &'static str,
     pub import_audit_key: Option<&'static str>,
     #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
