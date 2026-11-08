@@ -12,4 +12,3 @@ pub struct Row {
     pub active: bool,
     pub selected: bool,
 }
-
