@@ -1,8 +1,8 @@
 //! Explicit non-shipping Core QA delete entrypoint.
 #[cfg(not(debug_assertions))]
 compile_error!("QA Core physical Inbox deletion cannot ship in a release build");
-//! Caller independently binds the selected UUID, bytes and digest to local consent.
-//! This is not an installed UI action, a remote command or a proof of power-loss durability.
+// Caller independently binds the selected UUID, bytes and digest to local consent.
+// This is not an installed UI action, a remote command or a proof of power-loss durability.
 use super::{
     delete_after_explicit_consent, ConfirmedRemoval, CrashCut, InboxLedger, Path, Uuid, MAX_BYTES,
 };
