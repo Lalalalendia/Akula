@@ -22,6 +22,7 @@ use std::{
 use uuid::Uuid;
 #[cfg(windows)]
 mod import;
+mod kind;
 mod list;
 mod preview;
 mod removal;
