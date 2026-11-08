@@ -46,12 +46,6 @@ pub(super) fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
     Ok(InboxView {
         rows,
         total,
-        loading: false,
-        error: None,
-        exporting: false,
-        importing: false,
-        previewing: false,
-        preview: None,
-        notice_key: None,
+        ..InboxView::default()
     })
 }
