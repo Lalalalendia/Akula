@@ -47,7 +47,9 @@ fn borrowed_file_identity_for_lab(handle: *mut c_void) -> Result<(u32, u64), Vau
     // SAFETY: SQLite owns the live HANDLE; the synchronous query writes the
     // initialized stack output and never closes or caches the borrowed handle.
     if unsafe { GetFileInformationByHandle(handle, &mut info) } == 0 {
-        return Err(VaultPortError::Io(std::io::Error::last_os_error().to_string()));
+        return Err(VaultPortError::Io(
+            std::io::Error::last_os_error().to_string(),
+        ));
     }
     let index = (u64::from(info.file_index_high) << 32) | u64::from(info.file_index_low);
     if info.volume_serial == 0 || index == 0 {
@@ -681,7 +683,10 @@ mod tests {
         });
         let first_removed = t1.join().unwrap();
         let second_removed = t2.join().unwrap();
-        assert!(!(first_removed && second_removed), "duplicate physical delete");
+        assert!(
+            !(first_removed && second_removed),
+            "duplicate physical delete"
+        );
         let reader = InboxLedger::open_existing(&root).unwrap().unwrap();
         if first_removed || second_removed {
             assert_eq!(
