@@ -4,6 +4,8 @@
 pub enum InboxAction {
     Preview(String),
     SaveCopy(String),
+    OlderPage,
+    NewerPage,
     #[cfg(windows)]
     Import(String),
     AskRemoval(String),
@@ -32,6 +34,7 @@ pub struct InboxRow {
 pub struct InboxView {
     pub rows: Vec<InboxRow>,
     pub total: u64,
+    pub page_offset: usize,
     pub loading: bool,
     pub error: Option<String>,
     pub exporting: bool,
