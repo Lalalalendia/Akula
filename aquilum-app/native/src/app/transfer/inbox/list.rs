@@ -1,7 +1,9 @@
 //! Read-only Inbox projection; never trust SQLite without local rehashing.
 use super::*;
 use crate::ui::transfer::InboxRow;
-use akula_inbox_ledger_lab::{ImportAuditStatus, LocalStatus};
+use akula_inbox_ledger_lab::ImportAuditStatus;
+mod removal_state;
+use removal_state::status_key;
 
 pub(super) fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
     let Some(ledger) =
@@ -32,12 +34,7 @@ pub(super) fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
                 id,
                 bytes: file.bytes,
                 sender,
-                status_key: match status {
-                    LocalStatus::VerifiedLocal => "transfer.inboxVerified",
-                    LocalStatus::Pending => "transfer.inboxPending",
-                    LocalStatus::NeedsReview => "transfer.inboxReview",
-                    LocalStatus::Unknown => "transfer.inboxUnknown",
-                },
+                status_key: status_key(&ledger, file.id, status)?,
                 import_audit_key: match imported {
                     ImportAuditStatus::NotRecorded => None,
                     ImportAuditStatus::Verified => Some("transfer.inboxAuditVerified"),

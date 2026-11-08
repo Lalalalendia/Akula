@@ -146,3 +146,69 @@ fn save_copy_rejects_own_inbox_and_known_vault() {
     assert!(save_checked_copy(&inbox, intent.id, &forbidden_inbox, &[]).is_err());
     assert!(!forbidden_inbox.exists());
 }
+
+#[test]
+fn durable_removal_intent_never_displays_verified_inbox_actions_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("received-inbox");
+    let bytes = b"verified original must not be presented after remove intent";
+    let receipt = ExpectedTransfer {
+        id: Uuid::new_v4(),
+        sender_key: [61; 32],
+        recipient_key: [62; 32],
+        source: Transport::P2p,
+        bytes: bytes.len() as u64,
+        blake3: *blake3::hash(bytes).as_bytes(),
+    };
+    {
+        let mut ledger = InboxLedger::open(&root).unwrap();
+        assert_eq!(ledger.reserve(&receipt).unwrap(), LocalStatus::Pending);
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(ledger.object_path(receipt.id))
+            .unwrap();
+        file.write_all(bytes).unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        assert_eq!(ledger.confirm(&receipt).unwrap(), LocalStatus::VerifiedLocal);
+    }
+    assert_eq!(
+        read_checked_inbox(&root).unwrap().rows[0].status_key,
+        "transfer.inboxVerified"
+    );
+    {
+        let ledger = InboxLedger::open(&root).unwrap();
+        ledger.request_removal(receipt.id).unwrap();
+        assert_eq!(fs::read(ledger.object_path(receipt.id)).unwrap(), bytes);
+    }
+    // The original still exists, but removal consent irrevocably disables
+    // preview, Save Copy and Vault import until a separate recovery workflow.
+    assert_eq!(
+        read_checked_inbox(&root).unwrap().rows[0].status_key,
+        "transfer.inboxRemovalRequested"
+    );
+    {
+        let cold = InboxLedger::open_existing(&root).unwrap().unwrap();
+        assert!(cold.open_verified_file(receipt.id).is_err());
+    }
+    // A crash after physical removal, but before SQLite finish, is review,
+    // never a false verified/removed receipt.
+    fs::remove_file(
+        root.join("objects")
+            .join(format!("{}.blob", receipt.id.hyphenated())),
+    )
+    .unwrap();
+    assert_eq!(
+        read_checked_inbox(&root).unwrap().rows[0].status_key,
+        "transfer.inboxReview"
+    );
+    {
+        let ledger = InboxLedger::open(&root).unwrap();
+        ledger.finish_removal(receipt.id).unwrap();
+    }
+    assert_eq!(
+        read_checked_inbox(&root).unwrap().rows[0].status_key,
+        "transfer.inboxRemoved"
+    );
+}

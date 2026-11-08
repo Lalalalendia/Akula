@@ -99,6 +99,8 @@
     "inboxVerified": "Verified locally",
     "inboxPending": "Pending confirmation",
     "inboxReview": "Needs review",
+    "inboxRemovalRequested": "Removal requested — actions disabled",
+    "inboxRemoved": "Removed from Inbox",
     "inboxSaveCopy": "Save copy",
     "inboxSaving": "Saving a verified copy…",
     "inboxSaved": "Copy saved as a separate new file.",
