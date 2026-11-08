@@ -27,7 +27,7 @@ mod preview;
 mod removal;
 #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
 mod physical_removal;
-use list::read_checked_inbox;
+use list::{read_checked_inbox_page, PAGE_SIZE};
 use preview::read_checked_text_preview;
 
 #[derive(Default)]
@@ -160,16 +160,39 @@ impl InboxPreview {
 
 impl App {
     pub(super) fn begin_inbox_preview(&mut self) {
+        let offset = self.transfer.inbox.view.page_offset;
         let (tx, rx) = mpsc::channel();
         self.transfer.inbox.begin(rx);
         let wake = Arc::clone(&self.workspace.wake);
         thread::spawn(move || {
             let result = user_inbox_root()
                 .map_err(|err| format!("inbox root: {err:?}"))
-                .and_then(|root| read_checked_inbox(&root));
+                .and_then(|root| read_checked_inbox_page(&root, offset));
             let _ = tx.send(result);
             wake();
         });
+    }
+
+    pub(super) fn change_inbox_page(&mut self, older: bool) -> bool {
+        let view = &self.transfer.inbox.view;
+        if view.loading || view.exporting || view.importing || view.previewing
+            || view.removing || view.removal_confirmation.is_some()
+            || view.has_physical_confirmation()
+        {
+            return false;
+        }
+        let next = if older {
+            view.page_offset.checked_add(PAGE_SIZE)
+        } else {
+            view.page_offset.checked_sub(PAGE_SIZE)
+        };
+        let Some(next) = next else { return false; };
+        if older && u64::try_from(next).map_or(true, |offset| offset >= view.total) {
+            return false;
+        }
+        self.transfer.inbox.view.page_offset = next;
+        self.begin_inbox_preview();
+        true
     }
 
     /// The preview is user-triggered. A displayed UUID is only a selector,
