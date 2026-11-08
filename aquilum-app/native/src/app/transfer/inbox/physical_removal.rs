@@ -151,6 +151,7 @@ mod tests {
             id: id.clone(),
             bytes: 4,
             sender: "sender".to_owned(),
+            kind_key: "transfer.inboxKindUnknown",
             status_key: "transfer.inboxVerified",
             import_audit_key: None,
             blake3: *blake3::hash(b"test").as_bytes(),
