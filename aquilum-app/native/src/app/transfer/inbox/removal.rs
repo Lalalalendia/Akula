@@ -7,7 +7,12 @@ impl InboxPreview {
         let outcome = self.removal_rx.as_ref().map(|receiver| receiver.try_recv());
         match outcome {
             Some(Ok(Ok(id))) => {
-                if let Some(row) = self.view.rows.iter_mut().find(|row| row.id == id.to_string()) {
+                if let Some(row) = self
+                    .view
+                    .rows
+                    .iter_mut()
+                    .find(|row| row.id == id.to_string())
+                {
                     row.status_key = "transfer.inboxRemovalRequested";
                 }
                 self.view.removing = false;
@@ -32,14 +37,20 @@ impl InboxPreview {
 impl App {
     pub(in crate::app::transfer) fn ask_inbox_removal(&mut self, receipt: &str) -> bool {
         let view = &mut self.transfer.inbox.view;
-        if view.loading || view.exporting || view.importing || view.previewing
-            || view.removing || view.removal_confirmation.is_some()
+        if view.loading
+            || view.exporting
+            || view.importing
+            || view.previewing
+            || view.removing
+            || view.removal_confirmation.is_some()
         {
             return false;
         }
-        if !view.rows.iter().any(|row| {
-            row.id == receipt && row.status_key == "transfer.inboxVerified"
-        }) || Uuid::parse_str(receipt).is_err()
+        if !view
+            .rows
+            .iter()
+            .any(|row| row.id == receipt && row.status_key == "transfer.inboxVerified")
+            || Uuid::parse_str(receipt).is_err()
         {
             return false;
         }
@@ -49,16 +60,26 @@ impl App {
     }
 
     pub(in crate::app::transfer) fn cancel_inbox_removal(&mut self) -> bool {
-        self.transfer.inbox.view.removal_confirmation.take().is_some()
+        self.transfer
+            .inbox
+            .view
+            .removal_confirmation
+            .take()
+            .is_some()
     }
 
     pub(in crate::app::transfer) fn begin_inbox_removal(&mut self, receipt: &str) -> bool {
         let view = &mut self.transfer.inbox.view;
-        if view.loading || view.exporting || view.importing || view.previewing || view.removing
+        if view.loading
+            || view.exporting
+            || view.importing
+            || view.previewing
+            || view.removing
             || view.removal_confirmation.as_deref() != Some(receipt)
-            || !view.rows.iter().any(|row| {
-                row.id == receipt && row.status_key == "transfer.inboxVerified"
-            })
+            || !view
+                .rows
+                .iter()
+                .any(|row| row.id == receipt && row.status_key == "transfer.inboxVerified")
         {
             return false;
         }
@@ -96,16 +117,18 @@ pub(super) fn request_checked_removal(root: &Path, id: Uuid) -> Result<(), Strin
     let reader = InboxLedger::open_existing(root)
         .map_err(|error| format!("Inbox ledger: {error:?}"))?
         .ok_or("Inbox missing")?;
-    let (verified, expected) = reader.open_verified_file(id)
+    let (verified, expected) = reader
+        .open_verified_file(id)
         .map_err(|error| format!("Inbox receipt not available: {error:?}"))?;
     if expected.id != id {
         return Err("Inbox receipt identity mismatch".into());
     }
     drop(verified);
     drop(reader);
-    let ledger = InboxLedger::open(root)
-        .map_err(|error| format!("Inbox write ledger: {error:?}"))?;
-    ledger.request_removal(id)
+    let ledger =
+        InboxLedger::open(root).map_err(|error| format!("Inbox write ledger: {error:?}"))?;
+    ledger
+        .request_removal(id)
         .map_err(|error| format!("Inbox removal intent refused: {error:?}"))?;
     Ok(())
 }

@@ -20,7 +20,10 @@ pub(super) fn attach(
             t("transfer.inboxRemoveConfirm"),
             Variant::Ghost,
         ));
-        actions.push((confirm.id(), InboxAction::ConfirmRemoval(received.id.clone())));
+        actions.push((
+            confirm.id(),
+            InboxAction::ConfirmRemoval(received.id.clone()),
+        ));
         entry = entry.with_fixed(confirm);
         let cancel = NewWidget::new(TextButton::new(
             t("transfer.inboxRemoveCancel"),
@@ -80,25 +83,58 @@ mod tests {
     fn confirmation_is_separate_from_request_and_blocks_other_rows() {
         let mut view = sample();
         let initial = rendered_actions(&view);
-        assert!(initial.iter().any(|action| matches!(action, InboxAction::AskRemoval(_))));
-        assert!(!initial.iter().any(|action| matches!(action, InboxAction::ConfirmRemoval(_))));
+        assert!(
+            initial
+                .iter()
+                .any(|action| matches!(action, InboxAction::AskRemoval(_)))
+        );
+        assert!(
+            !initial
+                .iter()
+                .any(|action| matches!(action, InboxAction::ConfirmRemoval(_)))
+        );
 
         view.removal_confirmation = Some(view.rows[0].id.clone());
         let confirmation = rendered_actions(&view);
         assert_eq!(confirmation.len(), 2);
-        assert!(confirmation.iter().any(|action| matches!(action, InboxAction::ConfirmRemoval(_))));
-        assert!(confirmation.iter().any(|action| matches!(action, InboxAction::CancelRemoval)));
-        assert!(!confirmation.iter().any(|action| matches!(action, InboxAction::SaveCopy(_))));
+        assert!(
+            confirmation
+                .iter()
+                .any(|action| matches!(action, InboxAction::ConfirmRemoval(_)))
+        );
+        assert!(
+            confirmation
+                .iter()
+                .any(|action| matches!(action, InboxAction::CancelRemoval))
+        );
+        assert!(
+            !confirmation
+                .iter()
+                .any(|action| matches!(action, InboxAction::SaveCopy(_)))
+        );
         #[cfg(windows)]
-        assert!(!confirmation.iter().any(|action| matches!(action, InboxAction::Import(_))));
+        assert!(
+            !confirmation
+                .iter()
+                .any(|action| matches!(action, InboxAction::Import(_)))
+        );
 
         view.removing = true;
-        assert!(rendered_actions(&view).is_empty(), "no actions during SQLite request");
+        assert!(
+            rendered_actions(&view).is_empty(),
+            "no actions during SQLite request"
+        );
         view.removing = false;
         view.removal_confirmation = None;
         view.rows[0].status_key = "transfer.inboxRemovalRequested";
-        assert!(rendered_actions(&view).is_empty(), "durable removal request revokes actions");
+        assert!(
+            rendered_actions(&view).is_empty(),
+            "durable removal request revokes actions"
+        );
         view.rows[0].status_key = "transfer.inboxReview";
-        assert!(rendered_actions(&view).is_empty(), "corrupt local receipt revokes actions");
+        assert!(
+            rendered_actions(&view).is_empty(),
+            "corrupt local receipt revokes actions"
+        );
     }
 }

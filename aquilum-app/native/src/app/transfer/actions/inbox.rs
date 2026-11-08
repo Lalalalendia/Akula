@@ -7,7 +7,10 @@ impl App {
         dialog: &transfer_ui::TransferDialog,
         id: WidgetId,
     ) -> bool {
-        let hit = dialog.inbox_save_actions.iter().find(|(button, _)| *button == id);
+        let hit = dialog
+            .inbox_save_actions
+            .iter()
+            .find(|(button, _)| *button == id);
         let Some((_, command)) = hit else {
             return false;
         };
