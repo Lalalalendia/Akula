@@ -123,9 +123,14 @@ impl InboxLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs, sync::{Arc, Barrier}};
+    use std::{
+        fs,
+        sync::{Arc, Barrier},
+    };
 
-    fn fixture(with_identity: bool) -> (
+    fn fixture(
+        with_identity: bool,
+    ) -> (
         tempfile::TempDir,
         std::path::PathBuf,
         ExpectedTransfer,
@@ -145,7 +150,10 @@ mod tests {
         let mut ledger = InboxLedger::open(&root).unwrap();
         ledger.reserve(&receipt).unwrap();
         fs::write(ledger.object_path(receipt.id), bytes).unwrap();
-        assert_eq!(ledger.confirm(&receipt).unwrap(), LocalStatus::VerifiedLocal);
+        assert_eq!(
+            ledger.confirm(&receipt).unwrap(),
+            LocalStatus::VerifiedLocal
+        );
         ledger.request_removal(receipt.id).unwrap();
         let origin = RemovalOriginalIdentity {
             volume_serial: 23,
@@ -153,7 +161,9 @@ mod tests {
             hard_links: 1,
         };
         if with_identity {
-            ledger.record_original_identity_after_request(receipt.id, origin).unwrap();
+            ledger
+                .record_original_identity_after_request(receipt.id, origin)
+                .unwrap();
         }
         (dir, root, receipt, origin)
     }
@@ -171,11 +181,14 @@ mod tests {
     fn legacy_and_stale_evidence_cannot_claim_review_or_unlink() {
         let (_dir, root, receipt, original) = fixture(false);
         let ledger = InboxLedger::open(&root).unwrap();
-        assert!(ledger.record_one_shot_recovery_review(
-            approval(&receipt), original,
-        ).is_err());
+        assert!(ledger
+            .record_one_shot_recovery_review(approval(&receipt), original,)
+            .is_err());
         assert!(!ledger.has_recorded_recovery_review(receipt.id).unwrap());
-        assert_eq!(ledger.removal_status(receipt.id).unwrap(), RemovalAuditStatus::Requested);
+        assert_eq!(
+            ledger.removal_status(receipt.id).unwrap(),
+            RemovalAuditStatus::Requested
+        );
         let bytes = fs::read(ledger.object_path(receipt.id)).unwrap();
         assert_eq!(*blake3::hash(&bytes).as_bytes(), receipt.blake3);
         drop(ledger);
@@ -184,30 +197,50 @@ mod tests {
         let ledger = InboxLedger::open(&root).unwrap();
         let mut bad = approval(&receipt);
         bad.bytes += 1;
-        assert!(ledger.record_one_shot_recovery_review(bad, original).is_err());
+        assert!(ledger
+            .record_one_shot_recovery_review(bad, original)
+            .is_err());
         bad = approval(&receipt);
         bad.digest = [7; 32];
-        assert!(ledger.record_one_shot_recovery_review(bad, original).is_err());
+        assert!(ledger
+            .record_one_shot_recovery_review(bad, original)
+            .is_err());
         bad = approval(&receipt);
         bad.nonce = [0; 16];
-        assert!(ledger.record_one_shot_recovery_review(bad, original).is_err());
+        assert!(ledger
+            .record_one_shot_recovery_review(bad, original)
+            .is_err());
         bad = approval(&receipt);
         bad.transfer_id = Uuid::new_v4();
-        assert!(ledger.record_one_shot_recovery_review(bad, original).is_err());
+        assert!(ledger
+            .record_one_shot_recovery_review(bad, original)
+            .is_err());
         let wrong = RemovalOriginalIdentity {
             file_index: original.file_index + 1,
             ..original
         };
-        assert!(ledger.record_one_shot_recovery_review(approval(&receipt), wrong).is_err());
+        assert!(ledger
+            .record_one_shot_recovery_review(approval(&receipt), wrong)
+            .is_err());
         assert!(!ledger.has_recorded_recovery_review(receipt.id).unwrap());
-        assert!(ledger.record_one_shot_recovery_review(approval(&receipt), original).is_ok());
-        assert!(ledger.record_one_shot_recovery_review(approval(&receipt), original).is_err());
-        assert_eq!(ledger.removal_status(receipt.id).unwrap(), RemovalAuditStatus::Requested);
+        assert!(ledger
+            .record_one_shot_recovery_review(approval(&receipt), original)
+            .is_ok());
+        assert!(ledger
+            .record_one_shot_recovery_review(approval(&receipt), original)
+            .is_err());
+        assert_eq!(
+            ledger.removal_status(receipt.id).unwrap(),
+            RemovalAuditStatus::Requested
+        );
         let saved = fs::read(ledger.object_path(receipt.id)).unwrap();
         assert_eq!(*blake3::hash(&saved).as_bytes(), receipt.blake3);
         drop(ledger);
         assert!(InboxLedger::open_existing(&root)
-            .unwrap().unwrap().has_recorded_recovery_review(receipt.id).unwrap());
+            .unwrap()
+            .unwrap()
+            .has_recorded_recovery_review(receipt.id)
+            .unwrap());
     }
 
     #[test]
@@ -217,7 +250,10 @@ mod tests {
         let second = InboxLedger::open(&root).unwrap();
         let barrier = Arc::new(Barrier::new(2));
         let a1 = approval(&receipt);
-        let a2 = LocalRecoveryApproval { nonce: [92; 16], ..a1 };
+        let a2 = LocalRecoveryApproval {
+            nonce: [92; 16],
+            ..a1
+        };
         let gate1 = Arc::clone(&barrier);
         let gate2 = Arc::clone(&barrier);
         let t1 = std::thread::spawn(move || {
@@ -231,7 +267,13 @@ mod tests {
         assert_ne!(t1.join().unwrap(), t2.join().unwrap());
         let cold = InboxLedger::open_existing(&root).unwrap().unwrap();
         assert!(cold.has_recorded_recovery_review(receipt.id).unwrap());
-        assert_eq!(cold.removal_status(receipt.id).unwrap(), RemovalAuditStatus::Requested);
-        assert_eq!(fs::read(cold.object_path(receipt.id)).unwrap().len() as u64, receipt.bytes);
+        assert_eq!(
+            cold.removal_status(receipt.id).unwrap(),
+            RemovalAuditStatus::Requested
+        );
+        assert_eq!(
+            fs::read(cold.object_path(receipt.id)).unwrap().len() as u64,
+            receipt.bytes
+        );
     }
 }

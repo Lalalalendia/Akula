@@ -8,9 +8,9 @@
 //! Host handles OS custody, ACL, crashes and power-loss proof.
 
 mod import_audit;
-mod removal_audit;
 #[cfg(any(test, feature = "disposable-removal-lab"))]
 mod recovery_review;
+mod removal_audit;
 pub use import_audit::ImportAuditStatus;
 #[cfg(any(test, feature = "disposable-removal-lab"))]
 pub use removal_audit::RemovalOriginalIdentity;
