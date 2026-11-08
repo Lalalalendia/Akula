@@ -2,6 +2,7 @@
 use super::*;
 use crate::ui::transfer::InboxRow;
 use akula_inbox_ledger_lab::ImportAuditStatus;
+use super::kind::checked_kind;
 mod removal_state;
 pub(super) const PAGE_SIZE: usize = 24;
 use removal_state::status_key;
@@ -42,11 +43,28 @@ pub(super) fn read_checked_inbox_page(root: &Path, offset: usize) -> Result<Inbo
                 .iter()
                 .map(|byte| format!("{byte:02x}"))
                 .collect();
+            let mut checked_status = status_key(&ledger, file.id, status)?;
+            // Never inspect bytes for pending, revoked or removal-requested
+            // entries. Type inspection has no file or Vault authority.
+            let kind_key = if checked_status == "transfer.inboxVerified" {
+                match checked_kind(&ledger, file.id) {
+                    Ok(kind) => kind,
+                    Err(_) => {
+                        // A second same-handle verification can detect a
+                        // race after list_page(); never keep Verified on error.
+                        checked_status = "transfer.inboxReview";
+                        "transfer.inboxKindUnknown"
+                    }
+                }
+            } else {
+                "transfer.inboxKindUnknown"
+            };
             Ok(InboxRow {
                 id,
                 bytes: file.bytes,
                 sender,
-                status_key: status_key(&ledger, file.id, status)?,
+                kind_key,
+                status_key: checked_status,
                 #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
                 blake3: file.blake3,
                 import_audit_key: match imported {
