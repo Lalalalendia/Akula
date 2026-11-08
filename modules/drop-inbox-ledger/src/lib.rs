@@ -9,6 +9,8 @@
 
 mod import_audit;
 mod removal_audit;
+#[cfg(any(test, feature = "disposable-removal-lab"))]
+mod recovery_review;
 pub use import_audit::ImportAuditStatus;
 #[cfg(any(test, feature = "disposable-removal-lab"))]
 pub use removal_audit::RemovalOriginalIdentity;
