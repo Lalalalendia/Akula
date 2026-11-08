@@ -399,7 +399,18 @@ mod tests {
             ImportAuditStatus::NeedsReview
         );
         fs::remove_file(ledger.object_path(intent.id)).unwrap();
-        ledger.finish_removal(intent.id).unwrap();
+        // This test models a disposable OS deletion outcome, not a real
+        // Windows HANDLE attestation. Production cannot create this witness.
+        let witnessed = RemovalDispositionWitness::for_disposable_lab(
+            intent.id,
+            intent.bytes,
+            intent.blake3,
+            1,
+            2,
+            1,
+        )
+        .unwrap();
+        ledger.finish_removal(intent.id, witnessed).unwrap();
         assert_eq!(
             ledger.import_status(intent.id).unwrap(),
             ImportAuditStatus::Verified
