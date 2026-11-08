@@ -302,7 +302,11 @@ fn native_inbox_reaches_oldest_receipt_and_recovers_stale_page() {
             .unwrap();
         out.write_all(bytes.as_bytes()).unwrap();
         out.sync_all().unwrap();
-        assert_eq!(ledger.confirm(&receipt).unwrap(), LocalStatus::VerifiedLocal);
+        drop(out);
+        assert_eq!(
+            ledger.confirm(&receipt).unwrap(),
+            LocalStatus::VerifiedLocal
+        );
         ids.push(receipt.id);
     }
     drop(ledger);
