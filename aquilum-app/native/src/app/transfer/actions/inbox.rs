@@ -17,6 +17,8 @@ impl App {
         match command {
             transfer_ui::InboxAction::Preview(receipt) => self.begin_inbox_text_preview(receipt),
             transfer_ui::InboxAction::SaveCopy(receipt) => self.begin_inbox_save(receipt),
+            transfer_ui::InboxAction::OlderPage => self.change_inbox_page(true),
+            transfer_ui::InboxAction::NewerPage => self.change_inbox_page(false),
             #[cfg(windows)]
             transfer_ui::InboxAction::Import(receipt) => self.begin_inbox_import(receipt),
             transfer_ui::InboxAction::AskRemoval(receipt) => self.ask_inbox_removal(receipt),
