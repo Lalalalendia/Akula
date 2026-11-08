@@ -18,6 +18,7 @@ struct LabFileTime {
     low: u32,
     high: u32,
 }
+
 #[repr(C)]
 #[derive(Default)]
 struct LabFileInfo {
@@ -32,10 +33,12 @@ struct LabFileInfo {
     file_index_high: u32,
     file_index_low: u32,
 }
+
 #[link(name = "kernel32")]
 extern "system" {
     fn GetFileInformationByHandle(handle: *mut c_void, out: *mut LabFileInfo) -> i32;
 }
+
 fn borrowed_file_identity_for_lab(handle: *mut c_void) -> Result<(u32, u64), VaultPortError> {
     if handle.is_null() || handle as isize == -1 {
         return Err(VaultPortError::PermissionDenied);
