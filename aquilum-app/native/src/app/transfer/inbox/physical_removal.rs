@@ -101,10 +101,7 @@ impl App {
             .is_some()
     }
 
-    pub(in crate::app::transfer) fn begin_inbox_physical_removal(
-        &mut self,
-        receipt: &str,
-    ) -> bool {
+    pub(in crate::app::transfer) fn begin_inbox_physical_removal(&mut self, receipt: &str) -> bool {
         let view = &mut self.transfer.inbox.view;
         if view.loading
             || view.exporting
