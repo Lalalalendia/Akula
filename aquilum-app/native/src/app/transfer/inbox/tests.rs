@@ -41,6 +41,7 @@ fn native_projection_reports_verified_and_corrupt_bytes() {
     let model = read_checked_inbox(&inbox_root).unwrap();
     assert_eq!(model.total, 1);
     assert_eq!(model.rows[0].status_key, "transfer.inboxVerified");
+    assert_eq!(model.rows[0].kind_key, "transfer.inboxKindText");
     assert_eq!(
         read_checked_text_preview(&inbox_root, file.id)
             .unwrap()
@@ -61,6 +62,7 @@ fn native_projection_reports_verified_and_corrupt_bytes() {
     let model = read_checked_inbox(&inbox_root).unwrap();
     assert_eq!(model.total, 1);
     assert_eq!(model.rows[0].status_key, "transfer.inboxReview");
+    assert_eq!(model.rows[0].kind_key, "transfer.inboxKindUnknown");
     assert!(read_checked_text_preview(&inbox_root, file.id).is_err());
     let refused = export_dir.join("never-created.bin");
     assert!(save_checked_copy(&inbox_root, file.id, &refused, &[]).is_err());
