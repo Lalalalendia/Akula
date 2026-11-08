@@ -191,18 +191,31 @@ impl CancelablePipe {
 
     /// The stop event belongs to SCM service_main and is signaled by its
     /// control handler. A client can stay silent indefinitely; SCM STOP must
-    /// still cancel that overlapped ReadFile. Every connection drops its
-    /// bytes; the non-granting service never responds to any request.
-    pub(crate) fn run_until_stop(&self, stop: Handle) -> io::Result<()> {
+    /// still cancel that overlapped ReadFile. Every connection drops bytes.
+    ///
+    /// The source guard runs before and after the real pipe connection. Any
+    /// changed protected namespace or owner/DACL halts the *deny-only* service
+    /// instead of accepting another byte. This does NOT create an atomic
+    /// authorization fence or make future pathname-based reads safe.
+    pub(crate) fn run_until_stop(
+        &self,
+        stop: Handle,
+        mut source_guard: impl FnMut() -> io::Result<()>,
+    ) -> io::Result<()> {
         if stop.is_null() {
             return Err(io::Error::new(ErrorKind::InvalidInput, "no SCM stop event"));
         }
         let mut ov = Overlapped::with_event(self.done.0);
         loop {
+            source_guard()?;
             match self.connect(stop, &mut ov)? {
                 Phase::Stopped => break,
                 Phase::Retry => continue,
                 Phase::Completed => {}
+            }
+            if let Err(error) = source_guard() {
+                unsafe { DisconnectNamedPipe(self.pipe.0) };
+                return Err(error);
             }
             let read = self.read_one_or_stop(stop, &mut ov);
             // There is NO asynchronous operation left when read returns.

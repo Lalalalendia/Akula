@@ -88,7 +88,19 @@ try {
     # Even an otherwise valid marker must fail if ordinary Users gain write.
     Must-Icacls -aclArguments @($marker, "/grant:r", "*S-1-5-32-545:W")
     Expect-Refusal "--verify-custody"
-    Expect-Stop
+    if ($JoinedPipe) {
+        # A real connection wakes the overlapped denial-only service.
+        # It must detect changed source ACL itself and STOP: deliberately
+        # do not manually Stop-Service or the test would prove nothing.
+        & $exe "--verify-pipe" *> $null
+        try {
+            (Get-Service -Name $name).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(12))
+        } catch {
+            throw "running Broker did not stop after live marker ACL tampering"
+        }
+    } else {
+        Expect-Stop
+    }
     $tamperedRefused = $false
     try { Start-Service -Name $name -ErrorAction Stop }
     catch { $tamperedRefused = $true }
