@@ -89,3 +89,20 @@ pub fn pin_windows_export_parent(parent: &Path) -> Result<PinnedWindowsExportPar
     }
     Ok(PinnedWindowsExportParent { _chain: chain })
 }
+
+/// Non-shipping Windows QA-only deletion for an independently user-confirmed
+/// receipt. Never enable in signed installed builds or automatic UI actions.
+#[cfg(feature = "p2p-inbox-delete-qa")]
+pub fn qa_dispose_confirmed_inbox_file(
+    root: &Path,
+    selected_id: uuid::Uuid,
+    confirmed_bytes: u64,
+    confirmed_blake3: [u8; 32],
+) -> Result<(), String> {
+    crate::sync::p2p_stage::qa_dispose_confirmed_inbox_file(
+        root,
+        selected_id,
+        confirmed_bytes,
+        confirmed_blake3,
+    )
+}

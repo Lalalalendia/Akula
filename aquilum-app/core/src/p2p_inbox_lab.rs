@@ -178,3 +178,6 @@ pub fn save_verified_stage_as_new(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(windows, feature = "p2p-inbox-delete-qa"))]
+pub use windows::qa_dispose_confirmed_inbox_file;

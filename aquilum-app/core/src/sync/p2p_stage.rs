@@ -3,8 +3,10 @@
 // The later SQLite/object publication still needs a separate custody check.
 use super::{filegate_windows_acl, pinned_windows, VaultPortError};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "p2p-inbox-delete-qa"))]
 mod delete_lab;
+#[cfg(feature = "p2p-inbox-delete-qa")]
+pub(crate) use delete_lab::qa_dispose_confirmed_inbox_file;
 use std::{
     fs::{File, OpenOptions},
     os::windows::fs::{MetadataExt, OpenOptionsExt},
