@@ -1,0 +1,58 @@
+name: HTML Shiva process isolation pilot
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/native/src/html_preview.rs'
+      - 'aquilum-app/native/src/html_preview_shiva.rs'
+      - 'aquilum-app/native/src/native_modules.rs'
+      - 'aquilum-app/Cargo.lock'
+      - '.github/workflows/native-html-shiva.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  linux-worker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/shiva
+          ref: 40b72a90b1dac39812c77c7321e57d613a81cb51
+          path: shiva-src
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Build the exact confined Shiva worker
+        run: cargo build --manifest-path shiva-src/Cargo.toml -p shiva-worker
+      - name: Compile and test Akula isolated HTML adapter with real worker
+        working-directory: aquilum-app
+        env:
+          AKULA_TEST_SHIVA_WORKER_BIN: ${{ github.workspace }}/shiva-src/target/debug/shiva-worker
+        run: |
+          cargo test -p aquilum-native --features html-preview-shiva html_preview_shiva::tests -- --nocapture
+          cargo test -p aquilum-native --features html-preview-shiva html_preview::tests -- --nocapture
+      - name: Show canonical new Cargo.lock dependency graph
+        working-directory: aquilum-app
+        if: always()
+        run: |
+          echo AKULA_SHIVA_LOCK_DIFF_BEGIN
+          git diff --no-ext-diff --unified=3 -- Cargo.lock
+          echo AKULA_SHIVA_LOCK_DIFF_END
+          echo "AKULA_SHIVA_LOCK_BLOB_SHA=$(git hash-object Cargo.lock)"
+  windows-compile:
+    runs-on: windows-2022
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check opt-in Windows boundary compiles
+        working-directory: aquilum-app
+        run: cargo check -p aquilum-native --features html-preview-shiva
