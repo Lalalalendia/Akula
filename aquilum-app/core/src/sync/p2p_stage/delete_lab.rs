@@ -695,14 +695,18 @@ mod tests {
             );
             assert!(!reader.object_path(id).exists());
         } else {
-            // Competing verification HANDLEs may both prevent disposition
-            // under Win7-compatible sharing rules. That is a safe refusal,
-            // not a reason to repeat a consumed SQLite authorization.
-            assert_eq!(
-                reader.removal_status(id).unwrap(),
-                RemovalAuditStatus::Requested
-            );
-            assert_eq!(fs::read(reader.object_path(id)).unwrap(), bytes);
+            // Concurrent calls may both report failure even when disposition
+            // succeeded but the subsequent SQLite finish did not. This is an
+            // unresolved OS outcome, never authorization for Removed/retry.
+            match reader.removal_status(id).unwrap() {
+                RemovalAuditStatus::Requested => {
+                    assert_eq!(fs::read(reader.object_path(id)).unwrap(), bytes);
+                }
+                RemovalAuditStatus::NeedsReview => {
+                    assert!(!reader.object_path(id).exists());
+                }
+                other => panic!("unsafe failed-delete status: {other:?}"),
+            }
             assert!(reader.open_verified_file(id).is_err());
         }
     }
