@@ -11,6 +11,8 @@ workspace = ".."
 default = []
 # Offline two-replica JSON Canvas research only: no transport, File Gate or native UI.
 canvas-crdt-lab = []
+# Offline envelope preflight only; no QUIC adapter, Yrs ingress, file writes or grants.
+canvas-p2p-wire-lab = ["canvas-crdt-lab", "p2p-offer-lab", "device-roster-lab"]
 # Opt-in pure messaging state machine; no network, storage, UI or workers.
 messaging-core-lab = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
