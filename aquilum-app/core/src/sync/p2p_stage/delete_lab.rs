@@ -14,7 +14,10 @@ mod relative;
 // The SQLite connection retains the HANDLE for this synchronous call.
 #[repr(C)]
 #[derive(Default)]
-struct LabFileTime { low: u32, high: u32 }
+struct LabFileTime {
+    low: u32,
+    high: u32,
+}
 #[repr(C)]
 #[derive(Default)]
 struct LabFileInfo {
