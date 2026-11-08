@@ -21,7 +21,10 @@ fn older_pages_remain_selectable_after_more_than_24_receipts() {
         };
         ledger.reserve(&receipt).unwrap();
         fs::write(ledger.object_path(receipt.id), bytes.as_bytes()).unwrap();
-        assert_eq!(ledger.confirm(&receipt).unwrap(), LocalStatus::VerifiedLocal);
+        assert_eq!(
+            ledger.confirm(&receipt).unwrap(),
+            LocalStatus::VerifiedLocal
+        );
         inserted.push(receipt.id);
     }
     assert_eq!(ledger.count().unwrap(), 27);
@@ -36,11 +39,17 @@ fn older_pages_remain_selectable_after_more_than_24_receipts() {
     assert_eq!(older[0].0.id, inserted[2]);
     assert_eq!(older[1].0.id, inserted[1]);
     assert_eq!(older[2].0.id, inserted[0]);
-    assert!(older.iter().all(|(_, status)| *status == LocalStatus::VerifiedLocal));
+    assert!(older
+        .iter()
+        .all(|(_, status)| *status == LocalStatus::VerifiedLocal));
     assert!(ledger.list_page(24, 27).unwrap().is_empty());
 
     // A stale object on an older page cannot retain a false "Verified" label.
-    fs::write(ledger.object_path(inserted[0]), b"changed after confirmation").unwrap();
+    fs::write(
+        ledger.object_path(inserted[0]),
+        b"changed after confirmation",
+    )
+    .unwrap();
     let page = ledger.list_page(24, 24).unwrap();
     assert_eq!(page[2].0.id, inserted[0]);
     assert_eq!(page[2].1, LocalStatus::NeedsReview);
