@@ -183,7 +183,11 @@ def main() -> int:
         if args.sender.samefile(args.receiver):
             raise EvidenceRejected("two independent log files are required")
         outcome = correlate(read_log(args.sender), read_log(args.receiver))
-    except (EvidenceRejected, OSError) as exc:
+    except OSError:
+        # OSError messages often contain private local paths.
+        print("B2_CORRELATION=REJECTED PHYSICAL_WAN=UNVERIFIED: cannot access QA files", file=sys.stderr)
+        return 1
+    except EvidenceRejected as exc:
         print(f"B2_CORRELATION=REJECTED PHYSICAL_WAN=UNVERIFIED: {exc}", file=sys.stderr)
         return 1
     if outcome == "HOLD":
