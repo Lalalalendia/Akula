@@ -7,6 +7,8 @@ on:
     paths:
       - 'aquilum-app/core/src/p2p_inbox_lab/**'
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
+      - 'aquilum-app/core/src/sync/p2p_stage.rs'
+      - 'aquilum-app/core/src/sync/p2p_stage/**'
       - 'aquilum-app/core/src/files/gate/**'
       - 'aquilum-app/core/src/files/workspace.rs'
       - 'aquilum-app/core/src/p2p_offer_lab.rs'
