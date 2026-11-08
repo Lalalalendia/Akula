@@ -11,6 +11,8 @@ mod import_audit;
 mod removal_audit;
 pub use import_audit::ImportAuditStatus;
 pub use removal_audit::{RemovalAuditStatus, RemovalDispositionWitness};
+#[cfg(any(test, feature = "disposable-removal-lab"))]
+pub use removal_audit::RemovalOriginalIdentity;
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::{
