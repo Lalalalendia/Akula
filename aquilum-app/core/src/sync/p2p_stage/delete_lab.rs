@@ -58,7 +58,7 @@ fn borrowed_file_identity_for_lab(handle: *mut c_void) -> Result<(u32, u64), Vau
     Ok((info.volume_serial, index))
 }
 
-use akula_inbox_ledger_lab::{InboxLedger, RemovalDispositionWitness};
+use akula_inbox_ledger_lab::{InboxLedger, RemovalDispositionWitness, RemovalOriginalIdentity};
 use relative::open_delete_candidate;
 use uuid::Uuid;
 
@@ -324,6 +324,18 @@ fn delete_after_explicit_consent(
     ledger
         .request_removal(selected_id)
         .map_err(|e| format!("one-shot SQLite request refused: {e:?}"))?;
+    // Persist the identity of the exact pinned original before OS unlink.
+    // Crashes between request and this record remain manual-review-only.
+    ledger
+        .record_original_identity_after_request(
+            selected_id,
+            RemovalOriginalIdentity {
+                volume_serial: original_identity.0,
+                file_index: original_identity.1,
+                hard_links: original_identity.2,
+            },
+        )
+        .map_err(|e| format!("original OS identity persistence refused: {e:?}"))?;
     if cut == CrashCut::AfterRequest {
         return Err("simulated crash after durable request".into());
     }

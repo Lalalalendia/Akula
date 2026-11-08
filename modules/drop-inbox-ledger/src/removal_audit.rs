@@ -55,6 +55,18 @@ impl RemovalDispositionWitness {
     }
 }
 
+
+/// Recorded OS identity of the object that the local user originally selected.
+/// This is audit evidence, NOT an authority to retry unlink or mark Removed.
+/// Only trusted Windows QA code may record it after committing removal intent.
+#[cfg(any(test, feature = "disposable-removal-lab"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RemovalOriginalIdentity {
+    pub volume_serial: u32,
+    pub file_index: u64,
+    pub hard_links: u32,
+}
+
 impl InboxLedger {
     /// Local user intent only. Future OS deletion must commit this first.
     pub fn request_removal(&self, id: Uuid) -> Result<(), LedgerError> {
@@ -118,6 +130,98 @@ impl InboxLedger {
             return Err(LedgerError::ConflictingIntent);
         }
         Ok(())
+    }
+
+
+    /// Commit the original Windows HANDLE identity *after* the existing
+    /// one-shot Requested intent and *before* any OS disposition. If this
+    /// separate durable write fails, the caller must NOT delete the file.
+    ///
+    /// A legacy Requested row without this record is manual-review-only.
+    /// The record cannot authorize retry or completion after a crash.
+    #[cfg(any(test, feature = "disposable-removal-lab"))]
+    pub fn record_original_identity_after_request(
+        &self,
+        id: Uuid,
+        origin: RemovalOriginalIdentity,
+    ) -> Result<(), LedgerError> {
+        if id.is_nil()
+            || origin.volume_serial == 0
+            || origin.file_index == 0
+            || origin.hard_links != 1
+            || self.removal_row(id)? != Some(0)
+            || self.status(id)? != LocalStatus::VerifiedLocal
+        {
+            return Err(LedgerError::InvalidLocalObject);
+        }
+        self.db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS removal_original_identity (
+                transfer_id TEXT PRIMARY KEY NOT NULL
+                    REFERENCES removal_inbox(transfer_id) ON DELETE RESTRICT,
+                volume_serial INTEGER NOT NULL
+                    CHECK(volume_serial BETWEEN 1 AND 4294967295),
+                file_index BLOB NOT NULL CHECK(length(file_index) = 8),
+                hard_links INTEGER NOT NULL CHECK(hard_links = 1)
+            );",
+        )?;
+        let inserted = self.db.execute(
+            "INSERT OR IGNORE INTO removal_original_identity
+             (transfer_id, volume_serial, file_index, hard_links)
+             VALUES (?1, ?2, ?3, 1)",
+            params![
+                id.to_string(),
+                i64::from(origin.volume_serial),
+                origin.file_index.to_le_bytes().to_vec()
+            ],
+        )?;
+        if inserted != 1 {
+            return Err(LedgerError::ConflictingIntent);
+        }
+        Ok(())
+    }
+
+    /// Read-only audit evidence. An identical digest is not the same OS file.
+    /// Never feed this value directly to finish_removal as a deletion witness.
+    #[cfg(any(test, feature = "disposable-removal-lab"))]
+    pub fn original_identity_for_manual_review(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<RemovalOriginalIdentity>, LedgerError> {
+        if id.is_nil() {
+            return Err(LedgerError::InvalidIntent);
+        }
+        let exists: Option<i64> = self.db.query_row(
+            "SELECT 1 FROM sqlite_master
+             WHERE type='table' AND name='removal_original_identity'",
+            [],
+            |row| row.get(0),
+        ).optional()?;
+        if exists.is_none() {
+            return Ok(None);
+        }
+        let value: Option<(i64, Vec<u8>, i64)> = self.db.query_row(
+            "SELECT volume_serial, file_index, hard_links
+             FROM removal_original_identity WHERE transfer_id = ?1",
+            [id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional()?;
+        let Some((volume, index_bytes, links)) = value else {
+            return Ok(None);
+        };
+        let volume_serial = u32::try_from(volume)
+            .map_err(|_| LedgerError::CorruptDatabaseRecord)?;
+        let index_bytes: [u8; 8] = index_bytes
+            .try_into()
+            .map_err(|_| LedgerError::CorruptDatabaseRecord)?;
+        let file_index = u64::from_le_bytes(index_bytes);
+        if volume_serial == 0 || file_index == 0 || links != 1 {
+            return Err(LedgerError::CorruptDatabaseRecord);
+        }
+        Ok(Some(RemovalOriginalIdentity {
+            volume_serial,
+            file_index,
+            hard_links: 1,
+        }))
     }
 
     pub fn removal_status(&self, id: Uuid) -> Result<RemovalAuditStatus, LedgerError> {
@@ -264,6 +368,33 @@ mod tests {
             RemovalAuditStatus::Available
         );
         ledger.request_removal(intent.id).unwrap();
+        // Old requests have no persisted OS identity and cannot be
+        // recovered automatically merely because bytes still match.
+        assert!(ledger
+            .original_identity_for_manual_review(intent.id)
+            .unwrap()
+            .is_none());
+        let origin = RemovalOriginalIdentity {
+            volume_serial: 17,
+            file_index: 31,
+            hard_links: 1,
+        };
+        assert!(ledger
+            .record_original_identity_after_request(intent.id, RemovalOriginalIdentity {
+                hard_links: 2,
+                ..origin
+            })
+            .is_err());
+        ledger
+            .record_original_identity_after_request(intent.id, origin)
+            .unwrap();
+        assert!(ledger
+            .record_original_identity_after_request(intent.id, origin)
+            .is_err());
+        assert_eq!(
+            ledger.original_identity_for_manual_review(intent.id).unwrap(),
+            Some(origin)
+        );
         assert!(ledger.request_removal(intent.id).is_err());
         assert_eq!(
             ledger.removal_status(intent.id).unwrap(),
@@ -283,6 +414,10 @@ mod tests {
         assert_eq!(fs::read(ledger.object_path(intent.id)).unwrap(), bytes);
         drop(ledger);
         let reader = InboxLedger::open_existing(&root).unwrap().unwrap();
+        assert_eq!(
+            reader.original_identity_for_manual_review(intent.id).unwrap(),
+            Some(origin)
+        );
         assert_eq!(
             reader.removal_status(intent.id).unwrap(),
             RemovalAuditStatus::Requested
