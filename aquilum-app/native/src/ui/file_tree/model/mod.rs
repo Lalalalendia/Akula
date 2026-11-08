@@ -1,5 +1,11 @@
 mod counts;
 mod edit;
+mod filter;
+#[cfg(test)]
+mod filter_tests;
+mod row;
+mod vault;
+mod visit;
 mod load;
 mod select;
 mod sort;
@@ -12,7 +18,8 @@ mod startup_bench;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use aquilum_core::files::models::FileItem;
+use filter::Filter;
+use vault::Lists;
 
 pub use counts::Counts;
 pub use sort::Sort;
@@ -21,19 +28,7 @@ pub fn comparable(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/").to_lowercase()
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Row {
-    pub path: PathBuf,
-    pub name: String,
-    pub folder: bool,
-    pub depth: usize,
-    pub expanded: bool,
-    pub color: Option<&'static str>,
-    pub items: Option<u32>,
-    pub guides: Vec<usize>,
-    pub active: bool,
-    pub selected: bool,
-}
+pub use row::Row;
 
 #[derive(Debug, PartialEq)]
 pub enum Press {
@@ -50,7 +45,9 @@ pub struct Modifiers {
 #[derive(Default)]
 pub struct TreeModel {
     root: Option<PathBuf>,
-    directories: HashMap<String, Vec<FileItem>>,
+    directories: Lists,
+    filter: Option<Filter>,
+    index: Option<Lists>,
     expanded: BTreeMap<String, PathBuf>,
     selected: HashSet<String>,
     anchor: Option<PathBuf>,
