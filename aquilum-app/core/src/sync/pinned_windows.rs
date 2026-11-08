@@ -102,10 +102,30 @@ pub(super) fn file_identity(file: &File) -> Result<(u32, u64), VaultPortError> {
 
 /// Identity and hard-link count from the same opened HANDLE.
 pub(crate) fn file_identity_with_links(file: &File) -> Result<(u32, u64, u32), VaultPortError> {
+    identity_from_borrowed_handle(file.as_raw_handle())
+}
+
+/// Use the SQLite Windows VFS-owned native HANDLE in an isolated Core test.
+/// The caller MUST keep its sqlite3 connection alive and cannot close or
+/// transfer ownership of this borrowed HANDLE. Normal builds lack this API.
+#[cfg(test)]
+pub(crate) fn borrowed_file_identity_for_lab(
+    handle: *mut c_void,
+) -> Result<(u32, u64), VaultPortError> {
+    if handle.is_null() || handle as isize == -1 {
+        return Err(VaultPortError::PermissionDenied);
+    }
+    let (volume, index, _) = identity_from_borrowed_handle(handle)?;
+    Ok((volume, index))
+}
+
+fn identity_from_borrowed_handle(
+    handle: *mut c_void,
+) -> Result<(u32, u64, u32), VaultPortError> {
     let mut info = WinByHandleFileInformation::default();
-    // SAFETY: file is live, the output struct is fully initialized, and
-    // the synchronous Win32 call writes into our valid stack allocation.
-    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) };
+    // SAFETY: the OS HANDLE remains valid for this synchronous call. The
+    // output struct is fully initialized and never escapes this function.
+    let ok = unsafe { GetFileInformationByHandle(handle, &mut info) };
     if ok == 0 {
         return Err(io(std::io::Error::last_os_error()));
     }

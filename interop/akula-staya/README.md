@@ -259,3 +259,15 @@ will not use any n0 discovery/relay.
 The opt-in `node-replica-transport-lab` test persists one allowlisted Markdown fixture through the existing Sync DAG. After its original source is removed, a signed exact read grant and synthetic device proof allow a one-time disposable export. Actual Staya Iroh QUIC/Bao transfers verified bytes to a separate process. The provider refuses pre-arm GET and an unlisted Iroh peer.
 
 This does **not** enroll a real user device, grant File Gate rights, provide a server Node daemon or remove the temporary plaintext path. Existing `p2p-live-identity` and `p2p-inbox-lab` retain their separate validation gates. Product NODE-E2E-02/07 remain unaccepted; see [AKULA-NODE-E2E-01A](../../docs/platforms/AKULA-NODE-E2E-01A.md).
+
+## Native one-file P2P on the standard installed Akula profile
+
+The protected-main integration branch enables `installed -> p2p-native-receive-beta`
+for the regular signed Windows installer and its existing auto-updater. P2P
+networking starts only on explicit user send/receive actions; peer confirmation
+is not a Vault or File Gate grant. LAN uses numeric private UDP addresses,
+Internet mode explicitly opts into n0 rendezvous and relay, and verified bytes
+remain in a separate local Inbox. See
+`docs/sync/AK-P2P-NATIVE-RECEIVE-ONEFILE-01.md` for limits and acceptance gates.
+This integration is not a published release until merged and signed, and still
+requires installed two-machine GUI and Windows directory/SQLite custody review.

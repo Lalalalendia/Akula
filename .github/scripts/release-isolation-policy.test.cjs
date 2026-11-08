@@ -167,3 +167,21 @@ test('single published Akula installer includes opt-in S3 feature', () => {
   assert.match(active, /--title "Akula v\$\{version\}" --latest/);
   assert.doesNotMatch(active, /--features installed,s3-pair-beta\s+--bin\s+different-app/);
 });
+
+
+test('signed Win7/10/11 Akula release fails closed while P2P beta lacks B1-B5 acceptance', () => {
+  const signed = file('.github/workflows/akula-windows-signed-candidate.yml');
+  const native = file('aquilum-app/native/Cargo.toml');
+  const installed = native.match(/^installed = \[([^\n]+)\]$/m);
+  assert.ok(installed, 'Native installed Cargo feature must be explicit');
+  assert.doesNotMatch(installed[1], /p2p-(?:native|inbox|device)/,
+    'unaccepted P2P cannot enter signed installed feature');
+  assert.match(native, /^p2p-native-receive-beta = /m,
+    'the independent QA-only transfer feature must still exist');
+  assert.match(signed, /Hold unaccepted P2P outside signed installed builds/);
+  assert.match(signed, /cargo metadata --manifest-path aquilum-app\/Cargo\.toml --locked --no-deps --format-version 1/);
+  assert.match(signed, /features\.installed/);
+  assert.match(signed, /p2p-\(native\|inbox\|device\)/);
+  assert.match(signed, /AKULA_SIGNED_INSTALLED_P2P_RELEASE_HOLD=1/);
+  assert.match(signed, /scripts\/akula-win7-signed-stage\.ps1/);
+});
