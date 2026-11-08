@@ -27,7 +27,7 @@ mod preview;
 mod removal;
 #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
 mod physical_removal;
-use list::{read_checked_inbox_page, PAGE_SIZE};
+use list::{PAGE_SIZE, read_checked_inbox_page};
 use preview::read_checked_text_preview;
 
 #[derive(Default)]
@@ -175,8 +175,12 @@ impl App {
 
     pub(super) fn change_inbox_page(&mut self, older: bool) -> bool {
         let view = &self.transfer.inbox.view;
-        if view.loading || view.exporting || view.importing || view.previewing
-            || view.removing || view.removal_confirmation.is_some()
+        if view.loading
+            || view.exporting
+            || view.importing
+            || view.previewing
+            || view.removing
+            || view.removal_confirmation.is_some()
             || view.has_physical_confirmation()
         {
             return false;
@@ -186,7 +190,9 @@ impl App {
         } else {
             view.page_offset.checked_sub(PAGE_SIZE)
         };
-        let Some(next) = next else { return false; };
+        let Some(next) = next else {
+            return false;
+        };
         if older && u64::try_from(next).map_or(true, |offset| offset >= view.total) {
             return false;
         }
