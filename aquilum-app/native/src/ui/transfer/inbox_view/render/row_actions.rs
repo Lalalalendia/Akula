@@ -89,6 +89,7 @@ mod tests {
         assert!(confirmation.iter().any(|action| matches!(action, InboxAction::ConfirmRemoval(_))));
         assert!(confirmation.iter().any(|action| matches!(action, InboxAction::CancelRemoval)));
         assert!(!confirmation.iter().any(|action| matches!(action, InboxAction::SaveCopy(_))));
+        #[cfg(windows)]
         assert!(!confirmation.iter().any(|action| matches!(action, InboxAction::Import(_))));
 
         view.removing = true;
