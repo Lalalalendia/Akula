@@ -43,7 +43,7 @@ impl TextEditor {
         }
 
         if is_closing(c) {
-            let next_char = self.doc.after(self.focus).chars().next();
+            let next_char = self.doc.copy(self.focus..self.focus + self.doc.next_grapheme(self.focus)).chars().next();
             if next_char == Some(c) {
                 let next_pos = self.focus + c.len_utf8();
                 (self.anchor, self.focus) = (next_pos, next_pos);
@@ -52,16 +52,15 @@ impl TextEditor {
         }
 
         if let Some(close) = pair_close(c) {
-            let before = self.doc.before(self.focus);
+            let before = self.doc.copy(self.doc.floor(self.focus.saturating_sub(4))..self.focus);
             if (c == '\'' || c == '"' || c == '`') && before.chars().next_back().is_some_and(char::is_alphanumeric) {
                 return false;
             }
             // A fenced Markdown block belongs on its own line. Preserve ordinary
             // inline backtick pairs (and single-line inputs) without inserting newlines.
-            let fence = c == '`' && !self.single_line && self.doc.markdown.is_some()
-                && before.strip_suffix("``").is_some_and(|rest| {
-                    rest.rsplit('\n').next().is_some_and(|line| line.chars().all(|ch| ch == ' ' || ch == '\t'))
-                });
+            let fence = c == '`' && !self.single_line && self.doc.markdown.is_some() && before.ends_with("``")
+                && self.doc.copy(self.doc.line_at(self.focus).start..self.focus)
+                    .strip_suffix("``").is_some_and(|line| line.chars().all(|ch| ch == ' ' || ch == '\t'));
             // Keep the caret after the opening fence so the user may type a
             // language (e.g. rust) before pressing Enter for the code body.
             let insert = if fence { "`\n```".to_owned() } else { format!("{c}{close}") };
@@ -77,8 +76,8 @@ impl TextEditor {
         if !self.selection().is_empty() || self.focus == 0 {
             return false;
         }
-        let prev = self.doc.before(self.focus).chars().next_back();
-        let next = self.doc.after(self.focus).chars().next();
+        let prev = self.doc.copy(self.doc.floor(self.focus.saturating_sub(4))..self.focus).chars().next_back();
+        let next = self.doc.copy(self.focus..self.focus + self.doc.next_grapheme(self.focus)).chars().next();
         if let (Some(p), Some(n)) = (prev, next)
             && is_matching_pair(p, n)
         {

@@ -1,6 +1,6 @@
 //! Cooperative cross-process admission, not an OS-enforced disk quota.
 mod lock;
-pub(super) use lock::acquire;
+pub(super) use lock::{acquire, try_acquire};
 use std::{fs, io, path::Path};
 use uuid::Uuid;
 use super::{denied, invalid, reparse};

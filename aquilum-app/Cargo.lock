@@ -368,7 +368,7 @@ version = "0.1.0"
 
 [[package]]
 name = "aquilum-core"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "akula-node-catalog",
  "akula-server-bootstrap-b0",
@@ -404,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "aquilum-native"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "accesskit_macos",
  "accesskit_unix",
@@ -6386,9 +6386,9 @@ dependencies = [
 
 [[package]]
 name = "pulldown-cmark"
-version = "0.13.5"
+version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "278e9268c93b9e498a2da46c34d90ba93a3255eb99009646398f34bc73ab36eb"
+checksum = "3db2be46835f013dd3f4fa7f5f7402c537787b54ebb6fe2b94bbdd7e2669bb7b"
 dependencies = [
  "bitflags",
  "getopts",

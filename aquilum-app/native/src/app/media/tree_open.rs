@@ -13,7 +13,7 @@ impl App {
             report!(
                 "WIN7_TXT_TREE_OPEN routed={} decoded={} file_exists={}",
                 opened,
-                self.note.as_ref().is_some_and(|note| note.is(&path)),
+                self.open_error.is_none() && self.tabs.active().path.as_deref() == Some(path.as_path()) && (self.note.is_none() || self.note.as_ref().is_some_and(|note| note.is(&path))),
                 path.is_file()
             );
         }

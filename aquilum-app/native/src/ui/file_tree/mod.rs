@@ -6,6 +6,7 @@ mod ghost;
 mod imported;
 pub mod model;
 mod parts;
+mod paths;
 mod pinned;
 mod persistence;
 mod pins;
@@ -15,7 +16,6 @@ mod scroll_ops;
 mod store;
 #[cfg(test)]
 mod testing;
-
 use std::path::{Path, PathBuf};
 
 use masonry::app::RenderRoot;

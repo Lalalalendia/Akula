@@ -1,4 +1,5 @@
 mod readonly;
+mod legacy_txt;
 mod open_in;
 mod docx;
 #[cfg(feature = "dicom-preview")]
@@ -188,12 +189,7 @@ impl App {
                 #[cfg(test)]
                 record_stage(|s| s.page_build = started.elapsed());
             }
-            Err(error) => {
-                let err_str = format!("{error}");
-                report!("заметка {} не прочитана: {err_str}", path.display());
-                self.open_error = Some((path.clone(), err_str.clone()));
-                self.show_open_error(root, &path, &err_str);
-            }
+            Err(error) => self.show_txt_or_open_error(root, &path, error),
         }
         self.hold = Some(std::time::Instant::now() + super::super::HOLD);
         #[cfg(test)]
@@ -214,7 +210,6 @@ impl App {
             chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
         }
     }
-
     fn drop_note_page(&mut self, root: &mut RenderRoot) {
         self.embeds = None;
         // Read-only image/structured pages have no NoteIds, but their decoded

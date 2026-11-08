@@ -180,3 +180,33 @@ fn checkpoints_identify_the_second_windowed_fence_not_the_first() {
     }
     assert_eq!(recovered, Some(second), "offset must never migrate to an older code block");
 }
+
+
+#[test]
+fn stale_window_byte_offsets_never_underflow_or_split_utf8() {
+    let source = lines(70_000);
+    let mut doc = windowed(&source);
+    doc.include(source.len());
+    let (base, loaded) = doc.loaded();
+    assert!(base > 0, "must reproduce a far-away mounted window");
+    assert!(loaded.starts_with("строка "), "window starts on a UTF-8 line boundary");
+
+    // The crash reported an absolute caret byte offset below Document::base.
+    // Window-only readers must not wrap usize, panic, or alter the full Rope.
+    assert_eq!(doc.before(0), "");
+    assert_eq!(doc.after(0), "");
+    assert_eq!(doc.slice(0..1), "");
+    assert_eq!(doc.before(doc.end() + 1), "");
+    assert_eq!(doc.after(doc.end() + 1), "");
+    assert_eq!(doc.slice(base..doc.end() + 1), "");
+
+    // A byte position inside the first Cyrillic character is not a valid
+    // UTF-8 boundary, even if it lies numerically within the loaded window.
+    assert_eq!(doc.before(base + 1), "");
+    assert_eq!(doc.after(base + 1), "");
+    assert_eq!(doc.slice(base..base + 1), "");
+
+    assert_eq!(doc.after(base), loaded);
+    assert_eq!(doc.slice(base..doc.end()), loaded);
+    assert_eq!(doc.whole(), source, "an invalid window read must never mutate the source");
+}

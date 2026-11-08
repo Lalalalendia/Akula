@@ -27,7 +27,6 @@ impl App {
         self.poll_update_and_server_probe(root);
         self.on_retention_done(root);
         #[cfg(feature = "dropbox-readonly-preview")] self.poll_dropbox_settings(root);
-        self.undo_failed_renames(root);
         self.poll_find(root);
         let mut links_changed = false;
         let mut history_changed = false;
@@ -77,7 +76,7 @@ impl App {
                         changed.push(PathBuf::from(&moved.to));
                     }
                     let removed: Vec<PathBuf> = relocation.removed.iter().map(PathBuf::from).collect();
-                    title |= self.close_missing_tabs(root, &removed);
+                    title |= !relocation.moves.is_empty() | self.close_missing_tabs(root, &removed);
                     changed.extend(removed);
                 }
                 _ => {}

@@ -1,12 +1,10 @@
 use std::ops::Range;
-
 use masonry::accesskit::{Node, Role};
 pub(super) use masonry::core::keyboard::{Key, KeyState, NamedKey};
-pub(super) use masonry::core::Ime;
+pub(super) use masonry::core::{BrushIndex, Ime};
 pub(super) use masonry::imaging::Painter;
 pub(super) use masonry::kurbo::{Affine, Axis, BezPath, Cap, Circle, Join, Point, Rect, RoundedRect, Size, Stroke, Vec2};
 pub(super) use masonry::parley::{Affinity, BoundingBox, Cursor, Layout, Selection};
-pub(super) use masonry::core::BrushIndex;
 pub(super) use super::markdown;
 pub(super) use super::document::{Fold, Paragraph};
 pub(super) use super::markdown::{Block, Callout};
@@ -57,6 +55,8 @@ mod state;
 pub use state::TextEditor;
 mod suggest;
 mod table;
+#[cfg(test)]
+mod pair_window_tests;
 #[cfg(test)]
 mod testing;
 mod widget_events;

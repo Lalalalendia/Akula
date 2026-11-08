@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests;
+mod relocate;
 
 use std::path::{Path, PathBuf};
 
@@ -141,14 +142,4 @@ impl Tabs {
         true
     }
 
-    pub fn rename(&mut self, from: &Path, to: &Path) -> bool {
-        let mut changed = false;
-        for tab in &mut self.tabs {
-            if tab.path.as_deref() == Some(from) {
-                tab.path = Some(to.to_path_buf());
-                changed = true;
-            }
-        }
-        changed
-    }
 }

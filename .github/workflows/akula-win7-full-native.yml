@@ -292,6 +292,17 @@ jobs:
           "external_crt_dll_count=0" | Add-Content "$out/status.txt"
           Get-Content "$out/full-audit.md" | Add-Content $env:GITHUB_STEP_SUMMARY
 
+      - name: Verify legacy TXT decoder uses Win7-supported kernel32 imports
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $imports = Get-Content 'win7-full-results/full-imports.txt' -Raw
+          foreach ($api in @('GetACP', 'MultiByteToWideChar')) {
+            if (!$imports.Contains($api)) { throw "Native TXT decoder missing Win7 kernel32 API: $api" }
+          }
+          'legacy_txt_ansi_decoder_imports=GetACP,MultiByteToWideChar' |
+            Add-Content 'win7-full-results/status.txt'
+
       - name: Build pinned Shiva PDF CLI for Windows 7 (same Rust target as Akula)
         shell: pwsh
         env:

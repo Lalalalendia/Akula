@@ -118,13 +118,11 @@ impl FileTree {
     fn commit_rename(&mut self, root: &mut RenderRoot, input: &str) -> Option<TreeAction> {
         let from = self.model.renaming()?.to_path_buf();
         self.model.stop_rename();
-        let Some((to, name)) = crate::file_ops::rename_target(&from, input) else {
+        let Some((to, _)) = crate::file_ops::rename_target(&from, input) else {
             self.refresh(root);
             return None;
         };
-        self.model.patch(&from, &to, &name);
-        self.save_expanded();
-        self.save_colors();
+        // Do not invent the destination row before the actual file move.
         self.refresh(root);
         Some(TreeAction::Rename { from, to })
     }
