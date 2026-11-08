@@ -86,7 +86,7 @@ impl App {
 
 /// Independently recheck a locally verified object before committing SQLite intent.
 /// This is deliberately non-destructive: even success keeps the original bytes.
-fn request_checked_removal(root: &Path, id: Uuid) -> Result<(), String> {
+pub(super) fn request_checked_removal(root: &Path, id: Uuid) -> Result<(), String> {
     if id.is_nil() {
         return Err("Invalid Inbox receipt".into());
     }

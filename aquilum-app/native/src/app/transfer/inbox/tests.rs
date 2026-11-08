@@ -228,7 +228,7 @@ fn request_removal_requires_verified_receipt_and_never_unlinks() {
     };
     let mut ledger = InboxLedger::open(&root).unwrap();
     assert_eq!(ledger.reserve(&expected).unwrap(), LocalStatus::Pending);
-    assert!(request_checked_removal(&root, expected.id).is_err());
+    assert!(removal::request_checked_removal(&root, expected.id).is_err());
     let object = ledger.object_path(expected.id);
     let mut writer = fs::OpenOptions::new()
         .create_new(true)
@@ -240,11 +240,11 @@ fn request_removal_requires_verified_receipt_and_never_unlinks() {
     drop(writer);
     assert_eq!(ledger.confirm(&expected).unwrap(), LocalStatus::VerifiedLocal);
     drop(ledger);
-    assert!(request_checked_removal(&root, expected.id).is_ok());
+    assert!(removal::request_checked_removal(&root, expected.id).is_ok());
     assert_eq!(fs::read(&object).unwrap(), bytes);
     assert_eq!(read_checked_inbox(&root).unwrap().rows[0].status_key,
         "transfer.inboxRemovalRequested");
-    assert!(request_checked_removal(&root, expected.id).is_err(),
+    assert!(removal::request_checked_removal(&root, expected.id).is_err(),
         "a repeated request is not another authorized operation");
     let reopened = InboxLedger::open_existing(&root).unwrap().unwrap();
     assert!(reopened.open_verified_file(expected.id).is_err());
@@ -254,9 +254,9 @@ fn request_removal_requires_verified_receipt_and_never_unlinks() {
 fn removal_request_rejects_absent_or_corrupted_inbox_without_creating_paths() {
     let temp = tempfile::tempdir().unwrap();
     let missing = temp.path().join("missing-inbox");
-    assert!(request_checked_removal(&missing, Uuid::new_v4()).is_err());
+    assert!(removal::request_checked_removal(&missing, Uuid::new_v4()).is_err());
     assert!(!missing.exists());
-    assert!(request_checked_removal(&missing, Uuid::nil()).is_err());
+    assert!(removal::request_checked_removal(&missing, Uuid::nil()).is_err());
     let root = temp.path().join("received-inbox");
     let bytes = b"original";
     let expected = ExpectedTransfer {
@@ -274,7 +274,7 @@ fn removal_request_rejects_absent_or_corrupted_inbox_without_creating_paths() {
     ledger.confirm(&expected).unwrap();
     drop(ledger);
     fs::write(&object, b"modified").unwrap();
-    assert!(request_checked_removal(&root, expected.id).is_err());
+    assert!(removal::request_checked_removal(&root, expected.id).is_err());
     assert_eq!(fs::read(&object).unwrap(), b"modified");
     assert_eq!(read_checked_inbox(&root).unwrap().rows[0].status_key,
         "transfer.inboxReview");

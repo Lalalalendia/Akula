@@ -4,7 +4,7 @@ use std::io::Read;
 
 /// A deliberately narrow in-app text preview: only checked files up to 4 KiB.
 /// Never execute remote bytes, launch handlers, use a sender path or write Vault.
-fn read_checked_text_preview(root: &Path, id: Uuid) -> Result<Option<String>, String> {
+pub(super) fn read_checked_text_preview(root: &Path, id: Uuid) -> Result<Option<String>, String> {
     const MAX_TEXT_BYTES: u64 = 4 * 1024;
     #[cfg(windows)]
     let _pinned = aquilum_core::p2p_inbox_lab::pin_windows_inbox_read(root)
