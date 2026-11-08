@@ -23,6 +23,8 @@ mod tab_cache;
 mod version_memory;
 mod tab_list;
 mod transfer;
+#[cfg(feature = "p2p-offer-consent-qa")]
+mod offer_consent;
 mod templates;
 mod text_files;
 mod tree_pins;

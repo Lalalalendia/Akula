@@ -1,4 +1,4 @@
-use super::{FileTree, Path, PathBuf, RenderRoot};
+use super::{FileTree, Path, RenderRoot};
 
 impl FileTree {
     /// Patch names, expanded paths and colors only after an actual disk rename.
@@ -18,8 +18,4 @@ impl FileTree {
         }
     }
 
-    pub fn paths_changed(&mut self, root: &mut RenderRoot, paths: &[PathBuf]) {
-        self.model.refresh_paths(paths);
-        self.refresh(root);
-    }
 }
