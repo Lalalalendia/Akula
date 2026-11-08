@@ -115,7 +115,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab --lib sync::p2p_stage::delete_lab::tests -- --nocapture
+          set -euo pipefail
+          rustfmt --edition 2021 --check aquilum-app/core/src/sync/p2p_stage/delete_lab.rs aquilum-app/core/src/sync/p2p_stage/delete_lab/relative.rs
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab --lib sync::p2p_stage::delete_lab::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-delete-lab.txt"
+          grep -F 'test sync::p2p_stage::delete_lab::tests::confirmed_intent_precedes_verified_same_handle_delete ... ok' "$RUNNER_TEMP/p2p-delete-lab.txt"
+          grep -F 'test sync::p2p_stage::delete_lab::tests::crash_after_disposition_before_sqlite_finish_requires_review ... ok' "$RUNNER_TEMP/p2p-delete-lab.txt"
+          grep -Eq 'test result: ok\\. [1-9][0-9]* passed' "$RUNNER_TEMP/p2p-delete-lab.txt"
+          echo 'AKULA_P2P_WIN7_DISPOSABLE_SAME_HANDLE_DELETE_LAB_PASS non_shipping=1'
       - name: Confirm unaccepted P2P excluded from signed installed graph
         if: runner.os == 'Windows'
         shell: bash
