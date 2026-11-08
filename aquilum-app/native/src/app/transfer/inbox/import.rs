@@ -45,6 +45,7 @@ impl App {
             || self.transfer.inbox.view.previewing
             || self.transfer.inbox.view.removing
             || self.transfer.inbox.view.removal_confirmation.is_some()
+            || self.transfer.inbox.view.has_physical_confirmation()
         {
             return false;
         }
