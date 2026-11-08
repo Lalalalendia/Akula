@@ -20,6 +20,8 @@ mod testing;
 mod tests;
 #[cfg(test)]
 mod colr_bounds_tests;
+#[cfg(test)]
+mod image_downsample_tests;
 
 pub use offscreen::offscreen;
 pub use pixels::{brush, from_rgba};
