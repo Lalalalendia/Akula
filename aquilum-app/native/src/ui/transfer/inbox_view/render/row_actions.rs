@@ -178,14 +178,34 @@ mod tests {
     fn physical_delete_requires_separate_explicit_confirmation_in_qa() {
         let mut view = sample();
         let initial = rendered_actions(&view);
-        assert!(initial.iter().any(|item| matches!(item, InboxAction::AskPhysicalRemoval(_))));
-        assert!(!initial.iter().any(|item| matches!(item, InboxAction::ConfirmPhysicalRemoval(_))));
+        assert!(
+            initial
+                .iter()
+                .any(|item| matches!(item, InboxAction::AskPhysicalRemoval(_)))
+        );
+        assert!(
+            !initial
+                .iter()
+                .any(|item| matches!(item, InboxAction::ConfirmPhysicalRemoval(_)))
+        );
         view.physical_removal_confirmation = Some(view.rows[0].id.clone());
         let confirm = rendered_actions(&view);
         assert_eq!(confirm.len(), 2);
-        assert!(confirm.iter().any(|item| matches!(item, InboxAction::ConfirmPhysicalRemoval(_))));
-        assert!(confirm.iter().any(|item| matches!(item, InboxAction::CancelPhysicalRemoval)));
-        assert!(!confirm.iter().any(|item| matches!(item, InboxAction::ConfirmRemoval(_))));
+        assert!(
+            confirm
+                .iter()
+                .any(|item| matches!(item, InboxAction::ConfirmPhysicalRemoval(_)))
+        );
+        assert!(
+            confirm
+                .iter()
+                .any(|item| matches!(item, InboxAction::CancelPhysicalRemoval))
+        );
+        assert!(
+            !confirm
+                .iter()
+                .any(|item| matches!(item, InboxAction::ConfirmRemoval(_)))
+        );
         view.removing = true;
         assert!(rendered_actions(&view).is_empty());
         view.removing = false;
@@ -193,5 +213,4 @@ mod tests {
         view.rows[0].status_key = "transfer.inboxReview";
         assert!(rendered_actions(&view).is_empty());
     }
-
 }

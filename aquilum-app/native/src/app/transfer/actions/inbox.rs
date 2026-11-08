@@ -31,9 +31,7 @@ impl App {
                 self.begin_inbox_physical_removal(receipt)
             }
             #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
-            transfer_ui::InboxAction::CancelPhysicalRemoval => {
-                self.cancel_inbox_physical_removal()
-            },
+            transfer_ui::InboxAction::CancelPhysicalRemoval => self.cancel_inbox_physical_removal(),
         }
     }
 }
