@@ -1,9 +1,19 @@
 use super::agent_principals::{AgentCredentialStore, AuthenticatedAgent};
 use super::http::{refused, Connection, Failure, Head, Response};
 use super::protocol;
+#[cfg(test)]
+use super::agent_scoped_read::HostPinnedReadRoot;
+#[cfg(test)]
+use super::agent_vault_grants::{AgentVaultGrantStore, HostVaultRegistration};
+#[cfg(test)]
+use crate::plugins::VaultId;
+#[cfg(test)]
+use serde_json::json;
 use serde_json::Value;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
+#[cfg(test)]
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -27,6 +37,16 @@ pub struct RunningServer {
 enum AuthenticationMode {
     Legacy(String),
     ScopedDenyAll(Arc<Mutex<AgentCredentialStore>>),
+    #[cfg(test)]
+    ScopedReadFixture(Arc<ScopedReadFixture>),
+}
+
+/// This test-only origin can NEVER be created by an installed product.
+#[cfg(test)]
+struct ScopedReadFixture {
+    credentials: Arc<Mutex<AgentCredentialStore>>,
+    grants: Arc<Mutex<AgentVaultGrantStore>>,
+    roots: BTreeMap<VaultId, (HostVaultRegistration, HostPinnedReadRoot)>,
 }
 
 /// Host-owned identity, never created from MCP clientInfo or tool arguments.
@@ -40,20 +60,26 @@ impl AuthenticationMode {
     fn authenticate(&self, head: &Head) -> Option<RequestPrincipal> {
         match self {
             Self::Legacy(token) => authorized(head, token).then_some(RequestPrincipal::Legacy),
-            Self::ScopedDenyAll(store) => {
-                if head.header_count("authorization") != 1 {
-                    return None;
-                }
-                let (scheme, credential) = head.header("authorization")?
-                    .trim().split_once(' ')?;
-                if !scheme.eq_ignore_ascii_case("bearer") || credential.trim().is_empty() {
-                    return None;
-                }
-                let store = store.lock().ok()?;
-                store.authenticate(credential.trim()).ok().map(RequestPrincipal::Agent)
-            }
+            Self::ScopedDenyAll(store) => authenticate_agent(store, head),
+            #[cfg(test)]
+            Self::ScopedReadFixture(fixture) => authenticate_agent(&fixture.credentials, head),
         }
     }
+}
+
+fn authenticate_agent(
+    store: &Arc<Mutex<AgentCredentialStore>>,
+    head: &Head,
+) -> Option<RequestPrincipal> {
+    if head.header_count("authorization") != 1 {
+        return None;
+    }
+    let (scheme, credential) = head.header("authorization")?.trim().split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") || credential.trim().is_empty() {
+        return None;
+    }
+    let store = store.lock().ok()?;
+    store.authenticate(credential.trim()).ok().map(RequestPrincipal::Agent)
 }
 
 struct Endpoint {
@@ -283,6 +309,21 @@ impl RunningServer {
         Self::start_with_auth(port, AuthenticationMode::ScopedDenyAll(store), deny)
     }
 
+    /// A test-only positive MCP listener; NEVER compiled in shipped Akula.
+    #[cfg(test)]
+    fn start_scoped_read_fixture(
+        port: u16,
+        fixture: ScopedReadFixture,
+    ) -> Result<Self, String> {
+        let deny: SharedToolCaller =
+            Arc::new(|_, _| Err("MCP_AGENT_SCOPE_DENIED".to_owned()));
+        Self::start_with_auth(
+            port,
+            AuthenticationMode::ScopedReadFixture(Arc::new(fixture)),
+            deny,
+        )
+    }
+
     fn start_with_auth(
         port: u16,
         authentication: AuthenticationMode,
@@ -332,6 +373,7 @@ impl Endpoint {
         &self,
         body: &str,
         principal: RequestPrincipal,
+        _head: &Head,
         connection: &mut Connection,
         keep_alive: bool,
     ) -> Result<bool, Failure> {
@@ -343,9 +385,63 @@ impl Endpoint {
         if self.stopping.load(Ordering::SeqCst) {
             return Err(refused(503, "MCP-сервер остановлен"));
         }
-        let output = match principal {
-            RequestPrincipal::Legacy => protocol::handle_message(body, self.call.as_ref()),
-            RequestPrincipal::Agent(_agent) => protocol::handle_without_tools(body),
+        let output = match (principal, &self.authentication) {
+            (RequestPrincipal::Legacy, _) => {
+                protocol::handle_message(body, self.call.as_ref())
+            }
+            #[cfg(test)]
+            (RequestPrincipal::Agent(agent), AuthenticationMode::ScopedReadFixture(fixture)) => {
+                // Tool discovery and every tool invocation independently
+                // check the currently authenticated principal and grant.
+                let eligible = fixture.roots.values().any(|(receipt, _)| {
+                    lock(&fixture.grants)
+                        .authorize_notes_read(agent, *receipt)
+                        .is_ok()
+                });
+                if !eligible {
+                    protocol::handle_without_tools(body)
+                } else {
+                    let bearer = _head
+                        .header("authorization")
+                        .and_then(|value| value.trim().split_once(' '))
+                        .map(|(_, token)| token.trim())
+                        .unwrap_or("");
+                    let dispatch = |name: &str, args: &Value| -> Result<Value, String> {
+                        let denied = || "MCP_AGENT_SCOPE_DENIED".to_owned();
+                        if name != "read_note" {
+                            return Err(denied());
+                        }
+                        let requested = args
+                            .get("vaultId")
+                            .and_then(Value::as_str)
+                            .and_then(|v| uuid::Uuid::parse_str(v).ok())
+                            .ok_or_else(denied)?;
+                        let path = args
+                            .get("note")
+                            .and_then(Value::as_str)
+                            .ok_or_else(denied)?;
+                        // A guest UUID only selects an ALREADY trusted test
+                        // root: it never constructs an authority/registration.
+                        let (vault, (_, root)) = fixture
+                            .roots
+                            .iter()
+                            .find(|(vault, _)| vault.as_uuid() == requested)
+                            .ok_or_else(denied)?;
+                        let credentials = lock(&fixture.credentials);
+                        let grants = lock(&fixture.grants);
+                        let checked = root
+                            .read_checked(&credentials, &grants, bearer, *vault, path)
+                            .map_err(|_| denied())?;
+                        Ok(json!({
+                            "note": checked.path,
+                            "content": checked.content,
+                            "revision": checked.revision,
+                        }))
+                    };
+                    protocol::handle_fixture_scoped_read(body, &dispatch)
+                }
+            }
+            (RequestPrincipal::Agent(_), _) => protocol::handle_without_tools(body),
         };
         let response = match output {
             Some(payload) => Response::json(payload),
@@ -420,7 +516,7 @@ fn exchange(connection: &mut Connection, endpoint: &Endpoint, slot: &Slot) -> Re
     connection.mark_authenticated();
     let body = connection.read_body(&head, MAX_BODY_BYTES)?;
     let body = String::from_utf8(body).map_err(|_| refused(400, "Тело запроса не в UTF-8"))?;
-    endpoint.answer(&body, principal, connection, head.keeps_alive())
+    endpoint.answer(&body, principal, &head, connection, head.keeps_alive())
 }
 fn admit(
     head: &Head,
@@ -1060,6 +1156,205 @@ mod tests {
                 "MCP_AGENT_SCOPE_DENIED"
             );
         }
+        server.stop();
+    }
+
+    /// AKAI-HOST-FASTPATH-V1: real localhost HTTP/MCP request/response proof.
+    /// Every root receipt is SELF-ISSUED IN A TEST. No installed issuer exists.
+    #[test]
+    fn scoped_host_v1_real_http_two_agents_read_and_revoke() {
+        use crate::plugins::{Capability, GrantScope, VaultId};
+        use crate::sync::filegate_lock_probe::PinnedProbeRoot;
+        use std::fs;
+        use std::path::Path;
+
+        fn root(path: &Path, receipt: HostVaultRegistration) -> HostPinnedReadRoot {
+            let probe = PinnedProbeRoot::open(path).unwrap();
+            let identity = probe.identity();
+            drop(probe);
+            HostPinnedReadRoot::from_test_host_claim(path, receipt, identity).unwrap()
+        }
+        fn rpc(url: &str, key: &str, body: Value) -> Value {
+            let response = ureq::post(url)
+                .set("Authorization", &format!("Bearer {key}"))
+                .send_string(&body.to_string())
+                .unwrap()
+                .into_string()
+                .unwrap();
+            serde_json::from_str(&response).unwrap()
+        }
+        fn read(url: &str, key: &str, vault: VaultId, path: &str) -> Value {
+            rpc(
+                url,
+                key,
+                json!({
+                    "jsonrpc": "2.0", "id": 11, "method": "tools/call",
+                    "params": { "name": "read_note", "arguments": {
+                        "vaultId": vault.as_uuid().to_string(), "note": path
+                    }}
+                }),
+            )
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let x = dir.path().join("X");
+        let y = dir.path().join("Y");
+        fs::create_dir(&x).unwrap();
+        fs::create_dir(&y).unwrap();
+        fs::write(x.join("note.md"), "SCOPED_AGENT_A_ONLY").unwrap();
+        fs::write(y.join("note.md"), "SCOPED_AGENT_B_ONLY").unwrap();
+
+        let receipt_x =
+            HostVaultRegistration::from_host_custody(VaultId::new_for_host(), [11; 32])
+                .unwrap();
+        let receipt_y =
+            HostVaultRegistration::from_host_custody(VaultId::new_for_host(), [22; 32])
+                .unwrap();
+        let mut credentials =
+            AgentCredentialStore::open(&dir.path().join("agents.sqlite3")).unwrap();
+        let mut agent_a = credentials.issue_principal("agent-A", None).unwrap();
+        let mut agent_b = credentials.issue_principal("agent-B", None).unwrap();
+        let mut agent_c = credentials.issue_principal("agent-C-no-grant", None).unwrap();
+        let key_a = agent_a.take_bearer_once().unwrap();
+        let key_b = agent_b.take_bearer_once().unwrap();
+        let key_c = agent_c.take_bearer_once().unwrap();
+        let mut grants =
+            AgentVaultGrantStore::provision_new(&dir.path().join("grants.sqlite3")).unwrap();
+        grants.register_host_vault(receipt_x).unwrap();
+        grants.register_host_vault(receipt_y).unwrap();
+        let epoch_a = grants
+            .grant_notes_read(
+                agent_a.principal,
+                receipt_x,
+                Capability::NotesRead,
+                GrantScope::WholeVault,
+                0,
+                None,
+            )
+            .unwrap();
+        grants
+            .grant_notes_read(
+                agent_b.principal,
+                receipt_y,
+                Capability::NotesRead,
+                GrantScope::WholeVault,
+                0,
+                None,
+            )
+            .unwrap();
+
+        let store = Arc::new(Mutex::new(credentials));
+        let grant_store = Arc::new(Mutex::new(grants));
+        let roots = BTreeMap::from([
+            (receipt_x.vault_id(), (receipt_x, root(&x, receipt_x))),
+            (receipt_y.vault_id(), (receipt_y, root(&y, receipt_y))),
+        ]);
+        let server = RunningServer::start_scoped_read_fixture(
+            0,
+            ScopedReadFixture {
+                credentials: Arc::clone(&store),
+                grants: Arc::clone(&grant_store),
+                roots,
+            },
+        )
+        .unwrap();
+        let url = format!("http://127.0.0.1:{}/mcp", server.port());
+        let list = json!({"jsonrpc":"2.0","id":9,"method":"tools/list"});
+        let listed = rpc(&url, key_a.as_str(), list.clone());
+        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(listed["result"]["tools"][0]["name"], "read_note");
+        assert_eq!(
+            rpc(&url, key_c.as_str(), list.clone())["result"]["tools"],
+            json!([])
+        );
+
+        for (key, vault, expected) in [
+            (key_a.as_str(), receipt_x.vault_id(), "SCOPED_AGENT_A_ONLY"),
+            (key_b.as_str(), receipt_y.vault_id(), "SCOPED_AGENT_B_ONLY"),
+        ] {
+            let outcome = read(&url, key, vault, "note.md");
+            assert_eq!(outcome["result"]["isError"], false);
+            let inner: Value = serde_json::from_str(
+                outcome["result"]["content"][0]["text"].as_str().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(inner["content"], expected);
+            assert_eq!(inner["revision"].as_str().unwrap().len(), 64);
+        }
+        for (key, vault, path) in [
+            (key_a.as_str(), receipt_y.vault_id(), "note.md"),
+            (key_b.as_str(), receipt_x.vault_id(), "note.md"),
+            (key_c.as_str(), receipt_x.vault_id(), "note.md"),
+            (key_a.as_str(), receipt_x.vault_id(), "../Y/note.md"),
+        ] {
+            let forbidden = read(&url, key, vault, path);
+            assert_eq!(forbidden["result"]["isError"], true);
+            assert_eq!(
+                forbidden["result"]["content"][0]["text"],
+                "MCP_AGENT_SCOPE_DENIED"
+            );
+            assert!(!forbidden.to_string().contains("SCOPED_AGENT_"));
+        }
+        let forbidden_write = rpc(
+            &url,
+            key_a.as_str(),
+            json!({
+                "jsonrpc":"2.0", "id":10, "method":"tools/call",
+                "params":{
+                    "name":"update_note",
+                    "arguments":{"note":"note.md","content":"attack"}
+                }
+            }),
+        );
+        assert_eq!(forbidden_write["result"]["isError"], true);
+        assert_eq!(
+            fs::read_to_string(x.join("note.md")).unwrap(),
+            "SCOPED_AGENT_A_ONLY"
+        );
+
+        // An opened root must not authorize a replacement at the old path.
+        // Windows may permit or refuse rename despite a pinned HANDLE.
+        let renamed = dir.path().join("X-renamed");
+        if fs::rename(&x, &renamed).is_ok() {
+            fs::create_dir(&x).unwrap();
+            fs::write(x.join("note.md"), "SUBSTITUTED_UNTRUSTED_BYTES").unwrap();
+            let substituted = read(&url, key_a.as_str(), receipt_x.vault_id(), "note.md");
+            assert_eq!(substituted["result"]["isError"], true);
+            assert_eq!(
+                substituted["result"]["content"][0]["text"],
+                "MCP_AGENT_SCOPE_DENIED"
+            );
+            assert!(!substituted.to_string().contains("SUBSTITUTED_UNTRUSTED_BYTES"));
+        }
+
+        // Previously successful HTTP tokens must not survive grant revoke.
+        let epoch = grant_store
+            .lock()
+            .unwrap()
+            .revoke_notes_read(agent_a.principal, receipt_x, epoch_a);
+        assert!(epoch.is_ok());
+        assert_eq!(
+            rpc(&url, key_a.as_str(), list)["result"]["tools"],
+            json!([])
+        );
+        assert_eq!(
+            read(&url, key_a.as_str(), receipt_x.vault_id(), "note.md")
+                ["result"]["isError"],
+            true
+        );
+        assert_eq!(
+            read(&url, key_b.as_str(), receipt_y.vault_id(), "note.md")
+                ["result"]["isError"],
+            false
+        );
+        // Credential revoke must additionally return HTTP 401 on new calls.
+        store.lock().unwrap().revoke(agent_b.credential).unwrap();
+        let denied = ureq::post(&url)
+            .set("Authorization", &format!("Bearer {}", key_b.as_str()))
+            .send_string(&initialize())
+            .unwrap_err();
+        assert_eq!(status(Err(denied)), Some(401));
+
         server.stop();
     }
 
