@@ -54,7 +54,13 @@ pub(super) fn emit_if_opted_in(
     }
     println!(
         "{}",
-        line(phase, bytes, digest, receipt, selected_path_snapshot(connection))
+        line(
+            phase,
+            bytes,
+            digest,
+            receipt,
+            selected_path_snapshot(connection)
+        )
     );
 }
 
@@ -67,7 +73,13 @@ mod tests {
         let bytes = b"AKULA synthetic WAN B2 test fixture only";
         let digest = *blake3::hash(bytes).as_bytes();
         let receipt = Uuid::parse_str("05ec121e-0f1b-4a63-8c4a-5e11c32a1b41").unwrap();
-        let send = line(Phase::SenderAck, bytes.len() as u64, &digest, None, "direct");
+        let send = line(
+            Phase::SenderAck,
+            bytes.len() as u64,
+            &digest,
+            None,
+            "direct",
+        );
         let receive = line(
             Phase::ReceiverInbox,
             bytes.len() as u64,
@@ -78,7 +90,10 @@ mod tests {
         let shared = format!(
             "bytes={} blake3={}",
             bytes.len(),
-            digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+            digest
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
         );
         assert!(send.contains(&shared));
         assert!(receive.contains(&shared));
