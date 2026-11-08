@@ -98,13 +98,13 @@ impl App {
                 }
                 _ => {}
             }
-            return Some(Outcome::default());
+            return Some(Outcome { title: matches!(action.downcast_ref::<TextAction>(), Some(TextAction::Entered(_))), ..Outcome::default() });
         }
         if id == ids.title_box.id() && action.downcast_ref::<TitleAction>().is_some() {
             let title = ids.title;
             let text = title.get(root).map(|t| t.inner().text()).unwrap_or_default();
             self.commit_title(root, &text);
-            return Some(Outcome::default());
+            return Some(Outcome { title: true, ..Outcome::default() });
         }
         if action.downcast_ref::<Pressed>().is_some() {
             if id == ids.back {

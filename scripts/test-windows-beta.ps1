@@ -263,6 +263,26 @@ if (!(Test-Path -LiteralPath $u02Note -PathType Leaf)) { throw 'Installed U02 fi
 $u02Hash = (Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash
 Assert-LegacyUntouched
 
+# Filename regression after #913: real installed title Enter and blur through
+# OS keyboard, File Gate, restart and UIA clipboard readback. No user vaults.
+$renameScript = Join-Path $PSScriptRoot 'windows-beta-rename-uia.ps1'
+$renameTokens = $null
+$renameParseErrors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+  $renameScript, [ref]$renameTokens, [ref]$renameParseErrors) | Out-Null
+if ($renameParseErrors.Count -ne 0) {
+  throw ('Installed rename QA syntax check failed: ' + ($renameParseErrors | Out-String))
+}
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $renameScript -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula title rename acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash -or
+    (Get-FileHash -LiteralPath $u02Note -Algorithm SHA256).Hash -ne $u02Hash) {
+  throw 'Installed rename QA altered another synthetic note'
+}
+Assert-LegacyUntouched
+
 # Installed NSIS + foreground OS keyboard regression for the 30k and 100k
 # whole-note replacement path. Test-only vault, never developer/user files.
 . (Join-Path $PSScriptRoot 'windows-beta-replace-all.ps1')
