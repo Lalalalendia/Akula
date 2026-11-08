@@ -120,7 +120,6 @@ mod tests {
         assert_eq!(fs::read(&unrelated).unwrap(), b"preserve");
     }
 
-
     #[test]
     fn earlier_requested_intent_never_implicitly_reauthorizes_physical_deletion() {
         let temp = tempfile::tempdir().unwrap();
@@ -138,17 +137,17 @@ mod tests {
         ledger.reserve(&receipt).unwrap();
         let path = ledger.object_path(receipt.id);
         fs::write(&path, bytes).unwrap();
-        assert_eq!(ledger.confirm(&receipt).unwrap(), LocalStatus::VerifiedLocal);
+        assert_eq!(
+            ledger.confirm(&receipt).unwrap(),
+            LocalStatus::VerifiedLocal
+        );
         ledger.request_removal(receipt.id).unwrap();
         drop(ledger);
 
-        assert!(qa_dispose_confirmed_inbox_file(
-            &root,
-            receipt.id,
-            receipt.bytes,
-            receipt.blake3,
-        )
-        .is_err());
+        assert!(
+            qa_dispose_confirmed_inbox_file(&root, receipt.id, receipt.bytes, receipt.blake3,)
+                .is_err()
+        );
         let cold = InboxLedger::open_existing(&root).unwrap().unwrap();
         assert_eq!(
             cold.removal_status(receipt.id).unwrap(),
@@ -160,13 +159,10 @@ mod tests {
         // A vanished pathname is not a disposition witness and cannot
         // authorize a retry or a false "Removed" journal state.
         fs::remove_file(&path).unwrap();
-        assert!(qa_dispose_confirmed_inbox_file(
-            &root,
-            receipt.id,
-            receipt.bytes,
-            receipt.blake3,
-        )
-        .is_err());
+        assert!(
+            qa_dispose_confirmed_inbox_file(&root, receipt.id, receipt.bytes, receipt.blake3,)
+                .is_err()
+        );
         let cold = InboxLedger::open_existing(&root).unwrap().unwrap();
         assert_eq!(
             cold.removal_status(receipt.id).unwrap(),
