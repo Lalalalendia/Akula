@@ -1,4 +1,8 @@
 use super::*;
+mod inbox_types;
+pub use inbox_types::{InboxRow, InboxView};
+#[cfg(feature = "p2p-inbox-preview")]
+pub use inbox_types::InboxAction;
 
 #[derive(Clone, Debug)]
 pub struct QueueRow {
@@ -12,15 +16,6 @@ pub struct QueueRow {
 pub enum QueueAction {
     Toggle,
     Remove,
-}
-
-#[cfg(feature = "p2p-inbox-preview")]
-#[derive(Clone, Debug)]
-pub enum InboxAction {
-    Preview(String),
-    SaveCopy(String),
-    #[cfg(windows)]
-    Import(String),
 }
 
 #[cfg(feature = "p2p-native-send-beta")]
@@ -37,28 +32,6 @@ pub enum NativeReceiveAction {
     Start(String),
     StartInternet(String),
     Cancel,
-}
-
-#[derive(Clone, Debug)]
-pub struct InboxRow {
-    pub id: String,
-    pub bytes: u64,
-    pub sender: String,
-    pub status_key: &'static str,
-    pub import_audit_key: Option<&'static str>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct InboxView {
-    pub rows: Vec<InboxRow>,
-    pub total: u64,
-    pub loading: bool,
-    pub error: Option<String>,
-    pub exporting: bool,
-    pub importing: bool,
-    pub previewing: bool,
-    pub preview: Option<(String, String)>,
-    pub notice_key: Option<&'static str>,
 }
 
 #[cfg(feature = "p2p-offer-consent-qa")]

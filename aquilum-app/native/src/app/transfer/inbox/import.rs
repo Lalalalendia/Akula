@@ -1,5 +1,4 @@
-//! Explicit Windows-only, user-selected Inbox -> registered Vault import.
-//! The standard signed Windows feature graph does not include this UI.
+//! QA-only Windows Inbox -> registered Vault import. Not in signed builds.
 use super::*;
 use aquilum_core::{Core, files::gate::import_verified_inbox_as_new};
 
@@ -44,6 +43,8 @@ impl App {
             || self.transfer.inbox.view.exporting
             || self.transfer.inbox.view.importing
             || self.transfer.inbox.view.previewing
+            || self.transfer.inbox.view.removing
+            || self.transfer.inbox.view.removal_confirmation.is_some()
         {
             return false;
         }
@@ -64,8 +65,7 @@ impl App {
         let wake = Arc::clone(&self.workspace.wake);
         let core = Arc::clone(&self.workspace.core);
         thread::spawn(move || {
-            // The user must select a registered Vault root explicitly. This
-            // folder chooser cannot grant writes to an arbitrary directory.
+            // The folder chooser cannot authorize an unregistered Vault.
             let chosen = rfd::FileDialog::new().pick_folder();
             let result = match chosen {
                 None => Ok(None),

@@ -1,5 +1,7 @@
 //! Transfer dialog action dispatch; no network work occurs without a click.
 use super::*;
+#[cfg(feature = "p2p-inbox-preview")]
+mod inbox;
 
 impl App {
     pub(in crate::app) fn on_transfer_action(
@@ -52,17 +54,7 @@ impl App {
         }
         #[cfg(feature = "p2p-inbox-preview")]
         if pressed && !refresh {
-            let hit = dialog.inbox_save_actions.iter().find(|(b, _)| *b == id);
-            if let Some((_, command)) = hit {
-                refresh = match command {
-                    transfer_ui::InboxAction::Preview(receipt) => {
-                        self.begin_inbox_text_preview(receipt)
-                    }
-                    transfer_ui::InboxAction::SaveCopy(receipt) => self.begin_inbox_save(receipt),
-                    #[cfg(windows)]
-                    transfer_ui::InboxAction::Import(receipt) => self.begin_inbox_import(receipt),
-                };
-            }
+            refresh = self.on_inbox_action(&dialog, id);
         }
         #[cfg(feature = "p2p-offer-consent-qa")]
         if pressed && !refresh {

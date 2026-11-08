@@ -1,5 +1,6 @@
 //! Verified Inbox UI: explicit local user actions only.
 use super::super::*;
+mod row_actions;
 
 pub(in crate::ui::transfer) fn render(
     view: &InboxView,
@@ -37,35 +38,14 @@ pub(in crate::ui::transfer) fn render(
             let mut entry = Flex::row()
                 .cross_axis_alignment(CrossAxisAlignment::Center)
                 .with(labels, 1.0);
-            if received.status_key == "transfer.inboxVerified"
-                && !view.exporting
-                && !view.importing
-                && !view.previewing
-            {
-                let preview =
-                    NewWidget::new(TextButton::new(t("transfer.inboxPreview"), Variant::Ghost));
-                actions.push((preview.id(), InboxAction::Preview(received.id.clone())));
-                entry = entry.with_fixed(preview);
-                let save =
-                    NewWidget::new(TextButton::new(t("transfer.inboxSaveCopy"), Variant::Ghost));
-                actions.push((save.id(), InboxAction::SaveCopy(received.id.clone())));
-                entry = entry.with_fixed(save);
-                #[cfg(windows)]
-                {
-                    if received.import_audit_key.is_none() {
-                        let import = NewWidget::new(TextButton::new(
-                            t("transfer.inboxImport"),
-                            Variant::Ghost,
-                        ));
-                        actions.push((import.id(), InboxAction::Import(received.id.clone())));
-                        entry = entry.with_fixed(import);
-                    }
-                }
-            }
+            let entry = row_actions::attach(entry, received, view, &mut actions);
             panel = panel.with_fixed(
                 NewWidget::new(entry)
                     .with_props(PropertySet::new().with(Padding::all(Length::px(size::SPACE_8)))),
             );
+            if view.removal_confirmation.as_deref() == Some(received.id.as_str()) {
+                panel = panel.with_fixed(hint(&t("transfer.inboxRemoveWarning")));
+            }
             if let Some((id, text)) = &view.preview {
                 if id == &received.id && received.status_key == "transfer.inboxVerified" {
                     panel = panel.with_fixed(hint(text));
@@ -83,6 +63,9 @@ pub(in crate::ui::transfer) fn render(
     }
     if view.previewing {
         panel = panel.with_fixed(hint(&t("transfer.inboxPreviewWorking")));
+    }
+    if view.removing {
+        panel = panel.with_fixed(hint(&t("transfer.inboxRemoveWorking")));
     }
     if let Some(key) = view.notice_key {
         panel = panel.with_fixed(hint(&t(key)));
