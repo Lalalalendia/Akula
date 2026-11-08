@@ -175,13 +175,23 @@ impl InboxLedger {
         &self,
         max_items: usize,
     ) -> Result<Vec<(ExpectedTransfer, LocalStatus)>, LedgerError> {
+        self.list_page(max_items, 0)
+    }
+
+    /// Bounded older page; the offset is local UI state, not remote metadata.
+    pub fn list_page(
+        &self,
+        max_items: usize,
+        offset: usize,
+    ) -> Result<Vec<(ExpectedTransfer, LocalStatus)>, LedgerError> {
         if max_items == 0 || max_items > 64 {
             return Err(LedgerError::InvalidIntent);
         }
-        let mut stmt = self
-            .db
-            .prepare("SELECT transfer_id FROM received_inbox ORDER BY rowid DESC LIMIT ?1")?;
-        let ids = stmt.query_map([max_items as i64], |row| row.get::<_, String>(0))?;
+        let offset = i64::try_from(offset).map_err(|_| LedgerError::InvalidIntent)?;
+        let mut stmt = self.db.prepare(
+            "SELECT transfer_id FROM received_inbox ORDER BY rowid DESC LIMIT ?1 OFFSET ?2",
+        )?;
+        let ids = stmt.query_map(params![max_items as i64, offset], |row| row.get::<_, String>(0))?;
         let mut result = Vec::new();
         for id in ids {
             let id = Uuid::parse_str(&id?).map_err(|_| LedgerError::CorruptDatabaseRecord)?;
