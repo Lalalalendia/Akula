@@ -743,6 +743,7 @@
     "newFolder": "New folder",
     "sort": "Change sort order",
     "collapseAll": "Collapse all",
+    "filter": "Filter files and folders",
     "sortNameAsc": "File name (A to Z)",
     "sortNameDesc": "File name (Z to A)",
     "sortModifiedNew": "Modified time (new to old)",
