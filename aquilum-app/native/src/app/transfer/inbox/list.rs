@@ -3,8 +3,10 @@ use super::*;
 use crate::ui::transfer::InboxRow;
 use akula_inbox_ledger_lab::ImportAuditStatus;
 mod removal_state;
+pub(super) const PAGE_SIZE: usize = 24;
 use removal_state::status_key;
 
+#[cfg(test)]
 pub(super) fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
     read_checked_inbox_page(root, 0)
 }
@@ -22,7 +24,7 @@ pub(super) fn read_checked_inbox_page(root: &Path, offset: usize) -> Result<Inbo
         .count()
         .map_err(|error| format!("count inbox: {error:?}"))?;
     let rows = ledger
-        .list_page(24, offset)
+        .list_page(PAGE_SIZE, offset)
         .map_err(|error| format!("check recent received files: {error:?}"))?
         .into_iter()
         .map(|(file, status)| -> Result<InboxRow, String> {
