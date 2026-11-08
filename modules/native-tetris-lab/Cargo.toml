@@ -1,0 +1,14 @@
+[package]
+name = "akula-native-tetris-lab"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
+description = "Dependency-free falling-block game for Akula's native 2D laboratory"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "akula-native-tetris-lab"
+path = "src/main.rs"
