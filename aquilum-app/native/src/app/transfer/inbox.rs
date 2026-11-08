@@ -1,4 +1,8 @@
 //! Native read-side projection and explicit Save Copy from checked Inbox.
+#[cfg(all(feature = "installed", feature = "p2p-inbox-physical-delete-qa"))]
+compile_error!("QA physical Inbox deletion cannot be combined with installed");
+#[cfg(all(feature = "p2p-inbox-physical-delete-qa", not(debug_assertions)))]
+compile_error!("QA physical Inbox deletion cannot ship in a release build");
 //! No automatic network transport, sender ACK, Vault writes or overwrite.
 //! An export rehashes the same pinned file descriptor at click time.
 

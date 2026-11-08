@@ -22,6 +22,8 @@ use uuid::Uuid;
 
 #[path = "p2p_one_file_beta/inbox.rs"]
 mod inbox;
+#[path = "p2p_one_file_beta/evidence.rs"]
+mod evidence;
 
 const ALPN: &[u8] = b"akula/p2p-one-file-lan-beta/1";
 const REQUEST: &[u8] = b"AKP2_GET_ONE_V1";
@@ -293,6 +295,14 @@ async fn send_one(
         return Err("receiver did not confirm verified NEW file".into());
     }
     println!("RECEIVER_VERIFIED_NEW_FILE=true DURABLE_ACK=false");
+    let (size, digest, _) = decode_frame(&frame)?;
+    evidence::emit_if_opted_in(
+        connection,
+        evidence::Phase::SenderAck,
+        size,
+        &digest,
+        None,
+    );
     Ok(())
 }
 
@@ -357,7 +367,7 @@ async fn receive_one_target(
         })?;
     } else {
         let (size, digest, data) = decode_frame(&bytes)?;
-        inbox::persist_received_payload(
+        let receipt = inbox::persist_received_payload(
             data,
             inbox_root,
             size,
@@ -365,6 +375,13 @@ async fn receive_one_target(
             *connection.remote_id().as_bytes(),
             local_endpoint_key,
         )?;
+        evidence::emit_if_opted_in(
+            connection,
+            evidence::Phase::ReceiverInbox,
+            size,
+            &digest,
+            Some(receipt.id),
+        );
     }
     let mut ack = connection
         .open_uni()

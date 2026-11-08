@@ -1,12 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-// P2P physical removal is a disposable QA operation, never a signed feature.
-// Cargo features are additive: explicitly reject installed + QA together.
-#[cfg(all(feature = "installed", feature = "p2p-inbox-physical-delete-qa"))]
-compile_error!("QA physical Inbox deletion cannot be combined with installed");
-#[cfg(all(feature = "p2p-inbox-physical-delete-qa", not(debug_assertions)))]
-compile_error!("QA physical Inbox deletion cannot ship in a release build");
-
 // Do not accidentally package an experimental live network control. QA may
 // compile it only in non-release builds; production release requires separate
 // acceptance, code change and review.
