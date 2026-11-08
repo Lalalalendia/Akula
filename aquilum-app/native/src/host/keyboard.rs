@@ -57,6 +57,12 @@ impl Host {
 
     fn paste(&mut self) -> bool {
         let (Some(clipboard), Some(root)) = (self.clipboard.as_mut(), &mut self.root) else { return false };
+        // Rich HTML only when a Markdown note editor explicitly accepts it.
+        // Search, dialog fields, code, tables, and unsupported HTML fall back
+        // to their existing clipboard handling without file I/O.
+        if self.app.paste_formatted(root, clipboard) {
+            return true;
+        }
         if let Ok(text) = clipboard.get_text() {
             root.handle_text_event(TextEvent::ClipboardPaste(text));
             return true;
