@@ -17,7 +17,6 @@ impl FileTree {
             self.paths_changed(root, &[from.to_path_buf(), to.to_path_buf()]);
         }
     }
-
     pub fn paths_changed(&mut self, root: &mut RenderRoot, paths: &[PathBuf]) {
         self.model.refresh_paths(paths);
         self.reindex();
