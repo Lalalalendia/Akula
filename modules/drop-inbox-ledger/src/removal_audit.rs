@@ -55,7 +55,6 @@ impl RemovalDispositionWitness {
     }
 }
 
-
 /// Recorded OS identity of the object that the local user originally selected.
 /// This is audit evidence, NOT an authority to retry unlink or mark Removed.
 /// Only trusted Windows QA code may record it after committing removal intent.
@@ -132,7 +131,6 @@ impl InboxLedger {
         Ok(())
     }
 
-
     /// Commit the original Windows HANDLE identity *after* the existing
     /// one-shot Requested intent and *before* any OS disposition. If this
     /// separate durable write fails, the caller must NOT delete the file.
@@ -190,26 +188,32 @@ impl InboxLedger {
         if id.is_nil() {
             return Err(LedgerError::InvalidIntent);
         }
-        let exists: Option<i64> = self.db.query_row(
-            "SELECT 1 FROM sqlite_master
+        let exists: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT 1 FROM sqlite_master
              WHERE type='table' AND name='removal_original_identity'",
-            [],
-            |row| row.get(0),
-        ).optional()?;
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
         if exists.is_none() {
             return Ok(None);
         }
-        let value: Option<(i64, Vec<u8>, i64)> = self.db.query_row(
-            "SELECT volume_serial, file_index, hard_links
+        let value: Option<(i64, Vec<u8>, i64)> = self
+            .db
+            .query_row(
+                "SELECT volume_serial, file_index, hard_links
              FROM removal_original_identity WHERE transfer_id = ?1",
-            [id.to_string()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        ).optional()?;
+                [id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
         let Some((volume, index_bytes, links)) = value else {
             return Ok(None);
         };
-        let volume_serial = u32::try_from(volume)
-            .map_err(|_| LedgerError::CorruptDatabaseRecord)?;
+        let volume_serial =
+            u32::try_from(volume).map_err(|_| LedgerError::CorruptDatabaseRecord)?;
         let index_bytes: [u8; 8] = index_bytes
             .try_into()
             .map_err(|_| LedgerError::CorruptDatabaseRecord)?;
@@ -380,10 +384,13 @@ mod tests {
             hard_links: 1,
         };
         assert!(ledger
-            .record_original_identity_after_request(intent.id, RemovalOriginalIdentity {
-                hard_links: 2,
-                ..origin
-            })
+            .record_original_identity_after_request(
+                intent.id,
+                RemovalOriginalIdentity {
+                    hard_links: 2,
+                    ..origin
+                }
+            )
             .is_err());
         ledger
             .record_original_identity_after_request(intent.id, origin)
@@ -392,7 +399,9 @@ mod tests {
             .record_original_identity_after_request(intent.id, origin)
             .is_err());
         assert_eq!(
-            ledger.original_identity_for_manual_review(intent.id).unwrap(),
+            ledger
+                .original_identity_for_manual_review(intent.id)
+                .unwrap(),
             Some(origin)
         );
         assert!(ledger.request_removal(intent.id).is_err());
@@ -415,7 +424,9 @@ mod tests {
         drop(ledger);
         let reader = InboxLedger::open_existing(&root).unwrap().unwrap();
         assert_eq!(
-            reader.original_identity_for_manual_review(intent.id).unwrap(),
+            reader
+                .original_identity_for_manual_review(intent.id)
+                .unwrap(),
             Some(origin)
         );
         assert_eq!(
