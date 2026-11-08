@@ -138,6 +138,18 @@ jobs:
             echo "::error::Unaccepted P2P leaked into signed installed dependencies"
             exit 1
           fi
+      - name: Verify separately confirmed physical deletion Native UI (QA-only)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2024 --check aquilum-app/native/src/app/transfer/inbox/physical_removal.rs
+          cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta,p2p-inbox-physical-delete-qa
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta,p2p-inbox-physical-delete-qa --lib ui::transfer::inbox_view::render::row_actions::tests::physical_delete_requires_separate_explicit_confirmation_in_qa -- --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-physical-ui.txt"
+          grep -F 'physical_delete_requires_separate_explicit_confirmation_in_qa ... ok' "$RUNNER_TEMP/p2p-physical-ui.txt"
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta,p2p-inbox-physical-delete-qa --lib app::transfer::inbox::physical_removal::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/p2p-physical-guard.txt"
+          grep -F 'physical_candidate_refuses_stale_or_modified_selection ... ok' "$RUNNER_TEMP/p2p-physical-guard.txt"
+          echo 'AKULA_P2P_NATIVE_PHYSICAL_QA_CONFIRMATION_PASS non_shipping=1'
       - name: Compile and test opt-in Native Inbox to Vault UI on Windows only
         if: runner.os == 'Windows'
         shell: bash

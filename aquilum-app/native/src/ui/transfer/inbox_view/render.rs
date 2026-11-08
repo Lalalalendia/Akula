@@ -46,6 +46,22 @@ pub(in crate::ui::transfer) fn render(
             if view.removal_confirmation.as_deref() == Some(received.id.as_str()) {
                 panel = panel.with_fixed(hint(&t("transfer.inboxRemoveWarning")));
             }
+            #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+            if view.physical_removal_confirmation.as_deref() == Some(received.id.as_str()) {
+                let digest = received
+                    .blake3
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>();
+                let warning = format!(
+                    "{} ID: {} · bytes: {} · BLAKE3: {}",
+                    t("transfer.inboxPhysicalWarning"),
+                    received.id,
+                    received.bytes,
+                    digest
+                );
+                panel = panel.with_fixed(hint(&warning));
+            }
             if let Some((id, text)) = &view.preview {
                 if id == &received.id && received.status_key == "transfer.inboxVerified" {
                     panel = panel.with_fixed(hint(text));

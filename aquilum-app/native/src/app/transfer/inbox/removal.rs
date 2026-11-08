@@ -43,6 +43,7 @@ impl App {
             || view.previewing
             || view.removing
             || view.removal_confirmation.is_some()
+            || view.has_physical_confirmation()
         {
             return false;
         }
@@ -75,6 +76,7 @@ impl App {
             || view.importing
             || view.previewing
             || view.removing
+            || view.has_physical_confirmation()
             || view.removal_confirmation.as_deref() != Some(receipt)
             || !view
                 .rows

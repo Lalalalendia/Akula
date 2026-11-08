@@ -9,6 +9,12 @@ pub enum InboxAction {
     AskRemoval(String),
     ConfirmRemoval(String),
     CancelRemoval,
+    #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+    AskPhysicalRemoval(String),
+    #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+    ConfirmPhysicalRemoval(String),
+    #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+    CancelPhysicalRemoval,
 }
 
 #[derive(Clone, Debug)]
@@ -18,6 +24,8 @@ pub struct InboxRow {
     pub sender: String,
     pub status_key: &'static str,
     pub import_audit_key: Option<&'static str>,
+    #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+    pub blake3: [u8; 32],
 }
 
 #[derive(Clone, Debug, Default)]
@@ -31,6 +39,21 @@ pub struct InboxView {
     pub previewing: bool,
     pub removing: bool,
     pub removal_confirmation: Option<String>,
+    #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+    pub physical_removal_confirmation: Option<String>,
     pub preview: Option<(String, String)>,
     pub notice_key: Option<&'static str>,
+}
+
+impl InboxView {
+    pub fn has_physical_confirmation(&self) -> bool {
+        #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+        {
+            self.physical_removal_confirmation.is_some()
+        }
+        #[cfg(not(all(windows, feature = "p2p-inbox-physical-delete-qa")))]
+        {
+            false
+        }
+    }
 }

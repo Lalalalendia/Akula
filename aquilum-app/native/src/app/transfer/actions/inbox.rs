@@ -22,6 +22,18 @@ impl App {
             transfer_ui::InboxAction::AskRemoval(receipt) => self.ask_inbox_removal(receipt),
             transfer_ui::InboxAction::ConfirmRemoval(receipt) => self.begin_inbox_removal(receipt),
             transfer_ui::InboxAction::CancelRemoval => self.cancel_inbox_removal(),
+            #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+            transfer_ui::InboxAction::AskPhysicalRemoval(receipt) => {
+                self.ask_inbox_physical_removal(receipt)
+            }
+            #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+            transfer_ui::InboxAction::ConfirmPhysicalRemoval(receipt) => {
+                self.begin_inbox_physical_removal(receipt)
+            }
+            #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+            transfer_ui::InboxAction::CancelPhysicalRemoval => {
+                self.cancel_inbox_physical_removal()
+            },
         }
     }
 }

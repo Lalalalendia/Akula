@@ -15,6 +15,27 @@ pub(super) fn attach(
     {
         return entry;
     }
+    #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+    if view.physical_removal_confirmation.as_deref() == Some(received.id.as_str()) {
+        let confirm = NewWidget::new(TextButton::new(
+            t("transfer.inboxPhysicalConfirm"),
+            Variant::Ghost,
+        ));
+        actions.push((
+            confirm.id(),
+            InboxAction::ConfirmPhysicalRemoval(received.id.clone()),
+        ));
+        entry = entry.with_fixed(confirm);
+        let cancel = NewWidget::new(TextButton::new(
+            t("transfer.inboxRemoveCancel"),
+            Variant::Ghost,
+        ));
+        actions.push((cancel.id(), InboxAction::CancelPhysicalRemoval));
+        return entry.with_fixed(cancel);
+    }
+    if view.has_physical_confirmation() {
+        return entry;
+    }
     if view.removal_confirmation.as_deref() == Some(received.id.as_str()) {
         let confirm = NewWidget::new(TextButton::new(
             t("transfer.inboxRemoveConfirm"),
@@ -52,7 +73,20 @@ pub(super) fn attach(
         Variant::Ghost,
     ));
     actions.push((removal.id(), InboxAction::AskRemoval(received.id.clone())));
-    entry.with_fixed(removal)
+    entry = entry.with_fixed(removal);
+    #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+    {
+        let physical = NewWidget::new(TextButton::new(
+            t("transfer.inboxPhysicalAsk"),
+            Variant::Ghost,
+        ));
+        actions.push((
+            physical.id(),
+            InboxAction::AskPhysicalRemoval(received.id.clone()),
+        ));
+        entry = entry.with_fixed(physical);
+    }
+    entry
 }
 
 #[cfg(test)]
@@ -67,6 +101,8 @@ mod tests {
                 sender: "sender".to_owned(),
                 status_key: "transfer.inboxVerified",
                 import_audit_key: None,
+                #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+                blake3: *blake3::hash(b"test").as_bytes(),
             }],
             ..InboxView::default()
         }
@@ -137,4 +173,25 @@ mod tests {
             "corrupt local receipt revokes actions"
         );
     }
+    #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+    #[test]
+    fn physical_delete_requires_separate_explicit_confirmation_in_qa() {
+        let mut view = sample();
+        let initial = rendered_actions(&view);
+        assert!(initial.iter().any(|item| matches!(item, InboxAction::AskPhysicalRemoval(_))));
+        assert!(!initial.iter().any(|item| matches!(item, InboxAction::ConfirmPhysicalRemoval(_))));
+        view.physical_removal_confirmation = Some(view.rows[0].id.clone());
+        let confirm = rendered_actions(&view);
+        assert_eq!(confirm.len(), 2);
+        assert!(confirm.iter().any(|item| matches!(item, InboxAction::ConfirmPhysicalRemoval(_))));
+        assert!(confirm.iter().any(|item| matches!(item, InboxAction::CancelPhysicalRemoval)));
+        assert!(!confirm.iter().any(|item| matches!(item, InboxAction::ConfirmRemoval(_))));
+        view.removing = true;
+        assert!(rendered_actions(&view).is_empty());
+        view.removing = false;
+        view.physical_removal_confirmation = None;
+        view.rows[0].status_key = "transfer.inboxReview";
+        assert!(rendered_actions(&view).is_empty());
+    }
+
 }

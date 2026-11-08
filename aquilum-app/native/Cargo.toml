@@ -44,6 +44,8 @@ p2p-offer-consent-qa = ["p2p-device-ui", "aquilum-core/p2p-offer-lab"]
 p2p-inbox-preview = ["dep:akula-inbox-ledger-lab", "aquilum-core/p2p-inbox-lab"]
 p2p-native-send-beta = ["p2p-inbox-preview", "p2p-device-ui", "dep:akula-staya-integration", "dep:tokio"]
 p2p-native-receive-beta = ["p2p-native-send-beta"]
+# QA Windows-only physical deletion, never part of installed or default features.
+p2p-inbox-physical-delete-qa = ["p2p-inbox-preview", "aquilum-core/p2p-inbox-delete-qa"]
 # S3-E2E-01: optional read-only dashboard of registered S3 receive claims.
 # Does not expose S3 writes, apply, file mutation or baseline actions.
 s3-e2e01-review-preview = ["aquilum-core/sync-s3"]

@@ -35,6 +35,8 @@ pub(super) fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
                 bytes: file.bytes,
                 sender,
                 status_key: status_key(&ledger, file.id, status)?,
+                #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+                blake3: file.blake3,
                 import_audit_key: match imported {
                     ImportAuditStatus::NotRecorded => None,
                     ImportAuditStatus::Verified => Some("transfer.inboxAuditVerified"),

@@ -21,6 +21,8 @@ mod import;
 mod list;
 mod preview;
 mod removal;
+#[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+mod physical_removal;
 use list::read_checked_inbox;
 use preview::read_checked_text_preview;
 
@@ -35,6 +37,10 @@ pub(super) struct InboxPreview {
     pub(super) refresh_vault_copies: bool,
     preview_rx: Option<Receiver<Result<Option<String>, String>>>,
     removal_rx: Option<Receiver<Result<Uuid, String>>>,
+    #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+    physical_removal_rx: Option<Receiver<Result<Uuid, String>>>,
+    #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+    physical_removal_pending: Option<Uuid>,
 }
 
 impl InboxPreview {
@@ -45,6 +51,10 @@ impl InboxPreview {
         self.view.previewing = false;
         self.view.preview = None;
         self.view.removal_confirmation = None;
+        #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+        {
+            self.view.physical_removal_confirmation = None;
+        }
         self.view.error = None;
     }
 
@@ -60,6 +70,11 @@ impl InboxPreview {
                 view.notice_key = self.view.notice_key;
                 view.removing = self.view.removing;
                 view.removal_confirmation = self.view.removal_confirmation.clone();
+                #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+                {
+                    view.physical_removal_confirmation =
+                        self.view.physical_removal_confirmation.clone();
+                }
                 self.view = view;
                 self.rx = None;
                 changed = true;
@@ -107,6 +122,8 @@ impl InboxPreview {
         #[cfg(windows)]
         self.poll_import_result(&mut changed);
         self.poll_removal_result(&mut changed);
+        #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+        self.poll_physical_removal_result(&mut changed);
         let previewed = self.preview_rx.as_ref().map(|receiver| receiver.try_recv());
         match previewed {
             Some(Ok(Ok(Some(text)))) => {
@@ -160,6 +177,7 @@ impl App {
             || self.transfer.inbox.view.previewing
             || self.transfer.inbox.view.removing
             || self.transfer.inbox.view.removal_confirmation.is_some()
+            || self.transfer.inbox.view.has_physical_confirmation()
         {
             return false;
         }
@@ -202,6 +220,7 @@ impl App {
             || self.transfer.inbox.view.previewing
             || self.transfer.inbox.view.removing
             || self.transfer.inbox.view.removal_confirmation.is_some()
+            || self.transfer.inbox.view.has_physical_confirmation()
         {
             return false;
         }
