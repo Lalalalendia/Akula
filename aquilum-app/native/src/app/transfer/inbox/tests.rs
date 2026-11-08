@@ -277,3 +277,49 @@ fn removal_request_rejects_absent_or_corrupted_inbox_without_creating_paths() {
     assert_eq!(read_checked_inbox(&root).unwrap().rows[0].status_key,
         "transfer.inboxReview");
 }
+
+#[test]
+fn native_inbox_reaches_oldest_receipt_and_recovers_stale_page() {
+    let temp = tempfile::tempdir().unwrap();
+    let inbox = temp.path().join("received-inbox");
+    let mut ledger = InboxLedger::open(&inbox).unwrap();
+    let mut ids = Vec::new();
+    for n in 0..25 {
+        let bytes = format!("verified Native Inbox entry {n}");
+        let receipt = ExpectedTransfer {
+            id: Uuid::new_v4(),
+            sender_key: [7; 32],
+            recipient_key: [8; 32],
+            source: Transport::P2p,
+            bytes: bytes.len() as u64,
+            blake3: *blake3::hash(bytes.as_bytes()).as_bytes(),
+        };
+        ledger.reserve(&receipt).unwrap();
+        let mut out = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(ledger.object_path(receipt.id))
+            .unwrap();
+        out.write_all(bytes.as_bytes()).unwrap();
+        out.sync_all().unwrap();
+        assert_eq!(ledger.confirm(&receipt).unwrap(), LocalStatus::VerifiedLocal);
+        ids.push(receipt.id);
+    }
+    drop(ledger);
+    let newest = read_checked_inbox_page(&inbox, 0).unwrap();
+    assert_eq!(newest.rows.len(), 24);
+    assert_eq!(newest.total, 25);
+    assert_eq!(newest.page_offset, 0);
+    assert_eq!(newest.rows[0].id, ids[24].to_string());
+
+    let oldest = read_checked_inbox_page(&inbox, 24).unwrap();
+    assert_eq!(oldest.rows.len(), 1);
+    assert_eq!(oldest.page_offset, 24);
+    assert_eq!(oldest.rows[0].id, ids[0].to_string());
+    assert_eq!(oldest.rows[0].status_key, "transfer.inboxVerified");
+
+    // A page can become invalid after cleanup; never strand the user there.
+    let recovered = read_checked_inbox_page(&inbox, 48).unwrap();
+    assert_eq!(recovered.page_offset, 0);
+    assert_eq!(recovered.rows[0].id, ids[24].to_string());
+}
