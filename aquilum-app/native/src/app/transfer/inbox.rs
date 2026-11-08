@@ -8,7 +8,6 @@ use akula_inbox_ledger_lab::{InboxLedger, user_inbox_root};
 use aquilum_core::p2p_inbox_lab::save_verified_stage_as_new;
 use std::{
     fs,
-    io::Read,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -20,7 +19,10 @@ use uuid::Uuid;
 #[cfg(windows)]
 mod import;
 mod list;
+mod preview;
+mod removal;
 use list::read_checked_inbox;
+use preview::read_checked_text_preview;
 
 #[derive(Default)]
 pub(super) struct InboxPreview {
@@ -32,6 +34,7 @@ pub(super) struct InboxPreview {
     #[cfg(windows)]
     pub(super) refresh_vault_copies: bool,
     preview_rx: Option<Receiver<Result<Option<String>, String>>>,
+    removal_rx: Option<Receiver<Result<Uuid, String>>>,
 }
 
 impl InboxPreview {
@@ -41,6 +44,7 @@ impl InboxPreview {
         self.view.loading = true;
         self.view.previewing = false;
         self.view.preview = None;
+        self.view.removal_confirmation = None;
         self.view.error = None;
     }
 
@@ -54,6 +58,8 @@ impl InboxPreview {
                 view.previewing = self.view.previewing;
                 view.preview = self.view.preview.clone();
                 view.notice_key = self.view.notice_key;
+                view.removing = self.view.removing;
+                view.removal_confirmation = self.view.removal_confirmation.clone();
                 self.view = view;
                 self.rx = None;
                 changed = true;
@@ -100,6 +106,7 @@ impl InboxPreview {
         }
         #[cfg(windows)]
         self.poll_import_result(&mut changed);
+        self.poll_removal_result(&mut changed);
         let previewed = self.preview_rx.as_ref().map(|receiver| receiver.try_recv());
         match previewed {
             Some(Ok(Ok(Some(text)))) => {
@@ -151,6 +158,8 @@ impl App {
             || self.transfer.inbox.view.exporting
             || self.transfer.inbox.view.importing
             || self.transfer.inbox.view.previewing
+            || self.transfer.inbox.view.removing
+            || self.transfer.inbox.view.removal_confirmation.is_some()
         {
             return false;
         }
@@ -191,6 +200,8 @@ impl App {
             || self.transfer.inbox.view.importing
             || self.transfer.inbox.view.loading
             || self.transfer.inbox.view.previewing
+            || self.transfer.inbox.view.removing
+            || self.transfer.inbox.view.removal_confirmation.is_some()
         {
             return false;
         }
@@ -245,48 +256,6 @@ impl App {
         });
         true
     }
-}
-
-/// A deliberately narrow in-app text preview: only checked files up to 4 KiB.
-/// Never execute remote bytes, launch handlers, use a sender path or write Vault.
-fn read_checked_text_preview(root: &Path, id: Uuid) -> Result<Option<String>, String> {
-    const MAX_TEXT_BYTES: u64 = 4 * 1024;
-    #[cfg(windows)]
-    let _pinned = aquilum_core::p2p_inbox_lab::pin_windows_inbox_read(root)
-        .map_err(|error| format!("Windows Inbox read custody refused: {error:?}"))?;
-    let ledger = InboxLedger::open_existing(root)
-        .map_err(|error| format!("open checked Inbox: {error:?}"))?
-        .ok_or("Inbox does not exist")?;
-    let (mut pinned, intent) = ledger
-        .open_verified_file(id)
-        .map_err(|error| format!("checked preview refused: {error:?}"))?;
-    if intent.bytes > MAX_TEXT_BYTES {
-        return Ok(None);
-    }
-    let mut bytes = Vec::with_capacity(intent.bytes as usize);
-    (&mut pinned)
-        .take(MAX_TEXT_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    if bytes.len() as u64 != intent.bytes
-        || pinned.metadata().map_err(|error| error.to_string())?.len() != intent.bytes
-        || *blake3::hash(&bytes).as_bytes() != intent.blake3
-    {
-        return Err("Inbox file changed during preview".into());
-    }
-    if bytes.contains(&0) {
-        return Ok(None);
-    }
-    let Ok(text) = String::from_utf8(bytes) else {
-        return Ok(None);
-    };
-    if text
-        .chars()
-        .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
-    {
-        return Ok(None);
-    }
-    Ok(Some(text))
 }
 
 fn save_checked_copy(
