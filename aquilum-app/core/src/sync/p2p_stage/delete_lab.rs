@@ -361,7 +361,7 @@ fn delete_after_explicit_consent(
 #[cfg(feature = "p2p-inbox-delete-qa")]
 mod qa_entry;
 #[cfg(feature = "p2p-inbox-delete-qa")]
-pub(super) use qa_entry::qa_dispose_confirmed_inbox_file;
+pub(crate) use qa_entry::qa_dispose_confirmed_inbox_file;
 
 #[cfg(test)]
 mod tests {

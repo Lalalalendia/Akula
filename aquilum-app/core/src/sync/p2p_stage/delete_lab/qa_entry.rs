@@ -3,7 +3,7 @@
 //! This is not an installed UI action, a remote command or a proof of power-loss durability.
 use super::{ConfirmedRemoval, CrashCut, InboxLedger, MAX_BYTES, Path, Uuid, delete_after_explicit_consent};
 
-pub(super) fn qa_dispose_confirmed_inbox_file(
+pub(crate) fn qa_dispose_confirmed_inbox_file(
     root: &Path,
     selected_id: Uuid,
     confirmed_bytes: u64,
