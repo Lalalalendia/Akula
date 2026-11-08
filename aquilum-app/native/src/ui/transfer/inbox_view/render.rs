@@ -109,3 +109,36 @@ pub(in crate::ui::transfer) fn render(
     );
     (panel, actions)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inbox_pages_offer_only_valid_navigation() {
+        let row = InboxRow {
+            id: "00000000-0000-4000-8000-000000000001".to_owned(),
+            bytes: 4,
+            sender: "sender".to_owned(),
+            status_key: "transfer.inboxPending",
+            import_audit_key: None,
+            #[cfg(all(windows, feature = "p2p-inbox-physical-delete-qa"))]
+            blake3: *blake3::hash(b"test").as_bytes(),
+        };
+        let mut view = InboxView {
+            rows: vec![row],
+            total: 25,
+            ..InboxView::default()
+        };
+        let (_, actions) = render(&view);
+        assert!(actions.iter().any(|(_, act)| matches!(act, InboxAction::OlderPage)));
+        assert!(!actions.iter().any(|(_, act)| matches!(act, InboxAction::NewerPage)));
+        view.page_offset = 24;
+        let (_, actions) = render(&view);
+        assert!(!actions.iter().any(|(_, act)| matches!(act, InboxAction::OlderPage)));
+        assert!(actions.iter().any(|(_, act)| matches!(act, InboxAction::NewerPage)));
+        view.loading = true;
+        let (_, actions) = render(&view);
+        assert!(actions.is_empty(), "loading must not permit stale-page navigation");
+    }
+}
