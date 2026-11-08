@@ -14,7 +14,6 @@ pub struct Binding {
 const fn bind(scope: Scope, command: Command, label: &'static str, chords: &'static [Chord]) -> Binding {
     Binding { command, scope, label, chords, hidden: &[] }
 }
-
 pub const BINDINGS: &[Binding] = &[
     bind(Scope::Global, NewNote, "newNote", &[letter('n').action()]),
     bind(Scope::Global, NewTab, "newTab", &[letter('t').action()]),
@@ -45,16 +44,17 @@ pub const BINDINGS: &[Binding] = &[
     bind(Scope::Editor, Indent, "indent", &[named(K::Tab)]),
     bind(Scope::Editor, Outdent, "outdent", &[named(K::Tab).shift()]),
     bind(Scope::Editor, LineBreak, "lineBreak", &[named(K::Enter).shift()]),
-    bind(Scope::Navigation, WordLeft, "wordLeft", &[named(K::ArrowLeft).action().any_shift()]),
-    bind(Scope::Navigation, WordRight, "wordRight", &[named(K::ArrowRight).action().any_shift()]),
-    bind(Scope::Navigation, DocumentStart, "documentStart", &[named(K::Home).action().any_shift()]),
-    bind(Scope::Navigation, DocumentEnd, "documentEnd", &[named(K::End).action().any_shift()]),
+    bind(Scope::Navigation, WordLeft, "wordLeft", &[named(K::ArrowLeft).alt().any_shift().only(Os::Mac), named(K::ArrowLeft).action().any_shift().only(Os::Other)]),
+    bind(Scope::Navigation, WordRight, "wordRight", &[named(K::ArrowRight).alt().any_shift().only(Os::Mac), named(K::ArrowRight).action().any_shift().only(Os::Other)]),
+    bind(Scope::Navigation, DocumentStart, "documentStart", &[named(K::ArrowUp).action().any_shift().only(Os::Mac), named(K::Home).action().any_shift().only(Os::Other)]).with_hidden(&[named(K::Home).action().any_shift().only(Os::Mac)]),
+    bind(Scope::Navigation, DocumentEnd, "documentEnd", &[named(K::ArrowDown).action().any_shift().only(Os::Mac), named(K::End).action().any_shift().only(Os::Other)]).with_hidden(&[named(K::End).action().any_shift().only(Os::Mac)]),
     bind(Scope::Navigation, PageUp, "pageUp", &[named(K::PageUp).any_shift()]),
     bind(Scope::Navigation, PageDown, "pageDown", &[named(K::PageDown).any_shift()]),
     bind(Scope::Navigation, ScrollLineUp, "scrollLineUp", &[named(K::ArrowUp).ctrl().only(Os::Other)]),
     bind(Scope::Navigation, ScrollLineDown, "scrollLineDown", &[named(K::ArrowDown).ctrl().only(Os::Other)]),
-    bind(Scope::Navigation, DeleteWord, "deleteWord", &[named(K::Backspace).action()]),
-    bind(Scope::Navigation, DeleteWordForward, "deleteWordForward", &[named(K::Delete).action()]),
+    bind(Scope::Navigation, DeleteWord, "deleteWord", &[named(K::Backspace).alt().only(Os::Mac), named(K::Backspace).action().only(Os::Other)]).with_hidden(&[named(K::Backspace).ctrl().only(Os::Mac)]),
+    bind(Scope::Navigation, DeleteWordForward, "deleteWordForward", &[named(K::Delete).alt().only(Os::Mac), named(K::Delete).action().only(Os::Other)]).with_hidden(&[named(K::Delete).ctrl().only(Os::Mac)]),
+    bind(Scope::Navigation, LineDeleteBackward, "deleteLineBackward", &[named(K::Backspace).action().only(Os::Mac)]),
     bind(Scope::Table, NextCell, "nextCell", &[named(K::Tab)]),
     bind(Scope::Table, PreviousCell, "previousCell", &[named(K::Tab).shift()]),
     bind(Scope::Table, CellBelow, "cellBelow", &[named(K::Enter)]),
