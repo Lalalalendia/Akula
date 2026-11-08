@@ -23,6 +23,12 @@ pub(super) fn read_checked_inbox_page(root: &Path, offset: usize) -> Result<Inbo
     let total = ledger
         .count()
         .map_err(|error| format!("count inbox: {error:?}"))?;
+    // An old page may become empty after local cleanup; recover the first page.
+    let offset = if u64::try_from(offset).map_or(true, |value| value >= total) {
+        0
+    } else {
+        offset
+    };
     let rows = ledger
         .list_page(PAGE_SIZE, offset)
         .map_err(|error| format!("check recent received files: {error:?}"))?
