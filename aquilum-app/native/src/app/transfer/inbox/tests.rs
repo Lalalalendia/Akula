@@ -203,13 +203,11 @@ fn durable_removal_intent_never_displays_verified_inbox_actions_after_restart() 
         read_checked_inbox(&root).unwrap().rows[0].status_key,
         "transfer.inboxReview"
     );
-    {
-        let ledger = InboxLedger::open(&root).unwrap();
-        ledger.finish_removal(receipt.id).unwrap();
-    }
+    // Missing bytes do not prove a checked Windows HANDLE disposition.
+    // Native has no witness and must leave the record in review state.
     assert_eq!(
         read_checked_inbox(&root).unwrap().rows[0].status_key,
-        "transfer.inboxRemoved"
+        "transfer.inboxReview"
     );
 }
 
