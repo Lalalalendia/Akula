@@ -1,7 +1,9 @@
 //! Explicit non-shipping Core QA delete entrypoint.
 //! Caller independently binds the selected UUID, bytes and digest to local consent.
 //! This is not an installed UI action, a remote command or a proof of power-loss durability.
-use super::{ConfirmedRemoval, CrashCut, InboxLedger, MAX_BYTES, Path, Uuid, delete_after_explicit_consent};
+use super::{
+    delete_after_explicit_consent, ConfirmedRemoval, CrashCut, InboxLedger, Path, Uuid, MAX_BYTES,
+};
 
 pub(crate) fn qa_dispose_confirmed_inbox_file(
     root: &Path,
@@ -30,8 +32,8 @@ pub(crate) fn qa_dispose_confirmed_inbox_file(
     }
     drop(verified);
     drop(observed);
-    let ledger = InboxLedger::open(root)
-        .map_err(|error| format!("QA ledger write refused: {error:?}"))?;
+    let ledger =
+        InboxLedger::open(root).map_err(|error| format!("QA ledger write refused: {error:?}"))?;
     delete_after_explicit_consent(
         &ledger,
         root,
@@ -69,25 +71,52 @@ mod tests {
         ledger.reserve(&receipt).unwrap();
         let path = ledger.object_path(receipt.id);
         fs::write(&path, bytes).unwrap();
-        assert_eq!(ledger.confirm(&receipt).unwrap(), LocalStatus::VerifiedLocal);
+        assert_eq!(
+            ledger.confirm(&receipt).unwrap(),
+            LocalStatus::VerifiedLocal
+        );
         let unrelated = root.join("unrelated.txt");
         fs::write(&unrelated, b"preserve").unwrap();
         drop(ledger);
         let wrong_id = Uuid::new_v4();
-        assert!(qa_dispose_confirmed_inbox_file(&root, Uuid::nil(), receipt.bytes, receipt.blake3).is_err());
-        assert!(qa_dispose_confirmed_inbox_file(&root, wrong_id, receipt.bytes, receipt.blake3).is_err());
-        assert!(qa_dispose_confirmed_inbox_file(&root, receipt.id, receipt.bytes, [77; 32]).is_err());
-        assert!(qa_dispose_confirmed_inbox_file(&root, receipt.id, receipt.bytes + 1, receipt.blake3).is_err());
+        assert!(
+            qa_dispose_confirmed_inbox_file(&root, Uuid::nil(), receipt.bytes, receipt.blake3)
+                .is_err()
+        );
+        assert!(
+            qa_dispose_confirmed_inbox_file(&root, wrong_id, receipt.bytes, receipt.blake3)
+                .is_err()
+        );
+        assert!(
+            qa_dispose_confirmed_inbox_file(&root, receipt.id, receipt.bytes, [77; 32]).is_err()
+        );
+        assert!(qa_dispose_confirmed_inbox_file(
+            &root,
+            receipt.id,
+            receipt.bytes + 1,
+            receipt.blake3
+        )
+        .is_err());
         assert_eq!(fs::read(&path).unwrap(), bytes);
         assert_eq!(
-            InboxLedger::open_existing(&root).unwrap().unwrap().removal_status(receipt.id).unwrap(),
+            InboxLedger::open_existing(&root)
+                .unwrap()
+                .unwrap()
+                .removal_status(receipt.id)
+                .unwrap(),
             RemovalAuditStatus::Available
         );
         qa_dispose_confirmed_inbox_file(&root, receipt.id, receipt.bytes, receipt.blake3).unwrap();
         let cold = InboxLedger::open_existing(&root).unwrap().unwrap();
-        assert_eq!(cold.removal_status(receipt.id).unwrap(), RemovalAuditStatus::Removed);
+        assert_eq!(
+            cold.removal_status(receipt.id).unwrap(),
+            RemovalAuditStatus::Removed
+        );
         assert!(!path.exists());
-        assert!(qa_dispose_confirmed_inbox_file(&root, receipt.id, receipt.bytes, receipt.blake3).is_err());
+        assert!(
+            qa_dispose_confirmed_inbox_file(&root, receipt.id, receipt.bytes, receipt.blake3)
+                .is_err()
+        );
         assert_eq!(fs::read(&unrelated).unwrap(), b"preserve");
     }
 
@@ -100,7 +129,8 @@ mod tests {
             Uuid::new_v4(),
             4,
             *blake3::hash(b"data").as_bytes(),
-        ).is_err());
+        )
+        .is_err());
         assert!(!root.exists());
     }
 }
