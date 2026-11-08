@@ -71,6 +71,10 @@ jobs:
         run: |
           cargo fmt --manifest-path modules/drop-inbox-ledger/Cargo.toml -- --check
           cargo test --manifest-path modules/drop-inbox-ledger/Cargo.toml -- --nocapture
+      - name: B2 sender/receiver evidence contract (offline, never WAN acceptance)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 interop/akula-staya/qa/b2_evidence_check.py --self-test
       - name: Compile actual opt-in one-file beta
         shell: bash
         run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta
