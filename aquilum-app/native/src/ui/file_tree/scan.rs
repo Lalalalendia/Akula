@@ -1,4 +1,5 @@
 pub(super) mod worker;
+mod index;
 
 use std::sync::Arc;
 
@@ -10,6 +11,7 @@ impl FileTree {
     pub fn reload(&mut self, root: &mut RenderRoot) {
         self.model.reload_all();
         self.count_notes(Arc::clone(&self.wake));
+        self.reindex();
         self.refresh(root);
     }
 
@@ -20,6 +22,7 @@ impl FileTree {
     }
 
     pub fn poll(&mut self, root: &mut RenderRoot) {
+        self.poll_index(root);
         let Some(path) = self.model.root() else { return };
         let Some(counts) = self.counting.poll(path, Arc::clone(&self.wake)) else { return };
         self.model.set_counts(counts);

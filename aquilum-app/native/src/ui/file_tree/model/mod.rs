@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use filter::Filter;
-use vault::Lists;
+pub(super) use vault::{Lists, index};
 
 pub use counts::Counts;
 pub use sort::Sort;
