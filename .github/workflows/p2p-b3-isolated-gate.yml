@@ -111,6 +111,11 @@ jobs:
           grep -F 'test p2p_offer_lab::receipt_binding::signed::issuance::tests::rejected_sender_request_fails_before_os_credential_lookup ... ok' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
           grep -F 'test p2p_offer_lab::receipt_binding::signed::issuance::tests::receiver_half_preflight_rejects_forgery_before_os_credential_lookup ... ok' "$RUNNER_TEMP/p2p-os-signed-issuance.txt"
           echo 'AKULA_P2P_OS_SIGNED_ISSUANCE_QA_TESTS_PASS'
+      - name: Verify disposable Windows 7 same-HANDLE Inbox delete lab only
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab --lib sync::p2p_stage::delete_lab::tests -- --nocapture
       - name: Confirm unaccepted P2P excluded from signed installed graph
         if: runner.os == 'Windows'
         shell: bash

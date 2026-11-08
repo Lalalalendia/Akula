@@ -2,6 +2,9 @@
 // Handle-relative P2P stage inside Core's existing Windows sync custody boundary.
 // The later SQLite/object publication still needs a separate custody check.
 use super::{filegate_windows_acl, pinned_windows, VaultPortError};
+
+#[cfg(test)]
+mod delete_lab;
 use std::{
     fs::{File, OpenOptions},
     os::windows::fs::{MetadataExt, OpenOptionsExt},

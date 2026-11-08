@@ -89,6 +89,16 @@ pub struct InboxLedger {
 }
 
 impl InboxLedger {
+    /// Borrow the live SQLite Windows VFS connection for a disposable Core lab.
+    /// No raw HANDLE may escape the synchronous closure; not a production API.
+    #[cfg(all(windows, feature = "disposable-removal-lab"))]
+    pub fn inspect_disposable_sqlite_connection<R>(
+        &self,
+        inspect: impl FnOnce(&Connection) -> R,
+    ) -> R {
+        inspect(&self.db)
+    }
+
     /// The caller is responsible for independently authenticating and pinning
     /// the local root. This lab rejects symlinks on the root and direct objects
     /// directory, but does not claim to handle hostile ancestor-directory races.
