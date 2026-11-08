@@ -7,6 +7,7 @@ use ring::signature::{UnparsedPublicKey, ED25519};
 use uuid::Uuid;
 
 pub mod journal;
+pub mod display;
 
 // Non-shipping issuance is compiled only with the separately opted-in OS key.
 #[cfg(feature = "p2p-device-identity")]
@@ -187,7 +188,7 @@ mod tests {
         *cursor += N;
     }
 
-    fn fixture() -> (OfferV1, [u8; RECORD_BYTES], ObservedLocalReceipt) {
+    pub(super) fn fixture() -> (OfferV1, [u8; RECORD_BYTES], ObservedLocalReceipt) {
         let sender_key = Ed25519KeyPair::from_seed_unchecked(&[17; 32]).unwrap();
         let receiver_key = Ed25519KeyPair::from_seed_unchecked(&[29; 32]).unwrap();
         let mut sender_pub = [0u8; 32];

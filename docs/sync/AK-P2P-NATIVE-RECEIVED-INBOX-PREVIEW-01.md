@@ -63,3 +63,31 @@ be recreated from a receipt UUID, hash, or header. Keep the existing
 `received-<UUID>.bin` export suggestion until authenticated, bounded
 sender metadata is independently specified and verified. Physical WAN
 testing was waived for development, not reported as passed.
+
+## Signed Offer V2 display-label projection — QA, not installed
+
+The existing OfferV1 already carries a bounded display-only file label in
+its domain-separated manifest commitment. The V2 two-party Ed25519 receipt
+covers that commitment, the selected index, both enrolled endpoint IDs,
+the offer ID/nonce and the expected local file digest. There is **no need
+to invent an extra filename field in the one-file QUIC frame**.
+
+The opt-in Core `signed::display::verified_offer_label_v2` verifies
+the entire cold receipt with independent caller-supplied pinned peer IDs
+and a rehashed local Inbox observation before returning a typed
+`VerifiedOfferLabelV2` display hint. It rejects altered labels, forged
+signatures, mismatched file hash/receipt, wrong peers and invalid
+selection/time. The type provides only text and the bound receipt UUID;
+it exposes no path, export, import, delete or file-open operation.
+
+**Still missing:** storing the accepted signed Offer/receipt under OS custody,
+linking its V2 receipt ID to the Native Inbox, performing live receiver UI
+consent and authentically issuing the V2 proof in the real QUIC flow. Existing
+content-addressed V1 Inbox receipts cannot be relabeled using an unrelated
+signed Offer. Until those steps exist, Native displays only UUID, locally
+checked type hints and safe `received-<UUID>.bin` export suggestions.
+A signed display label is still a claim by the sender, **not independently
+verified historical disk filename or a trusted destination path**.
+
+Physical cross-WAN acceptance remains explicitly NOT TESTED (waived only
+for development). QA-only / DO NOT MERGE / no signed release.
