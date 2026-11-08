@@ -1,7 +1,7 @@
 //! Non-authorizing display label obtained ONLY from a verified signed V2 receipt.
 //! The sender's original disk filename is not attested; the label is still its
 //! display-only claim, never a trusted pathname, extension or file authority.
-use super::{ProofError, verify_cold_receipt_v2};
+use super::{verify_cold_receipt_v2, ProofError};
 use crate::p2p_offer_lab::receipt_binding::ObservedLocalReceipt;
 use crate::p2p_offer_lab::{OfferV1, PeerBinding};
 use uuid::Uuid;
@@ -68,7 +68,12 @@ mod tests {
     fn cold_v2_proof_binds_display_label_to_selected_receipt() {
         let (offer, record, observed) = fixture();
         let label = verified_offer_label_v2(
-            &record, &offer, offer.sender, offer.receiver, observed, NOW + 200,
+            &record,
+            &offer,
+            offer.sender,
+            offer.receiver,
+            observed,
+            NOW + 200,
         )
         .unwrap();
         assert_eq!(label.receipt_id(), observed.receipt_id);
@@ -83,7 +88,12 @@ mod tests {
             changed.files[0].label = text.into();
             assert_eq!(
                 verified_offer_label_v2(
-                    &record, &changed, offer.sender, offer.receiver, observed, NOW + 6,
+                    &record,
+                    &changed,
+                    offer.sender,
+                    offer.receiver,
+                    observed,
+                    NOW + 6,
                 ),
                 Err(ProofError::WrongContext),
             );
@@ -94,10 +104,16 @@ mod tests {
     fn forged_signatures_and_wrong_local_receipt_are_not_display_labels() {
         let (offer, record, observed) = fixture();
         let mut forged = record;
-        forged[forged.len() - 1] ^= 1;
+        let last_byte = forged.len() - 1;
+        forged[last_byte] ^= 1;
         assert_eq!(
             verified_offer_label_v2(
-                &forged, &offer, offer.sender, offer.receiver, observed, NOW + 6,
+                &forged,
+                &offer,
+                offer.sender,
+                offer.receiver,
+                observed,
+                NOW + 6,
             ),
             Err(ProofError::BadSignature),
         );
@@ -105,7 +121,12 @@ mod tests {
         wrong.receipt_id = Uuid::new_v4();
         assert_eq!(
             verified_offer_label_v2(
-                &record, &offer, offer.sender, offer.receiver, wrong, NOW + 6,
+                &record,
+                &offer,
+                offer.sender,
+                offer.receiver,
+                wrong,
+                NOW + 6,
             ),
             Err(ProofError::WrongReceipt),
         );
@@ -113,7 +134,12 @@ mod tests {
         wrong.blake3_root[0] ^= 1;
         assert_eq!(
             verified_offer_label_v2(
-                &record, &offer, offer.sender, offer.receiver, wrong, NOW + 6,
+                &record,
+                &offer,
+                offer.sender,
+                offer.receiver,
+                wrong,
+                NOW + 6,
             ),
             Err(ProofError::WrongReceipt),
         );
@@ -125,21 +151,22 @@ mod tests {
         let mut different = offer.receiver;
         different.endpoint_id[0] ^= 1;
         assert_eq!(
-            verified_offer_label_v2(
-                &record, &offer, offer.sender, different, observed, NOW + 6,
-            ),
+            verified_offer_label_v2(&record, &offer, offer.sender, different, observed, NOW + 6),
             Err(ProofError::WrongContext),
         );
         assert_eq!(
             verified_offer_label_v2(
-                &record, &offer, offer.sender, offer.receiver, observed, NOW + 2,
+                &record,
+                &offer,
+                offer.sender,
+                offer.receiver,
+                observed,
+                NOW + 2,
             ),
             Err(ProofError::InvalidTime),
         );
         assert_eq!(
-            verified_offer_label_v2(
-                &[], &offer, offer.sender, offer.receiver, observed, NOW + 6,
-            ),
+            verified_offer_label_v2(&[], &offer, offer.sender, offer.receiver, observed, NOW + 6),
             Err(ProofError::BadLength),
         );
     }

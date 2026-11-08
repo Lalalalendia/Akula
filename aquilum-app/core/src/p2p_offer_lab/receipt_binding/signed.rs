@@ -6,8 +6,8 @@ use crate::sync::DeviceId;
 use ring::signature::{UnparsedPublicKey, ED25519};
 use uuid::Uuid;
 
-pub mod journal;
 pub mod display;
+pub mod journal;
 
 // Non-shipping issuance is compiled only with the separately opted-in OS key.
 #[cfg(feature = "p2p-device-identity")]
