@@ -191,7 +191,9 @@ impl InboxLedger {
         let mut stmt = self.db.prepare(
             "SELECT transfer_id FROM received_inbox ORDER BY rowid DESC LIMIT ?1 OFFSET ?2",
         )?;
-        let ids = stmt.query_map(params![max_items as i64, offset], |row| row.get::<_, String>(0))?;
+        let ids = stmt.query_map(params![max_items as i64, offset], |row| {
+            row.get::<_, String>(0)
+        })?;
         let mut result = Vec::new();
         for id in ids {
             let id = Uuid::parse_str(&id?).map_err(|_| LedgerError::CorruptDatabaseRecord)?;
