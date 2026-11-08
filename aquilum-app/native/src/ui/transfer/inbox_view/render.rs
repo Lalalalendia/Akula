@@ -35,7 +35,7 @@ pub(in crate::ui::transfer) fn render(
                     .with_fixed(details(&label))
                     .with_fixed(hint(&detail)),
             );
-            let mut entry = Flex::row()
+            let entry = Flex::row()
                 .cross_axis_alignment(CrossAxisAlignment::Center)
                 .with(labels, 1.0);
             let entry = row_actions::attach(entry, received, view, &mut actions);
