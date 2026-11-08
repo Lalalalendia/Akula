@@ -1,48 +1,5 @@
-fn named(name: &str) -> Option<char> {
-    match name {
-        "amp" => Some('&'),
-        "lt" => Some('<'),
-        "gt" => Some('>'),
-        "quot" => Some('"'),
-        "apos" => Some('\''),
-        "nbsp" | "ensp" | "emsp" | "thinsp" => Some(' '),
-        "copy" => Some('©'),
-        "reg" => Some('®'),
-        "trade" => Some('™'),
-        "bull" => Some('•'),
-        "middot" => Some('·'),
-        "deg" => Some('°'),
-        "plusmn" => Some('±'),
-        "times" => Some('×'),
-        "divide" => Some('÷'),
-        "minus" => Some('−'),
-        "euro" => Some('€'),
-        "pound" => Some('£'),
-        "yen" => Some('¥'),
-        "cent" => Some('¢'),
-        "rarr" => Some('→'),
-        "larr" => Some('←'),
-        "uarr" => Some('↑'),
-        "darr" => Some('↓'),
-        "sect" => Some('§'),
-        "para" => Some('¶'),
-        "frac12" => Some('½'),
-        "ne" => Some('≠'),
-        "le" => Some('≤'),
-        "ge" => Some('≥'),
-        "infin" => Some('∞'),
-        "mdash" => Some('—'),
-        "ndash" => Some('–'),
-        "hellip" => Some('…'),
-        "laquo" => Some('«'),
-        "raquo" => Some('»'),
-        "ldquo" => Some('“'),
-        "rdquo" => Some('”'),
-        "lsquo" => Some('‘'),
-        "rsquo" => Some('’'),
-        _ => None,
-    }
-}
+mod named;
+use named::named;
 
 fn numeric(body: &str) -> Option<char> {
     let code = match body.strip_prefix('x').or_else(|| body.strip_prefix('X')) {
