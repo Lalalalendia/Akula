@@ -21,4 +21,3 @@ use super::tokens::size;
 use super::widgets::{IconButton, Leading, Rule, TextButton, Variant};
 use super::{icons, search, theme};
 use crate::i18n::{t, t_with};
-
