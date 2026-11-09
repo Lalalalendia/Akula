@@ -120,6 +120,11 @@ pub fn find_box(hint: String) -> FindBox {
     row("", hint, None)
 }
 
+/// Preserve an existing query when a search field is rebuilt or remounted.
+pub fn find_box_with_query(query: &str, hint: String) -> FindBox {
+    row(query, hint, None)
+}
+
 pub fn search_box(query: &str) -> SearchBox {
     let clear = NewWidget::new(IconButton::new(icons::X, t("search.clear")));
     let clear_handle = Handle::of(&clear);

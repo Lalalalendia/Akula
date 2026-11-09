@@ -28,7 +28,7 @@ pub(in crate::ui::file_tree) fn toolbar(query: &str) -> (NewWidget<Flex>, Toolba
     let new_folder = button(icons::FOLDER_PLUS, "fileTree.newFolder");
     let sort = button(icons::ARROW_UP_NARROW_WIDE, "fileTree.sort");
     let collapse = button(icons::CHEVRONS_DOWN_UP, "fileTree.collapseAll");
-    let search = search::find_box(t("fileTree.filter"));
+    let search = search::find_box_with_query(query, t("fileTree.filter"));
     let clear = NewWidget::new(IconButton::new(icons::X, t("search.clear")).small());
     let ids = Toolbar {
         new_note: new_note.id(), new_folder: new_folder.id(), sort: sort.id(), collapse: collapse.id(),
