@@ -235,6 +235,26 @@ mod tests {
         assert!(source.join(".akula/credentials/private").is_file());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_directory_junction_without_reading_outside() {
+        use std::process::Command;
+        let temp = crate::test_dir::tempdir();
+        let source = temp.path().join("Knowledge");
+        let outside = temp.path().join("Outside");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("private.md"), "outside content").unwrap();
+        let junction = source.join("linked");
+        let output = Command::new("cmd").arg("/C").arg("mklink").arg("/J")
+            .arg(&junction).arg(&outside).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let failure = duplicate_folder(&source, "copy").unwrap_err();
+        assert!(failure.contains("linked"), "{failure}");
+        assert!(!temp.path().join("Knowledge (copy)").exists());
+        assert_eq!(fs::read_to_string(outside.join("private.md")).unwrap(), "outside content");
+    }
+
     #[test]
     fn rejects_existing_file_at_destination_without_overwriting() {
         let temp = crate::test_dir::tempdir();
