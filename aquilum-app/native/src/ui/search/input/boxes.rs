@@ -12,4 +12,3 @@ pub struct FindBox {
     pub field: Handle<TextEditor>,
     pub placeholder: Handle<Placeholder>,
 }
-
