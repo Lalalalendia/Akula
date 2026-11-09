@@ -54,14 +54,14 @@ fn physical_root(path: &Path) -> io::Result<Option<PhysicalRootId>> {
         if meta.file_attributes() & 0x0000_0400 != 0 {
             return Err(io::Error::new(ErrorKind::InvalidData, "root is a reparse point"));
         }
-        let device = meta.volume_serial_number().ok_or_else(|| {
-            io::Error::new(ErrorKind::InvalidData, "volume ID unavailable")
-        })?;
-        let file = meta.file_index().ok_or_else(|| {
-            io::Error::new(ErrorKind::InvalidData, "file ID unavailable")
-        })?;
-        if file == 0 { return Err(io::Error::new(ErrorKind::InvalidData, "missing file ID")); }
-        return Ok(Some(PhysicalRootId { device: u64::from(device), file }));
+        // Akula already has a stable, handle-based Windows identity reader.
+        // The MetadataExt file_index/volume methods are unstable in Rust.
+        let handle = crate::sync::pinned_windows::open_root(path)
+            .map_err(|_| invalid("cannot open pinned Windows root"))?;
+        let (volume, file, _) = crate::sync::pinned_windows::file_identity_with_links(&handle)
+            .map_err(|_| invalid("cannot read Windows root identity"))?;
+        if file == 0 { return Err(invalid("missing Windows file ID")); }
+        return Ok(Some(PhysicalRootId { device: u64::from(volume), file }));
     }
     #[cfg(unix)]
     {
