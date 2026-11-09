@@ -8,6 +8,7 @@ impl App {
         match picked {
             Picked::Workspace(path) => return self.switch_workspace(root, path).title,
             Picked::WorkspaceCreated(result) => return self.on_workspace_created(root, result),
+            Picked::WorkspaceDuplicated(result) => return self.on_workspace_duplicated(root, result),
             Picked::PdfChosen(file) => self.prompt_pdf_preview(root, file),
             #[cfg(feature = "dicom-preview")]
             Picked::DicomExternal(path) => return self.open_dicom_external(root, path),
