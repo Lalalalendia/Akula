@@ -32,7 +32,7 @@ pub fn read_directory_impl(path: &Path) -> Result<Vec<FileItem>, FileCommandErro
             Err(_) => continue,
         };
 
-        if is_hidden_name(&entry.file_name()) || file_type.is_symlink() || reparse::is_reparse(&path) {
+        if is_hidden_name(&entry.file_name()) || file_type.is_symlink() || reparse::is_reparse(&entry) {
             continue;
         }
 
