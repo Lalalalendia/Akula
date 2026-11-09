@@ -31,7 +31,7 @@ impl App {
             return Outcome { title: was_current, ..Outcome::default() };
         }
         let dialog = &state.dialog;
-        let pressed = action.downcast_ref::<Pressed>().is_some();
+        let (pressed, creating) = (action.downcast_ref::<Pressed>().is_some(), id == dialog.create_new);
         let closing = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
             || (id == dialog.close && pressed);
         if closing {
@@ -47,7 +47,6 @@ impl App {
             return outcome;
         }
         if pressed && (id == dialog.open_folder || id == dialog.create_new) {
-            let creating = id == dialog.create_new;
             self.popup = Some(Popup::Workspaces(state));
             return if creating { self.pick_new_workspace() } else { self.pick_workspace(root) };
         }
