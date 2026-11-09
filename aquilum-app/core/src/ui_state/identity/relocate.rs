@@ -4,6 +4,14 @@
 //! a directory or authorize a filesystem mutation. A future coordinator must
 //! first complete and durably verify a safe on-disk move, then call this method.
 use super::*;
+use crate::search::paths::identity;
+use std::path::Path;
+
+fn invalid_workspace_path(path: &str) -> bool {
+    path.trim().is_empty()
+        || path.contains('\0')
+        || path.replace('\\', "/").split('/').any(|part| part == "." || part == "..")
+}
 
 impl UiStateDatabase {
     pub fn replace_workspace_path_after_move(
