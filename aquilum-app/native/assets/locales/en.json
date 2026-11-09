@@ -900,6 +900,7 @@
     "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning.",
     "switchSaveFailed": "Could not switch folders because a note was not saved. The current folder stays open. Check the editor warning.",
     "copySuffix": "copy",
-    "duplicateFailed": "Could not duplicate knowledge base: {{reason}}"
+    "duplicateFailed": "Could not duplicate knowledge base: {{reason}}",
+    "copyHint": "Copying a knowledge base copies notes and attachments only. Version history, sync data and service settings are not copied."
   }
 }
