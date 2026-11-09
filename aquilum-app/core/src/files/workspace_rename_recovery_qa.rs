@@ -170,6 +170,51 @@ fn classify(intent: &RenameIntent, registered: Option<(Uuid, &Path)>) -> Recover
     }
 }
 
+/// Read-only check against one explicitly SUPPLIED snapshot of every known
+/// workspace. This is not a trusted/locked registry read, so the caller may
+/// only use it as additional negative evidence, never as a move permit.
+fn classify_journal_with_registry(path: &Path, known: &[(Uuid, PathBuf)]) -> RecoveryView {
+    let intent = match read_journal(path) {
+        Ok(intent) => intent,
+        Err(_) => return RecoveryView::Hold,
+    };
+    let selected: Vec<_> = known.iter().filter(|(id, _)| *id == intent.workspace_id).collect();
+    if selected.len() != 1 {
+        return RecoveryView::Hold;
+    }
+    // Reject all other logical workspaces that lexically overlap either
+    // claimed root. This catches the collision after preflight in which a
+    // native directory move can succeed but the UUID CAS must fail.
+    let overlap = |left: &Path, right: &Path| {
+        let a = crate::search::paths::identity(left);
+        let b = crate::search::paths::identity(right);
+        let a = a.trim_end_matches('/');
+        let b = b.trim_end_matches('/');
+        a == b || a.starts_with(&(b.to_owned() + "/"))
+            || b.starts_with(&(a.to_owned() + "/"))
+    };
+    if known.iter().any(|(id, other)| {
+        *id != intent.workspace_id
+            && (overlap(other, &intent.source) || overlap(other, &intent.destination))
+    }) {
+        return RecoveryView::Hold;
+    }
+    // Compare normalized spellings to account for Windows verbatim prefixes,
+    // but never infer physical identity from that lexical comparison.
+    let registered = selected[0].1.as_path();
+    let old = crate::search::paths::identity(&intent.source);
+    let new = crate::search::paths::identity(&intent.destination);
+    let observed = crate::search::paths::identity(registered);
+    let spelling = if observed == old {
+        intent.source.as_path()
+    } else if observed == new {
+        intent.destination.as_path()
+    } else {
+        return RecoveryView::Hold;
+    };
+    classify(&intent, Some((intent.workspace_id, spelling)))
+}
+
 fn classify_journal(path: &Path, registered: Option<(Uuid, &Path)>) -> RecoveryView {
     match read_journal(path) {
         Ok(intent) => classify(&intent, registered),
