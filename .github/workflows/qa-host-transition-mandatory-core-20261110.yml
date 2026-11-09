@@ -1,0 +1,60 @@
+name: QA fail-closed default Core in transition lab
+on:
+  push:
+    branches: [integration/host-transition-mandatory-core-20261110]
+permissions:
+  contents: read
+jobs:
+  linux:
+    name: Linux unbound startup, host registry and Core epoch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Opt-in transition lab Core startup and host admission
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_core_transition_startup_qa -- --nocapture
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_custody_registry
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_core_epoch_tests
+      - name: Legacy host-custody stays independently selectable
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features host-custody --lib sync::host_core_epoch_tests
+  windows:
+    name: Windows unbound startup, host registry and Core epoch
+    runs-on: windows-2022
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Opt-in transition lab Core startup and host admission
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_core_transition_startup_qa -- --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_custody_registry
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_core_epoch_tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  macos:
+    name: macOS unbound startup, host registry and Core epoch
+    runs-on: macos-15
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Opt-in transition lab Core startup and host admission
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_core_transition_startup_qa -- --nocapture
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_custody_registry
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_core_epoch_tests
