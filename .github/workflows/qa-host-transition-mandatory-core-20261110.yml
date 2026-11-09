@@ -20,12 +20,14 @@ jobs:
           cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_core_transition_startup_qa -- --nocapture
           cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_custody_registry
           cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_core_epoch_tests
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --test host_transition_external_host_choice -- --nocapture
       - name: Legacy host-custody stays independently selectable
         working-directory: aquilum-app
         shell: bash
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features host-custody --lib sync::host_core_epoch_tests
+          cargo test --locked -p aquilum-core --features host-custody --test host_transition_external_host_choice
   windows:
     name: Windows unbound startup, host registry and Core epoch
     runs-on: windows-2022
@@ -43,6 +45,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_core_epoch_tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --test host_transition_external_host_choice -- --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p aquilum-core --features host-custody --test host_transition_external_host_choice
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   macos:
     name: macOS unbound startup, host registry and Core epoch
     runs-on: macos-15
@@ -58,3 +64,5 @@ jobs:
           cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_core_transition_startup_qa -- --nocapture
           cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_custody_registry
           cargo test --locked -p aquilum-core --features host-custody-transition-lab --lib sync::host_core_epoch_tests
+          cargo test --locked -p aquilum-core --features host-custody-transition-lab --test host_transition_external_host_choice -- --nocapture
+          cargo test --locked -p aquilum-core --features host-custody --test host_transition_external_host_choice
