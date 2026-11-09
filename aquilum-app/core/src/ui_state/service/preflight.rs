@@ -165,13 +165,13 @@ mod tests {
         let (_temp, service, uuid, root) = setup();
         let plan = service.plan_inactive_workspace_rename(uuid, "Renamed", None).unwrap();
         assert_eq!(plan.workspace_id, uuid);
-        assert_eq!(plan.expected_old_path, root);
-        assert_eq!(plan.destination_path, root.parent().unwrap().join("Renamed"));
+        assert_eq!(identity(&plan.expected_old_path), identity(&root));
+        assert_eq!(identity(&plan.destination_path), identity(&root.parent().unwrap().join("Renamed")));
         assert!(!plan.destination_path.exists());
         assert_eq!(fs::read_to_string(root.join("keep.md")).unwrap(), "original");
         let known = service.list_workspaces().unwrap();
         assert_eq!(known[0].id, uuid);
-        assert_eq!(known[0].path, root.to_string_lossy());
+        assert_eq!(identity(Path::new(&known[0].path)), identity(&root));
     }
 
     #[test]
