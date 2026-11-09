@@ -102,12 +102,16 @@ fn check_hard_kill(phase: &str, expected: RecoveryView) {
     let journal_bytes = fs::read(&journal).unwrap();
     let before = stored_path(&service, intent.workspace_id);
     let marker = tmp.path().join(format!("{phase}-checkpoint"));
+    let database_path = tmp.path().join("ui-state.sqlite");
     terminate_at(phase, &intent.source, &intent.destination, &marker,
-        &tmp.path().join("ui-state.sqlite"), intent.workspace_id);
-    // The crash must preserve the exact registry state reached by the child.
+        &database_path, intent.workspace_id);
+    // Simulate a truly cold restart of the supervising Core after child
+    // termination: no cached connection or in-memory workspaces survive.
+    drop(service);
+    let reopened = UiStateService::open(&database_path);
     let registered = if phase == "after-cas" { &intent.destination } else { &before };
-    assert_eq!(stored_path(&service, intent.workspace_id), *registered);
-    assert_eq!(classify_journal_with_registry(&journal, &full_registry(&service)), expected);
+    assert_eq!(stored_path(&reopened, intent.workspace_id), *registered);
+    assert_eq!(classify_journal_with_registry(&journal, &full_registry(&reopened)), expected);
     assert_eq!(fs::read(&journal).unwrap(), journal_bytes);
     let current = if phase == "before" { &intent.source } else { &intent.destination };
     let absent = if phase == "before" { &intent.destination } else { &intent.source };
