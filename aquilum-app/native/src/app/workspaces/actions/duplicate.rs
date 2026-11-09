@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use masonry::app::RenderRoot;
 
-use super::{App, Popup};
+use super::super::{App, Popup};
 use crate::i18n::{t, t_with};
 
 const MAX_ENTRIES: usize = 200_000;
@@ -91,7 +91,7 @@ impl App {
         let wake = Arc::clone(&self.workspace.wake);
         std::thread::spawn(move || {
             let result = duplicate_folder(&source, &suffix);
-            if sender.send(super::super::book::Picked::WorkspaceDuplicated(result)).is_ok() {
+            if sender.send(super::super::super::book::Picked::WorkspaceDuplicated(result)).is_ok() {
                 wake();
             }
         });
