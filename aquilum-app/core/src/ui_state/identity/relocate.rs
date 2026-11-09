@@ -43,22 +43,35 @@ impl UiStateDatabase {
 mod tests {
     use super::*;
     use crate::ui_state::tests::{batch, setup};
+    use crate::ui_state::models::SaveReaderStateInput;
 
     #[test]
     fn path_change_preserves_workspace_and_document_session_identity() {
         let (mut db, workspace, document, epoch) = setup();
         assert!(db.save_batch(&batch(workspace, document, epoch, 1, 28)).unwrap());
+        db.set_home_page("C:/notes", "index.md").unwrap();
+        db.save_reader_state(&SaveReaderStateInput {
+            workspace_id: workspace,
+            book_file: "Files/book.epub".to_owned(),
+            current: 42,
+            cfi: Some("epubcfi(/6/2)".to_owned()),
+            now_ms: 10,
+        }).unwrap();
         db.replace_workspace_path_after_move(workspace, "C:/notes", "C:/notes-renamed").unwrap();
         let known = db.list_workspaces().unwrap();
         assert_eq!(known.len(), 1);
         assert_eq!(known[0].id, workspace);
         assert_eq!(known[0].path, "C:/notes-renamed");
+        assert_eq!(known[0].home_page, "index.md");
         assert_eq!(db.resolve_workspace("C:/notes-renamed", 25).unwrap(), workspace);
         assert_eq!(db.resolve_document(workspace, "note.md").unwrap(), document);
         let restored = db.load_session(workspace, "main").unwrap();
         assert_eq!(restored.tabs.len(), 1);
         assert_eq!(restored.tabs[0].document_id, Some(document));
         assert_eq!(restored.views[0].fallback_anchor, 28);
+        let reader = db.load_reader_state(workspace, "Files/book.epub").unwrap().unwrap();
+        assert_eq!(reader.current, 42);
+        assert_eq!(reader.cfi.as_deref(), Some("epubcfi(/6/2)"));
     }
 
     #[test]
