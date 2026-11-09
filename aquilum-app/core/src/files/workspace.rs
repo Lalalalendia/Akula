@@ -32,6 +32,21 @@ pub fn read_directory_impl(path: &Path) -> Result<Vec<FileItem>, FileCommandErro
             continue;
         }
 
+        // On Windows, junctions and other reparse points may not be reported
+        // as symbolic links. Never list them as navigable workspace entries.
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                continue;
+            }
+        }
+
         let id = path.to_string_lossy().into_owned();
         if file_type.is_dir() {
             items.push(FileItem {
@@ -92,3 +107,7 @@ pub fn existing_files_impl(paths: Vec<String>) -> Vec<String> {
         })
         .collect()
 }
+
+#[cfg(all(test, windows))]
+#[path = "workspace/tests.rs"]
+mod tests;
