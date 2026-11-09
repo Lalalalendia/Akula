@@ -79,13 +79,22 @@ fn observed_request(operation: Uuid, workspace: Uuid,
     let source = fs::canonicalize(source).map_err(|_| Denial::UntrustedOrInvalid)?;
     let parent = source.parent().ok_or(Denial::UntrustedOrInvalid)?;
     if !destination.is_absolute()
-        || !overlap(parent, &destination.parent().ok_or(Denial::UntrustedOrInvalid)?.to_path_buf())
-        || identity(parent) != identity(destination.parent().unwrap())
+        || identity(parent) != identity(destination.parent().ok_or(Denial::UntrustedOrInvalid)?)
         || overlap(&source, destination)
         || destination.file_name().is_none()
-        || fs::symlink_metadata(destination).is_ok()
+        || destination.components().any(|c| matches!(
+            c, std::path::Component::CurDir | std::path::Component::ParentDir
+        ))
     {
         return Err(Denial::UntrustedOrInvalid);
+    }
+    // Only an actual ENOENT can establish an unoccupied destination.
+    // Permission denied and other metadata errors must never be interpreted
+    // as permission to create/rename the destination.
+    match fs::symlink_metadata(destination) {
+        Ok(_) => return Err(Denial::UntrustedOrInvalid),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(Denial::UntrustedOrInvalid),
     }
     // The pinned physical ID is just an additional mismatch detector,
     // not cross-process ownership proof, and it may be recycled.
