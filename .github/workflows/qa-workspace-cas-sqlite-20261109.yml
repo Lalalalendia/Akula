@@ -1,0 +1,59 @@
+name: QA workspace registry CAS against security-fixed SQLite
+on:
+  push:
+    branches: [integration/qa-workspace-cas-sqlite-20261109]
+    paths:
+      - aquilum-app/core/src/ui_state/**
+      - aquilum-app/core/Cargo.toml
+      - aquilum-app/Cargo.lock
+      - .github/workflows/qa-workspace-cas-sqlite-20261109.yml
+
+permissions:
+  contents: read
+
+jobs:
+  linux-core:
+    name: Linux CAS, SQLite and full Core regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Whitespace and architecture source-growth checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check ff14c602264219e3f419d22fb314a4258fdaba15 HEAD
+          node --test .github/scripts/ci-file-ratchet.test.cjs
+          node .github/scripts/ci-file-ratchet.cjs --base=ff14c602264219e3f419d22fb314a4258fdaba15 --head=HEAD
+      - uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        with:
+          tool: cargo-audit@0.22.2
+      - name: Security gate with fixed lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo audit --no-yanked --file aquilum-app/Cargo.lock
+          cargo audit --no-yanked --no-fetch --file aquilum-app/host-broker-lab/Cargo.lock
+      - name: Regression tests, SQLite path CAS and related storage
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --lib ui_state
+          cargo test --locked -p aquilum-core --lib
+  windows-core:
+    name: Windows CAS and SQLite UI-state regression
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Windows conditional workspace relocation tests
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-core --lib ui_state
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
