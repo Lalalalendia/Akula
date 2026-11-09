@@ -83,8 +83,12 @@ fn independent_appdata_and_runtime_host_env_cannot_reenable_unbound_writer() {
     let fake_host = base.join("runtime-host");
     fs::create_dir(&fake_host).unwrap();
     let misleading_db = fake_host.join("host.sqlite");
+    // Installer fixture validates canonical forbidden roots. Create the
+    // alternate appdata directory before provisioning the fake host ledger.
+    let app_b = base.join("app-b");
+    fs::create_dir(&app_b).unwrap();
     drop(crate::sync::host_custody_registry::SharedHostCustodyRegistry::provision_new(
-        &misleading_db, &[root.as_path(), base.join("app-b").as_path()],
+        &misleading_db, &[root.as_path(), app_b.as_path()],
     ).unwrap());
     let report = base.join("child-report");
     let child = Command::new(std::env::current_exe().unwrap())
