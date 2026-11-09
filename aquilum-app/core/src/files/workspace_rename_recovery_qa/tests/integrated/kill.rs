@@ -42,16 +42,28 @@ fn interrupted_rename_child() {
     let destination = PathBuf::from(std::env::var_os("AKULA_QA_RENAME_DEST").unwrap());
     let marker = PathBuf::from(std::env::var_os("AKULA_QA_RENAME_MARKER").unwrap());
     let phase = std::env::var("AKULA_QA_RENAME_PHASE").unwrap();
-    if phase == "after" {
+    if phase != "before" {
         no_replace_directory_rename(&source, &destination).unwrap();
-    } else {
-        assert_eq!(phase, "before");
+        if phase == "after-cas" {
+            // A separate process really commits the new path to the same
+            // fixture SQLite before the hard kill; this is not a fake CAS.
+            let database = PathBuf::from(std::env::var_os("AKULA_QA_RENAME_DB").unwrap());
+            let id = std::env::var("AKULA_QA_RENAME_UUID").unwrap()
+                .parse::<Uuid>().unwrap();
+            let service = UiStateService::open(&database);
+            service.replace_workspace_path_after_move(
+                id, &source.to_string_lossy(), &destination.to_string_lossy(),
+            ).unwrap();
+        } else {
+            assert_eq!(phase, "after");
+        }
     }
     report(&marker);
     loop { thread::park_timeout(Duration::from_secs(60)); }
 }
 
-fn terminate_at(phase: &str, source: &Path, dest: &Path, marker: &Path) {
+fn terminate_at(phase: &str, source: &Path, dest: &Path, marker: &Path,
+                database: &Path, id: Uuid) {
     let child = Command::new(std::env::current_exe().unwrap())
         .arg("--exact").arg(CHILD_EXACT).arg("--nocapture")
         .env(CHILD_FLAG, "1")
@@ -59,6 +71,8 @@ fn terminate_at(phase: &str, source: &Path, dest: &Path, marker: &Path) {
         .env("AKULA_QA_RENAME_DEST", dest)
         .env("AKULA_QA_RENAME_MARKER", marker)
         .env("AKULA_QA_RENAME_PHASE", phase)
+        .env("AKULA_QA_RENAME_DB", database)
+        .env("AKULA_QA_RENAME_UUID", id.to_string())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn().unwrap();
@@ -88,13 +102,15 @@ fn check_hard_kill(phase: &str, expected: RecoveryView) {
     let journal_bytes = fs::read(&journal).unwrap();
     let before = stored_path(&service, intent.workspace_id);
     let marker = tmp.path().join(format!("{phase}-checkpoint"));
-    terminate_at(phase, &intent.source, &intent.destination, &marker);
-    // No implicit retry, change of root UUID, ACK, journal cleanup or rollback.
-    assert_eq!(stored_path(&service, intent.workspace_id), before);
+    terminate_at(phase, &intent.source, &intent.destination, &marker,
+        &tmp.path().join("ui-state.sqlite"), intent.workspace_id);
+    // The crash must preserve the exact registry state reached by the child.
+    let registered = if phase == "after-cas" { &intent.destination } else { &before };
+    assert_eq!(stored_path(&service, intent.workspace_id), *registered);
     assert_eq!(classify_journal_with_registry(&journal, &full_registry(&service)), expected);
     assert_eq!(fs::read(&journal).unwrap(), journal_bytes);
-    let current = if phase == "after" { &intent.destination } else { &intent.source };
-    let absent = if phase == "after" { &intent.source } else { &intent.destination };
+    let current = if phase == "before" { &intent.source } else { &intent.destination };
+    let absent = if phase == "before" { &intent.destination } else { &intent.source };
     assert!(!absent.exists());
     assert_eq!(fs::read_to_string(current.join("note.md")).unwrap(), "original");
     assert_eq!(fs::read(current.join(".aquilum/history/version.bin")).unwrap(), [0, 200, 255]);
@@ -108,4 +124,9 @@ fn killed_before_native_rename_remains_prepared_without_change() {
 #[test]
 fn killed_after_native_rename_before_sqlite_cas_requires_review() {
     check_hard_kill("after", RecoveryView::MovedWaitingForRegistry);
+}
+
+#[test]
+fn killed_after_sqlite_cas_before_journal_ack_requires_review() {
+    check_hard_kill("after-cas", RecoveryView::RegistryChangedWaitingForAck);
 }
