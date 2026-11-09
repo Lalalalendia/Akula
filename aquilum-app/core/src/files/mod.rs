@@ -11,7 +11,7 @@ pub mod relocate;
 pub mod trash;
 pub mod watcher;
 pub mod workspace;
-
+#[cfg(test)] mod workspace_no_replace_qa;
 #[cfg(test)]
 mod tests;
 

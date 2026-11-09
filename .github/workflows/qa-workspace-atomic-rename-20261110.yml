@@ -1,0 +1,34 @@
+name: QA atomic no-replace workspace sibling move (test-only)
+on:
+  push:
+    branches: [integration/qa-workspace-atomic-rename-20261110]
+permissions:
+  contents: read
+jobs:
+  linux:
+    name: Linux renameat2 NOREPLACE and SQLite regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Atomic no-replace folder tests
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --lib files::workspace_no_replace_qa -- --nocapture
+          cargo test --locked -p aquilum-core --lib ui_state
+  windows:
+    name: Windows MoveFileExW NOREPLACE and junction regression
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Atomic no-replace folder tests
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          cargo test --locked -p aquilum-core --lib files::workspace_no_replace_qa -- --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
