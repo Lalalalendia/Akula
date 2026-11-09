@@ -707,8 +707,19 @@ mod tests {
             thread::sleep(Duration::from_millis(180));
             assert!(!report.exists(),
                 "enrollment committed while ordinary primary/history held host epoch");
+            // Legacy Core writes under an externally held host epoch.
+            // Transition-selected Core::open must fail closed instead:
+            // only a verified host-bound Core can be admitted as a writer.
+            #[cfg(not(feature = "host-custody-transition-lab"))]
             gate::create(&core_b, &target, "prior content", Source::Me, None)
                 .unwrap();
+            #[cfg(feature = "host-custody-transition-lab")]
+            {
+                assert!(gate::create(
+                    &core_b, &target, "must HOLD", Source::Me, None,
+                ).is_err());
+                assert!(!target.exists());
+            }
             child
         }).unwrap();
         assert!(child.wait().unwrap().success());
@@ -724,7 +735,10 @@ mod tests {
             Err(HostCustodyError::ConflictingEnrollment)
         ));
         assert!(!attempted.get(), "epoch ran a mutation after enrollment");
+        #[cfg(not(feature = "host-custody-transition-lab"))]
         assert_eq!(fs::read_to_string(&target).unwrap(), "prior content");
+        #[cfg(feature = "host-custody-transition-lab")]
+        assert!(!target.exists(), "unbound Core must never have created the file");
         assert_eq!(host.inspect(&vault, record.root_identity).unwrap(), Some(record));
     }
 
