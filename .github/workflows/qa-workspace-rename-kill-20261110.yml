@@ -1,0 +1,58 @@
+name: QA crash-window process termination for workspace rename
+on:
+  push:
+    branches: [integration/qa-workspace-rename-e2e-20261110]
+    paths:
+      - aquilum-app/core/src/files/workspace_rename_recovery_qa/**
+      - aquilum-app/core/src/files/workspace_rename_recovery_qa.rs
+      - .github/workflows/qa-workspace-rename-kill-20261110.yml
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux child kill before/after rename
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Real child termination and journal classification
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --lib files::workspace_rename_recovery_qa::tests::integrated::kill -- --nocapture
+          cargo test --locked -p aquilum-core --lib files::workspace_rename_recovery_qa
+
+  windows:
+    name: Windows child kill before/after rename
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Real child termination and journal classification
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          cargo test --locked -p aquilum-core --lib files::workspace_rename_recovery_qa::tests::integrated::kill -- --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p aquilum-core --lib files::workspace_rename_recovery_qa
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  macos:
+    name: macOS child kill before/after rename
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Real child termination and journal classification
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --lib files::workspace_rename_recovery_qa::tests::integrated::kill -- --nocapture
+          cargo test --locked -p aquilum-core --lib files::workspace_rename_recovery_qa
