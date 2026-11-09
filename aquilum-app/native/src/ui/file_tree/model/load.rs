@@ -5,7 +5,7 @@ mod expand;
 mod win7_scan;
 use std::path::{Path, PathBuf};
 
-use aquilum_core::files::models::FileItemType;
+use aquilum_core::files::models::{FileItem, FileItemType};
 use aquilum_core::files::workspace::read_directory_impl;
 
 use super::{TreeModel, comparable};

@@ -6,7 +6,7 @@ use super::super::{FileTree, model};
 impl FileTree {
     /// The scan uses the same vetted directory reader as the tree: symlinks
     /// and internal data folders never enter the background index.
-    pub(super) fn reindex(&mut self) {
+    pub(in crate::ui::file_tree) fn reindex(&mut self) {
         let Some(root) = self.model.root().filter(|_| self.model.filtering()).map(Path::to_path_buf) else {
             self.indexing = None;
             return;

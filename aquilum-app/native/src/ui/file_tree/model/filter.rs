@@ -29,6 +29,10 @@ impl Filter {
     }
 }
 
+fn copy_item(item: &FileItem) -> FileItem {
+    FileItem { id: item.id.clone(), name: item.name.clone(), item_type: item.item_type }
+}
+
 fn keep(source: &Lists, filter: &Filter, dir: &Path, kept: &mut Lists) -> bool {
     let Some(items) = source.get(&comparable(dir)) else { return false };
     let survivors: Vec<FileItem> = items
@@ -37,7 +41,7 @@ fn keep(source: &Lists, filter: &Filter, dir: &Path, kept: &mut Lists) -> bool {
             let inside = item.item_type == FileItemType::Folder && keep(source, filter, Path::new(&item.id), kept);
             inside || filter.matches(&item.name)
         })
-        .cloned()
+        .map(copy_item)
         .collect();
     let any = !survivors.is_empty();
     if any {
@@ -81,7 +85,7 @@ impl TreeModel {
         }
         if self.index.is_some() && self.sort != Sort::NameAsc {
             if self.sort.by_time() {
-                let unknown: Vec<FileItem> = kept.values().flatten().filter(|item| !self.times.contains_key(&comparable(Path::new(&item.id)))).cloned().collect();
+                let unknown: Vec<FileItem> = kept.values().flatten().filter(|item| !self.times.contains_key(&comparable(Path::new(&item.id)))).map(copy_item).collect();
                 self.stamp(&unknown);
             }
             for items in kept.values_mut() {

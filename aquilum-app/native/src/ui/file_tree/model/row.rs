@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
     pub path: PathBuf,
