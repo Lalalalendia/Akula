@@ -880,6 +880,10 @@
     "close": "close"
   },
   "workspaces": {
+    "create": "Create knowledge base",
+    "newName": "New knowledge base",
+    "pickParent": "Choose parent folder for a new knowledge base",
+    "createFailed": "Could not create knowledge base: {{reason}}",
     "title": "Knowledge bases",
     "close": "Close the list of knowledge bases",
     "empty": "No saved bases yet",
