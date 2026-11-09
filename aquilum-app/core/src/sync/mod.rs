@@ -22,6 +22,8 @@ pub(crate) mod host_install_witness;
 mod host_install_unix_root;
 #[cfg(all(test, feature = "host-custody"))]
 mod host_core_epoch_tests;
+#[cfg(all(test, feature = "host-custody-transition-lab"))]
+mod host_core_transition_startup_qa;
 pub(crate) mod guarded_note_write;
 #[cfg(feature = "sync-s3")]
 pub(crate) mod guarded_editor;
