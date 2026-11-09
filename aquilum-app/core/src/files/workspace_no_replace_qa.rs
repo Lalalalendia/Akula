@@ -67,7 +67,7 @@ fn no_replace_directory_rename(source: &Path, destination: &Path) -> io::Result<
         Err(e) => return Err(e),
     }
 
-    #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         use rustix::fs::{renameat_with, RenameFlags};
         let pinned_parent = fs::File::open(source_parent)?;
@@ -83,6 +83,38 @@ fn no_replace_directory_rename(source: &Path, destination: &Path) -> io::Result<
             destination.file_name().ok_or_else(|| denied("missing destination leaf"))?,
             RenameFlags::NOREPLACE,
         ).map_err(Into::into);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::CString;
+        use std::os::fd::AsRawFd;
+        use std::os::raw::c_char;
+        use std::os::unix::ffi::OsStrExt;
+        unsafe extern "C" {
+            fn renameatx_np(
+                old_dirfd: i32, old_name: *const c_char,
+                new_dirfd: i32, new_name: *const c_char,
+                flags: u32,
+            ) -> i32;
+        }
+        const RENAME_EXCL: u32 = 0x0000_0004;
+        let old_name = CString::new(
+            source.file_name().ok_or_else(|| denied("missing source leaf"))?.as_bytes()
+        ).map_err(|_| io::Error::new(ErrorKind::InvalidInput, "embedded NUL in source name"))?;
+        let new_name = CString::new(
+            destination.file_name().ok_or_else(|| denied("missing destination leaf"))?.as_bytes()
+        ).map_err(|_| io::Error::new(ErrorKind::InvalidInput, "embedded NUL in destination name"))?;
+        // Apple renameatx_np atomically enforces RENAME_EXCL on APFS.
+        // Resolve both leaf names against the same open parent directory.
+        // No unguarded rename(), hardlink/unlink fallback, or copy/delete.
+        let pinned_parent = fs::File::open(source_parent)?;
+        let ok = unsafe {
+            renameatx_np(
+                pinned_parent.as_raw_fd(), old_name.as_ptr(),
+                pinned_parent.as_raw_fd(), new_name.as_ptr(), RENAME_EXCL,
+            )
+        };
+        return if ok == 0 { Ok(()) } else { Err(io::Error::last_os_error()) };
     }
     #[cfg(windows)]
     {
