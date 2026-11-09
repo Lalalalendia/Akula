@@ -56,6 +56,15 @@ impl App {
                 self.popup = Some(Popup::Workspaces(state));
                 return self.switch_workspace(root, path);
             }
+            (Some((path, _)), Some(RowAction::Duplicate)) => {
+                // Do not copy an active workspace with in-memory unsaved edits.
+                if self.tree.root().is_some_and(|root| workspaces::same_path(root, &path)) {
+                    state.forget = None;
+                    self.popup = Some(Popup::Workspaces(state));
+                    return Outcome::default();
+                }
+                self.start_duplicate_workspace(path);
+            }
             (Some((path, workspace)), Some(RowAction::Forget)) => {
                 let (title, description) = workspaces::forget_texts(&path);
                 let (layer, forget) = ConfirmDialog::new(&title, &description, &t("common.cancel"), &t("workspaces.forgetConfirm"));
