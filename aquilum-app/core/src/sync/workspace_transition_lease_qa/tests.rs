@@ -33,7 +33,7 @@ fn marker(path: &Path, contents: &[u8]) {
 fn wait_for(child: &mut Child, path: &Path, expected: &[u8]) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        if fs::read(path).as_deref() == Ok(expected) { return; }
+        if fs::read(path).is_ok_and(|bytes| bytes.as_slice() == expected) { return; }
         assert!(child.try_wait().unwrap().is_none(), "child died before checkpoint");
         assert!(Instant::now() < deadline, "child checkpoint timed out");
         thread::sleep(Duration::from_millis(20));
