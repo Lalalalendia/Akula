@@ -29,6 +29,7 @@ jobs:
           echo '=== BEGIN CARGO LOCK DIFF ==='
           git diff -- Cargo.lock
           echo '=== END CARGO LOCK DIFF ==='
+          git diff --exit-code -- Cargo.lock # the committed lock must equal Cargo's resolution
       - uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
         with:
           tool: cargo-audit@0.22.2
