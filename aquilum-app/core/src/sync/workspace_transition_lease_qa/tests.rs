@@ -151,6 +151,22 @@ fn cold_reopen_second_core_cannot_take_reserved_destination() {
 }
 
 #[test]
+fn occupied_destination_and_parent_traversal_are_denied_before_reservation() {
+    let (_tmp, db, source, request) = setup();
+    fs::write(&request.destination, b"occupied").unwrap();
+    assert!(observed_request(Uuid::new_v4(), Uuid::new_v4(),
+        &source, &request.destination).is_err());
+    assert_eq!(fs::read(&request.destination).unwrap(), b"occupied");
+    fs::remove_file(&request.destination).unwrap();
+    let alias = request.destination.parent().unwrap()
+        .join("inside").join("..").join("renamed-base");
+    assert!(observed_request(Uuid::new_v4(), Uuid::new_v4(),
+        &source, &alias).is_err());
+    assert!(FixtureLedger::open_existing(&db).unwrap().inspect().unwrap().is_empty());
+    assert_eq!(fs::read(source.join("chapter.md")).unwrap(), b"never alter bytes");
+}
+
+#[test]
 fn missing_or_damaged_host_fixture_never_becomes_an_empty_roster() {
     let (tmp, db, _source, request) = setup();
     let missing = tmp.path().join("missing-db");
