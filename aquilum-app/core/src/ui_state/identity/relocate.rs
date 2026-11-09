@@ -33,6 +33,25 @@ impl UiStateDatabase {
         }
         let destination_identity = identity(Path::new(destination_path));
         let transaction = self.connection.transaction()?;
+        // UI-state list_workspaces deliberately returns display paths: the
+        // stored SQLite value can still start with the Windows \\?\ prefix.
+        // Read the exact raw row under this transaction and CAS against it.
+        // Lexical identity is comparison only, never filesystem authority.
+        let stored: Option<String> = transaction.query_row(
+            "SELECT path FROM workspaces WHERE id = ?1",
+            [workspace_id.to_string()],
+            |row| row.get(0),
+        ).optional()?;
+        let Some(stored) = stored else {
+            return Err(UiStateError::InvalidInput {
+                message: "workspace ID is no longer registered".into(),
+            });
+        };
+        if identity(Path::new(&stored)) != identity(Path::new(expected_old_path)) {
+            return Err(UiStateError::InvalidInput {
+                message: "workspace path changed since preflight".into(),
+            });
+        }
         {
             let mut statement = transaction.prepare(
                 "SELECT path FROM workspaces WHERE id <> ?1"
@@ -52,7 +71,7 @@ impl UiStateDatabase {
             "UPDATE workspaces SET path = ?3
              WHERE id = ?1 AND path = ?2
                AND NOT EXISTS (SELECT 1 FROM workspaces WHERE path = ?3)",
-            params![workspace_id.to_string(), expected_old_path, destination_path],
+            params![workspace_id.to_string(), &stored, destination_path],
         )?;
         if changed != 1 {
             return Err(UiStateError::InvalidInput {
@@ -128,6 +147,26 @@ mod tests {
         ).is_err());
         assert_eq!(db.resolve_workspace("C:/caf\u{e9}", 3).unwrap(), other);
         assert_eq!(db.list_workspaces().unwrap().len(), 2);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cas_uses_raw_registered_path_when_windows_display_strips_verbatim_prefix() {
+        let (mut db, workspace, _, _) = setup();
+        let raw = r"\\?\C:\notes";
+        db.connection.execute(
+            "UPDATE workspaces SET path = ?1 WHERE id = ?2",
+            params![raw, workspace.to_string()],
+        ).unwrap();
+        let displayed = db.list_workspaces().unwrap().into_iter()
+            .find(|known| known.id == workspace).unwrap().path;
+        assert!(!displayed.starts_with(r"\\?\"), "display path must omit NT prefix");
+        db.replace_workspace_path_after_move(workspace, &displayed, "C:/renamed").unwrap();
+        let known = db.list_workspaces().unwrap();
+        assert_eq!(known.len(), 1);
+        assert_eq!(known[0].id, workspace);
+        assert_eq!(known[0].path, "C:/renamed");
+        assert!(db.replace_workspace_path_after_move(workspace, &displayed, "C:/again").is_err());
     }
 
     #[test]
