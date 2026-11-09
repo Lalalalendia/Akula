@@ -89,3 +89,5 @@ fn registry_race_after_preflight_does_not_erase_moved_data_or_reassign_uuid() {
     assert_eq!(fs::read_to_string(intent.destination.join("note.md")).unwrap(), "original");
     assert!(journal.is_file());
 }
+
+mod kill;
