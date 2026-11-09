@@ -47,8 +47,9 @@ impl App {
             return outcome;
         }
         if pressed && (id == dialog.open_folder || id == dialog.create_new) {
+            let creating = id == dialog.create_new;
             self.popup = Some(Popup::Workspaces(state));
-            return if id == dialog.create_new { self.pick_new_workspace() } else { self.pick_workspace(root) };
+            return if creating { self.pick_new_workspace() } else { self.pick_workspace(root) };
         }
         let row = dialog.rows.iter().find(|(row, _, _)| *row == id).map(|(_, path, uuid)| (path.clone(), *uuid));
         match (row, action.downcast_ref::<RowAction>()) {
