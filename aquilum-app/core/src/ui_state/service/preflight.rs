@@ -150,7 +150,9 @@ mod tests {
 
     fn setup() -> (tempfile::TempDir, UiStateService, Uuid, PathBuf) {
         let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join("Knowledge");
+        // macOS /var can be a symlink to /private/var. Canonicalize only the
+        // disposable test parent; runtime path admission must remain strict.
+        let root = fs::canonicalize(temp.path()).unwrap().join("Knowledge");
         fs::create_dir(&root).unwrap();
         fs::write(root.join("keep.md"), "original").unwrap();
         let service = UiStateService::open(&temp.path().join("state.sqlite"));
