@@ -1,4 +1,4 @@
-# QA-only installed Akula filename acceptance after native rename safety (#913).
+﻿# QA-only installed Akula filename acceptance after native rename safety (#913).
 # Run ONLY on disposable GitHub-hosted Windows PowerShell STA; never on a user vault.
 param(
   [Parameter(Mandatory = $true)][string]$ExePath,
