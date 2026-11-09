@@ -57,6 +57,18 @@ fn check_real_directory(path: &Path) -> Result<(), UiStateError> {
     Ok(())
 }
 
+fn check_plain_ancestry(path: &Path) -> Result<(), UiStateError> {
+    // Validate each ancestor independently. Windows canonicalize() may
+    // legitimately return a verbatim-prefixed, case-adjusted or long-name
+    // spelling; equality of path strings is not a security boundary.
+    for ancestor in path.ancestors() {
+        if !ancestor.as_os_str().is_empty() {
+            check_real_directory(ancestor)?;
+        }
+    }
+    Ok(())
+}
+
 fn is_inside(child: &Path, parent: &Path) -> bool {
     let child = identity(child);
     let parent = identity(parent);
@@ -80,14 +92,15 @@ impl UiStateService {
         let selected = all.iter().find(|w| w.id == workspace_id)
             .ok_or_else(|| deny("workspace ID is no longer registered"))?;
         let source = PathBuf::from(&selected.path);
-        check_real_directory(&source)?;
+        check_plain_ancestry(&source)?;
         let canonical = fs::canonicalize(&source)?;
-        if identity(&source) != identity(&canonical) {
+        if !cfg!(windows) && identity(&source) != identity(&canonical) {
             return Err(deny("workspace root is not a stable canonical path"));
         }
         let parent = source.parent().ok_or_else(|| deny("cannot rename a volume root"))?;
         check_real_directory(parent)?;
-        if identity(&fs::canonicalize(parent)?) != identity(parent) {
+        let canonical_parent = fs::canonicalize(parent)?;
+        if !cfg!(windows) && identity(&canonical_parent) != identity(parent) {
             return Err(deny("workspace parent resolves through an alias"));
         }
         if let Some(active) = active_workspace {
@@ -191,6 +204,27 @@ mod tests {
         fs::remove_file(root.join("keep.md")).unwrap();
         fs::remove_dir(&root).unwrap();
         assert!(service.plan_inactive_workspace_rename(uuid, "Other", None).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_ancestor_junction_is_not_an_admissible_root() {
+        use std::process::Command;
+        let temp = tempfile::tempdir().unwrap();
+        let real = temp.path().join("Real");
+        let root = real.join("Knowledge");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("keep.md"), "intact").unwrap();
+        let junction = temp.path().join("Junction");
+        let output = Command::new("cmd").arg("/C").arg("mklink").arg("/J")
+            .arg(&junction).arg(&real).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let aliased_root = junction.join("Knowledge");
+        let svc = UiStateService::open(&temp.path().join("ui.sqlite"));
+        let uuid = svc.resolve_workspace(&aliased_root.to_string_lossy(), 1).unwrap();
+        assert!(svc.plan_inactive_workspace_rename(uuid, "New", None).is_err());
+        assert_eq!(fs::read_to_string(root.join("keep.md")).unwrap(), "intact");
+        assert!(!temp.path().join("New").exists());
     }
 
     #[cfg(unix)]
