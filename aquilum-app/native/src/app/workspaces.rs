@@ -1,5 +1,6 @@
 mod actions;
 mod create;
+mod duplicate;
 mod close;
 mod switch;
 
