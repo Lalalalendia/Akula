@@ -15,6 +15,7 @@ use crate::ui::{icons, text, theme};
 pub enum RowAction {
     Open,
     Forget,
+    Duplicate,
 }
 
 pub struct WorkspaceRow {
@@ -22,6 +23,7 @@ pub struct WorkspaceRow {
     path: String,
     current: bool,
     forget_hovered: bool,
+    duplicate_hovered: bool,
     forget: Tween,
     press: Press,
     name_line: text::Line,
@@ -38,11 +40,18 @@ impl WorkspaceRow {
             path: path.to_owned(),
             current,
             forget_hovered: false,
+            duplicate_hovered: false,
             forget: Tween::new(0.0, FAST, EASE_OUT),
             press: Press::default(),
             name_line: text::Line::default(),
             path_line: text::Line::default(),
         })
+    }
+
+    fn duplicate_rect(&self, bounds: Rect) -> Rect {
+        let x = bounds.x1 - size::SPACE_8 - FORGET * 2.0 - size::SPACE_4;
+        let y = bounds.center().y - FORGET / 2.0;
+        Rect::new(x, y, x + FORGET, y + FORGET)
     }
 
     fn forget_rect(&self, bounds: Rect) -> Rect {
@@ -59,6 +68,11 @@ impl Widget for WorkspaceRow {
         let bounds = ctx.content_box();
         if let PointerEvent::Move(update) = event {
             let over = self.forget_rect(bounds).contains(ctx.local_position(update.current.position));
+            let duplicate = self.duplicate_rect(bounds).contains(ctx.local_position(update.current.position));
+            if duplicate != self.duplicate_hovered {
+                self.duplicate_hovered = duplicate;
+                ctx.request_paint_only();
+            }
             if over != self.forget_hovered {
                 self.forget_hovered = over;
                 ctx.request_paint_only();
@@ -66,7 +80,10 @@ impl Widget for WorkspaceRow {
         }
         if let Some(e) = self.press.click(ctx, event) {
             let forget = self.forget_rect(bounds).contains(ctx.local_position(e.state.position));
-            if forget || !self.current { ctx.submit_action::<RowAction>(if forget { RowAction::Forget } else { RowAction::Open }); }
+            let duplicate = self.duplicate_rect(bounds).contains(ctx.local_position(e.state.position));
+            if forget || duplicate || !self.current {
+                ctx.submit_action::<RowAction>(if forget { RowAction::Forget } else if duplicate { RowAction::Duplicate } else { RowAction::Open });
+            }
         }
     }
 
@@ -87,6 +104,7 @@ impl Widget for WorkspaceRow {
         match event {
             Update::HoveredChanged(hovered) => {
                 self.forget_hovered = false;
+                self.duplicate_hovered = false;
                 if self.forget.set(if *hovered { 1.0 } else { 0.0 }) {
                     ctx.request_anim_frame();
                 }
@@ -128,7 +146,7 @@ impl Widget for WorkspaceRow {
             icons::CHECK.draw(painter, Point::new(bounds.x0 + gutter, bounds.center().y - icon / 2.0), icon, 1.2, t.icon_primary);
         }
         let text_x = bounds.x0 + gutter + icon + size::SPACE_8;
-        let right = bounds.x1 - size::SPACE_8 - FORGET - size::SPACE_4;
+        let right = bounds.x1 - size::SPACE_8 - FORGET * 2.0 - size::SPACE_4 * 2.0;
         let width = (right - text_x).max(0.0);
         let style = text::Style::ui(size::SIZE_20);
         let top = bounds.center().y - size::SIZE_20;
@@ -137,6 +155,11 @@ impl Widget for WorkspaceRow {
         let path = self.path_line.layout(ctx, &self.path, width, style);
         render_text(painter, Affine::translate((text_x, top + size::SIZE_20)), path, &[t.text_tertiary.into()], true);
         let alpha = self.forget.value() as f32;
+        if alpha > 0.0 {
+            let rect = self.duplicate_rect(bounds);
+            let icon_color = if self.duplicate_hovered { t.icon_primary } else { t.text_tertiary };
+            icons::FOLDER_PLUS.draw(painter, Point::new(rect.x0 + 3.0, rect.y0 + 3.0), FORGET - 6.0, 1.2, icon_color);
+        }
         if alpha > 0.0 {
             paint_close(painter, self.forget_rect(bounds), self.forget_hovered, alpha);
         }
