@@ -77,6 +77,9 @@ save-stage-probe = []
 sync-engine = []
 # Installer-wide local File Gate enrollment epoch; no network or AWS SDK.
 host-custody = []
+# Non-shipping v2 installer-ledger lab: persist and fence BOTH workspace paths.
+# Explicitly provision v2; schema v1 never auto-migrates and always HOLDs.
+host-custody-transition-lab = ["host-custody"]
 # OS-protected transport key, no peer grants.
 p2p-device-identity = ["dep:windows"]
 # Owner-signed read-only roster lab; not pairing, identity or Vault grants.
