@@ -1,10 +1,10 @@
+mod relocate;
 use super::database::UiStateDatabase;
 use super::error::UiStateError;
 use super::models::KnownWorkspace;
 use super::paths::display_workspace;
 use rusqlite::{params, OptionalExtension};
 use uuid::Uuid;
-
 fn parse_uuid(value: String) -> Result<Uuid, UiStateError> {
     Uuid::parse_str(&value).map_err(|error| UiStateError::Database {
         message: error.to_string(),

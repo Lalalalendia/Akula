@@ -196,3 +196,5 @@ fn unique_uncontested_registry_snapshot_preserves_three_observational_states() {
     assert_eq!(classify_journal_with_registry(&journal,
         &[(intent.workspace_id, intent.destination.clone())]), RecoveryView::RegistryChangedWaitingForAck);
 }
+
+mod integrated;
