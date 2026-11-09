@@ -12,15 +12,32 @@ impl UiStateDatabase {
         expected_old_path: &str,
         destination_path: &str,
     ) -> Result<(), UiStateError> {
-        if expected_old_path.trim().is_empty()
-            || destination_path.trim().is_empty()
-            || expected_old_path == destination_path
+        // A direct string comparison does not detect equivalent spellings
+        // (trailing separators, Unicode normalization, or Windows case folding).
+        // This is registry integrity only, NOT permission for a disk rename.
+        if invalid_workspace_path(expected_old_path)
+            || invalid_workspace_path(destination_path)
+            || identity(Path::new(expected_old_path)) == identity(Path::new(destination_path))
         {
             return Err(UiStateError::InvalidInput {
-                message: "workspace paths must be nonempty and different".into(),
+                message: "workspace paths must be valid and distinguishable".into(),
             });
         }
+        let destination_identity = identity(Path::new(destination_path));
         let transaction = self.connection.transaction()?;
+        {
+            let mut statement = transaction.prepare(
+                "SELECT path FROM workspaces WHERE id <> ?1"
+            )?;
+            let paths = statement.query_map([workspace_id.to_string()], |row| row.get::<_, String>(0))?;
+            for path in paths {
+                if identity(Path::new(&path?)) == destination_identity {
+                    return Err(UiStateError::InvalidInput {
+                        message: "destination aliases an already registered workspace".into(),
+                    });
+                }
+            }
+        }
         // CAS by both UUID and prior path; never create a second workspace ID
         // or reassign another workspace's documents, tabs or view states.
         let changed = transaction.execute(
@@ -82,10 +99,27 @@ mod tests {
         assert!(db.replace_workspace_path_after_move(workspace, "C:/notes", "C:/other").is_err());
         assert!(db.replace_workspace_path_after_move(workspace, "C:/notes", "").is_err());
         assert!(db.replace_workspace_path_after_move(workspace, "C:/notes", "C:/notes").is_err());
+        assert!(db.replace_workspace_path_after_move(workspace, "C:/notes", "C:/notes/").is_err());
+        assert!(db.replace_workspace_path_after_move(workspace, "C:/notes", "C:/other/").is_err());
+        assert!(db.replace_workspace_path_after_move(workspace, "C:/notes", "C:/bad/../dir").is_err());
+        assert!(db.replace_workspace_path_after_move(workspace, "C:/notes", "C:/bad/./dir").is_err());
+        #[cfg(windows)]
+        assert!(db.replace_workspace_path_after_move(workspace, "C:/notes", "c:/OTHER").is_err());
         let list = db.list_workspaces().unwrap();
         assert!(list.iter().any(|w| w.id == workspace && w.path == "C:/notes"));
         assert!(list.iter().any(|w| w.id == other && w.path == "C:/other"));
         assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn unicode_normalization_cannot_alias_another_registered_workspace() {
+        let (mut db, workspace, _, _) = setup();
+        let other = db.resolve_workspace("C:/caf\u{e9}", 2).unwrap();
+        assert!(db.replace_workspace_path_after_move(
+            workspace, "C:/notes", "C:/cafe\u{301}"
+        ).is_err());
+        assert_eq!(db.resolve_workspace("C:/caf\u{e9}", 3).unwrap(), other);
+        assert_eq!(db.list_workspaces().unwrap().len(), 2);
     }
 
     #[test]
