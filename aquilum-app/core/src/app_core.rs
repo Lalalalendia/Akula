@@ -170,14 +170,24 @@ impl Core {
     pub fn open_with_installed_host(
         app_data_dir: &Path, host_custody_db: &Path, events: Arc<dyn EventSink>,
     ) -> Arc<Self> {
-        // Compiled-installed binaries must not let even this constructor
-        // substitute a caller-provisioned empty private SQLite registry.
-        #[cfg(feature = "sync-installed-host")]
+        // A compiled transition lab must also refuse an appdata-supplied,
+        // apparently valid *foreign* host SQLite. Only a compile-time source
+        // may be selected by either public constructor in non-test builds.
+        // Existing unit tests may bind disposable fixture ledgers via this
+        // explicit constructor; this exemption is unavailable to any shipped
+        // dependent crate, native executable or integration-test binary.
+        #[cfg(any(
+            feature = "sync-installed-host",
+            all(feature = "host-custody-transition-lab", not(test))
+        ))]
         let trusted = option_env!("AKULA_INSTALLED_HOST_CUSTODY_DB")
             .map(PathBuf::from)
             .filter(|path| path.is_absolute() && path.file_name().is_some())
             .filter(|path| path == host_custody_db);
-        #[cfg(not(feature = "sync-installed-host"))]
+        #[cfg(all(
+            not(feature = "sync-installed-host"),
+            any(not(feature = "host-custody-transition-lab"), test)
+        ))]
         let trusted = host_custody_db.is_absolute().then(|| host_custody_db.to_path_buf());
         Self::open_inner(app_data_dir, events, trusted, true)
     }
