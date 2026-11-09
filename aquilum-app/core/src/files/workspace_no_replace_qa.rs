@@ -67,7 +67,7 @@ fn no_replace_directory_rename(source: &Path, destination: &Path) -> io::Result<
         Err(e) => return Err(e),
     }
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
     {
         use rustix::fs::{renameat_with, RenameFlags};
         let pinned_parent = fs::File::open(source_parent)?;
@@ -99,7 +99,7 @@ fn no_replace_directory_rename(source: &Path, destination: &Path) -> io::Result<
         let ok = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) };
         return if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(()) };
     }
-    #[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
+    #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", windows)))]
     {
         let _ = source_parent;
         Err(io::Error::new(ErrorKind::Unsupported, "no verified native no-replace move on this OS"))
@@ -114,7 +114,9 @@ mod tests {
 
     fn root() -> (tempfile::TempDir, std::path::PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
-        let from = tmp.path().join("Original");
+        // Canonical temp root prevents macOS /var -> /private/var alias from
+    // accidentally passing an untrusted symlink ancestor into the rename.
+    let from = fs::canonicalize(tmp.path()).unwrap().join("Original");
         fs::create_dir(&from).unwrap();
         fs::write(from.join("chapter.md"), "Original text").unwrap();
         (tmp, from)
@@ -126,7 +128,7 @@ mod tests {
         fs::create_dir(source.join("media")).unwrap();
         fs::write(source.join("media/image.bin"), [0_u8, 255, 1]).unwrap();
         let destination = source.with_file_name("Renamed");
-        if !cfg!(any(target_os = "linux", target_os = "android", windows)) {
+        if !cfg!(any(target_os = "linux", target_os = "android", target_os = "macos", windows)) {
             assert_eq!(no_replace_directory_rename(&source, &destination).unwrap_err().kind(), ErrorKind::Unsupported);
             return;
         }
@@ -171,12 +173,12 @@ mod tests {
 
     #[test]
     fn two_sources_racing_for_one_destination_never_overwrite() {
-        if !cfg!(any(target_os = "linux", target_os = "android", windows)) { return; }
+        if !cfg!(any(target_os = "linux", target_os = "android", target_os = "macos", windows)) { return; }
         let (tmp, first) = root();
-        let second = tmp.path().join("Second");
+        let second = first.with_file_name("Second");
         fs::create_dir(&second).unwrap();
         fs::write(second.join("chapter.md"), "Second text").unwrap();
-        let dest = tmp.path().join("Destination");
+        let dest = first.with_file_name("Destination");
         let barrier = Arc::new(Barrier::new(3));
         let joins: Vec<_> = [first.clone(), second.clone()].into_iter().map(|from| {
             let target = dest.clone();

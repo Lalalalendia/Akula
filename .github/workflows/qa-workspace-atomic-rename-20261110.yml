@@ -32,3 +32,18 @@ jobs:
         run: |
           cargo test --locked -p aquilum-core --lib files::workspace_no_replace_qa -- --nocapture
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  macos:
+    name: macOS renameatx_np NOREPLACE and SQLite regression
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: No-replace whole-folder rename test on macOS
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --lib files::workspace_no_replace_qa -- --nocapture
+          cargo test --locked -p aquilum-core --lib ui_state
