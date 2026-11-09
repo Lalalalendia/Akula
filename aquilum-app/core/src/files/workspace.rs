@@ -1,9 +1,13 @@
-use crate::search::paths::{is_hidden_name, is_markdown};
+use crate::search::paths::is_hidden_name;
 use super::attachments::MEDIA_EXTENSIONS;
 use super::error::FileCommandError;
 use super::models::{FileItem, FileItemType};
 use std::fs;
 use std::path::Path;
+
+mod existing;
+mod reparse;
+pub use existing::existing_files_impl;
 
 // Structured formats are listed like attachments until native dedicated views exist.
 // Never treat them as Markdown notes or send their content to the text editor.
@@ -28,23 +32,8 @@ pub fn read_directory_impl(path: &Path) -> Result<Vec<FileItem>, FileCommandErro
             Err(_) => continue,
         };
 
-        if is_hidden_name(&entry.file_name()) || file_type.is_symlink() {
+        if is_hidden_name(&entry.file_name()) || file_type.is_symlink() || reparse::is_reparse(&path) {
             continue;
-        }
-
-        // On Windows, junctions and other reparse points may not be reported
-        // as symbolic links. Never list them as navigable workspace entries.
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt;
-            const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-            let metadata = match fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(_) => continue,
-            };
-            if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-                continue;
-            }
         }
 
         let id = path.to_string_lossy().into_owned();
@@ -98,15 +87,6 @@ pub fn read_directory_impl(path: &Path) -> Result<Vec<FileItem>, FileCommandErro
     Ok(items)
 }
 
-pub fn existing_files_impl(paths: Vec<String>) -> Vec<String> {
-    paths
-        .into_iter()
-        .filter(|value| {
-            let path = Path::new(value);
-            path.is_file() && is_markdown(path)
-        })
-        .collect()
-}
 
 #[cfg(all(test, windows))]
 #[path = "workspace/tests.rs"]
