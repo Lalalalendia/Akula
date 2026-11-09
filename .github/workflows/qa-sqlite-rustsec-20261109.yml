@@ -45,3 +45,23 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --lib ui_state
+      - name: Full Core library regression (SQLite, history, search, File Gate)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --lib
+
+  windows-sqlite-core:
+    name: Windows SQLite UI-state smoke
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Windows SQLite and UI-state integration
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          cargo test --locked -p aquilum-core --lib ui_state
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
