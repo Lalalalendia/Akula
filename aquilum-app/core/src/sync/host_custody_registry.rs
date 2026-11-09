@@ -13,6 +13,8 @@
 //! schema is an error, not an empty enrollment roster.
 
 use super::VaultId;
+#[cfg(feature = "host-custody-transition-lab")]
+mod transition_reservation;
 use super::host_ledger_identity::{HostLedgerIdentity, HostLedgerObjectIds};
 use rusqlite::{params, Connection, OpenFlags, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -21,7 +23,10 @@ use std::path::Path;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+#[cfg(not(feature = "host-custody-transition-lab"))]
 const SCHEMA_VERSION: i64 = 1;
+#[cfg(feature = "host-custody-transition-lab")]
+const SCHEMA_VERSION: i64 = 2;
 const MAX_RECORD_BYTES: usize = 4096;
 const MAX_HOST_RECORDS: usize = 1024;
 
@@ -148,10 +153,21 @@ impl SharedHostCustodyRegistry {
                  root_path TEXT NOT NULL UNIQUE,
                  record_json BLOB NOT NULL,
                  record_blake3 TEXT NOT NULL
-             );
-             PRAGMA user_version = 1;
-             COMMIT;",
+             );",
         )?;
+        #[cfg(feature = "host-custody-transition-lab")]
+        conn.execute_batch(
+            "CREATE TABLE workspace_transitions (
+                operation_id TEXT NOT NULL PRIMARY KEY,
+                workspace_id TEXT NOT NULL UNIQUE,
+                source_path TEXT NOT NULL,
+                destination_path TEXT NOT NULL,
+                root_key TEXT NOT NULL UNIQUE,
+                record_json BLOB NOT NULL,
+                record_blake3 TEXT NOT NULL
+            );",
+        )?;
+        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"))?;
         identity.recheck()?;
         Ok(Self { conn, identity })
     }
@@ -232,6 +248,8 @@ impl SharedHostCustodyRegistry {
                 decode_row(row)?;
             }
         }
+        #[cfg(feature = "host-custody-transition-lab")]
+        transition_reservation::all(&conn)?;
         identity.recheck()?;
         if let Some(expected) = expected {
             identity.require_expected(expected)?;
@@ -260,6 +278,12 @@ impl SharedHostCustodyRegistry {
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let sidecars = self.identity.sidecars()?;
         self.identity.recheck()?;
+        #[cfg(feature = "host-custody-transition-lab")]
+        if transition_reservation::reserved(
+            &tx, Path::new(&record.root_path), record.root_identity,
+        )? {
+            return Err(HostCustodyError::ConflictingEnrollment);
+        }
         let existing = lookup(&tx, &key, &record.root_path)?;
         if let Some(previous) = existing {
             if previous != *record {
@@ -316,6 +340,12 @@ impl SharedHostCustodyRegistry {
         let sidecars = self.identity.sidecars()?;
         self.identity.recheck()?;
         // Enrollment cannot commit between lookup and the full publication.
+        #[cfg(feature = "host-custody-transition-lab")]
+        if transition_reservation::reserved(
+            &transaction, Path::new(&root), root_identity,
+        )? {
+            return Err(HostCustodyError::ConflictingEnrollment);
+        }
         if lookup(&transaction, &root_identity.key(), &root)?.is_some() {
             return Err(HostCustodyError::ConflictingEnrollment);
         }
@@ -349,6 +379,12 @@ impl SharedHostCustodyRegistry {
         }
         self.identity.recheck()?;
         let root = normalized_root_for_lookup(root_path)?;
+        #[cfg(feature = "host-custody-transition-lab")]
+        if transition_reservation::reserved(
+            &self.conn, Path::new(&root), root_identity,
+        )? {
+            return Err(HostCustodyError::ConflictingEnrollment);
+        }
         let found = lookup(&self.conn, &root_identity.key(), &root)?;
         if let Some(ref record) = found {
             if record.root_path != root || record.root_identity != root_identity {
