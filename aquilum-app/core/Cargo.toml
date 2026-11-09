@@ -151,7 +151,7 @@ blake3 = "1.8.5"
 # M1d-f1: inert OS-key-provided AEAD archive envelope; no SQLite activation.
 ring = "0.17.14"
 zeroize = "1.9.0"
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 uuid = { version = "1.23.5", features = ["v4", "serde"] }
 tantivy = { version = "0.26.1", default-features = false, features = ["mmap", "lz4-compression", "stemmer"] }
 rust-stemmers = "1.2.0"
