@@ -78,10 +78,16 @@ fn observed_request(operation: Uuid, workspace: Uuid,
     }
     let source = fs::canonicalize(source).map_err(|_| Denial::UntrustedOrInvalid)?;
     let parent = source.parent().ok_or(Denial::UntrustedOrInvalid)?;
+    // Windows verbatim-path parsing and PathBuf::push may normalize away
+    // dot segments. Inspect the supplied spelling BEFORE any path-based
+    // normalization as well as checking Components on Unix.
+    let written = destination.to_string_lossy().replace('\\', "/");
+    let dot_segment = written.split('/').any(|part| part == "." || part == "..");
     if !destination.is_absolute()
         || identity(parent) != identity(destination.parent().ok_or(Denial::UntrustedOrInvalid)?)
         || overlap(&source, destination)
         || destination.file_name().is_none()
+        || dot_segment
         || destination.components().any(|c| matches!(
             c, std::path::Component::CurDir | std::path::Component::ParentDir
         ))
