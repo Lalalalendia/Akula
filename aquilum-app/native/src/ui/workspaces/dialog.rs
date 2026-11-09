@@ -12,7 +12,6 @@ use crate::ui::text::selectable;
 use crate::ui::tokens::size;
 use crate::ui::widgets::{IconButton, Leading, Rule, TextButton, Variant};
 use crate::ui::{icons, search, theme};
-
 pub struct WorkspaceDialog {
     pub layer: WidgetId,
     pub close: WidgetId,
@@ -56,6 +55,7 @@ pub fn dialog(workspaces: &[(uuid::Uuid, String)], current: Option<&Path>, error
         .cross_axis_alignment(CrossAxisAlignment::Stretch)
         .with_fixed(header(&t("workspaces.title"), Some(close)))
         .with_fixed(border())
+        .with_fixed(NewWidget::new(Flex::row().with(selectable(&t("workspaces.copyHint"), |t| t.text_tertiary, None, Leading::Px(size::SIZE_20 as f32)), 1.0)).with_props(PropertySet::new().with(Padding::all(Length::px(size::DIALOG_PADDING)))))
         .with(NewWidget::new(ScrollArea::new(list)), 1.0);
     if let Some(error) = error {
         let error = NewWidget::new(Flex::row().with(selectable(error, |t| t.text_danger, None, Leading::Px(size::SIZE_20 as f32)), 1.0)).with_props(
