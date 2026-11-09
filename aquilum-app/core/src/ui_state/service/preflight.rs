@@ -105,12 +105,13 @@ impl UiStateService {
         }
         if let Some(active) = active_workspace {
             let active = fs::canonicalize(active)?;
-            if is_inside(&source, &active) || is_inside(&active, &source) {
+            if is_inside(&canonical, &active) || is_inside(&active, &canonical) {
                 return Err(deny("active workspace must be closed before planning"));
             }
         }
         let destination = parent.join(proposed_name);
-        if identity(&source) == identity(&destination) {
+        let physical_destination = canonical_parent.join(proposed_name);
+        if identity(&canonical) == identity(&physical_destination) {
             return Err(deny("workspace name does not change its path"));
         }
         // Check existing files, directories and links. Any error other than
@@ -127,10 +128,10 @@ impl UiStateService {
             let other_path = fs::canonicalize(&other.path)?;
             // A registered descendant or ancestor makes whole-root moves
             // ambiguous for File Gate, history ownership and sync enrollment.
-            if is_inside(&source, &other_path)
-                || is_inside(&other_path, &source)
-                || is_inside(&destination, &other_path)
-                || is_inside(&other_path, &destination)
+            if is_inside(&canonical, &other_path)
+                || is_inside(&other_path, &canonical)
+                || is_inside(&physical_destination, &other_path)
+                || is_inside(&other_path, &physical_destination)
             {
                 return Err(deny("nested or overlapping registered workspace"));
             }
