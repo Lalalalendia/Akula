@@ -1,0 +1,46 @@
+name: QA knowledge-base content copy with security-fixed SQLite
+on:
+  push:
+    branches: [integration/qa-workspace-copy-sqlite-20261109]
+permissions:
+  contents: read
+jobs:
+  linux-copy:
+    name: Linux content-only duplicate tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native Rust dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: RustSec on both lockfiles
+        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        with:
+          tool: cargo-audit@0.22.2
+      - name: RustSec lockfile check
+        run: |
+          set -euo pipefail
+          cargo audit --no-yanked --file aquilum-app/Cargo.lock
+          cargo audit --no-yanked --no-fetch --file aquilum-app/host-broker-lab/Cargo.lock
+      - name: Copy and workspace UI tests
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --bin aquilum-native app::workspaces::actions::duplicate -- --nocapture
+          cargo test --locked -p aquilum-native --bin aquilum-native app::tests::panels::workspaces -- --nocapture
+  windows-copy:
+    name: Windows copy and reparse-point regression
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Windows knowledge-base duplication tests
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          cargo test --locked -p aquilum-native --bin aquilum-native app::workspaces::actions::duplicate -- --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
