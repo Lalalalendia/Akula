@@ -158,3 +158,41 @@ fn journal_inside_vault_is_rejected() {
     assert_eq!(write_new_journal(&bad, &intent).unwrap_err().kind(), ErrorKind::InvalidData);
     assert!(!bad.exists());
 }
+
+#[test]
+fn complete_registry_snapshot_rejects_foreign_destination_and_nested_vault() {
+    let (_temp, intent, journal) = fixture();
+    write_new_journal(&journal, &intent).unwrap();
+    let source_registry = (intent.workspace_id, intent.source.clone());
+    let foreign = Uuid::new_v4();
+    let collision = vec![source_registry.clone(), (foreign, intent.destination.clone())];
+    assert_eq!(classify_journal_with_registry(&journal, &collision), RecoveryView::Hold);
+    let nested = vec![source_registry.clone(), (foreign, intent.source.join("Nested"))];
+    assert_eq!(classify_journal_with_registry(&journal, &nested), RecoveryView::Hold);
+    let ancestor = vec![source_registry, (foreign, intent.source.parent().unwrap().to_path_buf())];
+    assert_eq!(classify_journal_with_registry(&journal, &ancestor), RecoveryView::Hold);
+    assert!(intent.source.join("note.md").is_file());
+    assert!(!intent.destination.exists());
+}
+
+#[test]
+fn registry_snapshot_requires_exactly_one_selected_uuid() {
+    let (_temp, intent, journal) = fixture();
+    write_new_journal(&journal, &intent).unwrap();
+    assert_eq!(classify_journal_with_registry(&journal, &[]), RecoveryView::Hold);
+    let own = (intent.workspace_id, intent.source.clone());
+    assert_eq!(classify_journal_with_registry(&journal, &[own.clone(), own]), RecoveryView::Hold);
+}
+
+#[test]
+fn unique_uncontested_registry_snapshot_preserves_three_observational_states() {
+    let (_temp, intent, journal) = fixture();
+    write_new_journal(&journal, &intent).unwrap();
+    assert_eq!(classify_journal_with_registry(&journal,
+        &[(intent.workspace_id, intent.source.clone())]), RecoveryView::Prepared);
+    fs::rename(&intent.source, &intent.destination).unwrap(); // test fixture only
+    assert_eq!(classify_journal_with_registry(&journal,
+        &[(intent.workspace_id, intent.source.clone())]), RecoveryView::MovedWaitingForRegistry);
+    assert_eq!(classify_journal_with_registry(&journal,
+        &[(intent.workspace_id, intent.destination.clone())]), RecoveryView::RegistryChangedWaitingForAck);
+}
