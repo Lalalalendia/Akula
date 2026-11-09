@@ -1,6 +1,7 @@
 //! Copy a known source tree into a reserved, fresh directory. This is not a
 //! filesystem snapshot: external writers can still race with the final check.
 //! On any conflict/error leave the unregistered copy in place for inspection.
+use aquilum_core::search::paths::is_hidden_name;
 use std::collections::BTreeMap;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, ErrorKind, Read, Write};
@@ -61,6 +62,13 @@ fn walk(root: &Path, relative: &Path, depth: usize, manifest: &mut Manifest, byt
     }
     for entry in fs::read_dir(root.join(relative))? {
         let entry = entry?;
+        // A duplicated knowledge base is an independent *content* copy, not
+        // a clone of history, sync enrollment, Git or another app's state.
+        // Apply Akula's existing service-directory policy at every depth.
+        // This deliberately omits .aquilum/history and .akula* metadata.
+        if is_hidden_name(&entry.file_name()) {
+            continue;
+        }
         let relative_path = relative.join(entry.file_name());
         let md = fs::symlink_metadata(entry.path())?;
         let info = fingerprint(&md)?;
@@ -203,6 +211,28 @@ mod tests {
         let before = manifest(&source).unwrap();
         fs::write(source.join("later.md"), "Two").unwrap();
         assert_ne!(before, manifest(&source).unwrap());
+    }
+
+    #[test]
+    fn copies_content_without_cloning_history_or_sync_metadata() {
+        let temp = crate::test_dir::tempdir();
+        let source = temp.path().join("Knowledge");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("note.md"), "keep").unwrap();
+        for folder in [".aquilum/history", ".akula/credentials", ".quantum/history", ".git", ".obsidian", ".trash", "nested/.aquilum/history"] {
+            let secret = source.join(folder);
+            fs::create_dir_all(&secret).unwrap();
+            fs::write(secret.join("private"), "SECRET").unwrap();
+        }
+        fs::write(source.join(".akula-secret"), "do not clone").unwrap();
+        let copy = duplicate_folder(&source, "copy").unwrap();
+        assert_eq!(fs::read_to_string(copy.join("note.md")).unwrap(), "keep");
+        for folder in [".aquilum", ".akula", ".quantum", ".git", ".obsidian", ".trash", "nested/.aquilum"] {
+            assert!(!copy.join(folder).exists(), "must not clone service state: {folder}");
+        }
+        assert!(!copy.join(".akula-secret").exists());
+        assert!(source.join(".aquilum/history/private").is_file());
+        assert!(source.join(".akula/credentials/private").is_file());
     }
 
     #[test]
