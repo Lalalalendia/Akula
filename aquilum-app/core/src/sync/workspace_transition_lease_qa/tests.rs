@@ -158,8 +158,12 @@ fn occupied_destination_and_parent_traversal_are_denied_before_reservation() {
         &source, &request.destination).is_err());
     assert_eq!(fs::read(&request.destination).unwrap(), b"occupied");
     fs::remove_file(&request.destination).unwrap();
-    let alias = request.destination.parent().unwrap()
-        .join("inside").join("..").join("renamed-base");
+    // Keep the literal untrusted spelling intact: on Windows joining to a
+    // verbatim path may normalize .. before the admission function sees it.
+    let alias = PathBuf::from(format!("{}/inside/../renamed-base",
+        request.destination.parent().unwrap().display()));
+    assert!(alias.to_string_lossy().replace('\\', "/").split('/')
+        .any(|part| part == ".."), "fixture must retain raw traversal");
     assert!(observed_request(Uuid::new_v4(), Uuid::new_v4(),
         &source, &alias).is_err());
     assert!(FixtureLedger::open_existing(&db).unwrap().inspect().unwrap().is_empty());
