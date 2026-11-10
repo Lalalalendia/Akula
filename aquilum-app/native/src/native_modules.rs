@@ -1,15 +1,10 @@
-mod a11y;
-mod args;
-mod autostart;
-mod app;
-mod cover;
-mod poster;
+mod a11y; mod args;
+mod autostart; mod app;
+mod cover; mod poster;
 mod graph; mod reader;
-mod video;
-mod dates; mod docx;
+mod video; mod dates; mod docx;
 #[cfg(feature = "dicom-preview")] mod dicom;
-mod disk;
-mod file_ops;
+mod disk; mod file_ops;
 mod fling;
 mod frontmatter;
 mod i18n;
@@ -25,6 +20,11 @@ mod memory_probe;
 #[cfg(feature = "memory-probe")]
 #[global_allocator]
 static ALLOCATOR: memory_probe::Counting = memory_probe::Counting;
+#[cfg(feature = "notion-offline-preview")] mod notion_offline;
+#[cfg(feature = "notion-offline-preview")] mod notion_credentials;
+#[cfg(feature = "notion-offline-preview")] mod notion_sync;
+#[cfg(feature = "notion-offline-preview")] mod notion_import;
+#[cfg(feature = "notion-offline-preview")] mod notion_bases;
 mod navigation;
 mod note;
 mod output;
