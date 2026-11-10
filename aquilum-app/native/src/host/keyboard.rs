@@ -1,15 +1,7 @@
 use super::*;
 use crate::ui::keymap::{self, Command, Scope};
 
-fn latin(code: Code) -> Option<char> {
-    const LETTERS: [Code; 26] = [
-        Code::KeyA, Code::KeyB, Code::KeyC, Code::KeyD, Code::KeyE, Code::KeyF, Code::KeyG, Code::KeyH, Code::KeyI,
-        Code::KeyJ, Code::KeyK, Code::KeyL, Code::KeyM, Code::KeyN, Code::KeyO, Code::KeyP, Code::KeyQ, Code::KeyR,
-        Code::KeyS, Code::KeyT, Code::KeyU, Code::KeyV, Code::KeyW, Code::KeyX, Code::KeyY, Code::KeyZ,
-    ];
-    LETTERS.iter().position(|&c| c == code).map(|i| char::from(b'a' + i as u8))
-}
-
+mod layout;
 fn png(image: arboard::ImageData<'_>) -> Option<Vec<u8>> {
     let rgba = image::RgbaImage::from_raw(image.width as u32, image.height as u32, image.bytes.into_owned())?;
     let mut out = std::io::Cursor::new(Vec::new());
@@ -79,10 +71,7 @@ impl Host {
             ElementState::Pressed => KeyState::Down,
             ElementState::Released => KeyState::Up,
         };
-        let key = match latin(code) {
-            Some(letter) if keymap::action(self.modifiers) && !self.modifiers.alt() => Key::Character(letter.to_string()),
-            _ => key,
-        };
+        let key = layout::shortcut_key(key, code, self.modifiers);
         #[cfg(not(feature = "installed"))]
         if state == KeyState::Down && code == Code::F12 {
             self.renderer.toggle_overlay();
