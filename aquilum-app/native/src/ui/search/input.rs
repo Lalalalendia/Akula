@@ -10,6 +10,9 @@ use masonry::properties::{Gap, Padding};
 use masonry::widgets::Flex;
 
 use super::marked::marked_layout;
+
+mod boxes;
+pub use boxes::{FindBox, SearchBox};
 use crate::i18n::t;
 use crate::ui::editor::TextEditor;
 use crate::ui::handle::Handle;
@@ -76,25 +79,12 @@ impl Widget for Placeholder {
     }
 }
 
-pub struct SearchBox {
-    pub widget: NewWidget<Flex>,
-    pub field: Handle<TextEditor>,
-    pub placeholder: Handle<Placeholder>,
-    pub clear: Handle<IconButton>,
-}
-
 pub fn field(query: &str, hint: String) -> (NewWidget<Placeholder>, Handle<TextEditor>, Handle<Placeholder>) {
     let field = NewWidget::new(TextEditor::single_line(query).styled(|| style::ui_text(size::SIZE_20 as f32))).with_class(style::FIELD);
     let field_handle = Handle::of(&field);
     let placeholder = NewWidget::new(Placeholder { field: field.to_pod(), hint, empty: query.is_empty() });
     let placeholder_handle = Handle::of(&placeholder);
     (placeholder, field_handle, placeholder_handle)
-}
-
-pub struct FindBox {
-    pub widget: NewWidget<Flex>,
-    pub field: Handle<TextEditor>,
-    pub placeholder: Handle<Placeholder>,
 }
 
 fn row(query: &str, hint: String, clear: Option<NewWidget<IconButton>>) -> FindBox {
@@ -118,6 +108,11 @@ fn row(query: &str, hint: String, clear: Option<NewWidget<IconButton>>) -> FindB
 
 pub fn find_box(hint: String) -> FindBox {
     row("", hint, None)
+}
+
+/// Preserve an existing query when a search field is rebuilt or remounted.
+pub fn find_box_with_query(query: &str, hint: String) -> FindBox {
+    row(query, hint, None)
 }
 
 pub fn search_box(query: &str) -> SearchBox {

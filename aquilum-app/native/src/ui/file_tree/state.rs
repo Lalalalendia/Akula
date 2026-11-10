@@ -1,0 +1,16 @@
+pub struct FileTree {
+    model: TreeModel,
+    drag: Option<Drag>,
+    create_button: Option<WidgetId>,
+    row_ids: Vec<WidgetId>,
+    scroll: Option<Handle<ScrollArea<Flex>>>,
+    pinned: Option<Handle<Pinned>>,
+    counting: scan::worker::CountScan,
+    indexing: Option<std::sync::mpsc::Receiver<model::Lists>>,
+    wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+    rename: Option<Handle<TextEditor>>,
+    store: ExpandedStore,
+    first: usize,
+    offset: f64,
+    toolbar: Option<Toolbar>,
+}
