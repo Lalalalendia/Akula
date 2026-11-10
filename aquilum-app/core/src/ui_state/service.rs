@@ -1,3 +1,5 @@
+mod relocate;
+pub mod preflight;
 use super::database::UiStateDatabase;
 use super::error::UiStateError;
 use super::models::{KnownWorkspace, LoadedSession, OpenSessionInput, SaveStateBatchInput};
@@ -6,11 +8,9 @@ use crate::search::paths::canonical_path;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
-
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 const PURGE_BATCH: i64 = 5_000;
 const VACUUM_PAGES: i64 = 1_000;
-
 #[derive(Clone)]
 pub struct UiStateService {
     path: PathBuf,
