@@ -1,9 +1,13 @@
-use crate::search::paths::{is_hidden_name, is_markdown};
+use crate::search::paths::is_hidden_name;
 use super::attachments::MEDIA_EXTENSIONS;
 use super::error::FileCommandError;
 use super::models::{FileItem, FileItemType};
 use std::fs;
 use std::path::Path;
+
+mod existing;
+mod reparse;
+pub use existing::existing_files_impl;
 
 // Structured formats are listed like attachments until native dedicated views exist.
 // Never treat them as Markdown notes or send their content to the text editor.
@@ -28,7 +32,7 @@ pub fn read_directory_impl(path: &Path) -> Result<Vec<FileItem>, FileCommandErro
             Err(_) => continue,
         };
 
-        if is_hidden_name(&entry.file_name()) || file_type.is_symlink() {
+        if is_hidden_name(&entry.file_name()) || file_type.is_symlink() || reparse::is_reparse(&entry) {
             continue;
         }
 
@@ -83,12 +87,7 @@ pub fn read_directory_impl(path: &Path) -> Result<Vec<FileItem>, FileCommandErro
     Ok(items)
 }
 
-pub fn existing_files_impl(paths: Vec<String>) -> Vec<String> {
-    paths
-        .into_iter()
-        .filter(|value| {
-            let path = Path::new(value);
-            path.is_file() && is_markdown(path)
-        })
-        .collect()
-}
+
+#[cfg(all(test, windows))]
+#[path = "workspace/tests.rs"]
+mod tests;
