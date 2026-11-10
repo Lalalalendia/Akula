@@ -3,10 +3,12 @@
 //! On any conflict/error leave the unregistered copy in place for inspection.
 use aquilum_core::search::paths::is_hidden_name;
 use std::collections::BTreeMap;
-use std::fs::{self, File, Metadata, OpenOptions};
+use std::fs::{self, Metadata, OpenOptions};
 use std::io::{self, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+
+mod open;
 
 const MAX_ENTRIES: usize = 200_000;
 const MAX_BYTES: u64 = 50 * 1024 * 1024 * 1024;
@@ -101,10 +103,8 @@ fn manifest(root: &Path) -> io::Result<Manifest> {
 }
 
 fn digest_file(path: &Path) -> io::Result<blake3::Hash> {
-    if fingerprint(&fs::symlink_metadata(path)?)?.kind != EntryKind::File {
-        return Err(io::Error::new(ErrorKind::InvalidData, "source changed type"));
-    }
-    let mut reader = File::open(path)?;
+    let expected = fingerprint(&fs::symlink_metadata(path)?)?;
+    let mut reader = open::read_checked(path, &expected)?;
     let mut hash = blake3::Hasher::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -119,7 +119,7 @@ fn copy_checked_file(from: &Path, to: &Path, expected: &Fingerprint) -> io::Resu
     if fingerprint(&fs::symlink_metadata(from)?)? != *expected {
         return Err(io::Error::other("source changed before copying"));
     }
-    let mut reader = File::open(from)?;
+    let mut reader = open::read_checked(from, expected)?;
     let mut writer = OpenOptions::new().write(true).create_new(true).open(to)?;
     let mut hash = blake3::Hasher::new();
     let mut buffer = [0_u8; 64 * 1024];
