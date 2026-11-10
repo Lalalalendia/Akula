@@ -1,15 +1,8 @@
 use super::*;
 use crate::ui::keymap::{self, Command, Scope};
 
-fn latin(code: Code) -> Option<char> {
-    const LETTERS: [Code; 26] = [
-        Code::KeyA, Code::KeyB, Code::KeyC, Code::KeyD, Code::KeyE, Code::KeyF, Code::KeyG, Code::KeyH, Code::KeyI,
-        Code::KeyJ, Code::KeyK, Code::KeyL, Code::KeyM, Code::KeyN, Code::KeyO, Code::KeyP, Code::KeyQ, Code::KeyR,
-        Code::KeyS, Code::KeyT, Code::KeyU, Code::KeyV, Code::KeyW, Code::KeyX, Code::KeyY, Code::KeyZ,
-    ];
-    LETTERS.iter().position(|&c| c == code).map(|i| char::from(b'a' + i as u8))
-}
-
+mod latin;
+use latin::latin;
 fn png(image: arboard::ImageData<'_>) -> Option<Vec<u8>> {
     let rgba = image::RgbaImage::from_raw(image.width as u32, image.height as u32, image.bytes.into_owned())?;
     let mut out = std::io::Cursor::new(Vec::new());
@@ -57,6 +50,12 @@ impl Host {
 
     fn paste(&mut self) -> bool {
         let (Some(clipboard), Some(root)) = (self.clipboard.as_mut(), &mut self.root) else { return false };
+        // Rich HTML only when a Markdown note editor explicitly accepts it.
+        // Search, dialog fields, code, tables, and unsupported HTML fall back
+        // to their existing clipboard handling without file I/O.
+        if self.app.paste_formatted(root, clipboard) {
+            return true;
+        }
         if let Ok(text) = clipboard.get_text() {
             root.handle_text_event(TextEvent::ClipboardPaste(text));
             return true;

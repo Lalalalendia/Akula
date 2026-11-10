@@ -1,23 +1,5 @@
-fn named(name: &str) -> Option<char> {
-    match name {
-        "amp" => Some('&'),
-        "lt" => Some('<'),
-        "gt" => Some('>'),
-        "quot" => Some('"'),
-        "apos" => Some('\''),
-        "nbsp" => Some(' '),
-        "mdash" => Some('—'),
-        "ndash" => Some('–'),
-        "hellip" => Some('…'),
-        "laquo" => Some('«'),
-        "raquo" => Some('»'),
-        "ldquo" => Some('“'),
-        "rdquo" => Some('”'),
-        "lsquo" => Some('‘'),
-        "rsquo" => Some('’'),
-        _ => None,
-    }
-}
+mod named;
+use named::named;
 
 fn numeric(body: &str) -> Option<char> {
     let code = match body.strip_prefix('x').or_else(|| body.strip_prefix('X')) {

@@ -1,4 +1,5 @@
 mod tree_open;
+mod formatted;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -9,7 +10,6 @@ use super::App;
 use crate::images::{MediaKind, kind};
 use crate::ui::editor::{TextEditor, media_line};
 use crate::vault_files::{self, Source};
-
 fn natural_width(source: &Source<'_>) -> Option<f64> {
     let (width, _) = match source {
         Source::Path(path) => image::image_dimensions(path).ok()?,
