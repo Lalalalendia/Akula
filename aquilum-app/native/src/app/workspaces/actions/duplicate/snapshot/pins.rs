@@ -30,7 +30,7 @@ impl DirectoryPins {
         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
         const FILE_SHARE_READ: u32 = 0x0000_0001;
         let mut opts = OpenOptions::new();
-        opts.access_mode(0)
+        opts.read(true)
             .share_mode(FILE_SHARE_READ)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
         let handle = opts.open(path)?;
@@ -74,6 +74,7 @@ mod tests {
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(nested.join("note.md"), "keep").unwrap();
         let pins = DirectoryPins::acquire(&root).unwrap();
+        assert_eq!(pins.0.len(), 2, "both root and nested folder must be pinned");
         assert!(
             std::fs::rename(&nested, root.join("renamed")).is_err(),
             "nested path must stay pinned while a copy is in progress",
