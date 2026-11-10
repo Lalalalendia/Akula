@@ -880,6 +880,10 @@
     "close": "close"
   },
   "workspaces": {
+    "create": "Create knowledge base",
+    "newName": "New knowledge base",
+    "pickParent": "Choose parent folder for a new knowledge base",
+    "createFailed": "Could not create knowledge base: {{reason}}",
     "title": "Knowledge bases",
     "close": "Close the list of knowledge bases",
     "empty": "No saved bases yet",
@@ -894,6 +898,9 @@
     "listFailed": "Could not read the list of knowledge bases: {{reason}}",
     "closeActive": "Close knowledge base",
     "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning.",
-    "switchSaveFailed": "Could not switch folders because a note was not saved. The current folder stays open. Check the editor warning."
+    "switchSaveFailed": "Could not switch folders because a note was not saved. The current folder stays open. Check the editor warning.",
+    "copySuffix": "copy",
+    "duplicateFailed": "Could not duplicate knowledge base: {{reason}}",
+    "copyHint": "Copying creates a new base from non-service files and folders. Version history, sync data and service settings are not copied."
   }
 }

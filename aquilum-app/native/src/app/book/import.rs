@@ -8,17 +8,8 @@ use crate::frontmatter::{self, BOOK_COVER, BOOK_FILE, COVER, PAGE_COVER, PAGE_CO
 use crate::ui::widgets::TextButton;
 use crate::vault_files::{self, Source};
 
-#[derive(Debug)]
-pub(in crate::app) enum Picked {
-    Workspace(PathBuf),
-    PdfIndexed(Result<PathBuf, String>),
-    PdfChosen(PathBuf),
-    #[cfg(feature = "dicom-preview")]
-    DicomExternal(PathBuf),
-    PageCover(PathBuf, PathBuf),
-    BookCover(PathBuf, PathBuf),
-    Book(PathBuf, Option<PathBuf>),
-}
+mod picked;
+pub(in crate::app) use picked::Picked;
 const BOOK_EXTENSIONS: [&str; 6] = ["epub", "fb2", "mobi", "azw3", "azw", "prc"];
 const BYTES_PER_PAGE: u64 = 1024;
 
