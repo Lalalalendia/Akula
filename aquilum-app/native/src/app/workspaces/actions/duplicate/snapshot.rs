@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 mod open;
-
+mod pins;
 const MAX_ENTRIES: usize = 200_000;
 const MAX_BYTES: u64 = 50 * 1024 * 1024 * 1024;
 const MAX_DEPTH: usize = 64;
@@ -149,7 +149,7 @@ pub(super) fn duplicate_folder(source: &Path, suffix: &str) -> Result<PathBuf, S
     if suffix.trim().is_empty() {
         return Err("invalid copy suffix".into());
     }
-    // Refuse linked roots and pre-existing special entries before creating anything.
+    let _pins = pins::DirectoryPins::acquire(source).map_err(|error| error.to_string())?;
     let initial = manifest(source).map_err(|error| error.to_string())?;
     let parent = source.parent().ok_or("source has no parent folder")?;
     let name = source.file_name().ok_or("source has no folder name")?.to_string_lossy();
