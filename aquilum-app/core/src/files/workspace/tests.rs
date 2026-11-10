@@ -1,5 +1,6 @@
 use super::*;
 use std::os::windows::fs::MetadataExt;
+use std::os::windows::process::CommandExt;
 use std::process::Command;
 
 #[test]
@@ -15,8 +16,11 @@ fn excludes_ntfs_junction_even_when_it_looks_like_a_directory() {
     // /J is supported for ordinary Windows users; no symlink privilege required.
     let junction = workspace.join("linked-outside");
     let command = format!("mklink /J \"{}\" \"{}\"", junction.display(), outside.display());
+    // cmd.exe /C requires the shell command to be passed verbatim. Passing
+    // it via .arg() quotes the entire string, corrupting mklink's two paths.
     let output = Command::new("cmd.exe")
-        .args(["/C", &command])
+        .args(["/D", "/C"])
+        .raw_arg(&command)
         .output()
         .expect("start Windows junction creation");
     assert!(
