@@ -24,8 +24,7 @@ impl App {
         self.on_graph_results(root);
         self.poll_update_and_server_probe(root);
         self.on_retention_done(root);
-        #[cfg(feature = "dropbox-readonly-preview")] self.poll_dropbox_settings(root);
-        #[cfg(feature = "yandex-disk-readonly-preview")] self.poll_yandex_disk_settings(root);
+        #[cfg(feature = "dropbox-readonly-preview")] self.poll_dropbox_settings(root); #[cfg(feature = "yandex-disk-readonly-preview")] self.poll_yandex_disk_settings(root);
         self.poll_find(root);
         let mut links_changed = false;
         let mut history_changed = false;
