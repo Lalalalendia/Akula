@@ -3,12 +3,12 @@ mod cache;
 mod dataview;
 mod links;
 mod media;
+mod offline_video;
 mod resolver;
 mod youtube;
 mod video;
 #[cfg(test)]
 mod testing;
-
 pub use media::prune_remote;
 
 use std::path::{Path, PathBuf};
