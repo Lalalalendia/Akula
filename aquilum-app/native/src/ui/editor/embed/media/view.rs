@@ -58,6 +58,9 @@ impl MediaView {
     }
 
     fn buttons(&self) -> Vec<Option<MediaHit>> {
+        if crate::video::youtube::video_id(&self.line.src).is_some() {
+            return vec![Some(MediaHit::Source)];
+        }
         let mut out = Vec::new();
         if !self.video {
             out.extend([Some(MediaHit::Zoom), None]);
