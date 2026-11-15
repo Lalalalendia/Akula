@@ -5,6 +5,7 @@ on:
     paths:
       - 'modules/yandex-disk-connect-lab/Cargo.toml'
       - 'modules/yandex-disk-connect-lab/src/lib.rs'
+      - 'modules/yandex-disk-connect-lab/src/local_lifecycle.rs'
       - '.github/workflows/yandex-disk-connect-isolated.yml'
   workflow_dispatch:
 
