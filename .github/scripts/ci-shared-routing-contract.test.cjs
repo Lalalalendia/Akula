@@ -471,7 +471,7 @@ test('Windows beta standalone and mixed source owners require exactly one signed
   assert.match(body,/^  workflow_dispatch:\n    inputs:\n      ref:\n/m,'manual candidate with ref stays active');
   assert.match(body,/^        default: main$/m);
   assert.doesNotMatch(body,/^  pull_request:/m);
-  assert.equal(r.OWNED_SUITES.owned_windows_beta.length,15,'preserve Windows owner routes incl. U02 and R2 installed GUI readbacks');
+  assert.equal(r.OWNED_SUITES.owned_windows_beta.length,16,'preserve Windows owner routes incl. nested rename UIA');
   const owned=['.github/workflows/windows-beta.yml',
     '.github/scripts/windows-beta-identity.test.cjs',
     'scripts/test-windows-beta.ps1','scripts/windows-beta-u02-user-journey.ps1','scripts/windows-user-scenarios-installed.ps1',
