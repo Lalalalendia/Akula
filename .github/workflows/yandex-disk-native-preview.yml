@@ -57,6 +57,16 @@ jobs:
           const feature = cargo.match(/^yandex-disk-readonly-preview\s*=/m);
           if (!feature) throw new Error('explicit opt-in feature missing');
           NODE
+      - name: Verify committed Cargo.lock matches Cargo resolution
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          cargo metadata --format-version 1 --no-deps > /dev/null
+          if ! git diff --quiet -- Cargo.lock; then
+            echo '::error::Cargo.lock requires a precise dependency resolution update'
+            git --no-pager diff -- Cargo.lock
+            exit 1
+          fi
       - name: Compile opt-in native preview without OAuth credentials
         working-directory: aquilum-app
         run: cargo check --locked -p aquilum-native --features installed,yandex-disk-readonly-preview
