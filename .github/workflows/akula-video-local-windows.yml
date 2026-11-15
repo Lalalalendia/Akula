@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: akula-video-local-windows-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
