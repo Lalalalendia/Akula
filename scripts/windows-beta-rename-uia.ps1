@@ -154,11 +154,11 @@ function Normalize-Text([string]$value) {
 
 # Nested repeats the real title rename after both parent and child vaults
 # have been registered in the same installed Akula profile.
-foreach ($mode in @('Enter', 'Blur', 'Nested')) {
+foreach ($mode in @('Enter', 'Blur', 'Nested', 'NestedParentHistory')) {
   $originalStem = 'AkulaRename' + $mode
   $targetStem = 'AkulaRenamed' + $mode
   $fileVault = $vault
-  if ($mode -ceq 'Nested') {
+  if ($mode.StartsWith('Nested', [StringComparison]::Ordinal)) {
     # The preceding Enter/Blur passes registered the parent vault; this
     # child registration creates overlapping owners on the same physical note.
     $fileVault = Join-Path $vault 'Английский'
@@ -175,6 +175,27 @@ foreach ($mode in @('Enter', 'Blur', 'Nested')) {
   $source = '# ' + $originalStem + [char]10 + $bodyText + [char]10
   [IO.File]::WriteAllText($from, $source, [Text.UTF8Encoding]::new($false))
   $originalHash = (Get-FileHash -LiteralPath $from -Algorithm SHA256).Hash
+  $historyProof = $null
+  $historyAfter = $null
+  $legacyUnrelated = $null
+  if ($mode -ceq 'NestedParentHistory') {
+    # Historical versions in the parent root (which was opened earlier)
+    # belong to THIS note; a legacy Quantum archive for ANOTHER note does not.
+    $ownerDir = Join-Path $vault '.aquilum\history\Английский'
+    $ownerBefore = Join-Path $ownerDir ($originalStem + '.md')
+    $ownerAfter = Join-Path $ownerDir ($targetStem + '.md')
+    if ((Test-Path -LiteralPath $ownerBefore) -or (Test-Path -LiteralPath $ownerAfter)) {
+      throw 'Nested parent owner history fixture already exists'
+    }
+    New-Item -ItemType Directory -Path $ownerBefore -Force | Out-Null
+    $historyProof = Join-Path $ownerBefore '1_owner_me.md'
+    [IO.File]::WriteAllText($historyProof, 'parent root version that must survive rename')
+    $historyHash = (Get-FileHash -LiteralPath $historyProof -Algorithm SHA256).Hash
+    $historyAfter = Join-Path $ownerAfter '1_owner_me.md'
+    $legacyUnrelated = Join-Path $vault '.quantum\history\Другой файл.md'
+    New-Item -ItemType Directory -Path $legacyUnrelated -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $legacyUnrelated 'old.md'), 'unrelated history unchanged')
+  }
   $process = $null
   try {
     $argsForApp = '--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $fileVault, $DataDir, $from
@@ -187,7 +208,7 @@ foreach ($mode in @('Enter', 'Blur', 'Nested')) {
       throw 'Filename was changed before an explicit Enter or blur commit'
     }
 
-    if ($mode -ceq 'Enter' -or $mode -ceq 'Nested') {
+    if ($mode -ceq 'Enter' -or $mode.StartsWith('Nested', [StringComparison]::Ordinal)) {
       [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $process.Id, [uint16]0x0d, $false)
     } else {
       $null = Focus-Body $process
@@ -196,6 +217,14 @@ foreach ($mode in @('Enter', 'Blur', 'Nested')) {
     Wait-Window $process $targetStem
     if ((Get-FileHash -LiteralPath $to -Algorithm SHA256).Hash -cne $originalHash) {
       throw 'Renaming changed the exact synthetic Markdown bytes'
+    }
+    if ($null -ne $historyAfter) {
+      if ((Test-Path -LiteralPath $historyProof) -or
+          !(Test-Path -LiteralPath $historyAfter -PathType Leaf) -or
+          (Get-FileHash -LiteralPath $historyAfter -Algorithm SHA256).Hash -cne $historyHash -or
+          [IO.File]::ReadAllText((Join-Path $legacyUnrelated 'old.md')) -cne 'unrelated history unchanged') {
+        throw 'Nested parent-root history was lost or unrelated legacy archive changed'
+      }
     }
     if (!$process.CloseMainWindow() -or !$process.WaitForExit(25000)) {
       throw 'Akula failed graceful close after installed rename'
@@ -236,6 +265,11 @@ foreach ($mode in @('Enter', 'Blur', 'Nested')) {
     if ((Get-FileHash -LiteralPath $to -Algorithm SHA256).Hash -cne $after -or
         (Test-Path -LiteralPath $from)) {
       throw 'Restart altered renamed Markdown or recreated old filename'
+    }
+    if ($null -ne $historyAfter -and
+        ((Get-FileHash -LiteralPath $historyAfter -Algorithm SHA256).Hash -cne $historyHash -or
+         (Test-Path -LiteralPath $historyProof))) {
+      throw 'Nested parent-root history changed after installed GUI restart'
     }
     Write-Host "AKULA_RENAME_INSTALLED_UIA_PASS mode=$mode os_keys=1 file_gate=1 restart=1 gui_readback=1 sha256=1"
   } finally {
