@@ -1,0 +1,75 @@
+# Non-installed, no-credentials Yandex Disk native Settings bridge.
+# The installed feature list remains unchanged and release compilation with
+# this preview feature is deliberately rejected by main.rs.
+name: Personal Yandex Disk native opt-in preview
+
+on:
+  pull_request:
+    paths:
+      # Subscribe only new feature-owned files: shared/native family already
+      # has mandatory CI owners and must not gain another broad trigger.
+      - 'aquilum-app/native/src/app/yandex_disk_preview.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/sync/yandex_disk.rs'
+      - '.github/workflows/yandex-disk-native-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native-opt-in:
+    name: Yandex personal Disk native no-credentials / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 85
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux native dependencies and Secret Service build headers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends             libdbus-1-dev pkg-config libgtk-3-dev libxkbcommon-dev             libxkbcommon-x11-dev libfontconfig1-dev librsvg2-dev             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: yandex-native-personal-readonly-${{ matrix.os }}
+          save-if: false
+      - name: Prove native installed build never enables experimental OAuth login
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const cargo = fs.readFileSync('aquilum-app/native/Cargo.toml', 'utf8');
+          const installed = cargo.match(/^installed\s*=\s*\[([^\]]*)\]/m);
+          if (!installed || installed[1].includes('yandex-disk-readonly-preview'))
+            throw new Error('installed must not enable personal Yandex Disk OAuth preview');
+          const native = fs.readFileSync('aquilum-app/native/src/main.rs','utf8');
+          if (!native.includes('feature = "yandex-disk-readonly-preview", not(debug_assertions)'))
+            throw new Error('release build must reject preview feature');
+          const feature = cargo.match(/^yandex-disk-readonly-preview\s*=/m);
+          if (!feature) throw new Error('explicit opt-in feature missing');
+          NODE
+      - name: Verify committed Cargo.lock matches Cargo resolution
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          cargo update --workspace
+          if ! git diff --quiet -- Cargo.lock; then
+            echo '::error::Cargo.lock requires a precise dependency resolution update'
+            git --no-pager diff -- Cargo.lock
+            exit 1
+          fi
+      - name: Compile opt-in native preview without OAuth credentials
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-native --features installed,yandex-disk-readonly-preview
+      - name: Run preview state and Settings review-gate tests
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features installed,yandex-disk-readonly-preview yandex_disk -- --test-threads=1

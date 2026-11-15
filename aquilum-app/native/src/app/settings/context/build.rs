@@ -42,8 +42,8 @@ impl App {
         Context {
             workspace: workspace.clone(),
             sync_recovery,
-            #[cfg(feature = "s3-e2e01-review-preview")]
-            s3_bound_publications,
+            #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_status: self.yandex_disk_preview.status.to_owned(), #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_busy: self.yandex_disk_preview.busy, #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_review_account: self.yandex_disk_preview.review_account.clone(), #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_app_configured: crate::app::yandex_disk_preview::YandexDiskPreview::has_registered_app(), #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_vault_ready: self.yandex_disk_local_vault().is_some(),
+            #[cfg(feature = "s3-e2e01-review-preview")] s3_bound_publications,
             yandex_keys,
             yandex_probe: self.yandex_probe.view_for(&bucket),
             yandex_probe_busy: self.yandex_probe.busy(),

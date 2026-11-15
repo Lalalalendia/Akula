@@ -1,7 +1,7 @@
 mod actions;
 mod commands;
 mod book; mod canvas;
-mod core_events; #[cfg(feature = "dropbox-readonly-preview")] mod dropbox_preview;
+mod core_events; #[cfg(feature = "dropbox-readonly-preview")] mod dropbox_preview; #[cfg(feature = "yandex-disk-readonly-preview")] mod yandex_disk_preview;
 mod embeds;
 mod file_menu;
 mod find;
@@ -99,7 +99,7 @@ const MENU_MARGIN: f64 = 8.0;
 const HOLD: std::time::Duration = std::time::Duration::from_millis(500);
 pub struct App {
     workspace: Workspace,
-    #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview,
+    #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview, #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_preview: yandex_disk_preview::YandexDiskPreview,
     tree: FileTree,
     #[cfg(feature = "dicom-preview")] dicom_external_sources: HashSet<PathBuf>,
     chrome: Option<Chrome>,

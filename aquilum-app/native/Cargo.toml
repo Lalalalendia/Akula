@@ -43,6 +43,8 @@ p2p-device-ui = ["p2p-device-contacts-preview"]
 s3-e2e01-review-preview = ["aquilum-core/sync-s3"]
 # Dropbox remains read-only; full sync is a separate guarded release feature.
 dropbox-readonly-preview = ["dep:akula-dropbox-connect-lab", "dep:akula-dropbox-secret-store", "dep:akula-dropbox-t0"]
+# Opt-in QA mode only, never included in installed release.
+yandex-disk-readonly-preview = ["dep:akula-yandex-disk-connect-lab", "akula-yandex-disk-connect-lab/system-store"]
 # Manual QA preview; no user write/sync capability yet.
 yandex-s3-connection-preview = ["aquilum-core/sync-s3", "dep:tokio"]
 # User-enabled S3 pairing BETA: no activation in default installer.
@@ -60,6 +62,7 @@ aquilum-core = { path = "../core", features = ["host-custody"] }
 akula-dropbox-connect-lab = { path = "../../modules/dropbox-connect-lab", optional = true }
 akula-dropbox-secret-store = { path = "../../modules/dropbox-secret-store", features = ["system-store"], optional = true }
 akula-dropbox-t0 = { path = "../../modules/dropbox-t0", optional = true }
+akula-yandex-disk-connect-lab = { path = "../../modules/yandex-disk-connect-lab", optional = true }
 # Основная ветка xilem: Masonry без релиза больше года, бэкенды под vello_cpu только там.
 # Ревизия зафиксирована, обновлять пачками.
 masonry = { git = "https://github.com/linebender/xilem", rev = "271a27a6d4a930f7878d404f9014e3c50a3a9b88", default-features = false }

@@ -19,7 +19,7 @@ impl App {
         yandex_probe.set_bucket(&workspace.core.settings.get_config().s3_onboarding.bucket);
         let mut app = App {
             workspace,
-            #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview::new(),
+            #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview::new(), #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_preview: yandex_disk_preview::YandexDiskPreview::new(),
             tree,
             #[cfg(feature = "dicom-preview")] dicom_external_sources: HashSet::new(),
             chrome: None,
