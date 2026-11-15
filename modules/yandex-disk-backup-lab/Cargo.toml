@@ -8,7 +8,16 @@ description = "Explicit, offline-tested immutable encrypted personal Yandex Disk
 
 [workspace]
 
+[features]
+default = []
+# No application enables this: explicit QA-only network transport.
+network = ["dep:serde", "dep:serde_json", "dep:ureq", "dep:url"]
+
 [dependencies]
 akula-yandex-disk-rest = { path = "../yandex-disk-rest" }
 ring = "0.17.14"
 zeroize = "1.9.0"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+ureq = { version = "2.12", optional = true }
+url = { version = "2", optional = true }
