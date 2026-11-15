@@ -112,6 +112,11 @@ $p = Start-Process -FilePath $uninstall -ArgumentList '/S' -PassThru
 if (!$p.WaitForExit(120000) -or $p.ExitCode -ne 0) {
   throw 'Published 0.3.18 uninstall failed'
 }
+# NSIS can return before the uninstaller child finishes removing its files.
+# The required installed beta smoke uses the same bounded asynchronous fence.
+for ($i = 0; $i -lt 40 -and ((Test-Path -LiteralPath $exe) -or (Test-Path $reg)); $i++) {
+  Start-Sleep -Seconds 1
+}
 if ((Test-Path -LiteralPath $exe) -or (Test-Path $reg) -or
     (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $noteHash -or
     (Get-FileHash -LiteralPath $profileNote -Algorithm SHA256).Hash -cne $profileHash) {
