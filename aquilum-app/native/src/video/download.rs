@@ -30,7 +30,7 @@ fn command_args(url: &str, stage: &Path, max_bytes: u64) -> Vec<OsString> {
     let home = format!("home:{}", stage.display());
     let temp = format!("temp:{}", stage.display());
     [
-        "--ignore-config", "--no-playlist", "--no-exec", "--no-overwrites",
+        "--ignore-config", "--no-cache-dir", "--no-cookies", "--no-playlist", "--no-exec", "--no-overwrites",
         "--no-color", "--no-write-info-json", "--no-write-thumbnail",
         "--no-write-subs", "--no-write-auto-subs", "--no-write-comments",
         "--no-download-archive", "--restrict-filenames", "--newline",
@@ -141,6 +141,7 @@ pub fn download_one(
     }
     let stage = Staging::new(library.root())?;
     let mut child = ChildGuard(Command::new(executable)
+        .current_dir(stage.path())
         .args(command_args(url, stage.path(), allowance))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
