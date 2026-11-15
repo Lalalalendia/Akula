@@ -1,0 +1,44 @@
+name: Yandex Disk REST OAuth isolated connector
+
+on:
+  pull_request:
+    paths:
+      - 'modules/yandex-disk-rest/Cargo.toml'
+      - 'modules/yandex-disk-rest/src/lib.rs'
+      - 'modules/yandex-disk-rest/src/oauth.rs'
+      - 'modules/yandex-disk-rest/src/oauth/exchange.rs'
+      - 'modules/yandex-disk-rest/src/oauth/identity.rs'
+      - '.github/workflows/yandex-disk-rest-isolated.yml'
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  isolated-readonly:
+    name: Yandex REST OAuth / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: yandex-rest-isolated-${{ matrix.os }}
+          save-if: false
+      - name: Verify REST path guards, OAuth PKCE, token parsing and account binding
+        working-directory: .
+        run: cargo test --manifest-path modules/yandex-disk-rest/Cargo.toml
+      - name: Verify standalone bounded provider builds
+        working-directory: .
+        run: cargo check --manifest-path modules/yandex-disk-rest/Cargo.toml
