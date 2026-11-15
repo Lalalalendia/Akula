@@ -68,7 +68,7 @@ fn local_overlap_owner(
     if !matches!(fs::symlink_metadata(to), Err(e) if e.kind() == ErrorKind::NotFound) {
         return None;
     }
-    let selected = owner::unique_current(roots, from).ok().flatten();
+    let selected = owner::unique_current(roots, from).ok()?;
     let fallback = roots.iter().position(|root|
         owners.contains(&identity(root)) && strip_root(root, from).is_some()
     )?;
