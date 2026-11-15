@@ -3,7 +3,7 @@
 //! history belonging to a second registered root.
 use crate::app_core::Core;
 use crate::files::error::FileCommandError;
-use crate::history::store;
+use crate::history::owner;
 use crate::search::paths::{canonical_path, identity, strip_root};
 use std::fs;
 use std::io::ErrorKind;
@@ -38,80 +38,50 @@ fn matching_vaults(roots: &[PathBuf], candidate: &Path) -> Option<Vec<String>> {
     Some(physical)
 }
 
-fn absent_without_alias(root: &Path, note: &Path) -> bool {
-    let Some(relative) = strip_root(root, note) else {
-        return false;
-    };
-    let directory = store::history_dir(root, relative);
-    if store::checked_history_note_directory(root, &directory).is_err() {
-        return false;
-    }
-    matches!(
-        fs::symlink_metadata(directory),
-        Err(error) if error.kind() == ErrorKind::NotFound
-    )
-}
-
-fn no_legacy_history(root: &Path) -> bool {
-    let legacy = root.join(".quantum").join("history");
-    matches!(
-        fs::symlink_metadata(legacy),
-        Err(error) if error.kind() == ErrorKind::NotFound
-    )
-}
-
-fn local_overlap_is_safe(
+fn local_overlap_owner(
     roots: &[PathBuf],
     owners: &[String],
     from: &Path,
     to: &Path,
-) -> bool {
+) -> Option<usize> {
     if owners.len() < 2 || from.parent() != to.parent() {
-        return false;
+        return None;
     }
-    let Some(parent) = from.parent() else {
-        return false;
-    };
-    let Ok(physical_parent) = fs::canonicalize(parent) else {
-        return false;
-    };
-    // A reparse/symlink parent is not evidence of a local physical rename.
+    let parent = from.parent()?;
+    let physical_parent = fs::canonicalize(parent).ok()?;
     if identity(parent) != identity(&canonical_path(&physical_parent)) {
-        return false;
+        return None;
     }
-    let Ok(metadata) = fs::symlink_metadata(from) else {
-        return false;
-    };
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return false;
+    let meta = fs::symlink_metadata(from).ok()?;
+    if !meta.is_file() || meta.file_type().is_symlink() {
+        return None;
     }
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
-        if metadata.file_attributes() & 0x0000_0400 != 0 {
-            return false;
+        if meta.file_attributes() & 0x0000_0400 != 0 {
+            return None;
         }
     }
-    // Occupied destinations and Windows case-only aliases retain the
-    // conservative original gate; no accidental overwrite is admitted here.
-    if !matches!(fs::symlink_metadata(to), Err(error) if error.kind() == ErrorKind::NotFound) {
-        return false;
+    // No overwrite: an existing destination file, alias or unknown I/O
+    // failure is not a legitimate same-folder rename.
+    if !matches!(fs::symlink_metadata(to), Err(e) if e.kind() == ErrorKind::NotFound) {
+        return None;
     }
-    let mut matches = roots
-        .iter()
-        .filter(|root| owners.contains(&identity(root)) && strip_root(root, from).is_some());
-    let Some(selected) = matches.next() else {
-        return false;
-    };
-    // HistoryService selects the first registered matching root. Any other
-    // root with old/new (or legacy) history must stay on HOLD: relocating
-    // only the first history would orphan versions from the other workspace.
-    matches.all(|root| {
-        identity(root) == identity(selected)
-            || (no_legacy_history(root)
-                && absent_without_alias(root, from)
-                && absent_without_alias(root, to))
-    })
+    let selected = owner::unique_current(roots, from).ok().flatten();
+    let fallback = roots.iter().position(|root|
+        owners.contains(&identity(root)) && strip_root(root, from).is_some()
+    )?;
+    // An old per-note Quantum directory cannot be moved by the current
+    // HistoryService. An unrelated Quantum archive is not this note's owner.
+    for root in roots.iter().filter(|root| owners.contains(&identity(root))) {
+        if owner::legacy(root, from).ok()? || owner::legacy(root, to).ok()?
+            || owner::current(root, to).ok()?
+        {
+            return None;
+        }
+    }
+    Some(selected.unwrap_or(fallback))
 }
 
 /// Called under File Gate before any primary file or history mutation.
@@ -121,7 +91,7 @@ pub(super) fn admit_vault_relocation(
     from: &Path,
     to: &Path,
 ) -> Result<Vec<PathBuf>, FileCommandError> {
-    let roots = core.ui_state.workspace_roots().map_err(|error| FileCommandError::Task {
+    let mut roots = core.ui_state.workspace_roots().map_err(|error| FileCommandError::Task {
         message: format!(
             "Workspace registry cannot be read; refusing to move a primary file before validating history ownership: {error:?}"
         ),
@@ -131,9 +101,18 @@ pub(super) fn admit_vault_relocation(
     if let (Some(source), Some(destination)) = (&source, &destination) {
         if (source.is_empty() && destination.is_empty())
             || (source.len() == 1 && destination.len() == 1 && source == destination)
-            || (source == destination && local_overlap_is_safe(&roots, source, from, to))
         {
             return Ok(roots);
+        }
+        if source == destination {
+            if let Some(index) = local_overlap_owner(&roots, source, from, to) {
+                // HistoryService moves only one root's per-note version tree.
+                // Put its actual owner first, regardless of last-opened order.
+                // All other registered roots must have NO history for this note.
+                let preferred = roots.remove(index);
+                roots.insert(0, preferred);
+                return Ok(roots);
+            }
         }
     }
     let detail = match (&source, &destination) {
