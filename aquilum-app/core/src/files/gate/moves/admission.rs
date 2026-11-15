@@ -117,7 +117,7 @@ pub(super) fn admit_vault_relocation(
     }
     let detail = match (&source, &destination) {
         (Some(a), Some(b)) if a.len() > 1 && a == b => {
-            "overlapping registered workspace roots or independent history prevent a safe local rename; remove the redundant workspace registration (not its files) or resolve its history ownership"
+            "overlapping workspace roots have unsafe or ambiguous per-note history; keep registered workspaces and archives intact until their ownership is verified"
         }
         (Some(a), Some(b)) if a != b => "source and destination belong to different registered workspace roots",
         _ => "path ownership is unknown or an alias does not match its physical workspace",
