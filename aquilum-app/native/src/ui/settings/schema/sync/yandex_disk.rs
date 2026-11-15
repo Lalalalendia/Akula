@@ -3,7 +3,7 @@
 
 use super::*;
 
-pub(super) fn yandex_disk_setup(ctx: &Context) -> Block {
+pub(in crate::ui::settings::schema) fn yandex_disk_setup(ctx: &Context) -> Block {
     let in_review = ctx.yandex_disk_review_account.is_some();
     let can_start = ctx.yandex_disk_app_configured
         && ctx.yandex_disk_vault_ready

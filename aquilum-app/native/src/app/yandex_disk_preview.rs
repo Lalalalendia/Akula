@@ -97,7 +97,7 @@ impl YandexDiskPreview {
         self.review_account = None;
         self.vault = Some(vault.clone());
         self.generation = self.generation.wrapping_add(1);
-        let gen = self.generation;
+        let generation_token = self.generation;
         self.busy = true;
         self.status = "YANDEX_WAITING_FOR_BROWSER_CONSENT / SYNC_DISABLED";
         let tx = self.tx.clone();
@@ -114,7 +114,7 @@ impl YandexDiskPreview {
                         Err(err) => Reply::Reviewed(Err(err)),
                     }
                 })).unwrap_or(Reply::WorkerFailed);
-                if tx.send((gen, outcome)).is_ok() {
+                if tx.send((generation_token, outcome)).is_ok() {
                     wake();
                 }
             });
@@ -143,7 +143,7 @@ impl YandexDiskPreview {
         };
         self.busy = true;
         self.status = "YANDEX_STORING_OS_CREDENTIAL / SYNC_DISABLED";
-        let gen = self.generation;
+        let generation_token = self.generation;
         let tx = self.tx.clone();
         let spawned = std::thread::Builder::new()
             .name("akula-yandex-disk-os-keyring".into())
@@ -151,7 +151,7 @@ impl YandexDiskPreview {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     Reply::Saved(review.confirm_and_save(&account))
                 })).unwrap_or(Reply::WorkerFailed);
-                if tx.send((gen, outcome)).is_ok() {
+                if tx.send((generation_token, outcome)).is_ok() {
                     wake();
                 }
             });
@@ -176,9 +176,9 @@ impl YandexDiskPreview {
 
     pub(super) fn poll(&mut self, current_vault: Option<&str>) -> bool {
         let mut changed = self.discard_if_workspace_changed(current_vault);
-        while let Ok((gen, reply)) = self.rx.try_recv() {
+        while let Ok((generation_token, reply)) = self.rx.try_recv() {
             // A stale callback cannot grant a review for another vault.
-            if gen != self.generation {
+            if generation_token != self.generation {
                 self.busy = false;
                 changed = true;
                 continue;
