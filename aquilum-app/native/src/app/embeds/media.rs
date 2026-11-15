@@ -10,7 +10,6 @@ const RECENT: usize = 24;
 // These bound *compressed input bytes*, not decoder memory.
 const MAX_REMOTE_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_INLINE_IMAGE_BYTES: usize = 8 * 1024 * 1024;
-
 fn copy_with_byte_budget(mut reader: impl std::io::Read, mut writer: impl std::io::Write, limit: u64) -> std::io::Result<Option<u64>> {
     use std::io::Read;
     let count = std::io::copy(&mut reader.by_ref().take(limit.saturating_add(1)), &mut writer)?;
@@ -75,7 +74,7 @@ pub(super) fn locate(inner: &Inner, source: &str) -> Option<PathBuf> {
     bases.find_map(|base| Some(crate::paths::join(base, &decoded)).filter(|p| p.is_file()))
 }
 
-fn download(inner: &Inner, url: &str) -> Option<PathBuf> {
+pub(super) fn download(inner: &Inner, url: &str) -> Option<PathBuf> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::hash::DefaultHasher::new();
     url.hash(&mut hasher);
@@ -139,19 +138,7 @@ fn poster(path: &Path) -> Option<crate::images::Picture> {
 }
 
 pub(super) fn load(inner: &Inner, source: &str, wiki: bool) -> Fetch<Media> {
-    if !wiki && let Some(id) = crate::video::youtube::video_id(source) {
-        // Do not fetch HTML, run JavaScript or download video on note open.
-        // Only an image from the fixed thumbnail CDN is fetched under
-        // the existing 32 MiB compressed-image budget.
-        let picture = crate::video::youtube::thumbnail_url(id)
-            .and_then(|url| download(inner, &url))
-            .and_then(|path| crate::images::picture(&path));
-        let natural = picture.as_ref().map_or((0, 0), |p| p.natural);
-        return Fetch::Ready(Media {
-            image: picture.map(|p| p.image), natural,
-            video: true, path: None,
-        });
-    }
+    if let Some(preview) = super::youtube::preview(inner, source, wiki) { return preview; }
     if let Some(fetched) = inline_image(source) {
         return fetched;
     }
