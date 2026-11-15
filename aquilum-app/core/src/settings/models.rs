@@ -244,9 +244,8 @@ impl YandexS3Onboarding {
                 || c.is_ascii_digit() || c == b'_' || c == b'-')
     }
 }
-
-mod dropbox;
-pub use dropbox::{DropboxReadOnlyDraft, AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT};
+mod dropbox; mod yandex_disk_public;
+pub use dropbox::{DropboxReadOnlyDraft, AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT}; pub use yandex_disk_public::{YandexDiskPublicAccounts, YandexDiskPublicBinding, YandexDiskPublicError};
 
 /// Public-only preparation for *the user's own server*. No SSH private
 /// key, password, token, sudo credential or remote installation authority is
@@ -412,6 +411,7 @@ pub struct AppConfig {
     pub updates: UpdateSettings,
     pub s3_onboarding: YandexS3Onboarding,
     pub dropbox_readonly: DropboxReadOnlyDraft,
+    pub yandex_disk_public: YandexDiskPublicAccounts,
     pub server_setup: ServerBootstrapDraft,
 }
 
