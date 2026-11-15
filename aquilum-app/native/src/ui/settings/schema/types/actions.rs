@@ -8,7 +8,7 @@ pub enum Action {
     #[cfg(feature = "dropbox-readonly-preview")] DropboxForgetAccount,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxConnectReadOnly,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxResumeReadOnly,
-    #[cfg(feature = "yandex-disk-readonly-preview")] YandexDiskLoginReadOnly, #[cfg(feature = "yandex-disk-readonly-preview")] YandexDiskConfirmAccount,
+    #[cfg(feature = "yandex-disk-readonly-preview")] YandexDiskLoginReadOnly, #[cfg(feature = "yandex-disk-readonly-preview")] YandexDiskConfirmAccount, #[cfg(feature = "yandex-disk-readonly-preview")] YandexDiskInspectLocal, #[cfg(feature = "yandex-disk-readonly-preview")] YandexDiskForgetLocal,
     InspectRecovery(String),
     RequestRecoveryReview(NativeRecoveryDecision),
     OpenTrash,

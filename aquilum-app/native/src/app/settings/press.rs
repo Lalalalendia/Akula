@@ -9,7 +9,7 @@ impl App {
             // This handler is reached only for ordinary settings buttons.
             // Review actions require the separately confirmed modal flow.
             Action::OpenCloudProvider(_) => Effect::None, Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
-            #[cfg(feature = "yandex-disk-readonly-preview")] a @ (Action::YandexDiskLoginReadOnly | Action::YandexDiskConfirmAccount) => self.press_yandex_disk(a, dialog.section),
+            #[cfg(feature = "yandex-disk-readonly-preview")] a @ (Action::YandexDiskLoginReadOnly | Action::YandexDiskConfirmAccount | Action::YandexDiskInspectLocal | Action::YandexDiskForgetLocal) => self.press_yandex_disk(a, dialog.section),
             #[cfg(feature = "dropbox-readonly-preview")]
             a @ (Action::DropboxLoginAccount | Action::DropboxResumeAccount | Action::DropboxForgetAccount | Action::DropboxConnectReadOnly | Action::DropboxResumeReadOnly) => self.press_dropbox(a, dialog.section),
             Action::OpenTrash => {
