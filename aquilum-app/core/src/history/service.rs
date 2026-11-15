@@ -1039,6 +1039,7 @@ impl HistoryService {
             return Err(HistoryMoveFailure::new(action,
                 "participant HOLD activated before direct history relocation", false));
         }
+        state.roots = roots(); // Rename admission's registry snapshot, not cached roots.
         let (Some(source), Some(target)) = (
             locate(&mut state, roots, from),
             locate(&mut state, roots, to),
@@ -1093,7 +1094,6 @@ impl HistoryService {
         state.release_pair(&source.key, &target.key);
         Ok(())
     }
-
     pub fn trashed(&self, roots: Roots<'_>, note: &Path, trashed_at: &Path) {
         if let Err(error) = self.try_trashed(roots, note, trashed_at) {
             report(note, "не перемещена в корзину", &error.to_string());
