@@ -12,7 +12,10 @@ pub fn video_id(url: &str) -> Option<&str> {
     let (path, query) = rest[host_end..].split_once('?').unwrap_or((&rest[host_end..], ""));
     let path = path.split('#').next().unwrap_or(path);
     let id = match host {
-        "youtu.be" => path.strip_prefix('/')?.split('/').next()?,
+        "youtu.be" => {
+            let segment = path.strip_prefix('/')?;
+            (!segment.contains('/')).then_some(segment)?
+        },
         "youtube.com" | "youtube-nocookie.com" => {
             if path == "/watch" {
                 query.split('#').next()?.split('&').filter_map(|pair| {
@@ -25,7 +28,7 @@ pub fn video_id(url: &str) -> Option<&str> {
                 if !matches!(kind, "shorts" | "live" | "embed" | "v") {
                     return None;
                 }
-                rest.split('/').next()?
+                (!rest.contains('/')).then_some(rest)?
             }
         }
         _ => return None,
