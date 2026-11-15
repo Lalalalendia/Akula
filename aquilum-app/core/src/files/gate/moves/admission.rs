@@ -163,6 +163,10 @@ mod tests {
         let outer = temp.path().join("Книги");
         let inner = outer.join("Английский");
         fs::create_dir_all(&inner).unwrap();
+        // Mirror native Workspace::normalize: HistoryService requires the
+        // same canonical spelling on macOS (/var) and Windows (\\?\ paths).
+        let outer = canonical_path(&outer);
+        let inner = outer.join("Английский");
         let data = temp.path().join("appdata");
         fs::create_dir_all(&data).unwrap();
         let core = Core::open(&data, Arc::new(|_: CoreEvent| {}));
