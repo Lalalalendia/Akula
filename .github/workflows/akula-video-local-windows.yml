@@ -1,0 +1,56 @@
+name: Akula local-only video engine Windows QA (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/video/library.rs'
+      - 'aquilum-app/native/src/video/download.rs'
+      - 'aquilum-app/native/src/video/queue.rs'
+      - 'aquilum-app/native/src/app/embeds/video.rs'
+      - 'aquilum-app/native/src/ui/icons/video.rs'
+      - '.github/workflows/akula-video-local-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  video-local-windows:
+    name: Win32 local media, yt-dlp adapter and installed-feature build
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-local-video-windows-v1
+          cache-workspace-crates: true
+          save-if: false
+      - name: Native Windows library, URL parser and queue tests (offline)
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-native --bin aquilum-native video:: -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows video regression tests failed' }
+          Write-Host 'AKULA_VIDEO_WINDOWS_UNIT_PASS no_real_youtube=1 local_only=1'
+      - name: Build installed Akula release with local-only downloader
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native --features installed
+          if ($LASTEXITCODE -ne 0) { throw 'Installed native Windows video build failed' }
+          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release/aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Installed Akula executable missing' }
+          Get-FileHash -LiteralPath $exe -Algorithm SHA256 | Format-List
+          Write-Host 'AKULA_VIDEO_WINDOWS_INSTALLED_BUILD_PASS publish=0'
