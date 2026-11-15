@@ -61,7 +61,7 @@ jobs:
         working-directory: aquilum-app
         shell: bash
         run: |
-          cargo metadata --format-version 1 --no-deps > /dev/null
+          cargo update --workspace
           if ! git diff --quiet -- Cargo.lock; then
             echo '::error::Cargo.lock requires a precise dependency resolution update'
             git --no-pager diff -- Cargo.lock
