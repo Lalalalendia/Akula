@@ -1329,7 +1329,6 @@ fn relative_inside(root: &Path, path: &Path) -> Option<PathBuf> {
 
 /// Deny pre-existing directory aliases and malformed descendants for normal
 /// history operations. The caller already holds PROCESS_HISTORY_FILES; a
-/// cooperating Core cannot swap history directories during the operation.
 /// External processes remain outside that guarantee.
 fn allowed_history_directory(base: &Path, directory: &Path) -> bool {
     match store::checked_history_note_directory(base, directory) {
