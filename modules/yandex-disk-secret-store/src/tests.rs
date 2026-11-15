@@ -1,5 +1,5 @@
 use super::*;
-mod lifecycle;
+#[path = "tests/lifecycle.rs"] mod lifecycle;
 use std::{collections::HashMap, sync::Mutex};
 const VAULT: &str = "12345678-1234-1234-1234-123456789abc";
 const APP: &str = "4760187d81bc4b7799476b42b5103713";
