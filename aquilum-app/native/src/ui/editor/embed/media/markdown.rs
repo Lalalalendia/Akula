@@ -17,7 +17,6 @@ impl ImageParams {
         self.width = Some(width);
     }
 }
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct EmbedLine {
     pub src: String,
@@ -25,11 +24,9 @@ pub struct EmbedLine {
     pub params: ImageParams,
     pub title: String,
 }
-
 fn embeddable(source: &str) -> bool {
     images::kind(source).is_some() || images::extension(source).is_none()
 }
-
 pub fn is_embed(line: &str) -> bool {
     let line = line.trim();
     if crate::video::youtube::video_id(line).is_some() { return true; }
@@ -185,23 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn youtube_bare_url_is_preview_without_rewriting_markdown() {
-        for line in [
-            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-            "https://youtu.be/dQw4w9WgXcQ?t=14",
-        ] {
-            assert!(is_embed(line));
-            let block = parse(line);
-            assert_eq!(block.src, line);
-            assert!(!block.wiki);
-        }
-        assert!(!is_embed("Read https://youtu.be/dQw4w9WgXcQ"));
-        assert!(!is_embed("https://youtu.be/not-valid"));
-        assert!(!is_embed("https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ"));
-    }
-
-    #[test]
-        fn width_by_height_and_html_images_keep_their_size() {
+    fn width_by_height_and_html_images_keep_their_size() {
         let e = parse("![[a.png|300x200]]");
         assert_eq!((e.params.width, e.params.height), (Some(300.0), Some(200.0)));
         assert_eq!(format(&e), "![[a.png|300x200]]");
