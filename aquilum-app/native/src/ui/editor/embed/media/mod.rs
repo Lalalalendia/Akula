@@ -3,12 +3,12 @@ mod hit;
 mod markdown;
 mod paint;
 mod view;
-
+#[cfg(test)]
+mod youtube_tests;
 pub use hit::{MediaHit, MediaOverlay};
 pub use markdown::{EmbedLine, format, is_embed, is_html_image, media_line, parse};
 pub use paint::draw_image;
 pub use view::MediaView;
-
 const BUTTON: f64 = 24.0;
 const BAR_PAD: f64 = 3.0;
 const BAR_GAP: f64 = 4.0;
