@@ -1,14 +1,14 @@
 //! Yandex ID OAuth Authorization Code + PKCE/S256 preparation and callback validation.
 //!
-//! Offline-only PKCE setup, plus a fixed-origin token exchange in `exchange`.
-//! No browser, callbacks host, token persistence or local/remote file writes. A UI host must register the exact
+//! PKCE plus fixed-origin exchange; native-only loopback callback in callback.
+//! No browser launcher, token persistence or local/remote file writes. A UI host must register the exact
 //! redirect URI with Yandex, bind one outstanding request to its browser session,
 //! and handle one callback by consuming the pending state.
 //!
 //! No Debug / Serialize / Clone for secrets; verifier, state and code are kept in
 //! zeroizing buffers. OAuth or refresh tokens NEVER enter this module.
 
-pub mod exchange;
+pub mod callback; pub mod exchange;
 pub mod identity;
 
 use ring::digest::{digest, SHA256};
