@@ -158,6 +158,7 @@ impl MediaView {
                     }
                 }
             }
+            if crate::video::youtube::video_id(&self.line.src).is_some() { return; }
             let grip = RoundedRect::from_rect(self.grip() + at, BUTTON_RADIUS);
             box_shadow(painter, grip, tm.shadow_action);
             painter.fill(grip, tm.bg_scrim).draw();
