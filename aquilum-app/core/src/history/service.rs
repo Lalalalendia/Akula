@@ -1094,7 +1094,6 @@ impl HistoryService {
         state.release_pair(&source.key, &target.key);
         Ok(())
     }
-
     pub fn trashed(&self, roots: Roots<'_>, note: &Path, trashed_at: &Path) {
         if let Err(error) = self.try_trashed(roots, note, trashed_at) {
             report(note, "не перемещена в корзину", &error.to_string());
