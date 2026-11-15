@@ -11,7 +11,6 @@ mod windows;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-
 use masonry::peniko::ImageBrush;
 
 #[cfg(target_os = "linux")]
