@@ -1,7 +1,7 @@
 //! Select a note's persisted history, not the last workspace that was opened.
 //! This is a pathname preflight only; File Gate still owns mutation admission.
 use super::store;
-use crate::search::paths::strip_root;
+use crate::search::paths::{identity, strip_root};
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Component, Path, PathBuf};
@@ -77,10 +77,13 @@ pub(crate) fn unique_current(roots: &[PathBuf], note: &Path) -> io::Result<Optio
             continue;
         }
         if current(root, note)? {
-            if matched.is_some() {
-                return Err(denied("more than one registered workspace stores this note's history"));
+            if let Some(previous) = matched {
+                if identity(&roots[previous]) != identity(root) {
+                    return Err(denied("more than one registered workspace stores this note's history"));
+                }
+            } else {
+                matched = Some(index);
             }
-            matched = Some(index);
         }
     }
     Ok(matched)
@@ -111,6 +114,16 @@ mod tests {
         fs::create_dir_all(store::history_dir(&root, Path::new("Английский/Без названия.md"))).unwrap();
         fs::create_dir_all(store::history_dir(&nested, Path::new("Без названия.md"))).unwrap();
         assert!(unique_current(&[nested, root], &note).is_err());
+    }
+
+    #[test]
+    fn duplicate_registration_of_one_physical_root_is_not_independent_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Книги");
+        fs::create_dir_all(&root).unwrap();
+        let note = root.join("Без названия.md");
+        fs::create_dir_all(store::history_dir(&root, Path::new("Без названия.md"))).unwrap();
+        assert_eq!(unique_current(&[root.clone(), root], &note).unwrap(), Some(0));
     }
 
     #[cfg(unix)]
