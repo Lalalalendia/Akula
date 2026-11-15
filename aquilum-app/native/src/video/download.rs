@@ -208,7 +208,8 @@ mod tests {
         }
         assert_eq!(args.last().unwrap(), "https://youtu.be/dQw4w9WgXcQ");
         assert!(args.contains(&"home:/tmp/private".to_string()));
-        assert!(!args.iter().any(|s| s.contains("cookie")));
+        assert!(args.contains(&"--no-cookies".to_owned()));
+        assert!(!args.iter().any(|s| s == "--cookies" || s == "--cookies-from-browser" || s.starts_with("--cookies=")));
     }
 
     #[test]
