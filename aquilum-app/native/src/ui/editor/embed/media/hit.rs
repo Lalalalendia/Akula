@@ -1,5 +1,4 @@
 use masonry::kurbo::Point;
-
 use super::{HANDLE_HIT, MIN_CROP, MediaView, PLAY};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
