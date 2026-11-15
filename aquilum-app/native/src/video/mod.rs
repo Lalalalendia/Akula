@@ -1,3 +1,4 @@
+pub(crate) mod youtube;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
@@ -10,7 +11,6 @@ mod windows;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-
 use masonry::peniko::ImageBrush;
 
 #[cfg(target_os = "linux")]

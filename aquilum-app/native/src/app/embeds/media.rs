@@ -10,7 +10,6 @@ const RECENT: usize = 24;
 // These bound *compressed input bytes*, not decoder memory.
 const MAX_REMOTE_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_INLINE_IMAGE_BYTES: usize = 8 * 1024 * 1024;
-
 fn copy_with_byte_budget(mut reader: impl std::io::Read, mut writer: impl std::io::Write, limit: u64) -> std::io::Result<Option<u64>> {
     use std::io::Read;
     let count = std::io::copy(&mut reader.by_ref().take(limit.saturating_add(1)), &mut writer)?;
@@ -75,7 +74,7 @@ pub(super) fn locate(inner: &Inner, source: &str) -> Option<PathBuf> {
     bases.find_map(|base| Some(crate::paths::join(base, &decoded)).filter(|p| p.is_file()))
 }
 
-fn download(inner: &Inner, url: &str) -> Option<PathBuf> {
+pub(super) fn download(inner: &Inner, url: &str) -> Option<PathBuf> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::hash::DefaultHasher::new();
     url.hash(&mut hasher);
@@ -139,6 +138,7 @@ fn poster(path: &Path) -> Option<crate::images::Picture> {
 }
 
 pub(super) fn load(inner: &Inner, source: &str, wiki: bool) -> Fetch<Media> {
+    if let Some(preview) = super::youtube::preview(inner, source, wiki) { return preview; }
     if let Some(fetched) = inline_image(source) {
         return fetched;
     }

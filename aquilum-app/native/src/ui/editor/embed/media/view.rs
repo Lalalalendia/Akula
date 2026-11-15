@@ -1,13 +1,10 @@
 use std::path::PathBuf;
-
 use masonry::kurbo::{Point, Rect};
 use masonry::parley::Alignment;
 use masonry::peniko::ImageBrush;
-
 use super::super::metrics::{IMAGE_PAD_X, IMAGE_PAD_Y};
 use super::{BAR_GAP, BAR_PAD, BUTTON, EmbedLine, FULL, INSET, MIN_HEIGHT, MIN_WIDTH, MediaHit, SEPARATOR, VIDEO_MIN_HEIGHT};
 use crate::ui::editor::resolve::{Fetch, Media};
-
 pub struct MediaView {
     pub height: f64,
     pub line: EmbedLine,
@@ -58,6 +55,9 @@ impl MediaView {
     }
 
     fn buttons(&self) -> Vec<Option<MediaHit>> {
+        if crate::video::youtube::video_id(&self.line.src).is_some() {
+            return vec![Some(MediaHit::Source)];
+        }
         let mut out = Vec::new();
         if !self.video {
             out.extend([Some(MediaHit::Zoom), None]);

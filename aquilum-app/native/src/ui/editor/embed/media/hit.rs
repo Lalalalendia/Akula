@@ -1,5 +1,4 @@
 use masonry::kurbo::Point;
-
 use super::{HANDLE_HIT, MIN_CROP, MediaView, PLAY};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,7 +38,8 @@ impl MediaView {
         {
             return MediaHit::Handle(i as u8);
         }
-        if (overlay.hovered || overlay.crop.is_some()) && self.grip().contains(p) {
+        if crate::video::youtube::video_id(&self.line.src).is_none()
+            && (overlay.hovered || overlay.crop.is_some()) && self.grip().contains(p) {
             return MediaHit::Grip;
         }
         if let Some(state) = &overlay.video

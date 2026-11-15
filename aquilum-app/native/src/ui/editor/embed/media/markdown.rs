@@ -17,7 +17,6 @@ impl ImageParams {
         self.width = Some(width);
     }
 }
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct EmbedLine {
     pub src: String,
@@ -25,13 +24,12 @@ pub struct EmbedLine {
     pub params: ImageParams,
     pub title: String,
 }
-
 fn embeddable(source: &str) -> bool {
     images::kind(source).is_some() || images::extension(source).is_none()
 }
-
 pub fn is_embed(line: &str) -> bool {
     let line = line.trim();
+    if crate::video::youtube::video_id(line).is_some() { return true; }
     if let Some(inner) = line.strip_prefix("![[").and_then(|l| l.strip_suffix("]]")) {
         return !inner.contains(['[', ']']) && images::kind(split(inner).note).is_some();
     }
@@ -69,7 +67,9 @@ pub fn is_html_image(text: &str) -> bool {
 pub fn parse(line: &str) -> EmbedLine {
     let line = line.trim();
     let wiki = line.starts_with("![[");
-    let (src, params, title) = if is_html_image(line) {
+    let (src, params, title) = if crate::video::youtube::video_id(line).is_some() {
+        (line.to_owned(), Vec::new(), "")
+    } else if is_html_image(line) {
         let size = [attribute(line, "width"), attribute(line, "height")].map(|v| v.unwrap_or_default().trim_end_matches("px"));
         let params = if size[0].is_empty() { Vec::new() } else { vec![if size[1].is_empty() { size[0].to_owned() } else { size.join("x") }] };
         (attribute(line, "src").unwrap_or_default().to_owned(), params, attribute(line, "title").unwrap_or_default())

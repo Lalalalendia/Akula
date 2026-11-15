@@ -2,7 +2,6 @@ use masonry::imaging::Painter;
 use masonry::kurbo::{Affine, BezPath, Circle, Point, Rect, RoundedRect, Stroke, Vec2};
 use masonry::parley::Alignment;
 use masonry::peniko::Color;
-
 use super::{BUTTON, HANDLE, MediaHit, MediaOverlay, MediaView, PLAY};
 use crate::ui::icons::{self, Icon};
 use crate::ui::menu::box_shadow;
@@ -158,6 +157,7 @@ impl MediaView {
                     }
                 }
             }
+            if crate::video::youtube::video_id(&self.line.src).is_some() { return; }
             let grip = RoundedRect::from_rect(self.grip() + at, BUTTON_RADIUS);
             box_shadow(painter, grip, tm.shadow_action);
             painter.fill(grip, tm.bg_scrim).draw();

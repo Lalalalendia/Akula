@@ -4,6 +4,7 @@ mod dataview;
 mod links;
 mod media;
 mod resolver;
+mod youtube;
 #[cfg(test)]
 mod testing;
 
@@ -23,7 +24,6 @@ use cache::{Cache, Entry, claim, commit, settle};
 
 const INDEX_WAIT: Duration = Duration::from_millis(100);
 const INDEX_TRIES: usize = 600;
-
 fn indexed<T>(mut run: impl FnMut() -> Result<T, SearchError>) -> Result<T, SearchError> {
     let mut result = run();
     for _ in 0..INDEX_TRIES {
