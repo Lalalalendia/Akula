@@ -1,12 +1,14 @@
 //! Yandex ID OAuth Authorization Code + PKCE/S256 preparation and callback validation.
 //!
-//! Offline-only, no browser launch, HTTP token exchange, token persistence or
-//! authorization to list or mutate Akula data. A UI host must register the exact
+//! Offline-only PKCE setup, plus a fixed-origin token exchange in `exchange`.
+//! No browser, callbacks host, token persistence or local/remote file writes. A UI host must register the exact
 //! redirect URI with Yandex, bind one outstanding request to its browser session,
 //! and handle one callback by consuming the pending state.
 //!
 //! No Debug / Serialize / Clone for secrets; verifier, state and code are kept in
 //! zeroizing buffers. OAuth or refresh tokens NEVER enter this module.
+
+pub mod exchange;
 
 use ring::digest::{digest, SHA256};
 use ring::rand::{SecureRandom, SystemRandom};
@@ -98,8 +100,7 @@ impl YandexPkceStart {
         let state = Zeroizing::new(lower_hex(&state_bytes));
         verifier_bytes.zeroize();
         state_bytes.zeroize();
-
-        let challenge = s256_challenge(verifier.as_str());
+challenge = s256_challenge(verifier.as_str());
         let mut auth = Url::parse(YANDEX_AUTHORIZATION_URL)
             .expect("constant HTTPS Yandex endpoint");
         auth.query_pairs_mut()
@@ -144,8 +145,7 @@ impl YandexPkcePending {
         {
             return Err(YandexOAuthError::CallbackWrongOrigin);
         }
-
-        let mut code: Option<String> = None;
+mut code: Option<String> = None;
         let mut state: Option<String> = None;
         let mut error: Option<String> = None;
         let mut description_seen = false;
