@@ -170,6 +170,20 @@ mod tests {
         (core, outer, inner)
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_temp_directory_alias_resolves_to_registered_owner() {
+        let directory = tempfile::tempdir().unwrap();
+        let raw_root = directory.path().join("vault");
+        fs::create_dir_all(&raw_root).unwrap();
+        let registered = fs::canonicalize(&raw_root).unwrap();
+        let note = raw_root.join("note.md");
+        assert_eq!(
+            matching_vaults(&[registered.clone()], &note),
+            Some(vec![identity(&registered)])
+        );
+    }
+
     #[test]
     fn same_directory_rename_in_nested_registered_workspace_keeps_history() {
         let temp = tempfile::tempdir().unwrap();
@@ -183,6 +197,7 @@ mod tests {
         assert!(!old.exists());
         assert_eq!(fs::read_to_string(&new).unwrap(), "текст");
         assert!(core.history.page(&|| core.known_roots(), &new, 0, 8).total > 0);
+        assert_eq!(core.history.page(&|| core.known_roots(), &old, 0, 8).total, 0);
     }
 
     #[test]
