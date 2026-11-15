@@ -488,9 +488,11 @@ impl HistoryService {
             ));
         }
         let Some(located) = locate(&mut state, roots, note) else {
-            return if require_verified_version {
+            return if require_verified_version || state.roots.iter()
+                .any(|root| strip_root(root, note).is_some())
+            {
                 Err(HistorySaveFailure::new(
-                    "history version proof", "registered note has no history location",
+                    "history owner", "registered note has unsafe or ambiguous version history",
                 ))
             } else {
                 Ok(HistorySaveOutcome::unchanged())
@@ -1304,20 +1306,19 @@ impl HistoryService {
 }
 
 fn locate(state: &mut State, roots: Roots<'_>, note: &Path) -> Option<Located> {
-    let find = |roots: &[PathBuf]| {
-        roots.iter().find_map(|root| {
-            relative_inside(root, note).map(|relative| (root.clone(), relative))
-        })
+    state.roots = roots();
+    let preferred = match super::owner::unique_current(&state.roots, note) {
+        Ok(index) => index,
+        Err(error) => { report(note, "неоднозначная история", &error.to_string()); return None; }
     };
-    let (vault, relative) = find(&state.roots).or_else(|| {
-        state.roots = roots();
-        find(&state.roots)
-    })?;
-    Some(Located {
-        key: identity(note),
-        dir: store::history_dir(&vault, &relative),
-        vault,
-    })
+    let candidates = state.roots.iter().filter_map(|root|
+        relative_inside(root, note).map(|relative| (root.clone(), relative))
+    );
+    let (vault, relative) = preferred
+        .and_then(|index| state.roots.get(index).and_then(|root|
+            relative_inside(root, note).map(|relative| (root.clone(), relative))))
+        .or_else(|| candidates.into_iter().next())?;
+    Some(Located { key: identity(note), dir: store::history_dir(&vault, &relative), vault })
 }
 
 fn relative_inside(root: &Path, path: &Path) -> Option<PathBuf> {
@@ -1328,7 +1329,6 @@ fn relative_inside(root: &Path, path: &Path) -> Option<PathBuf> {
 
 /// Deny pre-existing directory aliases and malformed descendants for normal
 /// history operations. The caller already holds PROCESS_HISTORY_FILES; a
-/// cooperating Core cannot swap history directories during the operation.
 /// External processes remain outside that guarantee.
 fn allowed_history_directory(base: &Path, directory: &Path) -> bool {
     match store::checked_history_note_directory(base, directory) {
