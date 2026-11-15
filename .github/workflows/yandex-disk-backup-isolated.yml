@@ -33,3 +33,5 @@ jobs:
         run: cargo test --manifest-path modules/yandex-disk-backup-lab/Cargo.toml
       - name: Documentation tests
         run: cargo test --manifest-path modules/yandex-disk-backup-lab/Cargo.toml --doc
+      - name: Validate fixed-origin Yandex REST upload and download link policy
+        run: cargo test --manifest-path modules/yandex-disk-backup-lab/Cargo.toml --features network

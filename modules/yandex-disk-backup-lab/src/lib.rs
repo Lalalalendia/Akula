@@ -8,7 +8,7 @@
 //! Only exact bounded remote readback is sufficient for this stage's receipt.
 //! No listing, snapshot, deletion, local file write, or bidirectional Sync.
 //! No key material is saved to AppConfig, a workspace, or the cloud.
-
+#[cfg(feature = "network")] pub mod transport;
 use akula_yandex_disk_rest::YandexAppPath;
 use ring::{aead, digest, rand::{SecureRandom, SystemRandom}};
 use zeroize::Zeroizing;
