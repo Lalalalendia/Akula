@@ -9,7 +9,9 @@ on:
       # Subscribe only new feature-owned files: shared/native family already
       # has mandatory CI owners and must not gain another broad trigger.
       - 'aquilum-app/native/src/app/yandex_disk_preview.rs'
+      - 'aquilum-app/native/src/app/yandex_disk_preview/lifecycle.rs'
       - 'aquilum-app/native/src/ui/settings/schema/sync/yandex_disk.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/sync/yandex_disk/lifecycle.rs'
       - '.github/workflows/yandex-disk-native-preview.yml'
   workflow_dispatch:
 

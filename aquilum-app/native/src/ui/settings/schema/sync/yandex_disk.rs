@@ -2,7 +2,7 @@
 //! is unrelated to Yandex Cloud Object Storage / S3 credentials.
 
 use super::*;
-
+#[path = "yandex_disk/lifecycle.rs"] mod lifecycle;
 pub(in crate::ui::settings::schema) fn yandex_disk_setup(ctx: &Context) -> Block {
     let in_review = ctx.yandex_disk_review_account.is_some();
     let can_start = ctx.yandex_disk_app_configured
@@ -79,12 +79,12 @@ pub(in crate::ui::settings::schema) fn yandex_disk_setup(ctx: &Context) -> Block
             tone: Tone::Muted,
         },
     ));
+    lifecycle::extend_rows(ctx, &mut rows);
     Block {
         title: "Яндекс Диск · личный (экспериментальная авторизация)".into(),
         rows,
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

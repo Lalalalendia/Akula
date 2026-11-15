@@ -4,7 +4,6 @@
 //!
 //! The OAuth product-owned public client_id/registered callback port are baked
 //! into *non-installed* QA builds. Missing values disable the login button.
-
 use akula_yandex_disk_connect_lab::{ConnectError, ConnectSession, ReadOnlyReceipt, ReadOnlyReview};
 use std::{
     path::Path,
@@ -12,11 +11,9 @@ use std::{
     sync::{mpsc::{self, Receiver, Sender}, Arc},
     time::Duration,
 };
-
 const APP_ID: Option<&str> = option_env!("AKULA_YANDEX_OAUTH_CLIENT_ID");
 const PORT_TEXT: Option<&str> = option_env!("AKULA_YANDEX_OAUTH_CALLBACK_PORT");
 const PROFILE: &str = "personal_disk";
-
 fn registered_identity() -> Option<(&'static str, u16)> {
     let client = APP_ID?;
     let port = PORT_TEXT?.parse::<u16>().ok()?;
@@ -27,7 +24,6 @@ fn registered_identity() -> Option<(&'static str, u16)> {
     }
     Some((client, port))
 }
-
 fn open_browser(url: &str) -> bool {
     let program = if cfg!(target_os = "windows") {
         "explorer.exe"
@@ -41,25 +37,26 @@ fn open_browser(url: &str) -> bool {
         .stdout(Stdio::null()).stderr(Stdio::null())
         .spawn().is_ok()
 }
-
+#[path = "yandex_disk_preview/lifecycle.rs"] mod lifecycle;
 enum Reply {
     Reviewed(Result<ReadOnlyReview, ConnectError>),
     Saved(Result<ReadOnlyReceipt, ConnectError>),
+    LocalInspected(Result<akula_yandex_disk_connect_lab::local_lifecycle::StoredRefreshPresence, ConnectError>),
+    LocalForgot(Result<aquilum_core::settings::models::YandexDiskPublicBinding, ConnectError>),
     BrowserUnavailable,
     WorkerFailed,
 }
-
 pub(super) struct YandexDiskPreview {
     pub(super) status: &'static str,
     pub(super) busy: bool,
     pub(super) review_account: Option<String>,
     review: Option<ReadOnlyReview>,
+    pending_forget: Option<aquilum_core::settings::models::YandexDiskPublicBinding>,
     vault: Option<String>,
     generation: u64,
     tx: Sender<(u64, Reply)>,
     rx: Receiver<(u64, Reply)>,
 }
-
 impl YandexDiskPreview {
     pub(super) fn new() -> Self {
         let (tx, rx) = mpsc::channel();
@@ -68,17 +65,16 @@ impl YandexDiskPreview {
             busy: false,
             review_account: None,
             review: None,
+            pending_forget: None,
             vault: None,
             generation: 0,
             tx,
             rx,
         }
     }
-
     pub(super) fn has_registered_app() -> bool {
         registered_identity().is_some()
     }
-
     /// Return a public status only. ReadOnlyReview itself contains a refresh
     /// token and MUST NOT be stored in AppConfig, traced or formatted.
     pub(super) fn start(&mut self, vault_id: Option<String>, wake: Arc<dyn Fn() + Send + Sync>) {
@@ -123,7 +119,6 @@ impl YandexDiskPreview {
             self.status = "YANDEX_WORKER_UNAVAILABLE / SYNC_DISABLED";
         }
     }
-
     /// Explicit second click. The button label displays the same account ID;
     /// never auto-save on callback or page rendering. Keyring IO stays on
     /// its own OS worker, with no plaintext file fallback.
@@ -160,12 +155,10 @@ impl YandexDiskPreview {
             self.status = "YANDEX_WORKER_UNAVAILABLE / SYNC_DISABLED";
         }
     }
-
     fn discard_if_workspace_changed(&mut self, current_vault: Option<&str>) -> bool {
         if self.vault.is_some() && self.vault.as_deref() != current_vault {
             self.generation = self.generation.wrapping_add(1);
-            self.review = None;
-            self.review_account = None;
+            self.review = None; self.review_account = None; self.pending_forget = None;
             self.status = "YANDEX_WORKSPACE_CHANGED / SYNC_DISABLED";
             // Preserve busy until the old worker finishes, to avoid opening
             // two browser listeners or discarding a pending OS keyring write.
@@ -173,7 +166,6 @@ impl YandexDiskPreview {
         }
         false
     }
-
     pub(super) fn poll(&mut self, current_vault: Option<&str>) -> bool {
         let mut changed = self.discard_if_workspace_changed(current_vault);
         while let Ok((generation_token, reply)) = self.rx.try_recv() {
@@ -199,6 +191,11 @@ impl YandexDiskPreview {
                     self.status = "YANDEX_READONLY_CONSENT_SAVED / SYNC_DISABLED";
                 }
                 Reply::Saved(Err(err)) => self.status = err.public_status(),
+                Reply::LocalInspected(Ok(akula_yandex_disk_connect_lab::local_lifecycle::StoredRefreshPresence::Missing)) => self.status = "YANDEX_LOCAL_TOKEN_MISSING / SYNC_DISABLED",
+                Reply::LocalInspected(Ok(akula_yandex_disk_connect_lab::local_lifecycle::StoredRefreshPresence::PresentUnverified)) => self.status = "YANDEX_LOCAL_TOKEN_PRESENT_UNVERIFIED / SYNC_DISABLED",
+                Reply::LocalInspected(Err(err)) => self.status = err.public_status(),
+                Reply::LocalForgot(Ok(record)) => { self.pending_forget = Some(record); self.status = "YANDEX_LOCAL_FORGET_VERIFYING_SETTINGS / SYNC_DISABLED"; }
+                Reply::LocalForgot(Err(err)) => self.status = err.public_status(),
                 Reply::BrowserUnavailable => {
                     self.status = "YANDEX_BROWSER_UNAVAILABLE / SYNC_DISABLED";
                 }
@@ -210,7 +207,6 @@ impl YandexDiskPreview {
         changed
     }
 }
-
 impl super::App {
     /// Device-local UiState UUID, NEVER a provider's cloud Vault identity.
     /// Do not create a new identity or silently pair another workspace.
@@ -222,7 +218,6 @@ impl super::App {
             .find(|entry| crate::workspace::normalize(Path::new(&entry.path)) == selected)
             .map(|entry| entry.id.to_string())
     }
-
     pub(super) fn press_yandex_disk(&mut self,
         action: crate::ui::settings::schema::Action,
         section: crate::ui::settings::schema::Section,
@@ -238,8 +233,12 @@ impl super::App {
                 self.yandex_disk_preview.start(vault, wake);
             }
             Action::YandexDiskConfirmAccount => {
-                self.yandex_disk_preview.confirm(vault.as_deref(), wake);
+                if self.remember_yandex_public_review(vault.as_deref()) {
+                    self.yandex_disk_preview.confirm(vault.as_deref(), wake);
+                }
             }
+            Action::YandexDiskInspectLocal => { let record = self.yandex_local_public_hint(vault.as_deref()); self.yandex_disk_preview.start_local_inspect(record, wake); }
+            Action::YandexDiskForgetLocal => { let record = self.yandex_local_public_hint(vault.as_deref()); self.yandex_disk_preview.start_local_forget(record, wake); }
             _ => {}
         }
         super::settings::Effect::Content
@@ -251,6 +250,7 @@ impl super::App {
     ) {
         let vault = self.yandex_disk_local_vault();
         let changed = self.yandex_disk_preview.poll(vault.as_deref());
+        let changed = self.reconcile_yandex_local_forget() || changed;
         if changed && matches!(&self.popup,
             Some(super::Popup::Settings { dialog, .. })
                 if dialog.section == crate::ui::settings::schema::Section::Sync)
