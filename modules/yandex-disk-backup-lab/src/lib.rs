@@ -71,7 +71,7 @@ impl RecoveryKey {
 }
 
 fn seal_key(key: &RecoveryKey) -> Result<aead::LessSafeKey, BackupError> {
-    aead::UnboundKey::new(&aead::AES_256_GCM, key.0.as_ref())
+    aead::UnboundKey::new(&aead::AES_256_GCM, &key.0[..])
         .map(aead::LessSafeKey::new)
         .map_err(|_| BackupError::EncryptionFailed)
 }
