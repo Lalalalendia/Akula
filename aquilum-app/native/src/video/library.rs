@@ -36,6 +36,18 @@ fn alias(meta: &fs::Metadata) -> bool {
     { meta.file_type().is_symlink() }
 }
 
+/// Resolve the deepest existing ancestor BEFORE creating any child. This
+/// prevents a symlink/junction in the ancestor chain from directing even
+/// staging-directory creation into a synchronized vault.
+fn prospective_physical_root(root: &Path) -> io::Result<PathBuf> {
+    let ancestor = root.ancestors().find(|path| path.exists())
+        .ok_or_else(|| denied("no existing ancestor for local video storage"))?;
+    let physical = fs::canonicalize(ancestor)?;
+    let suffix = root.strip_prefix(ancestor)
+        .map_err(|_| denied("invalid local video path ancestry"))?;
+    Ok(physical.join(suffix))
+}
+
 fn outside_vaults(root: &Path, vaults: &[PathBuf]) -> io::Result<()> {
     for vault in vaults {
         // Unknown registered roots are not permission to store in a
@@ -64,6 +76,7 @@ impl Library {
         }
         // Reject obvious overlap before writing anything to the destination.
         outside_vaults(&root, registered_roots)?;
+        outside_vaults(&prospective_physical_root(&root)?, registered_roots)?;
         fs::create_dir_all(&root)?;
         let meta = fs::symlink_metadata(&root)?;
         if !meta.is_dir() || alias(&meta) {
@@ -168,6 +181,9 @@ mod tests {
         fs::create_dir_all(&vault).unwrap();
         let link = dir.path().join("local_link");
         symlink(&vault, &link).unwrap();
-        assert!(Library::at(link, &[vault]).is_err());
+        assert!(Library::at(link.clone(), &[vault.clone()]).is_err());
+        let aliased_child = vault.join("Videos");
+        assert!(Library::at(link.join("Videos"), &[vault]).is_err());
+        assert!(!aliased_child.exists(), "do not even create staging directory through a symlink");
     }
 }
