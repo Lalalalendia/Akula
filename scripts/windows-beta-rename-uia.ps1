@@ -152,11 +152,22 @@ function Normalize-Text([string]$value) {
   return $value.Replace($cr + $lf, $lf).Replace($cr, $lf)
 }
 
-foreach ($mode in @('Enter', 'Blur')) {
+# Nested repeats the real title rename after both parent and child vaults
+# have been registered in the same installed Akula profile.
+foreach ($mode in @('Enter', 'Blur', 'Nested')) {
   $originalStem = 'AkulaRename' + $mode
   $targetStem = 'AkulaRenamed' + $mode
-  $from = Join-Path $vault ($originalStem + '.md')
-  $to = Join-Path $vault ($targetStem + '.md')
+  $fileVault = $vault
+  if ($mode -ceq 'Nested') {
+    # The preceding Enter/Blur passes registered the parent vault; this
+    # child registration creates overlapping owners on the same physical note.
+    $fileVault = Join-Path $vault 'Английский'
+    if (!(Test-Path -LiteralPath $fileVault -PathType Container)) {
+      New-Item -ItemType Directory -Path $fileVault -ErrorAction Stop | Out-Null
+    }
+  }
+  $from = Join-Path $fileVault ($originalStem + '.md')
+  $to = Join-Path $fileVault ($targetStem + '.md')
   if ((Test-Path -LiteralPath $from) -or (Test-Path -LiteralPath $to)) {
     throw "AKULA_RENAME_UIA_HOLD: nonempty synthetic fixture for $mode"
   }
@@ -166,7 +177,7 @@ foreach ($mode in @('Enter', 'Blur')) {
   $originalHash = (Get-FileHash -LiteralPath $from -Algorithm SHA256).Hash
   $process = $null
   try {
-    $argsForApp = '--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $vault, $DataDir, $from
+    $argsForApp = '--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $fileVault, $DataDir, $from
     $process = Start-Process -FilePath $installed -ArgumentList $argsForApp -PassThru
     Wait-Window $process $originalStem
     $hwnd = Focus-Title $process $originalStem
@@ -176,7 +187,7 @@ foreach ($mode in @('Enter', 'Blur')) {
       throw 'Filename was changed before an explicit Enter or blur commit'
     }
 
-    if ($mode -ceq 'Enter') {
+    if ($mode -ceq 'Enter' -or $mode -ceq 'Nested') {
       [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $process.Id, [uint16]0x0d, $false)
     } else {
       $null = Focus-Body $process
@@ -193,7 +204,7 @@ foreach ($mode in @('Enter', 'Blur')) {
     $process = $null
 
     $after = (Get-FileHash -LiteralPath $to -Algorithm SHA256).Hash
-    $reopenArgs = '--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $vault, $DataDir, $to
+    $reopenArgs = '--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $fileVault, $DataDir, $to
     $process = Start-Process -FilePath $installed -ArgumentList $reopenArgs -PassThru
     Wait-Window $process $targetStem
     $hwnd = Focus-Body $process
