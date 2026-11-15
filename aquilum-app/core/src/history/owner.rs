@@ -78,7 +78,7 @@ pub(crate) fn unique_current(roots: &[PathBuf], note: &Path) -> io::Result<Optio
         }
         if current(root, note)? {
             if let Some(previous) = matched {
-                if identity(&roots[previous]) != identity(root) {
+                if identity(roots.get(previous).expect("previous index came from roots").as_path()) != identity(root.as_path()) {
                     return Err(denied("more than one registered workspace stores this note's history"));
                 }
             } else {
