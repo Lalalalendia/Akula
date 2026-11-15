@@ -9,6 +9,7 @@
 //! zeroizing buffers. OAuth or refresh tokens NEVER enter this module.
 
 pub mod exchange;
+pub mod identity;
 
 use ring::digest::{digest, SHA256};
 use ring::rand::{SecureRandom, SystemRandom};
@@ -270,7 +271,6 @@ mod tests {
         assert!(!a.authorization_url.contains(a.pending.verifier.as_str()));
         assert!(!a.authorization_url.contains("access_token"));
     }
-
     #[test]
     fn only_explicit_https_or_loopback_redirect_is_admitted() {
         for uri in [

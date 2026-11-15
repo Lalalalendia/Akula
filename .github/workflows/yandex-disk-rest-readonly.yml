@@ -6,6 +6,7 @@ on:
       - 'aquilum-app/core/src/sync/yandex_disk_rest.rs'
       - 'aquilum-app/core/src/sync/yandex_disk_rest/oauth.rs'
       - 'aquilum-app/core/src/sync/yandex_disk_rest/oauth/exchange.rs'
+      - 'aquilum-app/core/src/sync/yandex_disk_rest/oauth/identity.rs'
       - 'aquilum-app/core/Cargo.toml'
       - '.github/workflows/yandex-disk-rest-readonly.yml'
   workflow_dispatch:
