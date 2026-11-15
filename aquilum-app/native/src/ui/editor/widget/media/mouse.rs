@@ -58,6 +58,10 @@ impl TextEditor {
                     } else {
                         self.request(Request::Open { target: path.to_string_lossy().into_owned(), wiki: false, new_tab: false });
                     }
+                } else if crate::video::youtube::video_id(&line.src).is_some() {
+                    // The preview is an image, not a media stream. A click
+                    // opens the original YouTube URL; no implicit download.
+                    self.request(Request::Open { target: line.src, wiki: false, new_tab: false });
                 }
             }
             MediaHit::Mute => {
