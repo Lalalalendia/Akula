@@ -100,7 +100,7 @@ impl YandexPkceStart {
         let state = Zeroizing::new(lower_hex(&state_bytes));
         verifier_bytes.zeroize();
         state_bytes.zeroize();
-challenge = s256_challenge(verifier.as_str());
+        let challenge = s256_challenge(verifier.as_str());
         let mut auth = Url::parse(YANDEX_AUTHORIZATION_URL)
             .expect("constant HTTPS Yandex endpoint");
         auth.query_pairs_mut()
@@ -145,7 +145,7 @@ impl YandexPkcePending {
         {
             return Err(YandexOAuthError::CallbackWrongOrigin);
         }
-mut code: Option<String> = None;
+        let mut code: Option<String> = None;
         let mut state: Option<String> = None;
         let mut error: Option<String> = None;
         let mut description_seen = false;
