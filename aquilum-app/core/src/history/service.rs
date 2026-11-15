@@ -1039,10 +1039,7 @@ impl HistoryService {
             return Err(HistoryMoveFailure::new(action,
                 "participant HOLD activated before direct history relocation", false));
         }
-        // A workspace can be registered after HistoryService first cached roots.
-        // Rename admission has already verified a specific registry snapshot:
-        // use that order for BOTH history paths instead of stale cached roots.
-        state.roots = roots();
+        state.roots = roots(); // Rename admission's registry snapshot, not cached roots.
         let (Some(source), Some(target)) = (
             locate(&mut state, roots, from),
             locate(&mut state, roots, to),
