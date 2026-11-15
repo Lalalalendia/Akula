@@ -184,17 +184,21 @@ mod tests {
     }
 
     #[test]
-    fn second_workspace_existing_history_refuses_rename_without_touching_bytes() {
+    fn parent_owned_history_survives_nested_root_rename_and_cold_reopen() {
         let temp = tempfile::tempdir().unwrap();
         let (core, outer, inner) = core_with_outer(&temp);
         let old = inner.join("Без названия.md");
         let new = inner.join("Грамматика английского языка.md");
         crate::files::gate::create(&core, &old, "не терять", Source::Me, None).unwrap();
-        assert!(store::history_dir(&outer, old.strip_prefix(&outer).unwrap()).exists());
+        assert!(crate::history::store::history_dir(
+            &outer, old.strip_prefix(&outer).unwrap()).exists());
         core.ui_state.resolve_workspace(inner.to_str().unwrap(), 2).unwrap();
-        assert!(crate::files::gate::rename(&core, &old, &new).is_err());
-        assert_eq!(fs::read_to_string(&old).unwrap(), "не терять");
-        assert!(!new.exists());
+        crate::files::gate::rename(&core, &old, &new).unwrap();
+        assert!(!old.exists());
+        assert_eq!(fs::read_to_string(&new).unwrap(), "не терять");
+        let fresh = crate::history::HistoryService::new(&temp.path().join("cold-appdata"));
+        assert!(fresh.page(&|| core.known_roots(), &new, 0, 8).total > 0);
+        assert_eq!(fresh.page(&|| core.known_roots(), &old, 0, 8).total, 0);
     }
 
     #[test]
