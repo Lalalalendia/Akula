@@ -225,6 +225,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "akula-yandex-disk-connect-lab"
+version = "0.1.0"
+dependencies = [
+ "akula-yandex-disk-rest",
+ "akula-yandex-disk-secret-store",
+ "zeroize",
+]
+
+[[package]]
+name = "akula-yandex-disk-rest"
+version = "0.1.0"
+dependencies = [
+ "ring",
+ "serde",
+ "serde_json",
+ "ureq",
+ "url",
+ "zeroize",
+]
+
+[[package]]
+name = "akula-yandex-disk-secret-store"
+version = "0.1.0"
+dependencies = [
+ "keyring",
+ "sha2 0.11.1",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "aligned"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -314,38 +345,6 @@ name = "anymore"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a38750a2a9617d9f1a1428b408fb909f7256a2766c59b0b07993170959731bb"
-
-[[package]]
-name = "akula-yandex-disk-connect-lab"
-version = "0.1.0"
-dependencies = [
- "akula-yandex-disk-rest",
- "akula-yandex-disk-secret-store",
- "url",
- "zeroize",
-]
-
-[[package]]
-name = "akula-yandex-disk-rest"
-version = "0.1.0"
-dependencies = [
- "ring",
- "serde",
- "serde_json",
- "ureq",
- "url",
- "zeroize",
-]
-
-[[package]]
-name = "akula-yandex-disk-secret-store"
-version = "0.1.0"
-dependencies = [
- "keyring",
- "sha2 0.11.1",
- "subtle",
- "zeroize",
-]
 
 [[package]]
 name = "aq_trace"
