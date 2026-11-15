@@ -42,3 +42,37 @@ Primary references:
 - https://github.com/Lalalalendia/Akula/blob/main/aquilum-app/core/src/sync/provider.rs
 
 Existing programs: Notion SYNC 00-11, STOR-T-01/02/21. This is an opt-in transport boundary, **not** completion of SYNC-08.
+
+
+## 15 November 2026: important Yandex app:/ response-path compatibility correction
+
+The API accepts \`app:/\` paths when using the scoped \`cloud_api:disk.app_folder\`
+OAuth permission, but **returns resource paths under absolute \`disk:/\`**.
+This is independently documented in the Yandex Disk app-folder API reference
+and in the third-party SDK:
+- https://help.dev.korobka360.ru/pdf/1.0/api-disk-rest.pdf
+- https://github.com/ufee/yandex-disk
+
+The first implementation incorrectly expected every returned path to retain
+the \`app:/\` prefix. The new parser must **not** attempt to authorize \`disk:/\`
+requests using an app-folder token: those can fail with HTTP 403, as documented
+by rclone issue https://github.com/rclone/rclone/issues/9848 .
+
+Correct read-only boundary:
+
+1. Obtain the app's absolute \`disk:/...\` root path from the **first \`app:/\` root** metadata response; reject malformed paths and \`disk:/\` global root.
+2. Hold this as a session-only observed path identity. It is not a trusted
+   provider snapshot, authorization to write, or a durable account binding.
+3. Require the observed root for all nested \`app:/...\` requests and subsequent
+   root pages. Check the provider's absolute folder path and each direct child
+   against the expected observed parent using exact segment boundaries.
+4. Expose only app-relative aliases to callers. Never feed response-supplied
+   absolute \`disk:/\` paths into a restricted token's API operations.
+5. Keep the entire listing **unverified** for synchronization purposes:
+   offset-based pagination still cannot prove that no file was skipped during
+   concurrent changes. Do not infer any deletion from an incomplete observation.
+
+Offline tests cover root bootstrap, Unicode names, nested paths, mismatched
+roots, cross-namespace attacks, duplicate/foreign children, offset drift and
+oversized responses. Live behavior remains unverified without a disposable
+Yandex OAuth account.
