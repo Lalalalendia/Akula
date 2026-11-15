@@ -1,0 +1,35 @@
+name: Yandex Disk immutable encrypted backup offline
+on:
+  pull_request:
+    paths:
+      - 'modules/yandex-disk-backup-lab/**'
+      - '.github/workflows/yandex-disk-backup-isolated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  immutable-backup:
+    name: Encrypted backup & readback / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: yandex-encrypted-backup-${{ matrix.os }}
+          save-if: false
+      - name: One-off archive cryptography, immutable-create, readback failure contracts
+        run: cargo test --manifest-path modules/yandex-disk-backup-lab/Cargo.toml
+      - name: Documentation tests
+        run: cargo test --manifest-path modules/yandex-disk-backup-lab/Cargo.toml --doc

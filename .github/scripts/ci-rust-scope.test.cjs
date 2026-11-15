@@ -432,6 +432,7 @@ test('every standalone Rust module has a protected CI owner and executable Cargo
     'yandex-disk-secret-store':'yandex-disk-secret-store.yml',
     'yandex-disk-rest':'yandex-disk-rest-isolated.yml',
     'yandex-disk-connect-lab':'yandex-disk-connect-isolated.yml',
+    'yandex-disk-backup-lab':'yandex-disk-backup-isolated.yml',
     'dropbox-connect-lab':'dropbox-t0-isolated.yml',
     'text-delta-codec':'text-delta-codec-isolated.yml',
     'game-session':'game-session-isolated.yml',
