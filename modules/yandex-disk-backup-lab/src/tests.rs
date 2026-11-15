@@ -46,7 +46,8 @@ impl CreateOnlyBackupPort for FakeTransport {
         }
         let mut saved = ciphertext.to_vec();
         if matches!(self.mode, FakeMode::CorruptAfterUpload) {
-            saved[saved.len()-1] ^= 1;
+            let last = saved.len()-1;
+            saved[last] ^= 1;
         }
         self.objects.insert(key, saved);
         if matches!(self.mode, FakeMode::AcceptedThenLostResponse) {
