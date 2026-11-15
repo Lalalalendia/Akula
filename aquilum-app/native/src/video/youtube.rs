@@ -66,6 +66,23 @@ mod tests {
     }
 
     #[test]
+    fn standalone_video_urls_remain_exact_markdown_sources() {
+        use crate::ui::editor::embed::media::{is_embed, parse};
+        for line in [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtu.be/dQw4w9WgXcQ?t=14",
+        ] {
+            assert!(is_embed(line));
+            let block = parse(line);
+            assert_eq!(block.src, line);
+            assert!(!block.wiki);
+        }
+        assert!(!is_embed("Read https://youtu.be/dQw4w9WgXcQ"));
+        assert!(!is_embed("https://youtu.be/not-valid"));
+        assert!(!is_embed("https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ"));
+    }
+
+    #[test]
     fn reject_playlist_hosts_tricks_and_nonvideo_content() {
         for url in [
             "http://youtube.com/watch?v=dQw4w9WgXcQ",
