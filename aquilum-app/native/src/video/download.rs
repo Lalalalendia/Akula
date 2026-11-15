@@ -47,6 +47,19 @@ fn command_args(url: &str, stage: &Path, max_bytes: u64) -> Vec<OsString> {
     ].into_iter().map(OsString::from).collect()
 }
 
+/// If the progress stream cannot be decoded or inspected, the download
+/// process must not continue writing after the staging directory is dropped.
+struct ChildGuard(std::process::Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
 fn get_error(mut reader: impl Read) -> String {
     let mut bytes = [0_u8; 4096];
     let mut recent = Vec::<u8>::new();
@@ -127,28 +140,28 @@ pub fn download_one(
         return Err("local video-library quota is exhausted".into());
     }
     let stage = Staging::new(library.root())?;
-    let mut child = Command::new(executable)
+    let mut child = ChildGuard(Command::new(executable)
         .args(command_args(url, stage.path(), allowance))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn().map_err(|e| format!("yt-dlp unavailable or could not start: {e}"))?;
-    let stderr = child.stderr.take().ok_or("yt-dlp error stream unavailable")?;
+        .spawn().map_err(|e| format!("yt-dlp unavailable or could not start: {e}"))?);
+    let stderr = child.0.stderr.take().ok_or("yt-dlp error stream unavailable")?;
     let diagnostics = std::thread::spawn(move || get_error(stderr));
-    let stdout = child.stdout.take().ok_or("yt-dlp progress stream unavailable")?;
+    let stdout = child.0.stdout.take().ok_or("yt-dlp progress stream unavailable")?;
     let mut over_limit = false;
     for line in BufReader::new(stdout).lines() {
         let line = line.map_err(|e| e.to_string())?;
         if let Some(progress) = parse_progress(line.trim()) {
             if progress.downloaded > allowance {
                 over_limit = true;
-                let _ = child.kill();
+                let _ = child.0.kill();
                 break;
             }
             on_progress(progress);
         }
     }
-    let status = child.wait().map_err(|e| e.to_string())?;
+    let status = child.0.wait().map_err(|e| e.to_string())?;
     let stderr = diagnostics.join().unwrap_or_default();
     if over_limit {
         return Err("video download exceeded the local-file quota".into());
