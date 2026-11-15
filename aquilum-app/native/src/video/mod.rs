@@ -1,3 +1,5 @@
+pub(crate) mod download;
+pub(crate) mod library;
 pub(crate) mod youtube;
 #[cfg(target_os = "linux")]
 mod linux;
@@ -12,7 +14,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use masonry::peniko::ImageBrush;
-
 #[cfg(target_os = "linux")]
 use self::linux::Engine;
 #[cfg(target_os = "macos")]
@@ -21,7 +22,6 @@ use self::macos::Engine;
 use self::stub::Engine;
 #[cfg(target_os = "windows")]
 use self::windows::Engine;
-
 #[cfg(target_os = "linux")]
 pub fn poster(path: &Path) -> Option<ImageBrush> {
     Engine::poster(path)
