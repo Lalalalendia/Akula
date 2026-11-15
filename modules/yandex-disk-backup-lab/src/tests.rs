@@ -181,7 +181,7 @@ fn created_201_still_requires_exact_complete_readback() {
 }
 
 #[test]
-fn 202_is_pending_until_a_separate_verified_readback() {
+fn pending_202_requires_a_separate_verified_readback() {
     let (_, sealed, _) = archive();
     let mut provider = FakeTransport::new(FakeMode::Delayed202);
     assert_eq!(
@@ -229,7 +229,7 @@ fn conflict_does_not_overwrite_remote_object_or_claim_a_receipt() {
 }
 
 #[test]
-fn 201_with_corrupted_or_unavailable_readback_does_not_pass() {
+fn created_201_with_corrupted_or_unavailable_readback_does_not_pass() {
     let (_, sealed, _) = archive();
     let mut corrupted = FakeTransport::new(FakeMode::CorruptAfterUpload);
     assert_eq!(
