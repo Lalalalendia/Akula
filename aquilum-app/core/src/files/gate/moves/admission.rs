@@ -231,3 +231,7 @@ mod tests {
         assert!(!renamed.exists());
     }
 }
+
+#[cfg(test)]
+#[path = "owner_tests.rs"]
+mod owner_tests;
