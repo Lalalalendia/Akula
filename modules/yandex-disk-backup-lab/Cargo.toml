@@ -1,0 +1,14 @@
+[package]
+name = "akula-yandex-disk-backup-lab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "Explicit, offline-tested immutable encrypted personal Yandex Disk backup protocol"
+
+[workspace]
+
+[dependencies]
+akula-yandex-disk-rest = { path = "../yandex-disk-rest" }
+ring = "0.17.14"
+zeroize = "1.9.0"
