@@ -5,6 +5,8 @@
 // acceptance, code change and review.
 #[cfg(all(feature = "yandex-s3-connection-preview", not(debug_assertions)))]
 compile_error!("Yandex S3 connection preview must not ship in release builds");
+#[cfg(all(feature = "yandex-disk-readonly-preview", not(debug_assertions)))]
+compile_error!("Personal Yandex Disk OAuth preview must not ship in release builds");
 
 macro_rules! report {
     ($($arg:tt)*) => {

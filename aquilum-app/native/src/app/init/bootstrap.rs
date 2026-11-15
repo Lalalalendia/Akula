@@ -20,6 +20,7 @@ impl App {
         let mut app = App {
             workspace,
             #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview::new(),
+            #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_preview: yandex_disk_preview::YandexDiskPreview::new(),
             tree,
             #[cfg(feature = "dicom-preview")] dicom_external_sources: HashSet::new(),
             chrome: None,

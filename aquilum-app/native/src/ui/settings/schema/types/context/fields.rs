@@ -11,6 +11,11 @@ pub struct Context {
     pub s3_bound_publications: Option<NativeRecoveryOverview>,
     pub sync_selected: Option<NativeRecoveryCasePreview>,
     pub sync_notice: Option<String>,
+    #[cfg(feature = "yandex-disk-readonly-preview")] pub yandex_disk_status: String,
+    #[cfg(feature = "yandex-disk-readonly-preview")] pub yandex_disk_busy: bool,
+    #[cfg(feature = "yandex-disk-readonly-preview")] pub yandex_disk_review_account: Option<String>,
+    #[cfg(feature = "yandex-disk-readonly-preview")] pub yandex_disk_app_configured: bool,
+    #[cfg(feature = "yandex-disk-readonly-preview")] pub yandex_disk_vault_ready: bool,
     #[cfg(feature = "dropbox-readonly-preview")]
     pub dropbox_preview_status: String,
     #[cfg(feature = "dropbox-readonly-preview")]
