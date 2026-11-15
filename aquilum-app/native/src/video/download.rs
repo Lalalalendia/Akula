@@ -175,7 +175,10 @@ pub fn download_one(
     if used.saturating_add(bytes) > LIBRARY_MAX || bytes > allowance {
         return Err("video would exceed the local library quota".into());
     }
-    File::open(&staged).and_then(|file| file.sync_all()).map_err(|e| e.to_string())?;
+    // On Windows FlushFileBuffers requires a writable file handle. A read-only
+    // File::open handle can fail with ACCESS_DENIED after yt-dlp succeeded.
+    fs::OpenOptions::new().read(true).write(true).open(&staged)
+        .and_then(|file| file.sync_all()).map_err(|e| e.to_string())?;
     let ext = staged.extension().and_then(|e| e.to_str()).ok_or("invalid yt-dlp output extension")?;
     let target = library.published(id, ext).map_err(|e| e.to_string())?;
     if let Some(existing) = library.existing(id).map_err(|e| e.to_string())? {
@@ -277,6 +280,48 @@ mod tests {
         assert!(download_one(&library, exe.as_os_str(), "https://youtu.be/dQw4w9WgXcQ", |_| {}).is_err());
         assert!(library.existing("dQw4w9WgXcQ").unwrap().is_none());
         assert_eq!(fs::read_dir(library.root()).unwrap().count(), 0, "temporary files cleaned");
+    }
+
+
+    #[cfg(windows)]
+    #[test]
+    fn synthetic_windows_download_flushes_publishes_and_deduplicates() {
+        // The real Windows child-process + FlushFileBuffers + hard-link path;
+        // earlier Linux-only synthetic tests cannot catch Win32 handle rights.
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::at(temp.path().join("device-only"), &[]).unwrap();
+        let stub = temp.path().join("fake-yt-dlp.cmd");
+        fs::write(&stub, "@echo off\r\n> dQw4w9WgXcQ.mp4 echo synthetic-windows-video\r\necho AKULA_PROGRESS:25:25:0\r\nexit /b 0\r\n").unwrap();
+        let mut progress = Vec::new();
+        let first = download_one(
+            &library, stub.as_os_str(), "https://youtu.be/dQw4w9WgXcQ",
+            |p| progress.push(p),
+        ).expect("Windows fake downloader must publish after successful flush");
+        assert_eq!(first.parent(), Some(library.root()));
+        assert!(fs::read(&first).unwrap().starts_with(b"synthetic-windows-video"));
+        assert!(progress.iter().any(|p| p.total == Some(25)));
+        assert_eq!(
+            download_one(&library, OsStr::new("missing-yt-dlp.exe"),
+                "https://youtu.be/dQw4w9WgXcQ", |_| {}).unwrap(),
+            first,
+            "a second note must reuse the same device-local file",
+        );
+        assert_eq!(fs::read_dir(library.root()).unwrap().count(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn synthetic_windows_failure_does_not_publish_a_partial_video() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::at(temp.path().join("device-only"), &[]).unwrap();
+        let stub = temp.path().join("fake-failed-yt-dlp.cmd");
+        fs::write(&stub, "@echo off\r\n> dQw4w9WgXcQ.mp4.part echo incomplete\r\nexit /b 12\r\n").unwrap();
+        let outcome = download_one(&library, stub.as_os_str(),
+            "https://youtu.be/dQw4w9WgXcQ", |_| {});
+        assert!(outcome.is_err(), "nonzero yt-dlp exit must be rejected");
+        assert!(library.existing("dQw4w9WgXcQ").unwrap().is_none());
+        assert_eq!(fs::read_dir(library.root()).unwrap().count(), 0,
+            "failed Windows staging must be removed");
     }
 
     #[test]
