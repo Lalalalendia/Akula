@@ -71,7 +71,7 @@ pub(crate) fn legacy(root: &Path, note: &Path) -> io::Result<bool> {
 /// More than one independent history, or an uninspectable root, is an error,
 /// not authority to choose whichever workspace was opened most recently.
 pub(crate) fn unique_current(roots: &[PathBuf], note: &Path) -> io::Result<Option<usize>> {
-    let mut matched = None;
+    let mut matched: Option<usize> = None;
     for (index, root) in roots.iter().enumerate() {
         if strip_root(root, note).is_none() {
             continue;
