@@ -88,7 +88,8 @@ $runReg = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $legacyInstall = Join-Path $env:LOCALAPPDATA 'Aquilum\legacy-do-not-touch.txt'
 $legacyData = Join-Path $env:APPDATA 'com.dmitriy.aquilum-app\user-data-do-not-touch.txt'
 # The preceding installed Windows smoke must have uninstalled Akula, but kept
-# its test profile and its independent Aquilum do-not-touch sentinels.
+# its 0.3.19 test profile and independent Aquilum do-not-touch sentinels.
+# The published 0.3.18 baseline must never open the newer test profile.
 if ((Test-Path $exe) -or (Test-Path $reg) -or !(Test-Path $state -PathType Container)) {
   throw 'Earlier Windows installed smoke did not preserve required clean state'
 }
@@ -101,16 +102,25 @@ if (!(Test-Path $oldReg) -or !(Test-Path $runReg)) {
 $oldDisplay = (Get-ItemProperty $oldReg -Name DisplayName).DisplayName
 $oldRun = (Get-ItemProperty $runReg -Name Aquilum).Aquilum
 $legacyDigests = @((Get-FileHash $legacyInstall -Algorithm SHA256).Hash, (Get-FileHash $legacyData -Algorithm SHA256).Hash)
+# The signed workflow already ran and uninstalled the *new* version. Park
+# that disposable AppData, preserving every SHA256, then let the old published
+# application initialize the default profile. Otherwise this is a downgrade
+# of an existing 0.3.19 profile, not an upgrade acceptance test.
+. (Join-Path $PSScriptRoot 'akula-published-baseline-profile.ps1')
+if (@(Get-Process -Name 'akula-app' -ErrorAction SilentlyContinue).Count -ne 0) {
+  throw 'AKULA_PROFILE_HOLD: Akula is still running before baseline isolation'
+}
+$priorSmokeProfile = Reserve-AkulaPriorSmokeProfile $state (Join-Path $base 'new-version-smoke-appdata')
+Write-Host 'AKULA_PUBLISHED_PROFILE_ISOLATED preserved=1 sha256=1 default_profile_empty=1'
 $stateWitness = Join-Path $state 'signed-upgrade-preserve.txt'
-if (Test-Path $stateWitness) { throw 'Candidate profile witness preexists' }
-[IO.File]::WriteAllText($stateWitness, 'AKULA-USER-STATE')
-$stateDigest = (Get-FileHash $stateWitness -Algorithm SHA256).Hash
+$stateDigest = $null
 $vault = Join-Path $base 'vault'
 New-Item -ItemType Directory -Path $vault | Out-Null
 $note = Join-Path $vault 'Keep.md'
 [IO.File]::WriteAllText($note, '# Preserve Akula user Markdown')
 $noteDigest = (Get-FileHash $note -Algorithm SHA256).Hash
 function Assert-Preserved {
+  Assert-AkulaPriorSmokeProfile $priorSmokeProfile
   if (!(Test-Path $stateWitness) -or
       (Get-FileHash $stateWitness -Algorithm SHA256).Hash -ne $stateDigest -or
       (Get-FileHash $note -Algorithm SHA256).Hash -ne $noteDigest -or
@@ -153,11 +163,28 @@ $oldExeDigest = (Get-FileHash $exe -Algorithm SHA256).Hash
 $argsForApp = '--vault "' + $vault + '" --open "' + $note + '"'
 $oldProcess = Start-Process -FilePath $exe -ArgumentList $argsForApp -PassThru
 $oldGui = Wait-Gui
-if ($oldProcess.Id -ne $oldGui.Id -or !$oldGui.CloseMainWindow() -or !$oldGui.WaitForExit(25000)) {
-  throw 'Published Akula baseline GUI did not close normally'
+if ($oldProcess.Id -ne $oldGui.Id) {
+  throw "Published Akula baseline GUI belongs to a different process (started=$($oldProcess.Id), visible=$($oldGui.Id))"
+}
+if (!(Test-Path -LiteralPath $state -PathType Container)) {
+  throw 'Published Akula did not create its own baseline AppData'
+}
+if (Test-Path -LiteralPath $stateWitness) { throw 'Old baseline profile was not clean' }
+[IO.File]::WriteAllText($stateWitness, 'AKULA-USER-STATE')
+$stateDigest = (Get-FileHash -LiteralPath $stateWitness -Algorithm SHA256).Hash
+Assert-Preserved
+if (!$oldGui.CloseMainWindow()) {
+  throw "Published Akula $oldVersion GUI refused WM_CLOSE (pid=$($oldGui.Id))"
+}
+if (!$oldGui.WaitForExit(25000)) {
+  $oldGui.Refresh()
+  throw "Published Akula $oldVersion GUI did not exit within 25s after WM_CLOSE (pid=$($oldGui.Id), exited=$($oldGui.HasExited), hwnd=$($oldGui.MainWindowHandle))"
+}
+if (@(Get-Process -Name 'akula-app' -ErrorAction SilentlyContinue).Count -ne 0) {
+  throw 'Published Akula left another running process after closing the baseline GUI'
 }
 Assert-Preserved
-Write-Host "AKULA_PUBLISHED_BASELINE_PASS version=$oldVersion gui=1 notes=1"
+Write-Host "AKULA_PUBLISHED_BASELINE_PASS version=$oldVersion gui=1 old_profile=1 prior_profile_isolated=1 notes=1"
 
 # Exercise real NSIS updater arguments against the new signed candidate.
 Invoke-NSIS $newSetup @('/S','/R','/UPDATE','/ARGS')
