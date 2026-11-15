@@ -2,7 +2,6 @@ use masonry::imaging::Painter;
 use masonry::kurbo::{Affine, BezPath, Circle, Point, Rect, RoundedRect, Stroke, Vec2};
 use masonry::parley::Alignment;
 use masonry::peniko::Color;
-
 use super::{BUTTON, HANDLE, MediaHit, MediaOverlay, MediaView, PLAY};
 use crate::ui::icons::{self, Icon};
 use crate::ui::menu::box_shadow;
