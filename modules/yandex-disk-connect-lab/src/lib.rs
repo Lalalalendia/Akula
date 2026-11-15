@@ -7,7 +7,7 @@
 //! Do not call finish from the native GUI thread. No automatic startup,
 //! browser launch, callback listener, HTTP or token refresh happens until
 //! a host explicitly begins a user-driven session and opens its URL.
-
+pub mod local_lifecycle;
 use akula_yandex_disk_rest::{
     oauth::{
         callback::{BoundLogin, CallbackError},
