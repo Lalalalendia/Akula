@@ -43,6 +43,9 @@ jobs:
           cargo test --locked -p aquilum-native --bin aquilum-native video:: -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Native Windows video regression tests failed' }
           Write-Host 'AKULA_VIDEO_WINDOWS_UNIT_PASS no_real_youtube=1 local_only=1'
+          cargo test --locked -p aquilum-native --bin aquilum-native video_download_tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Windows native YouTube card download-action tests failed' }
+          Write-Host 'AKULA_VIDEO_WINDOWS_CARD_PASS explicit_click=1 local_copy=1 markdown_unchanged=1'
       - name: Build installed Akula release with local-only downloader
         shell: pwsh
         working-directory: aquilum-app
