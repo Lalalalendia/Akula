@@ -32,6 +32,7 @@ fn embeddable(source: &str) -> bool {
 
 pub fn is_embed(line: &str) -> bool {
     let line = line.trim();
+    if crate::video::youtube::video_id(line).is_some() { return true; }
     if let Some(inner) = line.strip_prefix("![[").and_then(|l| l.strip_suffix("]]")) {
         return !inner.contains(['[', ']']) && images::kind(split(inner).note).is_some();
     }
@@ -69,7 +70,9 @@ pub fn is_html_image(text: &str) -> bool {
 pub fn parse(line: &str) -> EmbedLine {
     let line = line.trim();
     let wiki = line.starts_with("![[");
-    let (src, params, title) = if is_html_image(line) {
+    let (src, params, title) = if crate::video::youtube::video_id(line).is_some() {
+        (line.to_owned(), Vec::new(), "")
+    } else if is_html_image(line) {
         let size = [attribute(line, "width"), attribute(line, "height")].map(|v| v.unwrap_or_default().trim_end_matches("px"));
         let params = if size[0].is_empty() { Vec::new() } else { vec![if size[1].is_empty() { size[0].to_owned() } else { size.join("x") }] };
         (attribute(line, "src").unwrap_or_default().to_owned(), params, attribute(line, "title").unwrap_or_default())
@@ -182,7 +185,23 @@ mod tests {
     }
 
     #[test]
-    fn width_by_height_and_html_images_keep_their_size() {
+    fn youtube_bare_url_is_preview_without_rewriting_markdown() {
+        for line in [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtu.be/dQw4w9WgXcQ?t=14",
+        ] {
+            assert!(is_embed(line));
+            let block = parse(line);
+            assert_eq!(block.src, line);
+            assert!(!block.wiki);
+        }
+        assert!(!is_embed("Read https://youtu.be/dQw4w9WgXcQ"));
+        assert!(!is_embed("https://youtu.be/not-valid"));
+        assert!(!is_embed("https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ"));
+    }
+
+    #[test]
+        fn width_by_height_and_html_images_keep_their_size() {
         let e = parse("![[a.png|300x200]]");
         assert_eq!((e.params.width, e.params.height), (Some(300.0), Some(200.0)));
         assert_eq!(format(&e), "![[a.png|300x200]]");
