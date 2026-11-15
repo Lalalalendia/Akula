@@ -8,6 +8,13 @@ on:
       - aquilum-app/core/src/files/gate/**
       - aquilum-app/core/src/history/service.rs
       - .github/workflows/qa-941-rename-overlap.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - aquilum-app/core/src/files/gate/**
+      - aquilum-app/core/src/history/service.rs
+      - .github/workflows/qa-941-rename-overlap.yml
   workflow_dispatch:
 
 permissions:
