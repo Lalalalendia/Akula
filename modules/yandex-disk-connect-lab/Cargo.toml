@@ -1,0 +1,21 @@
+[package]
+name = "akula-yandex-disk-connect-lab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "User-invoked two-phase read-only Yandex Disk connection with native OS token custody"
+
+[workspace]
+
+[features]
+default = []
+system-store = ["akula-yandex-disk-secret-store/system-store"]
+
+[dependencies]
+akula-yandex-disk-rest = { path = "../yandex-disk-rest" }
+akula-yandex-disk-secret-store = { path = "../yandex-disk-secret-store", default-features = false }
+zeroize = "1.9.0"
+
+[dev-dependencies]
+url = "2"

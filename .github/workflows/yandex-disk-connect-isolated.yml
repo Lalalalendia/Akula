@@ -1,0 +1,43 @@
+name: Yandex Disk read-only connection lab
+
+on:
+  pull_request:
+    paths:
+      - 'modules/yandex-disk-connect-lab/Cargo.toml'
+      - 'modules/yandex-disk-connect-lab/src/lib.rs'
+      - '.github/workflows/yandex-disk-connect-isolated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  isolated-connect:
+    name: Yandex connection safety / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prepare Linux D-Bus headers for platform keyring compile
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: yandex-connect-${{ matrix.os }}
+          save-if: false
+      - name: Verify reviewed account, OS save consent, crash-safe failure decisions
+        run: cargo test --manifest-path modules/yandex-disk-connect-lab/Cargo.toml
+      - name: Verify native OS-secret-store flavor compiles
+        run: cargo check --manifest-path modules/yandex-disk-connect-lab/Cargo.toml --features system-store
