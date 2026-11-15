@@ -1,0 +1,48 @@
+# Release QA only: no signing or publishing, disposable Windows runner.
+name: Akula published 0.3.18 cold GUI and profile handoff
+on:
+  pull_request:
+    paths:
+      - 'scripts/test-windows-signed-next-version-upgrade.ps1'
+      - 'scripts/akula-published-baseline-profile.ps1'
+      - 'scripts/test-windows-018-baseline-qa.ps1'
+      - '.github/workflows/akula-published-018-baseline-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  published-baseline:
+    if: github.repository == 'Lalalalendia/Akula'
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Parse both signed-upgrade and published-baseline QA PowerShell
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in @('test-windows-signed-next-version-upgrade.ps1',
+                              'akula-published-baseline-profile.ps1',
+                              'test-windows-018-baseline-qa.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $env:GITHUB_WORKSPACE "scripts/$file"),
+              [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) { throw "PowerShell syntax error in $file : $($errors[0])" }
+          }
+          Write-Host 'AKULA_PUBLISHED_018_QA_PARSE_PASS'
+      - name: Test profile handoff and the real published 0.3.18 GUI on clean AppData
+        shell: pwsh
+        timeout-minutes: 25
+        env:
+          AKULA_PUBLISHED_BASELINE_DISPOSABLE: '1'
+        run: ./scripts/test-windows-018-baseline-qa.ps1
