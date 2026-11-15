@@ -10,7 +10,7 @@
 //! No key material is saved to AppConfig, a workspace, or the cloud.
 
 use akula_yandex_disk_rest::YandexAppPath;
-use ring::{aead, constant_time, digest, rand::{SecureRandom, SystemRandom}};
+use ring::{aead, digest, rand::{SecureRandom, SystemRandom}};
 use zeroize::Zeroizing;
 
 /// Single-object laboratory limit. Large vaults need chunking & an encrypted
@@ -116,7 +116,7 @@ impl SealedBackup {
         let mut data = Zeroizing::new(plaintext.to_vec());
         seal_key(key)?.seal_in_place_append_tag(
             aead::Nonce::assume_unique_for_key(nonce),
-            aead::Aad::from(path.as_str().as_bytes()), &mut data,
+            aead::Aad::from(path.as_str().as_bytes()), &mut *data,
         ).map_err(|_| BackupError::EncryptionFailed)?;
         let mut encrypted = Vec::with_capacity(MAGIC.len() + NONCE_BYTES + data.len());
         encrypted.extend_from_slice(MAGIC);
@@ -175,8 +175,9 @@ impl SealedBackup {
             return Err(BackupError::RemoteContentMismatch);
         }
         let observed = digest::digest(&digest::SHA256, &bytes);
-        constant_time::verify_slices_are_equal(observed.as_ref(), &self.hash)
-            .map_err(|_| BackupError::RemoteContentMismatch)?;
+        if observed.as_ref() != self.hash.as_slice() {
+            return Err(BackupError::RemoteContentMismatch);
+        }
         Ok(VerifiedBackupReceipt {
             path: self.path.clone(), encrypted_len: bytes.len() as u64,
             sha256: self.hash,
