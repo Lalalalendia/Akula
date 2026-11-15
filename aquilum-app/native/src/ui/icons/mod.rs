@@ -3,16 +3,16 @@ mod arrows;
 mod editor;
 mod files;
 mod links;
-
+mod video;
 use masonry::imaging::{PaintSink, Painter};
 use masonry::kurbo::{Affine, BezPath, Cap, Circle, Join, Point, RoundedRect, Shape as _, Stroke};
 use masonry::peniko::Color;
-
 pub use app::*;
 pub use arrows::*;
 pub use editor::*;
 pub use files::*;
 pub use links::*;
+pub use video::*;
 
 pub enum Shape {
     Path(&'static str),

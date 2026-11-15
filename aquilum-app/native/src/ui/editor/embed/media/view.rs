@@ -5,6 +5,10 @@ use masonry::peniko::ImageBrush;
 use super::super::metrics::{IMAGE_PAD_X, IMAGE_PAD_Y};
 use super::{BAR_GAP, BAR_PAD, BUTTON, EmbedLine, FULL, INSET, MIN_HEIGHT, MIN_WIDTH, MediaHit, SEPARATOR, VIDEO_MIN_HEIGHT};
 use crate::ui::editor::resolve::{Fetch, Media};
+#[cfg(test)]
+#[path = "video_download_tests.rs"]
+mod video_download_tests;
+
 pub struct MediaView {
     pub height: f64,
     pub line: EmbedLine,
@@ -41,22 +45,20 @@ impl MediaView {
         let frame = Rect::new(x, IMAGE_PAD_Y, x + w, IMAGE_PAD_Y + h);
         MediaView { height: h + IMAGE_PAD_Y * 2.0, line, image, video, path, frame, room, uncropped }
     }
-
     pub fn crop(&self) -> [f64; 4] {
         if self.uncropped { FULL } else { self.line.params.crop.unwrap_or(FULL) }
     }
-
     pub fn aspect(&self) -> f64 {
         self.frame.width() / self.frame.height().max(1.0)
     }
-
     pub fn min_width(&self) -> f64 {
         MIN_WIDTH.max(self.toolbar_width() + INSET * 2.0).max(((if self.video { VIDEO_MIN_HEIGHT } else { MIN_HEIGHT }) * self.aspect()).round())
     }
-
     fn buttons(&self) -> Vec<Option<MediaHit>> {
         if crate::video::youtube::video_id(&self.line.src).is_some() {
-            return vec![Some(MediaHit::Source)];
+            let mut buttons = vec![Some(MediaHit::Source)];
+            if self.path.is_none() { buttons.extend([None, Some(MediaHit::Download)]); }
+            return buttons;
         }
         let mut out = Vec::new();
         if !self.video {
@@ -65,13 +67,11 @@ impl MediaView {
         out.extend([Some(MediaHit::Align), None, Some(MediaHit::Crop), None, Some(MediaHit::Source)]);
         out
     }
-
     fn toolbar_width(&self) -> f64 {
         let items = self.buttons();
         let widths: f64 = items.iter().map(|b| if b.is_some() { BUTTON } else { SEPARATOR }).sum();
         widths + BAR_GAP * (items.len() - 1) as f64 + BAR_PAD * 2.0
     }
-
     pub fn toolbar(&self) -> Rect {
         let w = self.toolbar_width();
         Rect::new(self.frame.x1 - INSET - w, self.frame.y0 + INSET, self.frame.x1 - INSET, self.frame.y0 + INSET + BUTTON + BAR_PAD * 2.0)

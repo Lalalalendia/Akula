@@ -46,7 +46,6 @@ impl TextEditor {
             _ => None,
         }
     }
-
     fn media_under(&self, point: Point) -> Option<(usize, MediaHit)> {
         if self.doc.markdown.is_none() || !self.laid_out() {
             return None;
@@ -61,7 +60,6 @@ impl TextEditor {
         let overlay = MediaOverlay { hovered: true, ..self.media_overlay(p.start) };
         Some((p.start, view.hit(local, &overlay))).filter(|(_, hit)| *hit != MediaHit::Outside)
     }
-
     pub(super) fn paint_videos(&self, painter: &mut masonry::imaging::Painter<'_>) {
         let (first, last) = (self.doc.at_y(self.painted.0), self.doc.at_y(self.painted.1));
         for (i, top, _) in self.doc.placed(first..=last) {
@@ -74,16 +72,21 @@ impl TextEditor {
             }
         }
     }
-
     pub(super) fn media_overlay(&self, start: usize) -> MediaOverlay {
         let m = &self.media;
         let crop = m.crop.filter(|(s, _)| *s == start).map(|(_, c)| c);
         let hover = m.hover.filter(|(s, _)| *s == start).map(|(_, h)| h);
         let video = self.media_view(start).filter(|v| v.video).and_then(|v| v.path.as_deref()).filter(|p| self.videos.has(p)).and_then(crate::video::state);
         let fade = m.bar.as_ref().filter(|(s, _)| *s == start).map_or(1.0, |(_, intro)| intro.value() as f32);
-        MediaOverlay { hovered: hover.is_some() || crop.is_some(), selected: m.selected == Some(start), hover, crop, video, fade }
+        let (download, failed) = match self.media_view(start).and_then(|view| crate::video::queue::status(&view.line.src)) {
+            Some(crate::video::queue::Status::Queued) => (Some(0.02), false),
+            Some(crate::video::queue::Status::Downloading(progress)) =>
+                (Some(progress.total.map_or(0.04, |total| progress.downloaded as f64 / total.max(1) as f64)), false),
+            Some(crate::video::queue::Status::Failed(_)) => (None, true),
+            _ => (None, false),
+        };
+        MediaOverlay { hovered: hover.is_some() || crop.is_some(), selected: m.selected == Some(start), hover, crop, video, download, failed, fade }
     }
-
     fn rewrite(&mut self, start: usize, line: &EmbedLine) {
         let range = self.doc.paragraph(self.doc.at_offset(start)).range();
         let text = media::format(line);
@@ -91,7 +94,6 @@ impl TextEditor {
             self.dispatch(vec![(range, text)], None, Kind::Block);
         }
     }
-
     fn end_crop(&mut self, apply: bool) {
         let Some((start, crop)) = self.media.crop.take() else { return };
         self.doc.uncropped = None;
@@ -100,7 +102,6 @@ impl TextEditor {
             self.rewrite(start, &line);
         }
     }
-
     fn show_source(&mut self, ctx: &mut EventCtx<'_>, start: usize) {
         self.end_crop(false);
         self.media.selected = None;
@@ -111,7 +112,6 @@ impl TextEditor {
         ctx.request_focus();
         ctx.request_layout();
     }
-
     fn request(&self, request: Request) {
         if let Some(resolver) = &self.doc.resolver {
             resolver.request(request);
@@ -142,7 +142,7 @@ impl TextEditor {
             MediaHit::Handle(2 | 6) => CursorIcon::NeswResize,
             MediaHit::Handle(1 | 5) => CursorIcon::NsResize,
             MediaHit::Handle(_) => CursorIcon::EwResize,
-            MediaHit::Zoom | MediaHit::Align | MediaHit::Crop | MediaHit::Source | MediaHit::Play | MediaHit::Toggle | MediaHit::Mute | MediaHit::Bar => CursorIcon::Pointer,
+            MediaHit::Zoom | MediaHit::Align | MediaHit::Crop | MediaHit::Source | MediaHit::Download | MediaHit::Play | MediaHit::Toggle | MediaHit::Mute | MediaHit::Bar => CursorIcon::Pointer,
             MediaHit::CropBox => CursorIcon::Move,
             MediaHit::Image | MediaHit::Outside => CursorIcon::Default,
         })

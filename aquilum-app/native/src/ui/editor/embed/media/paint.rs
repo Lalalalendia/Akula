@@ -6,7 +6,6 @@ use super::{BUTTON, HANDLE, MediaHit, MediaOverlay, MediaView, PLAY};
 use crate::ui::icons::{self, Icon};
 use crate::ui::menu::box_shadow;
 use crate::ui::theme;
-
 const RADIUS: f64 = 8.0;
 const BAR_RADIUS: f64 = 8.0;
 const BUTTON_RADIUS: f64 = 6.0;
@@ -14,7 +13,6 @@ const ICON: f64 = 16.0;
 const ICON_STROKE: f64 = 1.6;
 const FOCUS: f64 = 1.0;
 const RING: f64 = 4.0;
-
 pub fn draw_image(painter: &mut Painter<'_, impl masonry::imaging::PaintSink + ?Sized>, image: &masonry::peniko::ImageBrush, frame: Rect, crop: [f64; 4]) {
     let [l, t, r, b] = crop;
     let (iw, ih) = (f64::from(image.image.width), f64::from(image.image.height));
@@ -24,12 +22,12 @@ pub fn draw_image(painter: &mut Painter<'_, impl masonry::imaging::PaintSink + ?
     let y = frame.y0 + (frame.height() - h * k) / 2.0 - ih * t / 100.0 * k;
     painter.with_fill_clip(RoundedRect::from_rect(frame, RADIUS), |painter| painter.draw_image(image, Affine::translate((x, y)) * Affine::scale(k)));
 }
-
 fn icon_for(view: &MediaView, hit: MediaHit) -> Icon {
     match hit {
         MediaHit::Zoom => icons::ZOOM_IN,
         MediaHit::Crop => icons::CROP,
         MediaHit::Source => icons::CODE_XML,
+        MediaHit::Download => icons::DOWNLOAD,
         _ => match view.line.params.align {
             Alignment::Start | Alignment::Left => icons::ALIGN_LEFT,
             Alignment::End | Alignment::Right => icons::ALIGN_RIGHT,
@@ -101,6 +99,8 @@ impl MediaView {
             triangle.close_path();
             painter.fill(&triangle, Color::WHITE).draw();
         }
+        if let Some(progress) = overlay.download { painter.fill(Rect::new(frame.x0, frame.y1 - 5.0, frame.x0 + frame.width() * progress.clamp(0.0, 1.0), frame.y1), tm.icon_accent).draw(); }
+        if overlay.failed { painter.fill(Rect::new(frame.x0, frame.y1 - 5.0, frame.x1, frame.y1), Color::from_rgb8(220, 70, 70)).draw(); }
         if overlay.selected {
             painter.stroke(RoundedRect::from_rect(frame.inflate(RING / 2.0, RING / 2.0), RADIUS + RING / 2.0), &Stroke::new(RING), tm.border_focus_ring).draw();
             painter.stroke(RoundedRect::from_rect(frame.inset(-FOCUS / 2.0), RADIUS), &Stroke::new(FOCUS), tm.border_focus).draw();

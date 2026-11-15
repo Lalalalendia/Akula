@@ -43,6 +43,7 @@ impl TextEditor {
                 ctx.request_layout();
             }
             MediaHit::Source => self.show_source(ctx, start),
+            MediaHit::Download => self.request(Request::DownloadVideo { url: line.src }),
             MediaHit::Grip => {
                 let step = if matches!(line.params.align, Alignment::Center) { 2.0 } else { 1.0 };
                 self.media.drag = Some((start, Drag::Resize { x0: point.x, w0: frame.width(), step }));
@@ -57,8 +58,7 @@ impl TextEditor {
                         self.request(Request::Open { target: path.to_string_lossy().into_owned(), wiki: false, new_tab: false });
                     }
                 } else if crate::video::youtube::video_id(&line.src).is_some() {
-                    // The preview is an image, not a media stream. A click
-                    // opens the original YouTube URL; no implicit download.
+                    // Remote preview opens the URL; no implicit download.
                     self.request(Request::Open { target: line.src, wiki: false, new_tab: false });
                 }
             }

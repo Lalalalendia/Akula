@@ -1,5 +1,6 @@
 pub(crate) mod download;
 pub(crate) mod library;
+pub(crate) mod queue;
 pub(crate) mod youtube;
 #[cfg(target_os = "linux")]
 mod linux;
@@ -29,7 +30,6 @@ pub fn poster(path: &Path) -> Option<ImageBrush> {
 
 #[cfg(target_os = "macos")]
 pub use self::macos::poster;
-
 const MOVED: f64 = 0.05;
 
 #[derive(Clone, Debug, Default)]

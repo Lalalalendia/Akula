@@ -5,6 +5,7 @@ mod links;
 mod media;
 mod resolver;
 mod youtube;
+mod video;
 #[cfg(test)]
 mod testing;
 
@@ -14,7 +15,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
 use aquilum_core::Core;
 use aquilum_core::search::error::SearchError;
 use aquilum_core::search::paths::is_markdown;
