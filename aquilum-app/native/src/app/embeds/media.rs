@@ -139,6 +139,19 @@ fn poster(path: &Path) -> Option<crate::images::Picture> {
 }
 
 pub(super) fn load(inner: &Inner, source: &str, wiki: bool) -> Fetch<Media> {
+    if !wiki && let Some(id) = crate::video::youtube::video_id(source) {
+        // Do not fetch HTML, run JavaScript or download video on note open.
+        // Only an image from the fixed thumbnail CDN is fetched under
+        // the existing 32 MiB compressed-image budget.
+        let picture = crate::video::youtube::thumbnail_url(id)
+            .and_then(|url| download(inner, &url))
+            .and_then(|path| crate::images::picture(&path));
+        let natural = picture.as_ref().map_or((0, 0), |p| p.natural);
+        return Fetch::Ready(Media {
+            image: picture.map(|p| p.image), natural,
+            video: true, path: None,
+        });
+    }
     if let Some(fetched) = inline_image(source) {
         return fetched;
     }
