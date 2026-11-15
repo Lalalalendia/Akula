@@ -341,7 +341,7 @@ mod tests {
 
         let mut s = YandexPkceStart::begin(CLIENT_ID, REDIRECT).unwrap();
         s.pending.issued_at = Instant::now() - Duration::from_secs(601);
-        let valid = format!("{REDIRECT}?code=abc&state={}", s.pending.state);
+        let valid = format!("{REDIRECT}?code=abc&state={}", s.pending.state.as_str());
         assert!(matches!(
             s.pending.complete(&valid),
             Err(YandexOAuthError::CallbackExpired)
