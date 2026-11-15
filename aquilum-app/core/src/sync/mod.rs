@@ -96,10 +96,8 @@ mod s3_head_probe;
 mod s3_transport;
 #[cfg(feature = "sync-s3")]
 mod yandex_readonly_probe;
-#[cfg(feature = "sync-yandex-disk-rest")]
-pub mod yandex_disk_rest;
-mod upload;
-mod vault;
+#[cfg(feature = "sync-yandex-disk-rest")] pub mod yandex_disk_rest;
+mod upload; mod vault;
 pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimits};
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use delta::{plan_revision_exchange, DeltaPlanError, MissingRevisionBatch, RevisionExchangePlan, RevisionInventory};
