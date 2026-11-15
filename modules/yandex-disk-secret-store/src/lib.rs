@@ -157,11 +157,6 @@ impl YandexCredentialVault {
         value.map(YandexRefreshToken::from_protected).transpose()
     }
 
-    /// Local forgetting does not revoke the token remotely at Yandex Disk.
-    /// The UI must distinguish "forget on this device" from "revoke access".
-    pub fn forget_local(&self, scope: &YandexCredentialScope) -> Result<(), SecretError> {
-        self.backend.delete(scope.username())
-    }
 }
 
 #[cfg(feature = "system-store")]
@@ -205,6 +200,9 @@ impl Backend for NativeBackend {
         }
     }
 }
+
+mod lifecycle;
+pub use lifecycle::StoredRefreshPresence;
 
 #[cfg(test)]
 #[path = "tests.rs"]
