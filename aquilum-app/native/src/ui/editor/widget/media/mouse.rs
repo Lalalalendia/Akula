@@ -1,9 +1,7 @@
 use masonry::parley::Alignment;
-
 use super::*;
 use crate::ui::editor::embed::MediaHit;
 use crate::ui::editor::resolve::Request;
-
 impl TextEditor {
     pub(in crate::ui::editor::widget) fn media_press(&mut self, ctx: &mut EventCtx<'_>, point: Point, count: u8) -> bool {
         let under = self.media_under(point);
@@ -107,7 +105,6 @@ impl TextEditor {
         ctx.set_handled();
         true
     }
-
     pub(in crate::ui::editor::widget) fn media_move(&mut self, ctx: &mut EventCtx<'_>, point: Point) -> bool {
         if let Some((start, drag)) = self.media.drag {
             let Some(view) = self.media_view(start) else { return false };
@@ -148,7 +145,6 @@ impl TextEditor {
         }
         false
     }
-
     pub(in crate::ui::editor::widget) fn media_release(&mut self, ctx: &mut EventCtx<'_>) {
         let Some((start, drag)) = self.media.drag.take() else { return };
         if let (Drag::Resize { .. }, Some((_, width))) = (drag, self.doc.resized.take())
