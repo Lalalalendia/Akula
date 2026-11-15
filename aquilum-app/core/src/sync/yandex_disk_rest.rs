@@ -7,6 +7,8 @@
 //! is provided by this module. The caller supplies a short-lived OAuth token
 //! from an approved OS credential provider and runs this on a worker thread.
 
+pub mod oauth;
+
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::io::Read;

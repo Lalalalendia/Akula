@@ -76,7 +76,7 @@ save-stage-probe = []
 # Only protocol contracts compile in PR 00; no runtime/network/UI is started.
 sync-engine = []
 # Opt-in personal Yandex Disk REST metadata probe only. No OAuth, local apply, upload or delete.
-sync-yandex-disk-rest = []
+sync-yandex-disk-rest = ["dep:url"]
 # Installer-wide local File Gate enrollment epoch; no network or AWS SDK.
 host-custody = []
 # OS-protected transport key, no peer grants.

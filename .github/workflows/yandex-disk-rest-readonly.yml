@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/core/src/sync/yandex_disk_rest.rs'
+      - 'aquilum-app/core/src/sync/yandex_disk_rest/oauth.rs'
       - 'aquilum-app/core/Cargo.toml'
       - '.github/workflows/yandex-disk-rest-readonly.yml'
   workflow_dispatch:
@@ -34,7 +35,7 @@ jobs:
           save-if: false
       - name: Verify offline bounded parser, status policy and path restrictions
         working-directory: aquilum-app
-        run: cargo test --locked -p aquilum-core --features sync-yandex-disk-rest yandex_disk_rest::tests
+        run: cargo test --locked -p aquilum-core --features sync-yandex-disk-rest yandex_disk_rest
       - name: Verify opt-in module compiles without cloud authorization
         working-directory: aquilum-app
         run: cargo check --locked -p aquilum-core --features sync-yandex-disk-rest
