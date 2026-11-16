@@ -66,6 +66,8 @@ impl TextEditor {
             let p = self.doc.paragraph(i);
             if let (Fold::Head | Fold::Above, Some(View::Media(view))) = (p.fold, p.embed.map(|e| &e.view)) {
                 let overlay = self.media_overlay(p.start);
+                #[cfg(all(windows, feature = "video-ui-e2e"))]
+                crate::video::ui_acceptance::frame_ready(overlay.video.as_ref().is_some_and(|v| v.frame.is_some()));
                 if overlay.video.is_some() {
                     view.paint(painter, self.shift().x, top, &overlay);
                 }
