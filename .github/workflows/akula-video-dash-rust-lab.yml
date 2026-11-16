@@ -1,0 +1,145 @@
+name: Akula VIDEO-06 fragmented DASH remux in Rust (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'labs/video-lite/src/bin/dash.rs'
+      - '.github/workflows/akula-video-dash-rust-lab.yml'
+      - 'labs/video-lite/Cargo.toml'
+      - 'labs/video-lite/fixtures/avc_aac_2s.mp4'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  synthesize-fragments:
+    name: Generate separate fragmented MP4 tracks with reference FFmpeg (CI only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install FFmpeg for synthetic test generation only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+      - name: Generate real repeated moof/mdat fragments (no YouTube or network media)
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v ffmpeg
+          ffmpeg -version | head -n 1
+          mkdir -p video06-fixtures
+          SRC=labs/video-lite/fixtures/avc_aac_2s.mp4
+          test -s "$SRC"
+          ffmpeg -hide_banner -loglevel error -nostdin -stream_loop 29 -i "$SRC" -t 60 -map 0:v:0 -an -c:v copy -movflags +frag_keyframe+empty_moov+default_base_moof -frag_duration 500000 video06-fixtures/dash-video.mp4
+          ffmpeg -hide_banner -loglevel error -nostdin -stream_loop 29 -i "$SRC" -t 60 -map 0:a:0 -vn -c:a copy -movflags +frag_keyframe+empty_moov+default_base_moof -frag_duration 500000 video06-fixtures/dash-audio.m4a
+          python3 - <<'PY'
+          import os, struct
+          for filename in ('dash-video.mp4','dash-audio.m4a'):
+              path='video06-fixtures/'+filename
+              count=0; size=os.path.getsize(path); pos=0
+              with open(path,'rb') as f:
+                  while pos<size:
+                      f.seek(pos)
+                      header=f.read(8)
+                      if len(header)!=8: raise RuntimeError('truncated top-level header')
+                      length,name=struct.unpack('>I4s',header)
+                      if length==1: length=struct.unpack('>Q',f.read(8))[0]
+                      elif length==0: length=size-pos
+                      if length<8 or pos+length>size: raise RuntimeError('invalid MP4 box')
+                      if name==b'moof': count+=1
+                      pos+=length
+              print('VIDEO06_GENERATOR_FRAGMENTS',filename,'moofs',count,'bytes',size)
+              if count<3: raise RuntimeError('must have >=3 true fMP4 fragments')
+          PY
+          ffprobe -v error -show_entries stream=codec_name,codec_type -of json video06-fixtures/dash-video.mp4
+          ffprobe -v error -show_entries stream=codec_name,codec_type -of json video06-fixtures/dash-audio.m4a
+      - name: Upload only disposable generated synthetic fragments
+        uses: actions/upload-artifact@v4
+        with:
+          name: video06-synthetic-fragmented-tracks
+          path: video06-fixtures/
+          if-no-files-found: error
+          retention-days: 2
+
+  rust-fragmented:
+    name: Pure Rust fragment-reader and remux on ${{ matrix.os }}
+    needs: synthesize-fragments
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: video06-synthetic-fragmented-tracks
+          path: video06-fixtures
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: labs/video-lite
+          shared-key: akula-video06-fragmented-${{ matrix.os }}
+          save-if: false
+      - name: Compile and exercise pure Rust fMP4 demux+interleaving
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo generate-lockfile --manifest-path labs/video-lite/Cargo.toml
+          cargo build --manifest-path labs/video-lite/Cargo.toml --release --locked --bin dash
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            BIN=labs/video-lite/target/release/dash.exe
+          else
+            BIN=labs/video-lite/target/release/dash
+          fi
+          ls -lh "$BIN"
+          mkdir -p video06-out
+          "$BIN" prove-pair video06-fixtures/dash-video.mp4 video06-fixtures/dash-audio.m4a video06-out/output.mp4
+          test -s video06-out/output.mp4
+          echo "VIDEO06_RUST_FRAGMENTED_ACCEPTED platform=$RUNNER_OS no_ffmpeg_runtime=1"
+          echo "VIDEO06_OUTPUT_BYTES=$(wc -c < video06-out/output.mp4)"
+      - name: Independently decode the Rust MP4 through FFmpeg (Linux only)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # FFmpeg is a CI reference decoder ONLY, never used to make the Rust output.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffprobe -v error -show_streams -show_format -of json video06-out/output.mp4 > video06-out/probe.json
+          python3 - <<'PY'
+          import json
+          with open('video06-out/probe.json',encoding='utf8') as f:
+              report=json.load(f)
+          actual={(s['codec_type'],s['codec_name']) for s in report.get('streams',[])}
+          expected={('video','h264'),('audio','aac')}
+          if actual != expected:
+              raise RuntimeError(f'Rust MP4 codec identity mismatch: {actual}')
+          duration=float(report['format']['duration'])
+          if not 55.0 <= duration <= 65.0:
+              raise RuntimeError(f'Rust MP4 duration changed: {duration}')
+          print('VIDEO06_REFERENCE_PROBE_PASS duration_seconds=',duration, 'codecs=', actual)
+          PY
+          ffmpeg -v error -nostdin -i video06-out/output.mp4 -map 0:v:0 -f null -
+          ffmpeg -v error -nostdin -i video06-out/output.mp4 -map 0:a:0 -f null -
+          echo 'VIDEO06_INDEPENDENT_DECODER_PASS video=h264 audio=aac rust_mux=1 ffmpeg_runtime=0'
+      - name: Do not package the experiment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e video06-out/installer.exe
+          echo 'VIDEO06_NONRELEASE_PASS local_fixture_only=1 no_cloud_upload=1'

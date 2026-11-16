@@ -36,7 +36,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           cargo generate-lockfile --manifest-path labs/video-lite/Cargo.toml
           if ($LASTEXITCODE -ne 0) { throw 'Rust lab failed to resolve its isolated dependencies' }
-          cargo build --manifest-path labs/video-lite/Cargo.toml --release --locked
+          cargo build --manifest-path labs/video-lite/Cargo.toml --release --locked --bin akula-video-lite-lab
           if ($LASTEXITCODE -ne 0) { throw 'Rust lab failed to compile' }
           $exe = 'labs/video-lite/target/release/akula-video-lite-lab.exe'
           if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Rust standalone MP4 executable absent' }
