@@ -121,6 +121,45 @@ use super::*;
 
     #[cfg(windows)]
     #[test]
+    fn synthetic_avc_aac_download_survives_restart_and_decodes_natively() {
+        // Original two-second black/quiet fixture generated offline with
+        // libx264 constrained-baseline + AAC-LC. The .mp4 test file is device
+        // local and never copied into a workspace or sync directory.
+        let temp = tempfile::tempdir().unwrap();
+        let device_dir = temp.path().join("device-only");
+        let library = Library::at(device_dir.clone(), &[]).unwrap();
+        let fixture = temp.path().join("fixture.mp4");
+        fs::write(&fixture, include_bytes!("fixtures/native_avc_aac_test.mp4")).unwrap();
+        let stub = temp.path().join("fake-codec-yt-dlp.cmd");
+        fs::write(&stub, "@echo off\r\ncopy /y \"%~dp0fixture.mp4\" \"dQw4w9WgXcQ.mp4\" >nul\r\nif errorlevel 1 exit /b 21\r\necho AKULA_PROGRESS:2956:2956:0\r\nexit /b 0\r\n").unwrap();
+        let path = download_one(&library, stub.as_os_str(), "https://youtu.be/dQw4w9WgXcQ", |_| {})
+            .expect("fixture must publish after synthetic downloader completes");
+        assert_eq!(fs::read(&path).unwrap(), fs::read(&fixture).unwrap());
+        drop(library);
+        let reopened = Library::at(device_dir, &[]).unwrap();
+        assert_eq!(reopened.existing("dQw4w9WgXcQ").unwrap(), Some(path.clone()),
+            "device-local media must be discoverable after application restart");
+        assert!(crate::video::toggle(&path),
+            "Windows Media Foundation must open AVC/AAC native playback");
+        let mut player = crate::video::Owned::default();
+        player.add(path.clone());
+        let mut decoded_frame = false;
+        for _ in 0..150 {
+            let _ = player.tick();
+            if crate::video::state(&path).is_some_and(|state| state.frame.is_some()) {
+                decoded_frame = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(decoded_frame, "downloaded AVC/AAC must produce a native decoded frame");
+        player.stop();
+        assert_eq!(fs::read_dir(reopened.root()).unwrap().count(), 1,
+            "no duplicate or temporary video remains in local library");
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn synthetic_windows_failure_does_not_publish_a_partial_video() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::at(temp.path().join("device-only"), &[]).unwrap();
