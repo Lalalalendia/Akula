@@ -1,5 +1,6 @@
 pub(crate) mod download;
 pub(crate) mod library;
+pub(crate) mod light;
 pub(crate) mod queue;
 pub(crate) mod youtube;
 #[cfg(target_os = "linux")]
@@ -10,7 +11,6 @@ mod macos;
 mod stub;
 #[cfg(target_os = "windows")]
 mod windows;
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
