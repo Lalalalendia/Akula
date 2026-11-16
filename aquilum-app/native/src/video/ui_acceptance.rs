@@ -64,7 +64,7 @@ pub(crate) fn mark(event: &'static str) {
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
         let recorded = if event.starts_with("HOVER_") {
             cursor().is_some_and(|(x, y)|
-                writeln!(file, "VIDEO16_{event}_POINT:{x}:{y}\\nVIDEO16_{event}").is_ok()
+                writeln!(file, "VIDEO16_{event}_POINT:{x}:{y}\nVIDEO16_{event}").is_ok()
             )
         } else {
             writeln!(file, "VIDEO16_{event}").is_ok()
