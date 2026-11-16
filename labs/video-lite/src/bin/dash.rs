@@ -5,9 +5,9 @@ use mp4_track::{
     TrackId, TrackKind, WriterConfig,
 };
 use std::error::Error;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::BufReader;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type Reader = Mp4Reader<BufReader<File>>;
@@ -54,7 +54,7 @@ struct Source {
     fragments: usize,
 }
 impl Source {
-    fn new(path: &Path, kind: TrackKind) -> Result<Self> {
+    fn new(path: &Path, kind: TrackKind, require_fragments: bool) -> Result<Self> {
         let reader = constrained_reader(path)?;
         if reader.tracks().len() != 1 {
             return Err("separate DASH input must have exactly one track".into());
@@ -70,7 +70,9 @@ impl Source {
         if count == 0 { return Err("fragmented DASH contains no samples".into()); }
         let cfg = configure(track);
         let fragments = reader.fragments().len();
-        if fragments < 3 { return Err("DASH fixture must contain multiple fragments".into()); }
+        if require_fragments && fragments < 3 {
+            return Err("strict DASH fixture must contain multiple fragments".into());
+        }
         if reader.sample_info(id, 0)?.dts != 0 {
             return Err("nonzero initial DTS must be handled before production adoption".into());
         }
@@ -85,12 +87,12 @@ impl Source {
     }
 }
 
-fn merge(video: &Path, audio: &Path, output: &Path) -> Result<(u32, u32, usize, usize)> {
-    let mut v = Source::new(video, TrackKind::Video)?;
-    let mut a = Source::new(audio, TrackKind::Audio)?;
+fn merge(video: &Path, audio: &Path, file: File, strict: bool) -> Result<(u32, u32, usize, usize)> {
+    let mut v = Source::new(video, TrackKind::Video, strict)?;
+    let mut a = Source::new(audio, TrackKind::Audio, strict)?;
     let (vcount, acount) = (v.count, a.count);
     let (vscale, ascale) = (v.cfg.timescale, a.cfg.timescale);
-    let mut writer = Mp4Writer::new(File::create(output)?, WriterConfig::default())?;
+    let mut writer = Mp4Writer::new(file, WriterConfig::default())?;
     let vid = writer.add_track(v.cfg.clone())?;
     let aid = writer.add_track(a.cfg.clone())?;
     let (mut vs, mut aus) = (v.take()?, a.take()?);
@@ -126,13 +128,13 @@ fn merge(video: &Path, audio: &Path, output: &Path) -> Result<(u32, u32, usize, 
             aus = a.take()?;
         }
     }
-    writer.finish()?;
+    writer.finish()?.sync_all()?;
     if written != (vcount, acount) { return Err("not all samples were remuxed".into()); }
     Ok((vcount, acount, v.fragments, a.fragments))
 }
 
 fn compare(input: &Path, output: &Path, kind: TrackKind) -> Result<()> {
-    let mut before = Source::new(input, kind)?;
+    let mut before = Source::new(input, kind, true)?;
     let mut after = constrained_reader(output)?;
     let output_track = after.tracks().iter().find(|track| accepts(track, kind))
         .ok_or("remuxed output track missing")?;
@@ -157,20 +159,52 @@ fn compare(input: &Path, output: &Path, kind: TrackKind) -> Result<()> {
     Ok(())
 }
 
+/// A failed remux never leaves a partially-created output with a playable name.
+/// create_new also refuses to overwrite a source or another Akula process.
+struct OutputCleanup {
+    path: PathBuf,
+    keep: bool,
+}
+impl Drop for OutputCleanup {
+    fn drop(&mut self) {
+        if !self.keep {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 fn run() -> Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
-    if args.len() != 5 || args[1] != "prove-pair" {
-        return Err("usage: dash prove-pair <fragmented-video.mp4> <fragmented-audio.m4a> <result.mp4>".into());
+    if args.len() != 5 || !(args[1] == "prove-pair" || args[1] == "mux-pair") {
+        return Err("usage: dash {prove-pair|mux-pair} <H264-only.mp4> <AAC-only.m4a> <new-output.mp4>".into());
     }
+    let strict = args[1] == "prove-pair";
     let video = Path::new(&args[2]);
     let audio = Path::new(&args[3]);
     let result = Path::new(&args[4]);
-    let (vcount, acount, vfragments, afragments) = merge(video, audio, result)?;
-    compare(video, result, TrackKind::Video)?;
-    compare(audio, result, TrackKind::Audio)?;
+    if !video.is_file() || !audio.is_file() || video == audio {
+        return Err("two distinct regular input files are required".into());
+    }
+    let output_file = OpenOptions::new().write(true).create_new(true).open(result)?;
+    let mut cleanup = OutputCleanup { path: result.to_path_buf(), keep: false };
+    let (vcount, acount, vfragments, afragments) = merge(video, audio, output_file, strict)?;
+    if strict {
+        compare(video, result, TrackKind::Video)?;
+        compare(audio, result, TrackKind::Audio)?;
+    }
     let output = constrained_reader(result)?;
-    if output.tracks().len() != 2 { return Err("output is not a two-track MP4".into()); }
-    println!("DASH_RUST_FRAGMENTED_REMUX_PASS video_samples={vcount} audio_samples={acount} video_fragments={vfragments} audio_fragments={afragments} output_bytes={} ffmpeg_in_runtime=0", result.metadata()?.len());
+    if output.tracks().len() != 2 {
+        return Err("output is not a two-track MP4".into());
+    }
+    if result.metadata()?.len() < 1024 {
+        return Err("output MP4 unexpectedly small".into());
+    }
+    cleanup.keep = true;
+    if strict {
+        println!("DASH_RUST_FRAGMENTED_REMUX_PASS video_samples={vcount} audio_samples={acount} video_fragments={vfragments} audio_fragments={afragments} output_bytes={} ffmpeg_in_runtime=0", result.metadata()?.len());
+    } else {
+        println!("DASH_RUST_MUX_PAIR_PASS video_samples={vcount} audio_samples={acount} video_fragments={vfragments} audio_fragments={afragments} output_bytes={} ffmpeg_in_runtime=0", result.metadata()?.len());
+    }
     Ok(())
 }
 
