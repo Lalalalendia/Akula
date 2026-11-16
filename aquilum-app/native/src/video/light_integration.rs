@@ -29,10 +29,10 @@ fn real_windows_native_pipeline_remuxes_local_dash_without_syncing_media() {
     assert!(manifest.starts_with("http://127.0.0.1:")
             && manifest.ends_with("/manifest.mpd"),
         "the real downloader may only fetch the loopback synthetic MPD");
-    let ytdlp = PathBuf::from(values[1].as_ref().unwrap());
-    let quickjs = PathBuf::from(values[2].as_ref().unwrap());
-    let rust_mux = PathBuf::from(values[3].as_ref().unwrap());
-    let capture = PathBuf::from(values[4].as_ref().unwrap());
+    let ytdlp = PathBuf::from(values[1].as_ref().unwrap().as_os_str());
+    let quickjs = PathBuf::from(values[2].as_ref().unwrap().as_os_str());
+    let rust_mux = PathBuf::from(values[3].as_ref().unwrap().as_os_str());
+    let capture = PathBuf::from(values[4].as_ref().unwrap().as_os_str());
     assert!(capture.is_absolute() && !capture.exists());
     verify_pinned_runtime(&ytdlp, &quickjs)
         .expect("no unpinned yt-dlp or JS runtime may run in the native acceptance");
