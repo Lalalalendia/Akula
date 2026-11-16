@@ -50,7 +50,7 @@ jobs:
           if ((Get-Item -LiteralPath $yt).Length -ne 23575744) { throw 'yt-dlp exact size mismatch' }
           $jsResult = (& $qjs -e 'print("VIDEO09_QUICKJS_EXEC_PASS")' 2>&1 | Out-String)
           if ($LASTEXITCODE -ne 0 -or !$jsResult.Contains('VIDEO09_QUICKJS_EXEC_PASS')) { throw 'Verified QuickJS cannot execute' }
-          $cliResult = (& $yt --no-js-runtimes --js-runtimes "quickjs:$qjs" --version 2>&1 | Out-String).Trim()
+          $cliResult = (& $yt --ignore-config --no-plugin-dirs --no-remote-components --no-js-runtimes --js-runtimes "quickjs:$qjs" --version 2>&1 | Out-String).Trim()
           if ($LASTEXITCODE -ne 0 -or $cliResult -cne '2026.10.26') { throw "yt-dlp rejects QuickJS runtime selector: $cliResult" }
           Add-Content -Path $env:GITHUB_ENV -Value "AKULA_TEST_QUICKJS_BIN=$qjs"
           Add-Content -Path $env:GITHUB_ENV -Value "AKULA_TEST_YTDLP_BIN=$yt"
