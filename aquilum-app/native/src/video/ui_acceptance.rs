@@ -6,7 +6,6 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use crate::ui::editor::embed::MediaHit;
 
 const TEST_ID: &str = "dQw4w9WgXcQ";
 
@@ -64,12 +63,9 @@ pub(crate) fn frame_ready(ready: bool) {
     if ready { mark("DECODED_FRAME"); }
 }
 
-pub(crate) fn hover(hit: MediaHit, local: bool) {
-    match hit {
-        MediaHit::Download => mark("HOVER_DOWNLOAD"),
-        MediaHit::Play if local => mark("HOVER_LOCAL_PLAY"),
-        _ => {}
-    }
+pub(crate) fn hover(download: bool, play: bool, local: bool) {
+    if download { mark("HOVER_DOWNLOAD"); }
+    if play && local { mark("HOVER_LOCAL_PLAY"); }
 }
 
 #[cfg(test)]
