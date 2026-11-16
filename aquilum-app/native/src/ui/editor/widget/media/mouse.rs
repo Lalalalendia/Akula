@@ -43,7 +43,11 @@ impl TextEditor {
                 ctx.request_layout();
             }
             MediaHit::Source => self.show_source(ctx, start),
-            MediaHit::Download => self.request(Request::DownloadVideo { url: line.src }),
+            MediaHit::Download => {
+                #[cfg(all(windows, feature = "video-ui-e2e"))]
+                crate::video::ui_acceptance::mark("CLICK_DOWNLOAD");
+                self.request(Request::DownloadVideo { url: line.src });
+            }
             MediaHit::Grip => {
                 let step = if matches!(line.params.align, Alignment::Center) { 2.0 } else { 1.0 };
                 self.media.drag = Some((start, Drag::Resize { x0: point.x, w0: frame.width(), step }));
