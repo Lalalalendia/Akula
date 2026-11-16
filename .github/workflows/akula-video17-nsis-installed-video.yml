@@ -8,6 +8,7 @@ on:
       - 'scripts/windows-video17-installed-nsis.ps1'
       - 'scripts/windows-video16-real-gui.ps1'
       - 'aquilum-app/native/src/video/ui_acceptance.rs'
+      - 'aquilum-app/native/src/ui/editor/widget/widget_events.rs'
       - 'aquilum-app/native/src/ui/editor/widget/media/mouse.rs'
       - '.github/workflows/akula-video17-nsis-installed-video.yml'
 
@@ -45,6 +46,10 @@ jobs:
           assert 'VIDEO16_HOVER_' not in Path('aquilum-app/native/src/video/queue.rs').read_text()
           assert 'AKULA_VIDEO16_MPD_URL' in probe
           assert 'media_press' in Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
+          assert 'WINDOW_POINTER_DOWN' in Path('aquilum-app/native/src/ui/editor/widget/widget_events.rs').read_text()
+          assert 'PRESS_DOWNLOAD' in probe and 'CENTER_DOWNLOAD_READY' in probe
+          assert 'SendInput(1,down' in Path('scripts/windows-video16-real-gui.ps1').read_text()
+          assert "Wait-Event $centerName" in Path('scripts/windows-video16-real-gui.ps1').read_text()
           mouse=Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
           assert 'toolbar_items()' in mouse and 'r.center()' in mouse
           assert 'ui_acceptance::hover(' in mouse
