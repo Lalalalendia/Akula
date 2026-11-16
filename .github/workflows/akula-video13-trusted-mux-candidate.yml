@@ -47,6 +47,8 @@ jobs:
           assert 'akula-yt-dlp.exe' in main and 'akula-quickjs.exe' in main
           assert 'verify_pinned_runtime(&ytdlp, &quickjs)' in main
           assert 'std::env::var_os("AKULA_QUICKJS_BIN")' not in main
+          assert 'video-rust-bundle is Windows-only: refusing unpinned legacy fallback' in main
+          assert '#[cfg(not(feature = "video-rust-bundle"))]' in main
           assert 'AKULA_RUST_MUX_BIN is no longer supported' in main
           assert 'PathBuf::from(mux)' not in main
           assert 'fs::hard_link(&output, &target)' in main
