@@ -7,9 +7,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-$ffmpegRelease = 'autobuild-2026-11-15-12-40'
-$ffmpegAsset = 'ffmpeg-n8.1.3-35-gf1acb0a266-win64-lgpl-8.1.zip'
-$ffmpegSha256 = '272140baa96cbb9553eb57c03590e0b8d2c93ce352aa7f876c34fbc657536836'
+$ffmpegRelease = 'autobuild-2026-10-31-12-59'
+$ffmpegAsset = 'ffmpeg-n8.1.3-27-g8dca1586f4-win64-lgpl-8.1.zip'
+$ffmpegSha256 = 'd4c2a42673917b4a97104a3e9f082729a9730796b98664e37c0b7eba6c6c613d'
 $denoVersion = 'v2.9.8'
 $denoAsset = 'deno-x86_64-pc-windows-msvc.zip'
 $denoSha256 = 'cba84b26e0df5ae7f74fc66b86a95b866872a86292ebd84fa1e959927edd93bf'
