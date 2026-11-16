@@ -104,7 +104,6 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if (!(Test-Path 'labs/video-lite/Cargo.lock' -PathType Leaf)) { throw 'locked video-lite dependencies missing' }
-          if ($LASTEXITCODE -ne 0) { throw 'Rust helper lockfile unavailable' }
           cargo test --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Rust edit-list and timeline regression' }
           cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
