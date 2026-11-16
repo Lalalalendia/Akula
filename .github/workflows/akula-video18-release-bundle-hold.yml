@@ -1,0 +1,37 @@
+name: Akula VIDEO-18 release supply-chain HOLD (non-release)
+
+on:
+  pull_request:
+    branches: [main, feat/video03-one-click-offline-20261116]
+    paths:
+      - '.github/scripts/video18-release-bundle-hold.test.cjs'
+      - '.github/workflows/akula-video18-release-bundle-hold.yml'
+      - '.github/workflows/akula-windows-signed-candidate.yml'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/native/packaging/akula-windows.json'
+      - 'aquilum-app/native/packaging/akula-windows-video17-lab.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  signed-release-hold:
+    name: No unsigned video sidecars in signed Akula release candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Run release boundary and deliberate negative tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          node --test .github/scripts/video18-release-bundle-hold.test.cjs
+          echo 'VIDEO18_RELEASE_HOLD_PASS no_unsigned_sidecars=1 no_release=1'
