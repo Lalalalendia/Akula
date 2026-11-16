@@ -47,7 +47,13 @@ jobs:
           reps=tree.findall('.//'+namespace+'Representation')
           assert len(reps)==2, 'must have separate video and audio representations'
           assert len(list(root.glob('*.m4s')))>=4, 'test media segments missing'
-          assert 'http://' not in mpd.read_text() and 'https://' not in mpd.read_text(), 'manifest must use local relative segments'
+          segments=tree.findall('.//'+namespace+'SegmentTemplate')
+          assert segments, 'DASH MPD must have explicit segment templates'
+          for segment in segments:
+              for attr in ('media','initialization'):
+                  assert '://' not in segment.attrib.get(attr,''), 'only relative media segments allowed'
+          for node in tree.findall('.//'+namespace+'BaseURL'):
+              assert '://' not in (node.text or ''), 'remote MPD base forbidden'
           print('VIDEO12_FIXTURE_PASS representations=',len(reps))
           PY
       - uses: actions/upload-artifact@v4
