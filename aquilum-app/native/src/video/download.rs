@@ -36,7 +36,7 @@ fn command_args(url: &str, stage: &Path, max_bytes: u64) -> Vec<OsString> {
         "--no-download-archive", "--restrict-filenames", "--newline",
         "--progress", "--no-warnings", "--retries", "3",
         "--fragment-retries", "3", "--socket-timeout", "20",
-        "--format", "bv*[height<=720]+ba/b[height<=720]",
+        "--format", "bv[vcodec^=avc1][height<=720]+ba[acodec^=mp4a]/b[vcodec^=avc1][acodec^=mp4a][height<=720]",
         "--merge-output-format", "mp4",
         "--output", "%(id)s.%(ext)s",
         "--paths", &home, "--paths", &temp,
