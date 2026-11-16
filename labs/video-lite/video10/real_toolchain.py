@@ -126,7 +126,7 @@ def main():
         a = load_single_track(args.yt_dlp, args.quickjs, url, temp,
                               "ba[acodec^=mp4a][ext=m4a]", "audio")
         target = temp / "combined.mp4"
-        stdout, _ = run([args.mux, "mux-pair", v, a, target], cwd=temp)
+        stdout, _ = run([args.mux.resolve(), "mux-pair", v, a, target], cwd=temp)
         if "DASH_RUST_MUX_PAIR_PASS" not in stdout:
             raise RuntimeError("Rust mux did not report success")
         if not target.is_file() or not (1000 < target.stat().st_size < LIMIT):
