@@ -55,6 +55,15 @@ pub(crate) fn mark(event: &'static str) {
     }
 }
 
+pub(crate) fn blank_preview() -> crate::ui::editor::resolve::Fetch<crate::ui::editor::resolve::Media> {
+    use crate::ui::editor::resolve::{Fetch, Media};
+    Fetch::Ready(Media { image: None, natural: (0, 0), video: true, path: None })
+}
+
+pub(crate) fn frame_ready(ready: bool) {
+    if ready { mark("DECODED_FRAME"); }
+}
+
 pub(crate) fn hover(hit: MediaHit, local: bool) {
     match hit {
         MediaHit::Download => mark("HOVER_DOWNLOAD"),
