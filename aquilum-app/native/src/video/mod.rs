@@ -3,6 +3,8 @@ pub(crate) mod library;
 pub(crate) mod light;
 pub(crate) mod queue;
 pub(crate) mod youtube;
+#[cfg(all(windows, feature = "video-ui-e2e"))]
+pub(crate) mod ui_acceptance;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
