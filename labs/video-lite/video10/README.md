@@ -25,6 +25,26 @@ YouTube or downloading any externally hosted video.
    decodes the combined Windows-generated media. This is a check on Rust output,
    not a runtime FFmpeg dependency.
 
+## Defect found and regression added
+
+The first real Windows yt-dlp test produced both H.264/AAC tracks and a
+5,833-byte MP4, but independent FFprobe showed missing movie duration,
+only one readable packet per stream, and **no decoded video or audio
+frames**. The earlier sample-byte-fidelity test alone had missed this.
+
+Root cause: fragmented MP4 initialization can carry a single zero-length
+edit-list (elst) placeholder; the old Rust mux copied it unchanged to a
+progressive MP4. The mp4-track writer then derived a **zero mvhd/tkhd
+duration** from it, hiding the actual samples.
+
+The mux now normalizes this edit duration from accumulated sample times,
+rescaling to the output movie timescale and preserving AAC's media_time
+(e.g. 1024 priming samples); complex/non-unity edits fail closed.
+Unit tests cover zero edits, rescaling and unsupported timelines.
+The independent decoder now checks **actual decoded frame counts** as
+well as stream/movie durations, so a structurally valid but empty-playback
+file cannot pass acceptance.
+
 ## Safety and release limits
 
 - The server only accepts connections on localhost, uses synthetic media, and
