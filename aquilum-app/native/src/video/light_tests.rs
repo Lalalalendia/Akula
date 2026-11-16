@@ -245,3 +245,51 @@ fn video13_build_time_pin_accepts_only_exact_compiled_rust_helper() {
         _ => panic!("VIDEO13 requires both a compiled-in hash and an exact test helper"),
     }
 }
+
+
+#[cfg(windows)]
+#[test]
+fn video15_bundled_runtime_files_are_exact_pinned_siblings() {
+    let yt = std::env::var_os("AKULA_TEST_YTDLP_BIN");
+    let js = std::env::var_os("AKULA_TEST_QUICKJS_BIN");
+    let (yt, js) = match (yt, js) {
+        (Some(yt), Some(js)) => (PathBuf::from(yt), PathBuf::from(js)),
+        (None, None) => {
+            println!("VIDEO15_BUNDLED_RUNTIME_NOT_CONFIGURED local_developer_test=1");
+            return;
+        }
+        _ => panic!("VIDEO-15 requires both official runtime paths"),
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let app = dir.path().join("akula-app.exe");
+    fs::write(&app, b"test application placeholder").unwrap();
+    let ytdlp = app.parent().unwrap().join("akula-yt-dlp.exe");
+    let quickjs = app.parent().unwrap().join("akula-quickjs.exe");
+    fs::copy(yt, &ytdlp).unwrap();
+    fs::copy(js, &quickjs).unwrap();
+    verify_pinned_runtime(&ytdlp, &quickjs)
+        .expect("both actual installed-sibling runtimes must match pinned digests");
+    let original = fs::read(&quickjs).unwrap();
+    let mut modified = original.clone();
+    modified[0] ^= 0x01;
+    fs::write(&quickjs, modified).unwrap();
+    assert!(verify_pinned_runtime(&ytdlp, &quickjs).unwrap_err().contains("SHA-256"));
+    fs::write(&quickjs, original).unwrap();
+    fs::remove_file(&ytdlp).unwrap();
+    assert!(verify_pinned_runtime(&ytdlp, &quickjs).is_err());
+    println!("VIDEO15_BUNDLED_RUNTIME_PINS_PASS location=sibling quickjs_tamper_rejected=1 ytdlp_missing_rejected=1");
+}
+
+
+#[cfg(all(not(windows), feature = "video-rust-bundle"))]
+#[test]
+fn video15_non_windows_trusted_bundle_refuses_legacy_fallback() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::at(temp.path().join("local-media"), &[]).unwrap();
+    let error = download_one_or_legacy(
+        &library, OsStr::new("fake-untrusted-yt-dlp"),
+        "https://youtu.be/dQw4w9WgXcQ", |_| {},
+    ).unwrap_err();
+    assert!(error.contains("Windows-only"), "unsupported OS silently fell back: {error}");
+    assert_eq!(fs::read_dir(library.root()).unwrap().count(), 0);
+}

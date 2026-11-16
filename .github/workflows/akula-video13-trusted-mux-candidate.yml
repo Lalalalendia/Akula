@@ -44,6 +44,11 @@ jobs:
           assert 'option_env!("AKULA_BUNDLED_MUX_SHA256")' in main
           assert 'bundled_mux_from_exe(&application, expected)' in main
           assert 'akula-video-mux.exe' in main
+          assert 'akula-yt-dlp.exe' in main and 'akula-quickjs.exe' in main
+          assert 'verify_pinned_runtime(&ytdlp, &quickjs)' in main
+          assert 'std::env::var_os("AKULA_QUICKJS_BIN")' not in main
+          assert 'video-rust-bundle is Windows-only: refusing unpinned legacy fallback' in main
+          assert '#[cfg(not(feature = "video-rust-bundle"))]' in main
           assert 'AKULA_RUST_MUX_BIN is no longer supported' in main
           assert 'PathBuf::from(mux)' not in main
           assert 'fs::hard_link(&output, &target)' in main
@@ -89,13 +94,33 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "AKULA_BUNDLED_MUX_SHA256=$sha"
           Add-Content -Path $env:GITHUB_ENV -Value "AKULA_VIDEO13_TEST_MUX_BIN=$mux"
           Write-Host 'VIDEO13_HELPER_FROM_EXACT_SOURCE_PASS runtime_executable=0'
+      - name: Fetch and verify exact official runtimes for disposable candidate only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scratch = Join-Path $env:RUNNER_TEMP 'video15-pinned-runtime'
+          New-Item -ItemType Directory -Force -Path $scratch | Out-Null
+          $yt = Join-Path $scratch 'akula-yt-dlp.exe'
+          $js = Join-Path $scratch 'akula-quickjs.exe'
+          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' -OutFile $yt -UseBasicParsing
+          Invoke-WebRequest 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' -OutFile $js -UseBasicParsing
+          $yh = (Get-FileHash -LiteralPath $yt -Algorithm SHA256).Hash.ToLowerInvariant()
+          $jh = (Get-FileHash -LiteralPath $js -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($yh -cne 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d') { throw 'official yt-dlp pin mismatch' }
+          if ($jh -cne 'ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7') { throw 'official QuickJS pin mismatch' }
+          if ((Get-Item -LiteralPath $yt).Length -ne 23575744) { throw 'official yt-dlp size mismatch' }
+          if ((Get-Item -LiteralPath $js).Length -ne 1873152) { throw 'official QuickJS size mismatch' }
+          Add-Content -Path $env:GITHUB_ENV -Value "AKULA_TEST_YTDLP_BIN=$yt"
+          Add-Content -Path $env:GITHUB_ENV -Value "AKULA_TEST_QUICKJS_BIN=$js"
+          Write-Host 'VIDEO15_OFFICIAL_SIDECARS_VERIFIED no_unpinned_runtime=1 no_youtube_request=1'
       - name: Run native tests with a hash embedded at Rust compilation time
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --bin aquilum-native --features installed,video-rust-bundle video::light::tests::video13_ -- --nocapture
-          if ($LASTEXITCODE -ne 0) { throw 'build-time mux trust gate rejected its own helper' }
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --bin aquilum-native --features installed,video-rust-bundle video::light::tests::video1 -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'build-time mux or official runtime trust gate rejected its own helper' }
           Write-Host 'VIDEO13_COMPILED_SHA_NATIVE_PASS modified_helper_denied=1'
+          Write-Host 'VIDEO15_BUNDLED_SHA_NATIVE_PASS no_env_runtime_selection=1'
       - name: Stage candidate Akula and mux side by side, no installer
         shell: pwsh
         working-directory: aquilum-app
@@ -112,8 +137,14 @@ jobs:
           if (!(Test-Path -LiteralPath $app)) { throw 'Akula installed executable not built' }
           Copy-Item -LiteralPath $app -Destination (Join-Path $dir 'akula-app.exe')
           Copy-Item -LiteralPath $env:AKULA_VIDEO13_TEST_MUX_BIN -Destination (Join-Path $dir 'akula-video-mux.exe')
+          Copy-Item -LiteralPath $env:AKULA_TEST_YTDLP_BIN -Destination (Join-Path $dir 'akula-yt-dlp.exe')
+          Copy-Item -LiteralPath $env:AKULA_TEST_QUICKJS_BIN -Destination (Join-Path $dir 'akula-quickjs.exe')
           $actual = (Get-FileHash -LiteralPath (Join-Path $dir 'akula-video-mux.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -cne $env:AKULA_BUNDLED_MUX_SHA256) { throw 'candidate helper hash does not match compiled pin' }
+          $yhash = (Get-FileHash -LiteralPath (Join-Path $dir 'akula-yt-dlp.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          $jhash = (Get-FileHash -LiteralPath (Join-Path $dir 'akula-quickjs.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($yhash -cne 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d') { throw 'staged yt-dlp was altered' }
+          if ($jhash -cne 'ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7') { throw 'staged QuickJS was altered' }
           if ((Get-Item -LiteralPath (Join-Path $dir 'akula-app.exe')).Length -lt 100000) { throw 'unexpected empty Akula executable' }
           Write-Host 'VIDEO13_STAGED_PAIR_PASS compiled_app=1 same_directory=1 helper_hash_verified=1'
           Write-Host 'VIDEO13_NONRELEASE_PASS signed=0 installer=0 upload=0 release=0'
