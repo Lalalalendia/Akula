@@ -26,6 +26,9 @@ signingIdentity = "-"
 linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh" }
 
 [features]
+# VIDEO-13: non-release Windows proof only. Default installed builds keep
+# legacy behavior until the full signed toolchain/installer acceptance.
+video-rust-bundle = []
 # Public install includes read-only Dropbox authorization; cloud writes remain disabled.
 installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
 messaging-w4-pilot = []
