@@ -193,13 +193,13 @@ fn download_rust(
     library: &Library, executable: &OsStr, mux: &Path, quickjs: &Path, url: &str,
     on_progress: impl FnMut(download::Progress),
 ) -> Result<PathBuf, String> {
-    download_rust_from_source(library, executable, mux, quickjs, url, url, on_progress)
+    #[cfg(all(windows, feature = "video-ui-e2e"))]
+    let transport = super::ui_acceptance::transport_url(url)?;
+    #[cfg(not(all(windows, feature = "video-ui-e2e")))]
+    let transport = url.to_owned();
+    download_rust_from_source(library, executable, mux, quickjs, url, &transport, on_progress)
 }
-
-// The real application always passes identical note and transport URLs. The
-// private test harness supplies a loopback MPD as transport while retaining a
-// valid YouTube note identifier, allowing the actual native orchestration to
-// be tested without requesting third-party media.
+// VIDEO-12/16: synthetic localhost transport is confined to native tests or the CI-only GUI feature.
 fn download_rust_from_source(
     library: &Library, executable: &OsStr, mux: &Path, quickjs: &Path,
     url: &str, transport_url: &str,

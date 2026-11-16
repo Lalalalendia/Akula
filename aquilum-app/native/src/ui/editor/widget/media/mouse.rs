@@ -18,11 +18,7 @@ impl TextEditor {
         let Some(view) = self.media_view(start) else { return false };
         let (line, frame, video, image, path, crop_now) = (view.line.clone(), view.frame, view.video, view.image.clone(), view.path.clone(), view.crop());
         match hit {
-            MediaHit::Zoom => {
-                if let Some(image) = image {
-                    self.request(Request::View(image, path));
-                }
-            }
+            MediaHit::Zoom => { if let Some(image) = image { self.request(Request::View(image, path)); } }
             MediaHit::Align => {
                 let mut line = line;
                 line.params.align = match line.params.align {
@@ -51,7 +47,11 @@ impl TextEditor {
             }
             MediaHit::Play | MediaHit::Toggle => {
                 if let Some(path) = path {
+                    #[cfg(all(windows, feature = "video-ui-e2e"))]
+                    crate::video::ui_acceptance::mark("CLICK_LOCAL_PLAY_ATTEMPT");
                     if crate::video::toggle(&path) {
+                        #[cfg(all(windows, feature = "video-ui-e2e"))]
+                        crate::video::ui_acceptance::mark("CLICK_LOCAL_PLAY");
                         self.videos.add(path);
                         ctx.request_anim_frame();
                     } else {
@@ -62,11 +62,7 @@ impl TextEditor {
                     self.request(Request::Open { target: line.src, wiki: false, new_tab: false });
                 }
             }
-            MediaHit::Mute => {
-                if let Some(path) = &path {
-                    crate::video::mute(path);
-                }
-            }
+            MediaHit::Mute => { if let Some(path) = &path { crate::video::mute(path); } }
             MediaHit::Bar => {
                 if let Some(path) = &path {
                     let top = self.doc.top(self.doc.at_offset(start));
@@ -134,6 +130,10 @@ impl TextEditor {
             return true;
         }
         let hover = self.media_under(point);
+        #[cfg(all(windows, feature = "video-ui-e2e"))]
+        if let Some((start, hit)) = hover {
+            crate::video::ui_acceptance::hover(hit == MediaHit::Download, hit == MediaHit::Play, self.media_view(start).is_some_and(|v| v.path.is_some()));
+        }
         if hover != self.media.hover {
             self.media.hover = hover;
             let start = hover.map(|(s, _)| s);

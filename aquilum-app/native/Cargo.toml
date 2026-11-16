@@ -29,6 +29,8 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 # VIDEO-13: non-release Windows proof only. Default installed builds keep
 # legacy behavior until the full signed toolchain/installer acceptance.
 video-rust-bundle = []
+# Explicitly non-shipping real Windows GUI test: guarded localhost MPD only.
+video-ui-e2e = ["video-rust-bundle"]
 # Public install includes read-only Dropbox authorization; cloud writes remain disabled.
 installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
 messaging-w4-pilot = []
