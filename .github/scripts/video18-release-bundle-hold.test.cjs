@@ -134,7 +134,7 @@ test('VIDEO-18 refuses Cargo-default activation of test-only video code', () => 
   const cargo = file('aquilum-app/native/Cargo.toml');
   const signed = file('.github/workflows/akula-windows-signed-candidate.yml');
   assert.throws(
-    () => validateReleaseGates(cargo.replace('[features]', '[features]\\ndefault = ["video-rust-bundle"]'), signed),
+    () => validateReleaseGates(cargo.replace('[features]', '[features]\ndefault = ["video-rust-bundle"]'), signed),
     /HOLD/
   );
 });
