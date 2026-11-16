@@ -142,17 +142,50 @@ fn check_mux(executable: &Path) -> Result<(), String> {
     safe_file(executable, 128 * 1024 * 1024).map(|_| ())
 }
 
+// A VIDEO-07 helper could return exit=0 for a structurally readable MP4
+// with a zero-length elst and no decodable frames. Require a versioned
+// positive-duration receipt from the corrected VIDEO-11 helper before any
+// file is published. This is an accidental-compatibility guard, not a
+// cryptographic signature of arbitrary user-supplied executable bytes.
+fn valid_mux_receipt(stdout: &str) -> bool {
+    let mut lines = stdout.lines().filter(|l| l.starts_with("DASH_RUST_MUX_PAIR_PASS "));
+    let Some(line) = lines.next() else { return false; };
+    if lines.next().is_some() { return false; }
+    let parts: Vec<_> = line.split_whitespace().collect();
+    if !parts.contains(&"protocol=v2") || !parts.contains(&"ffmpeg_in_runtime=0") {
+        return false;
+    }
+    for field in ["duration_ms=", "video_samples=", "audio_samples="] {
+        let Some(value) = parts.iter().find_map(|part| part.strip_prefix(field)) else {
+            return false;
+        };
+        let Ok(value) = value.parse::<u64>() else { return false; };
+        if value == 0 || (field == "duration_ms=" && value > 86_400_000) {
+            return false;
+        }
+    }
+    true
+}
+
 fn run_mux(executable: &Path, stage: &Path, result: &Path) -> Result<(), String> {
     let mut child = ChildGuard(Command::new(executable)
         .arg("mux-pair").arg(stage.join("video.mp4")).arg(stage.join("audio.m4a"))
         .arg(result).current_dir(stage)
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped())
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn().map_err(|e| format!("Rust MP4 muxer cannot start: {e}"))?);
     let errors = child.0.stderr.take().ok_or("missing mux stderr")?;
+    let receipts = child.0.stdout.take().ok_or("missing mux stdout")?;
     let diagnostics = std::thread::spawn(move || tail(errors));
+    let result_report = std::thread::spawn(move || tail(receipts));
     let exit = child.0.wait().map_err(|e| e.to_string())?;
     let error = diagnostics.join().unwrap_or_default();
-    if !exit.success() { return Err(format!("Rust MP4 muxer rejected H264/AAC ({exit}): {error}")); }
+    let receipt = result_report.join().unwrap_or_default();
+    if !exit.success() {
+        return Err(format!("Rust MP4 muxer rejected H264/AAC ({exit}): {error}"));
+    }
+    if !valid_mux_receipt(&receipt) {
+        return Err("Rust MP4 muxer is outdated or produced no verified duration; refusing publication".into());
+    }
     Ok(())
 }
 
