@@ -100,7 +100,8 @@ jobs:
           queue=Path('aquilum-app/native/src/video/queue.rs').read_text()
           for required in ('AKULA_RUST_MUX_BIN','AKULA_QUICKJS_BIN','download_one_or_legacy',
                            'Library','Stage::new(library)','mux-pair','--no-playlist',
-                           '--no-exec','--no-js-runtimes','--js-runtimes',
+                           '--no-exec','--no-plugin-dirs','--no-remote-components',
+                           '--no-js-runtimes','--js-runtimes',
                            'QUICKJS_WINDOWS_SHA256','YTDLP_WINDOWS_SHA256',
                            'verify_pinned_runtime','fs::hard_link'):
               assert required in light,required
