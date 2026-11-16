@@ -36,7 +36,7 @@ fn two_explicit_tracks_are_remuxed_once_without_any_cloud_or_vault_write() {
         fi
         printf 'AKULA_PROGRESS:16:16:0\n'
     "#);
-    let mux_body = format!("test \"$1\" = 'mux-pair'\ntest -s \"$2\"\ntest -s \"$3\"\ncp '{}' \"$4\"", fixture_path.display());
+    let mux_body = format!("test \"$1\" = 'mux-pair'\ntest -s \"$2\"\ntest -s \"$3\"\ncp '{}' \"$4\"\necho 'DASH_RUST_MUX_PAIR_PASS protocol=v2 duration_ms=6000 video_samples=60 audio_samples=94 ffmpeg_in_runtime=0'", fixture_path.display());
     let mux = script(temp.path().join("fake-rust-mux.sh"), &mux_body);
     let mut progress = Vec::new();
     let first = download_rust(&library, yt.as_os_str(), &mux, Path::new("/tmp/mock-qjs"), URL, |p| progress.push(p))
@@ -80,7 +80,7 @@ fn native_windows_two_track_mock_uses_local_library_and_writable_flush() {
     let yt = temp.path().join("fake-yt-dlp.cmd");
     fs::write(&yt, "@echo off\r\nif not exist video.mp4 (\r\n  > video.mp4 echo mock-video\r\n) else (\r\n  > audio.m4a echo mock-audio\r\n)\r\necho AKULA_PROGRESS:12:12:0\r\nexit /b 0\r\n").unwrap();
     let mux = temp.path().join("fake-rust-mux.cmd");
-    fs::write(&mux, "@echo off\r\nif not \"%~1\"==\"mux-pair\" exit /b 4\r\ncopy /y \"%~dp0fixture.mp4\" \"%~4\" >nul\r\nif errorlevel 1 exit /b 5\r\nexit /b 0\r\n").unwrap();
+    fs::write(&mux, "@echo off\r\nif not \"%~1\"==\"mux-pair\" exit /b 4\r\ncopy /y \"%~dp0fixture.mp4\" \"%~4\" >nul\r\nif errorlevel 1 exit /b 5\r\necho DASH_RUST_MUX_PAIR_PASS protocol=v2 duration_ms=6000 video_samples=60 audio_samples=94 ffmpeg_in_runtime=0\r\nexit /b 0\r\n").unwrap();
     let first = download_rust(&library, yt.as_os_str(), &mux, Path::new("C:\\mock-qjs.exe"), URL, |_| {})
         .expect("Windows mock Rust mux should publish after successful FlushFileBuffers");
     assert_eq!(fs::read(&first).unwrap(), fs::read(fixture_path).unwrap());
@@ -156,4 +156,43 @@ fn official_pins_accept_only_the_checked_windows_quickjs_and_ytdlp() {
         }
         _ => panic!("both AKULA_TEST_QUICKJS_BIN and AKULA_TEST_YTDLP_BIN must be supplied"),
     }
+}
+
+
+#[test]
+fn refuses_old_unversioned_or_zero_duration_mux_receipts() {
+    let valid = "DASH_RUST_MUX_PAIR_PASS protocol=v2 duration_ms=6000 video_samples=60 audio_samples=94 ffmpeg_in_runtime=0\n";
+    assert!(valid_mux_receipt(valid));
+    for bad in [
+        "",
+        "DASH_RUST_MUX_PAIR_PASS video_samples=60 audio_samples=94 ffmpeg_in_runtime=0\n",
+        "DASH_RUST_MUX_PAIR_PASS protocol=v1 duration_ms=6000 video_samples=60 audio_samples=94 ffmpeg_in_runtime=0\n",
+        "DASH_RUST_MUX_PAIR_PASS protocol=v2 duration_ms=0 video_samples=60 audio_samples=94 ffmpeg_in_runtime=0\n",
+        "DASH_RUST_MUX_PAIR_PASS protocol=v2 duration_ms=6000 video_samples=0 audio_samples=94 ffmpeg_in_runtime=0\n",
+        "DASH_RUST_MUX_PAIR_PASS protocol=v2 duration_ms=6000 video_samples=60 audio_samples=94 ffmpeg_in_runtime=1\n",
+    ] {
+        assert!(!valid_mux_receipt(bad), "accepted invalid receipt: {bad}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn successful_but_stale_rust_mux_does_not_publish_any_video() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::at(temp.path().join("local"), &[]).unwrap();
+    let fixture_path = fixture(temp.path());
+    let yt = script(temp.path().join("yt.sh"), r#"
+        if test -f video.mp4; then
+            printf synthetic-audio > audio.m4a
+        else
+            printf synthetic-video > video.mp4
+        fi
+    "#);
+    let old_mux = script(temp.path().join("old-mux.sh"),
+        &format!("cp '{}' \"$4\"\necho 'DASH_RUST_MUX_PAIR_PASS video_samples=60 audio_samples=94'", fixture_path.display()));
+    let error = download_rust(&library, yt.as_os_str(), &old_mux,
+        Path::new("/tmp/mock-qjs"), URL, |_| {}).unwrap_err();
+    assert!(error.contains("outdated"), "{error}");
+    assert!(library.existing(ID).unwrap().is_none());
+    assert_eq!(fs::read_dir(library.root()).unwrap().count(), 0);
 }
