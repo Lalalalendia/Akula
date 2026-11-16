@@ -2,7 +2,7 @@ name: Akula VIDEO-12 native real toolchain local-only E2E (non-release)
 
 on:
   pull_request:
-    branches: [feat/video03-one-click-offline-20261116]
+    branches: [main, feat/video03-one-click-offline-20261116]
     paths:
       - 'labs/video-lite/video12/**'
       - '.github/workflows/akula-video12-native-real-offline.yml'
