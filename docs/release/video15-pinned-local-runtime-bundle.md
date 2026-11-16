@@ -22,6 +22,8 @@ In the **non-default** `video-rust-bundle` feature on Windows only:
   `AKULA_QUICKJS_BIN` is no longer accepted in the Rust path. The
   legacy, normally installed code path is unchanged; it does not
   automatically download or load new media.
+- An explicit `video-rust-bundle` on Linux/macOS now **fails closed**
+  instead of running the unpinned legacy downloader from PATH.
 - Keep `--ignore-config --no-plugin-dirs --no-remote-components
   --no-js-runtimes --js-runtimes quickjs:<verified path>` for yt-dlp,
   and retain device-local staging, atomically published MP4 and v2 mux
