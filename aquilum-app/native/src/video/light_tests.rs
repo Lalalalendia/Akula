@@ -109,7 +109,7 @@ fn yt_dlp_single_track_args_do_not_request_merge_or_postprocessing() {
         assert!(args.contains(&"--ignore-config".into()));
         assert!(args.contains(&"--no-playlist".into()));
         assert!(args.contains(&"--no-exec".into()));
-        assert!(args.windows(2).any(|a| a == ["--fixup", "never"]));
+        assert!(args.windows(2).any(|a| a[0] == "--fixup" && a[1] == "never"));
         assert!(!args.contains(&"--merge-output-format".into()));
         assert!(!args.contains(&"--postprocessor-args".into()));
         assert_eq!(args.last().map(String::as_str), Some(URL));
