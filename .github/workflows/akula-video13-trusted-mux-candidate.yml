@@ -79,7 +79,6 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if (!(Test-Path 'labs/video-lite/Cargo.lock' -PathType Leaf)) { throw 'locked video-lite dependencies missing' }
-          if ($LASTEXITCODE -ne 0) { throw 'helper dependencies unavailable' }
           cargo test --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
           if ($LASTEXITCODE -ne 0) { throw 'mux timeline regression' }
           cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
