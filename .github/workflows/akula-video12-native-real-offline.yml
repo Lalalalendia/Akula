@@ -1,0 +1,169 @@
+name: Akula VIDEO-12 native real toolchain local-only E2E (non-release)
+
+on:
+  pull_request:
+    branches: [feat/video03-one-click-offline-20261116]
+    paths:
+      - 'labs/video-lite/video12/**'
+      - '.github/workflows/akula-video12-native-real-offline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fixture:
+    name: Generate 6s synthetic video/audio MPD, no YouTube requests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Create DASH fixture with two independent media tracks
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          test -s labs/video-lite/fixtures/avc_aac_2s.mp4
+          mkdir -p video12-fixture
+          ffmpeg -hide_banner -loglevel error -nostdin \
+            -stream_loop 2 -i labs/video-lite/fixtures/avc_aac_2s.mp4 \
+            -t 6 -map 0:v:0 -map 0:a:0 -c copy \
+            -f dash -seg_duration 1 -use_template 1 -use_timeline 1 \
+            video12-fixture/manifest.mpd
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          root=Path('video12-fixture')
+          mpd=root/'manifest.mpd'
+          tree=ET.parse(mpd)
+          namespace='{urn:mpeg:dash:schema:mpd:2011}'
+          reps=tree.findall('.//'+namespace+'Representation')
+          assert len(reps)==2, 'must have separate video and audio representations'
+          assert len(list(root.glob('*.m4s')))>=4, 'test media segments missing'
+          assert 'http://' not in mpd.read_text() and 'https://' not in mpd.read_text(), 'manifest must use local relative segments'
+          print('VIDEO12_FIXTURE_PASS representations=',len(reps))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video12-synthetic-local-dash
+          path: video12-fixture/
+          retention-days: 2
+          if-no-files-found: error
+
+  native-windows:
+    name: Real pinned yt-dlp and QuickJS to Akula native Rust local media library
+    needs: fixture
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: video12-synthetic-local-dash
+          path: video12-fixture
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aquilum-app -> ../.artifacts/cargo-native
+            labs/video-lite
+          shared-key: akula-video12-native-real-rust-v1
+          save-if: false
+      - name: Build corrected Rust v2 helper from exact PR source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo generate-lockfile --manifest-path labs/video-lite/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Rust helper lockfile unavailable' }
+          cargo test --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Rust edit-list and timeline regression' }
+          cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if ($LASTEXITCODE -ne 0) { throw 'Corrected helper could not compile' }
+          if (!(Test-Path 'labs/video-lite/target/release/dash.exe')) { throw 'Rust helper missing' }
+          Write-Host 'VIDEO12_RUST_V2_COMPILED_FROM_SOURCE'
+      - name: Fetch official SHA-pinned yt-dlp and QuickJS for disposable CI only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scratch = Join-Path $env:RUNNER_TEMP 'video12-private-binaries'
+          New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+          $yt = Join-Path $scratch 'yt-dlp.exe'
+          $qjs = Join-Path $scratch 'qjs.exe'
+          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' -OutFile $yt -UseBasicParsing
+          Invoke-WebRequest 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' -OutFile $qjs -UseBasicParsing
+          if ((Get-FileHash $yt -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d') { throw 'yt-dlp binary pin mismatch' }
+          if ((Get-FileHash $qjs -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7') { throw 'QuickJS binary pin mismatch' }
+          if ((Get-Item $yt).Length -ne 23575744 -or (Get-Item $qjs).Length -ne 1873152) { throw 'Wrong exact executable lengths' }
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO12_YT=$yt"
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO12_QJS=$qjs"
+          Write-Host 'VIDEO12_OFFICIAL_BINARIES_PINNED temporary_ci=1'
+      - name: Native Akula pipeline downloads localhost MPD and publishes only local MP4
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path video12-output -Force | Out-Null
+          python labs/video-lite/video12/native_acceptance.py --repo . --manifest-dir video12-fixture --yt-dlp $env:VIDEO12_YT --quickjs $env:VIDEO12_QJS --mux labs/video-lite/target/release/dash.exe --output video12-output/akula-native.mp4
+          if ($LASTEXITCODE -ne 0) { throw 'VIDEO12 native real downloader failed' }
+          if (!(Test-Path video12-output/akula-native.mp4 -PathType Leaf)) { throw 'Native MP4 missing' }
+          Write-Host 'VIDEO12_NATIVE_PATH_PASS no_vault_sync=1 no_youtube_requests=1'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video12-native-rust-mp4
+          path: video12-output/akula-native.mp4
+          if-no-files-found: error
+          retention-days: 2
+      - name: Reaffirm non-release boundary
+        shell: pwsh
+        run: |
+          Write-Host 'VIDEO12_NONRELEASE_PASS shipped=0 installer_modified=0 only_local_test_media=1'
+
+  reference-decode:
+    name: Independently decode actual Akula-native published MP4
+    needs: native-windows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: video12-native-rust-mp4
+          path: video12-output
+      - name: Require positive duration and decodable real frames for both tracks
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffprobe -v error -count_frames \
+            -show_entries stream=codec_type,codec_name,nb_read_frames,duration:format=duration \
+            -of json video12-output/akula-native.mp4 > video12-output/probe.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('video12-output/probe.json').read_text())
+          codes={(s['codec_type'],s['codec_name']) for s in data['streams']}
+          assert codes=={('video','h264'),('audio','aac')},codes
+          duration=float(data['format']['duration'])
+          assert 4.0 <= duration <= 8.0,duration
+          for stream in data['streams']:
+              frames=int(stream['nb_read_frames'])
+              assert frames >= 30,stream
+              assert float(stream['duration']) > 4,stream
+              print('VIDEO12_REFERENCE_FRAMES_PASS codec=',stream['codec_name'],'frames=',frames)
+          print('VIDEO12_REFERENCE_DURATION_PASS',duration)
+          PY
+          ffmpeg -hide_banner -loglevel error -nostdin -i video12-output/akula-native.mp4 -map 0:v:0 -f null -
+          ffmpeg -hide_banner -loglevel error -nostdin -i video12-output/akula-native.mp4 -map 0:a:0 -f null -
+          echo 'VIDEO12_NATIVE_REFERENCE_DECODE_PASS rust_mux=1 ffmpeg_runtime=0'
