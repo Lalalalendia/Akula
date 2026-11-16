@@ -119,6 +119,66 @@ use super::*;
         assert_eq!(fs::read_dir(library.root()).unwrap().count(), 1);
     }
 
+
+    /// Log which Media Foundation stage is unavailable on the Windows runner.
+    /// The application must not mark playback as accepted on a missing decoder.
+    #[cfg(windows)]
+    fn media_foundation_probe(path: &Path) -> String {
+        use windows::Win32::Media::MediaFoundation::{
+            MFStartup, MF_VERSION, MFSTARTUP_FULL, MFCreateAttributes,
+            MFCreateMediaType, MFCreateSourceReaderFromURL,
+            MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING,
+            MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING,
+            MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_MT_FRAME_SIZE,
+            MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MFMediaType_Video,
+            MFVideoFormat_RGB32,
+        };
+        use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
+        use windows::core::HSTRING;
+        let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        let mf = unsafe { MFStartup(MF_VERSION, MFSTARTUP_FULL) };
+        let mut report = format!("COM={com:?}; MFStartup={mf:?}");
+        if mf.is_err() { return report; }
+        for (label, attribute) in [
+            ("advanced", MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING),
+            ("Win7-basic", MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING),
+        ] {
+            let step = (|| -> Result<String, String> {
+                let mut holder = None;
+                unsafe { MFCreateAttributes(&mut holder, 1) }
+                    .map_err(|e| format!("MFCreateAttributes {e:?}"))?;
+                let attributes = holder.ok_or("no attributes returned")?;
+                attributes.SetUINT32(&attribute, 1)
+                    .map_err(|e| format!("SetUINT32 {e:?}"))?;
+                let reader = unsafe {
+                    MFCreateSourceReaderFromURL(&HSTRING::from(path.as_os_str()), &attributes)
+                }.map_err(|e| format!("MFCreateSourceReaderFromURL {e:?}"))?;
+                let stream = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
+                reader.GetNativeMediaType(stream, 0)
+                    .map_err(|e| format!("GetNativeMediaType {e:?}"))?
+                    .GetUINT64(&MF_MT_FRAME_SIZE)
+                    .map_err(|e| format!("GetUINT64(MF_MT_FRAME_SIZE) {e:?}"))?;
+                let kind = unsafe { MFCreateMediaType() }
+                    .map_err(|e| format!("MFCreateMediaType {e:?}"))?;
+                kind.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
+                    .map_err(|e| format!("Set major type {e:?}"))?;
+                kind.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32)
+                    .map_err(|e| format!("Set RGB32 {e:?}"))?;
+                let native_size = reader.GetNativeMediaType(stream, 0)
+                    .map_err(|e| format!("re-read native type {e:?}"))?
+                    .GetUINT64(&MF_MT_FRAME_SIZE)
+                    .map_err(|e| format!("native size {e:?}"))?;
+                kind.SetUINT64(&MF_MT_FRAME_SIZE, native_size)
+                    .map_err(|e| format!("set frame size {e:?}"))?;
+                reader.SetCurrentMediaType(stream, None, &kind)
+                    .map_err(|e| format!("SetCurrentMediaType {e:?}"))?;
+                Ok(format!("RGB32 configured size={native_size}"))
+            })();
+            report.push_str(&format!("; {label}={step:?}"));
+        }
+        report
+    }
+
     #[cfg(windows)]
     #[test]
     fn synthetic_avc_aac_download_survives_restart_and_decodes_natively() {
@@ -140,7 +200,8 @@ use super::*;
         assert_eq!(reopened.existing("dQw4w9WgXcQ").unwrap(), Some(path.clone()),
             "device-local media must be discoverable after application restart");
         assert!(crate::video::toggle(&path),
-            "Windows Media Foundation must open AVC/AAC native playback");
+            "Windows Media Foundation must open AVC/AAC native playback. Diagnostics: {}",
+            media_foundation_probe(&path));
         let mut player = crate::video::Owned::default();
         player.add(path.clone());
         let mut decoded_frame = false;
