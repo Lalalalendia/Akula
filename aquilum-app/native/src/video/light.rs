@@ -335,14 +335,13 @@ pub(super) fn download_one_or_legacy(
         let application = std::env::current_exe()
             .map_err(|e| format!("cannot locate installed Akula executable: {e}"))?;
         let mux = bundled_mux_from_exe(&application, expected)?;
-        let quickjs = std::env::var_os("AKULA_QUICKJS_BIN")
-            .filter(|s| !s.is_empty())
-            .ok_or("AKULA_QUICKJS_BIN must specify SHA-pinned QuickJS-NG")?;
-        let quickjs = PathBuf::from(quickjs);
-        // An exact hash pin is required for both external parsing tools.
-        // No PATH fallback or remote runtime components are permitted here.
-        verify_pinned_runtime(Path::new(executable), &quickjs)?;
-        download_rust(library, executable, &mux, &quickjs, url, on_progress)
+        let directory = application.parent().ok_or("Akula executable has no parent directory")?;
+        // VIDEO-15: both tools are pinned siblings; never execute the queue's
+        // PATH/env-selected executable or a user-selected JS runtime.
+        let ytdlp = directory.join("akula-yt-dlp.exe");
+        let quickjs = directory.join("akula-quickjs.exe");
+        verify_pinned_runtime(&ytdlp, &quickjs)?;
+        download_rust(library, ytdlp.as_os_str(), &mux, &quickjs, url, on_progress)
     }
     #[cfg(not(all(windows, feature = "video-rust-bundle")))]
     {
