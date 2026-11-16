@@ -311,3 +311,7 @@ pub(super) fn download_one_or_legacy(
 #[cfg(test)]
 #[path = "light_tests.rs"]
 mod tests;
+
+#[cfg(all(test, windows))]
+#[path = "light_integration.rs"]
+mod integration_tests;
