@@ -62,7 +62,9 @@ fn target_pixel(source: (i32, i32), delta: (f64, f64)) -> Option<(i32, i32)> {
 fn record(event: &'static str, center_delta: Option<(f64, f64)>) {
     if !hosted() || !matches!(event,
         "HOVER_DOWNLOAD" | "CLICK_DOWNLOAD" | "HOVER_LOCAL_PLAY" |
-        "CLICK_LOCAL_PLAY_ATTEMPT" | "CLICK_LOCAL_PLAY" | "DECODED_FRAME")
+        "CLICK_LOCAL_PLAY_ATTEMPT" | "CLICK_LOCAL_PLAY" | "DECODED_FRAME" |
+        "WINDOW_POINTER_DOWN" | "PRESS_DOWNLOAD" | "PRESS_OTHER" | "PRESS_NONE" |
+        "CENTER_DOWNLOAD_READY" | "CENTER_LOCAL_PLAY_READY")
     {
         return;
     }
@@ -105,6 +107,16 @@ pub(crate) fn frame_ready(ready: bool) {
 pub(crate) fn hover(download: bool, play: bool, local: bool, center_delta: Option<(f64, f64)>) {
     if download { record("HOVER_DOWNLOAD", center_delta); }
     if play && local { record("HOVER_LOCAL_PLAY", center_delta); }
+    if center_delta.is_some_and(|(x, y)| x.abs() <= 4.0 && y.abs() <= 4.0) {
+        if download { mark("CENTER_DOWNLOAD_READY"); }
+        if play && local { mark("CENTER_LOCAL_PLAY_READY"); }
+    }
+}
+
+// Observation-only. Actual clicks must still be delivered through the
+// Windows pointer event and media_press() to perform any real action.
+pub(crate) fn press_hit(download: bool, has_media: bool) {
+    mark(if download { "PRESS_DOWNLOAD" } else if has_media { "PRESS_OTHER" } else { "PRESS_NONE" });
 }
 
 #[cfg(test)]
