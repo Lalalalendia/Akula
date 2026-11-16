@@ -199,9 +199,11 @@ use super::*;
         let reopened = Library::at(device_dir, &[]).unwrap();
         assert_eq!(reopened.existing("dQw4w9WgXcQ").unwrap(), Some(path.clone()),
             "device-local media must be discoverable after application restart");
+        let mf_path = crate::workspace::normalize(&path);
+        assert_eq!(fs::read(&mf_path).unwrap(), fs::read(&path).unwrap());
         assert!(crate::video::toggle(&path),
-            "Windows Media Foundation must open AVC/AAC native playback. Diagnostics: {}",
-            media_foundation_probe(&path));
+            "Windows Media Foundation must open AVC/AAC native playback. Local source: {mf_path:?}. Diagnostics: {}",
+            media_foundation_probe(&mf_path));
         let mut player = crate::video::Owned::default();
         player.add(path.clone());
         let mut decoded_frame = false;
