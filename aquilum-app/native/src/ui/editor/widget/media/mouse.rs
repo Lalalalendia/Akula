@@ -130,7 +130,7 @@ impl TextEditor {
         let hover = self.media_under(point);
         #[cfg(all(windows, feature = "video-ui-e2e"))]
         if let Some((start, hit)) = hover {
-            crate::video::ui_acceptance::hover(hit, self.media_view(start).is_some_and(|v| v.path.is_some()));
+            crate::video::ui_acceptance::hover(hit == MediaHit::Download, hit == MediaHit::Play, self.media_view(start).is_some_and(|v| v.path.is_some()));
         }
         if hover != self.media.hover {
             self.media.hover = hover;
