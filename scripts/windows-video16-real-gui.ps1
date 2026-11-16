@@ -88,7 +88,14 @@ $text = "# VIDEO16 Media" + [Environment]::NewLine +
         [Environment]::NewLine +
         "https://youtu.be/dQw4w9WgXcQ" + [Environment]::NewLine
 [IO.File]::WriteAllText($note,$text,[Text.UTF8Encoding]::new($false))
-$baseline = (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
+function Get-Video16Sha([string]$LiteralPath) {
+    # Use .NET SHA256 instead of Windows PowerShell's autoloaded Utility module.
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($LiteralPath)
+    try { return [System.BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '') }
+    finally { $stream.Dispose(); $sha.Dispose() }
+}
+$baseline = Get-Video16Sha $note
 $movie = Join-Path $DataDir 'local-videos\dQw4w9WgXcQ.mp4'
 if (Test-Path -LiteralPath $movie) { throw 'Fixture MP4 already present' }
 if (Test-Path -LiteralPath $ProbePath) { throw 'Old GUI probe is present' }
@@ -208,7 +215,7 @@ try{
         }
     }
     if(!$ready){throw 'VIDEO16 physical click did not publish a device-local MP4'}
-    if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -ne $baseline){
+    if((Get-Video16Sha $note) -ne $baseline){
         throw 'VIDEO16 download changed synced Markdown'
     }
     if(@(Get-ChildItem -LiteralPath $VaultPath -Recurse -File |
@@ -224,7 +231,7 @@ try{
     Find-Real-Hover $proc 'HOVER_LOCAL_PLAY'
     Wait-Event 'CLICK_LOCAL_PLAY' 60
     Wait-Event 'DECODED_FRAME' 150
-    if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -ne $baseline){
+    if((Get-Video16Sha $note) -ne $baseline){
         throw 'VIDEO16 playback after restart changed synced Markdown'
     }
     Write-Host 'VIDEO16_RESTART_DECODED_GUI_FRAME_PASS real_pointer=1 local_copy=1 decoded_frame=1'
