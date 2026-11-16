@@ -1,0 +1,83 @@
+name: Akula VIDEO-08 Rust local-only mux adapter stacked QA (non-release)
+on:
+  pull_request:
+    branches: [main, feat/video03-one-click-offline-20261116]
+    paths:
+      - 'aquilum-app/native/src/video/light.rs'
+      - 'aquilum-app/native/src/video/light_tests.rs'
+      - 'aquilum-app/native/src/video/download.rs'
+      - 'aquilum-app/native/src/video/mod.rs'
+      - 'aquilum-app/native/src/video/queue.rs'
+      - '.github/workflows/akula-video-light-stack.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  win-native:
+    name: Windows explicit-click local library, Rust mock mux and installed build
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-video08-light-windows-v1
+          cache-workspace-crates: true
+          save-if: false
+      - name: Validate Rust staged-download tests (no real YouTube requests)
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-native --bin aquilum-native video::light:: -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'VIDEO-08 Windows Rust staged-media tests failed' }
+          Write-Host 'VIDEO08_WINDOWS_STAGING_PASS local_only=1 fake_ytdlp=1 fake_mux=1 no_youtube_request=1'
+      - name: Run prior VIDEO-03 media tests unchanged
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-native --bin aquilum-native video:: -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'VIDEO-03 video tests regressed' }
+          Write-Host 'VIDEO08_WINDOWS_VIDEO_REGRESSION_PASS'
+      - name: Confirm installed-feature executable still builds
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native --features installed
+          if ($LASTEXITCODE -ne 0) { throw 'VIDEO-08 installed Akula build failed' }
+          Write-Host 'VIDEO08_INSTALLED_BUILD_PASS bundling_rust_mux=0 public_release=0'
+  static-invariants:
+    name: Fail closed on implicit download or synced media bytes
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Reject accidental downloader runtime activation or vault writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          light=Path('aquilum-app/native/src/video/light.rs').read_text()
+          queue=Path('aquilum-app/native/src/video/queue.rs').read_text()
+          for required in ('AKULA_RUST_MUX_BIN','download_one_or_legacy','Library','Stage::new(library)',
+                           'mux-pair','--no-playlist','--no-exec','fs::hard_link'):
+              assert required in light,required
+          assert 'super::light::download_one_or_legacy' in queue
+          assert 'std::thread::spawn(move ||' in queue
+          assert 'std::env::var_os("AKULA_RUST_MUX_BIN")' in light
+          for forbidden in ('--merge-output-format','--postprocessor-args','https://www.youtube.com/watch?v='):
+              assert forbidden not in light,forbidden
+          print('VIDEO08_NO_IMPLICIT_SYNC_OR_INSTALL_PASS')
