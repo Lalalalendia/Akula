@@ -16,7 +16,7 @@ pub struct Progress {
     pub total: Option<u64>,
 }
 
-fn parse_progress(line: &str) -> Option<Progress> {
+pub(super) fn parse_progress(line: &str) -> Option<Progress> {
     let body = line.strip_prefix("AKULA_PROGRESS:")?;
     let mut fields = body.split(':');
     let downloaded = fields.next()?.trim().parse().ok()?;
