@@ -1,0 +1,114 @@
+name: Akula VIDEO-13 build-pinned Rust mux candidate (non-release)
+
+on:
+  pull_request:
+    branches: [main, feat/video03-one-click-offline-20261116]
+    paths:
+      - 'aquilum-app/native/src/video/light.rs'
+      - 'aquilum-app/native/src/video/light_tests.rs'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'labs/video-lite/src/bin/dash.rs'
+      - 'labs/video-lite/Cargo.toml'
+      - '.github/workflows/akula-video13-trusted-mux-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source-boundary:
+    name: No arbitrary mux executable or changes to public installer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Enforce non-release and compiled-pin boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+          main = Path('aquilum-app/native/src/video/light.rs').read_text()
+          cfg = tomllib.loads(Path('aquilum-app/native/Cargo.toml').read_text())
+          assert 'video-rust-bundle' in cfg['features']
+          assert 'option_env!("AKULA_BUNDLED_MUX_SHA256")' in main
+          assert 'bundled_mux_from_exe(&application, expected)' in main
+          assert 'akula-video-mux.exe' in main
+          assert 'AKULA_RUST_MUX_BIN is no longer supported' in main
+          assert 'PathBuf::from(mux)' not in main
+          assert 'fs::hard_link(&output, &target)' in main
+          assert 'verify_pinned_runtime' in main
+          assert 'download::download_one(library, executable, url, on_progress)' in main
+          # Do not silently alter existing shipping packaging during this experiment.
+          import json
+          package = json.loads(Path('aquilum-app/native/packaging/akula-windows.json').read_text())
+          assert not any('video-mux' in x['path'] for x in package['binaries'])
+          print('VIDEO13_SOURCE_TRUST_PASS env_path_rejected=1 release_installer_untouched=1')
+          PY
+
+  windows:
+    name: Build exact Rust helper, pin in Akula and reject tampering
+    needs: source-boundary
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aquilum-app -> ../.artifacts/cargo-native
+            labs/video-lite
+          shared-key: akula-video13-trusted-helper-windows-v1
+          save-if: false
+      - name: Build corrected v2 mux from checked-out source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo generate-lockfile --manifest-path labs/video-lite/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'helper dependencies unavailable' }
+          cargo test --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if ($LASTEXITCODE -ne 0) { throw 'mux timeline regression' }
+          cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if ($LASTEXITCODE -ne 0) { throw 'helper build failed' }
+          $mux = (Resolve-Path 'labs/video-lite/target/release/dash.exe').Path
+          $sha = (Get-FileHash -LiteralPath $mux -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -cnotmatch '^[0-9a-f]{64}$') { throw 'invalid compiled helper SHA-256' }
+          Add-Content -Path $env:GITHUB_ENV -Value "AKULA_BUNDLED_MUX_SHA256=$sha"
+          Add-Content -Path $env:GITHUB_ENV -Value "AKULA_VIDEO13_TEST_MUX_BIN=$mux"
+          Write-Host 'VIDEO13_HELPER_FROM_EXACT_SOURCE_PASS runtime_executable=0'
+      - name: Run native tests with a hash embedded at Rust compilation time
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --bin aquilum-native --features installed,video-rust-bundle video::light::tests::video13_ -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'build-time mux trust gate rejected its own helper' }
+          Write-Host 'VIDEO13_COMPILED_SHA_NATIVE_PASS modified_helper_denied=1'
+      - name: Stage candidate Akula and mux side by side, no installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed,video-rust-bundle
+          if ($LASTEXITCODE -ne 0) { throw 'installed-feature trusted candidate does not compile' }
+          $dir = Join-Path $env:RUNNER_TEMP 'video13-staged-local-only'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $app = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release/aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $app)) { throw 'Akula installed executable not built' }
+          Copy-Item -LiteralPath $app -Destination (Join-Path $dir 'akula-app.exe')
+          Copy-Item -LiteralPath $env:AKULA_VIDEO13_TEST_MUX_BIN -Destination (Join-Path $dir 'akula-video-mux.exe')
+          $actual = (Get-FileHash -LiteralPath (Join-Path $dir 'akula-video-mux.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -cne $env:AKULA_BUNDLED_MUX_SHA256) { throw 'candidate helper hash does not match compiled pin' }
+          if ((Get-Item -LiteralPath (Join-Path $dir 'akula-app.exe')).Length -lt 100000) { throw 'unexpected empty Akula executable' }
+          Write-Host 'VIDEO13_STAGED_PAIR_PASS compiled_app=1 same_directory=1 helper_hash_verified=1'
+          Write-Host 'VIDEO13_NONRELEASE_PASS signed=0 installer=0 upload=0 release=0'
