@@ -18,6 +18,9 @@ use super::*;
         }
         assert_eq!(args.last().unwrap(), "https://youtu.be/dQw4w9WgXcQ");
         assert!(args.contains(&"home:/tmp/private".to_string()));
+        assert_eq!(args.windows(2).find(|pair| pair[0] == "--format").map(|pair| pair[1].as_str()),
+            Some("bv[vcodec^=avc1][height<=720]+ba[acodec^=mp4a]/b[vcodec^=avc1][acodec^=mp4a][height<=720]"),
+            "native Windows decoder needs AVC/AAC; an MP4 extension alone does not ensure playback");
         assert!(args.contains(&"--no-cookies".to_owned()));
         assert!(!args.iter().any(|s| s == "--cookies" || s == "--cookies-from-browser" || s.starts_with("--cookies=")));
     }
