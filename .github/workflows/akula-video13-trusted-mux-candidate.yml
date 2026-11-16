@@ -97,9 +97,13 @@ jobs:
           Write-Host 'VIDEO13_COMPILED_SHA_NATIVE_PASS modified_helper_denied=1'
       - name: Stage candidate Akula and mux side by side, no installer
         shell: pwsh
+        working-directory: aquilum-app
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo build --release --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed,video-rust-bundle
+          # Cargo reads .cargo/config.toml from its process working directory.
+          # Running at repo root with --manifest-path silently uses another
+          # target directory, while the installer expects .artifacts/cargo-native.
+          cargo build --release --locked -p aquilum-native --features installed,video-rust-bundle
           if ($LASTEXITCODE -ne 0) { throw 'installed-feature trusted candidate does not compile' }
           $dir = Join-Path $env:RUNNER_TEMP 'video13-staged-local-only'
           New-Item -ItemType Directory -Path $dir -Force | Out-Null
