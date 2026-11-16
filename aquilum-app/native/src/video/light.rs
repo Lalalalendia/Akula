@@ -109,7 +109,7 @@ fn run_track(
     let mut too_large = false;
     for line in BufReader::new(stdout).lines() {
         let line = line.map_err(|e| e.to_string())?;
-        if let Some(p) = download::parse_progress_for_light(&line) {
+        if let Some(p) = download::parse_progress(&line) {
             if p.downloaded > remaining {
                 too_large = true;
                 let _ = child.0.kill();
