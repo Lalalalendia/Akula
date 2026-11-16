@@ -89,6 +89,10 @@ foreach($p in @($vault,$data,$probe)){
   }
 }
 $installed=$false
+$note=Join-Path $vault 'VIDEO16 Media.md'
+$media=Join-Path $data 'local-videos/dQw4w9WgXcQ.mp4'
+$noteSha=$null
+$mediaSha=$null
 try{
   $proc=Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
   if($proc.ExitCode -ne 0){throw "NSIS installer exited $($proc.ExitCode)"}
@@ -121,6 +125,12 @@ try{
        Where-Object {$_.Extension -in '.mp4','.m4a','.m4s','.webm'}).Count -ne 0){
     throw 'VIDEO17 leaked local video into synced vault'
   }
+  if(!(Test-Path -LiteralPath $note -PathType Leaf) -or
+     !(Test-Path -LiteralPath $media -PathType Leaf)){
+    throw 'VIDEO17 installed GUI did not retain exact note and video'
+  }
+  $noteSha=Hash $note
+  $mediaSha=Hash $media
   Assert-Upstream
   Write-Host 'VIDEO17_INSTALLED_GUI_RESTART_PLAY_PASS real_mouse=1 local_video=1 decoded_frame=1'
 } finally {
@@ -140,11 +150,11 @@ try{
     Write-Host 'VIDEO17_NSIS_UNINSTALL_PASS removed_five_exe=1 upstream_untouched=1'
   }
 }
-$note=Join-Path $vault 'VIDEO16 Media.md'
-$media=Join-Path $data 'local-videos/dQw4w9WgXcQ.mp4'
 if(!(Test-Path -LiteralPath $output -PathType Leaf) -or
    !(Test-Path -LiteralPath $note -PathType Leaf) -or
-   !(Test-Path -LiteralPath $media -PathType Leaf)){
-  throw 'VIDEO17 uninstall deleted private media/note or acceptance output'
+   !(Test-Path -LiteralPath $media -PathType Leaf) -or
+   $null -eq $noteSha -or $null -eq $mediaSha -or
+   (Hash $note) -cne $noteSha -or (Hash $media) -cne $mediaSha){
+  throw 'VIDEO17 uninstall deleted or changed private media/Markdown'
 }
 Write-Host 'VIDEO17_INSTALLED_FULL_CYCLE_PASS install=1 download=1 restart=1 play=1 uninstall=1 data_preserved=1'
