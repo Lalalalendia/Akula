@@ -199,11 +199,7 @@ fn download_rust(
     let transport = url.to_owned();
     download_rust_from_source(library, executable, mux, quickjs, url, &transport, on_progress)
 }
-
-// The real application always passes identical note and transport URLs. The
-// private test harness supplies a loopback MPD as transport while retaining a
-// valid YouTube note identifier, allowing the actual native orchestration to
-// be tested without requesting third-party media.
+// VIDEO-12/16: synthetic localhost transport is confined to native tests or the CI-only GUI feature.
 fn download_rust_from_source(
     library: &Library, executable: &OsStr, mux: &Path, quickjs: &Path,
     url: &str, transport_url: &str,
