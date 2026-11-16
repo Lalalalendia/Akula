@@ -286,12 +286,8 @@ fn verify_pinned_runtime(_ytdlp: &Path, _quickjs: &Path) -> Result<(), String> {
     Err("VIDEO-09 opt-in is Windows-only until non-Windows executable pins are validated".into())
 }
 
-// VIDEO-13: a shipping Rust mux comes from the *same installed directory*
-// as Akula, with its exact digest compiled into the main executable.
-// A manifest next to the helper cannot authenticate itself, so no external
-// manifest or environment variable is allowed to select or pin this EXE.
-// Installed builds without a bundled digest retain the existing legacy
-// downloader; they do not execute an unverified Rust helper.
+// Experimental Rust mux is resolved beside Akula, pinned at build time.
+// Never trust an adjacent unsigned manifest or an arbitrary helper path.
 #[cfg(windows)]
 fn bundled_mux_from_exe(application: &Path, expected_sha256: &str) -> Result<PathBuf, String> {
     if expected_sha256.len() != 64
@@ -343,7 +339,11 @@ pub(super) fn download_one_or_legacy(
         verify_pinned_runtime(&ytdlp, &quickjs)?;
         download_rust(library, ytdlp.as_os_str(), &mux, &quickjs, url, on_progress)
     }
-    #[cfg(not(all(windows, feature = "video-rust-bundle")))]
+    #[cfg(all(not(windows), feature = "video-rust-bundle"))]
+    {
+        Err("video-rust-bundle is Windows-only: refusing unpinned legacy fallback".into())
+    }
+    #[cfg(not(feature = "video-rust-bundle"))]
     {
         download::download_one(library, executable, url, on_progress)
     }
