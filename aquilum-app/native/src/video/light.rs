@@ -223,7 +223,9 @@ fn verify_pin(path: &Path, size: u64, expected: &str, name: &str) -> Result<(), 
         if read == 0 { break; }
         sha.update(&buffer[..read]);
     }
-    let digest = format!("{:x}", sha.finalize());
+    // sha2 0.11 Output is an Array, not a LowerHex implementation.
+    let digest: String = sha.finalize().iter()
+        .map(|byte| format!("{byte:02x}")).collect();
     if digest != expected { return Err(format!("{name} SHA-256 does not match pinned runtime")); }
     Ok(())
 }
