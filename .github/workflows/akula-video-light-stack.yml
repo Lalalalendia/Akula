@@ -30,6 +30,29 @@ jobs:
           shared-key: akula-video08-light-windows-v1
           cache-workspace-crates: true
           save-if: false
+      - name: Fetch and verify exact official QuickJS-NG and yt-dlp binaries for test only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scratch = Join-Path $env:RUNNER_TEMP 'akula-video09-runtime'
+          New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+          $qjs = Join-Path $scratch 'qjs.exe'
+          $yt = Join-Path $scratch 'yt-dlp.exe'
+          Invoke-WebRequest 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' -OutFile $qjs -UseBasicParsing
+          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' -OutFile $yt -UseBasicParsing
+          $qhash = (Get-FileHash -LiteralPath $qjs -Algorithm SHA256).Hash.ToLowerInvariant()
+          $yhash = (Get-FileHash -LiteralPath $yt -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($qhash -cne 'ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7') { throw "QuickJS hash changed: $qhash" }
+          if ($yhash -cne 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d') { throw "yt-dlp hash changed: $yhash" }
+          if ((Get-Item -LiteralPath $qjs).Length -ne 1873152) { throw 'QuickJS exact size mismatch' }
+          if ((Get-Item -LiteralPath $yt).Length -ne 23575744) { throw 'yt-dlp exact size mismatch' }
+          $jsResult = (& $qjs -e 'print("VIDEO09_QUICKJS_EXEC_PASS")' 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0 -or !$jsResult.Contains('VIDEO09_QUICKJS_EXEC_PASS')) { throw 'Verified QuickJS cannot execute' }
+          $cliResult = (& $yt --ignore-config --no-plugin-dirs --no-remote-components --no-js-runtimes --js-runtimes "quickjs:$qjs" --version 2>&1 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $cliResult -cne '2026.10.26') { throw "yt-dlp rejects QuickJS runtime selector: $cliResult" }
+          Add-Content -Path $env:GITHUB_ENV -Value "AKULA_TEST_QUICKJS_BIN=$qjs"
+          Add-Content -Path $env:GITHUB_ENV -Value "AKULA_TEST_YTDLP_BIN=$yt"
+          Write-Host 'VIDEO09_PINNED_RUNTIME_CLI_PASS no_youtube_request=1 no_remote_component_download=1'
       - name: Validate Rust staged-download tests (no real YouTube requests)
         shell: pwsh
         working-directory: aquilum-app
@@ -38,6 +61,9 @@ jobs:
           cargo test --locked -p aquilum-native --bin aquilum-native video::light:: -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'VIDEO-08 Windows Rust staged-media tests failed' }
           Write-Host 'VIDEO08_WINDOWS_STAGING_PASS local_only=1 fake_ytdlp=1 fake_mux=1 no_youtube_request=1'
+          cargo test --locked -p aquilum-native --bin aquilum-native video::light::tests::official_pins_accept_only_the_checked_windows_quickjs_and_ytdlp -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Native runtime signature verification failed' }
+          Write-Host 'VIDEO09_NATIVE_RUNTIME_INTEGRITY_PASS'
       - name: Run prior VIDEO-03 media tests unchanged
         shell: pwsh
         working-directory: aquilum-app
@@ -70,12 +96,20 @@ jobs:
           from pathlib import Path
           light=Path('aquilum-app/native/src/video/light.rs').read_text()
           queue=Path('aquilum-app/native/src/video/queue.rs').read_text()
-          for required in ('AKULA_RUST_MUX_BIN','download_one_or_legacy','Library','Stage::new(library)',
-                           'mux-pair','--no-playlist','--no-exec','fs::hard_link'):
+          for required in ('AKULA_RUST_MUX_BIN','AKULA_QUICKJS_BIN','download_one_or_legacy',
+                           'Library','Stage::new(library)','mux-pair','--no-playlist',
+                           '--no-exec','--no-plugin-dirs','--no-remote-components',
+                           '--no-js-runtimes','--js-runtimes',
+                           'QUICKJS_WINDOWS_SHA256','YTDLP_WINDOWS_SHA256',
+                           'verify_pinned_runtime','fs::hard_link'):
               assert required in light,required
           assert 'super::light::download_one_or_legacy' in queue
           assert 'std::thread::spawn(move ||' in queue
           assert 'std::env::var_os("AKULA_RUST_MUX_BIN")' in light
+          assert 'std::env::var_os("AKULA_QUICKJS_BIN")' in light
+          assert '"quickjs:{}", quickjs.display()' in light
+          assert 'None => download::download_one' in light
+          assert 'Err("VIDEO-09 opt-in is Windows-only' in light
           for forbidden in ('--merge-output-format','--postprocessor-args','https://www.youtube.com/watch?v='):
               assert forbidden not in light,forbidden
           print('VIDEO08_NO_IMPLICIT_SYNC_OR_INSTALL_PASS')

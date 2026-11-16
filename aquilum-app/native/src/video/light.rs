@@ -5,6 +5,8 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
+#[cfg(windows)]
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
@@ -76,12 +78,16 @@ fn safe_file(path: &Path, max_bytes: u64) -> Result<u64, String> {
     Ok(meta.len())
 }
 
-fn track_args(stage: &Path, track: Track, remaining: u64, url: &str) -> Vec<OsString> {
+fn track_args(stage: &Path, track: Track, remaining: u64, url: &str, quickjs: &Path) -> Vec<OsString> {
     let home = format!("home:{}", stage.display());
     let temp = format!("temp:{}", stage.display());
     let cap = remaining.to_string();
+    // Restrict EJS execution to the explicitly pinned QuickJS binary.
+    // --no-js-runtimes removes yt-dlp's default Deno runtime.
+    let js_runtime = format!("quickjs:{}", quickjs.display());
     [
-        "--ignore-config", "--no-cache-dir", "--no-cookies", "--no-playlist",
+        "--ignore-config", "--no-plugin-dirs", "--no-remote-components",
+        "--no-js-runtimes", "--js-runtimes", &js_runtime, "--no-cache-dir", "--no-cookies", "--no-playlist",
         "--no-exec", "--no-overwrites", "--no-color", "--no-write-info-json",
         "--no-write-thumbnail", "--no-write-subs", "--no-write-auto-subs",
         "--no-write-comments", "--no-download-archive", "--restrict-filenames",
@@ -96,11 +102,12 @@ fn track_args(stage: &Path, track: Track, remaining: u64, url: &str) -> Vec<OsSt
 
 fn run_track(
     executable: &OsStr, stage: &Path, url: &str, track: Track,
-    remaining: u64, offset: u64, report: &mut impl FnMut(download::Progress),
+    remaining: u64, offset: u64, quickjs: &Path,
+    report: &mut impl FnMut(download::Progress),
 ) -> Result<u64, String> {
     let mut child = ChildGuard(Command::new(executable)
         .current_dir(stage)
-        .args(track_args(stage, track, remaining, url))
+        .args(track_args(stage, track, remaining, url, quickjs))
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn().map_err(|e| format!("yt-dlp unavailable: {e}"))?);
     let errors = child.0.stderr.take().ok_or("missing yt-dlp stderr")?;
@@ -150,7 +157,7 @@ fn run_mux(executable: &Path, stage: &Path, result: &Path) -> Result<(), String>
 }
 
 fn download_rust(
-    library: &Library, executable: &OsStr, mux: &Path, url: &str,
+    library: &Library, executable: &OsStr, mux: &Path, quickjs: &Path, url: &str,
     mut on_progress: impl FnMut(download::Progress),
 ) -> Result<PathBuf, String> {
     let id = youtube::video_id(url).ok_or("unsupported single YouTube URL")?;
@@ -162,12 +169,12 @@ fn download_rust(
     let remaining = LIBRARY_MAX.saturating_sub(used).min(SINGLE_VIDEO_MAX);
     if remaining < 1024 * 1024 { return Err("local video quota exhausted".into()); }
     let stage = Stage::new(library)?;
-    let video = run_track(executable, stage.path(), url, Track::Video, remaining, 0, &mut on_progress)?;
+    let video = run_track(executable, stage.path(), url, Track::Video, remaining, 0, quickjs, &mut on_progress)?;
     if remaining.saturating_sub(video) < 1024 {
         return Err("no space for an AAC track after video download".into());
     }
     let audio = run_track(executable, stage.path(), url, Track::Audio,
-        remaining - video, video, &mut on_progress)?;
+        remaining - video, video, quickjs, &mut on_progress)?;
     if video.saturating_add(audio) > remaining {
         return Err("media input streams exceeded local quota".into());
     }
@@ -189,6 +196,51 @@ fn download_rust(
     Ok(target)
 }
 
+// Official Windows binaries checked against the exact VIDEO-05 proof.
+// Updating either runtime requires a version/size/hash change plus CI proof.
+// Never download or update an executable from user content or runtime EJS.
+#[cfg(windows)]
+const QUICKJS_WINDOWS_BYTES: u64 = 1_873_152;
+#[cfg(windows)]
+const YTDLP_WINDOWS_BYTES: u64 = 23_575_744;
+#[cfg(windows)]
+const QUICKJS_WINDOWS_SHA256: &str =
+    "ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7";
+#[cfg(windows)]
+const YTDLP_WINDOWS_SHA256: &str =
+    "f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d";
+
+#[cfg(windows)]
+fn verify_pin(path: &Path, size: u64, expected: &str, name: &str) -> Result<(), String> {
+    if !path.is_absolute() { return Err(format!("{name} requires an absolute path")); }
+    let measured = safe_file(path, size)?;
+    if measured != size { return Err(format!("{name} has a different executable size")); }
+    let mut source = fs::File::open(path).map_err(|e| format!("{name} cannot be opened: {e}"))?;
+    let mut sha = Sha256::new();
+    let mut buffer = [0u8; 65_536];
+    loop {
+        let read = source.read(&mut buffer).map_err(|e| format!("{name} verification failed: {e}"))?;
+        if read == 0 { break; }
+        sha.update(&buffer[..read]);
+    }
+    // sha2 0.11 Output is an Array, not a LowerHex implementation.
+    let digest: String = sha.finalize().iter()
+        .map(|byte| format!("{byte:02x}")).collect();
+    if digest != expected { return Err(format!("{name} SHA-256 does not match pinned runtime")); }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn verify_pinned_runtime(ytdlp: &Path, quickjs: &Path) -> Result<(), String> {
+    verify_pin(ytdlp, YTDLP_WINDOWS_BYTES, YTDLP_WINDOWS_SHA256, "yt-dlp 2026.10.26")?;
+    verify_pin(quickjs, QUICKJS_WINDOWS_BYTES, QUICKJS_WINDOWS_SHA256, "QuickJS-NG v0.18.0")
+}
+
+#[cfg(not(windows))]
+fn verify_pinned_runtime(_ytdlp: &Path, _quickjs: &Path) -> Result<(), String> {
+    Err("VIDEO-09 opt-in is Windows-only until non-Windows executable pins are validated".into())
+}
+
 /// Opt-in staging route, preserving legacy behavior until there is an
 /// independently audited installer for yt-dlp, QuickJS and the Rust muxer.
 pub(super) fn download_one_or_legacy(
@@ -197,7 +249,16 @@ pub(super) fn download_one_or_legacy(
 ) -> Result<PathBuf, String> {
     let requested = std::env::var_os("AKULA_RUST_MUX_BIN").filter(|s| !s.is_empty());
     match requested {
-        Some(mux) => download_rust(library, executable, &PathBuf::from(mux), url, on_progress),
+        Some(mux) => {
+            let quickjs = std::env::var_os("AKULA_QUICKJS_BIN")
+                .filter(|s| !s.is_empty())
+                .ok_or("AKULA_QUICKJS_BIN must explicitly specify pinned QuickJS-NG")?;
+            let quickjs = PathBuf::from(quickjs);
+            // Production route cannot use a yt-dlp or JS interpreter resolved
+            // through PATH, untrusted config or an unverified executable.
+            verify_pinned_runtime(Path::new(executable), &quickjs)?;
+            download_rust(library, executable, &PathBuf::from(mux), &quickjs, url, on_progress)
+        }
         None => download::download_one(library, executable, url, on_progress),
     }
 }
