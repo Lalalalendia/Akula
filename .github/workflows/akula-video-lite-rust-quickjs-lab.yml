@@ -34,8 +34,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          test -s labs/video-lite/Cargo.lock
-          if ($LASTEXITCODE -ne 0) { throw 'Rust lab failed to resolve its isolated dependencies' }
+          if (!(Test-Path 'labs/video-lite/Cargo.lock' -PathType Leaf)) { throw 'Rust lab lockfile missing' }
           cargo build --manifest-path labs/video-lite/Cargo.toml --release --locked --bin akula-video-lite-lab
           if ($LASTEXITCODE -ne 0) { throw 'Rust lab failed to compile' }
           $exe = 'labs/video-lite/target/release/akula-video-lite-lab.exe'
