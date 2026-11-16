@@ -6,6 +6,8 @@ publish = false
 
 [dependencies]
 mp4 = "=0.14.0"
+# Bounded fMP4 reader with tfhd/trex default-size handling (VIDEO-06 only).
+mp4-track = "=0.1.0"
 
 [profile.release]
 opt-level = "z"
