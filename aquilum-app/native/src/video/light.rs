@@ -191,6 +191,18 @@ fn run_mux(executable: &Path, stage: &Path, result: &Path) -> Result<(), String>
 
 fn download_rust(
     library: &Library, executable: &OsStr, mux: &Path, quickjs: &Path, url: &str,
+    on_progress: impl FnMut(download::Progress),
+) -> Result<PathBuf, String> {
+    download_rust_from_source(library, executable, mux, quickjs, url, url, on_progress)
+}
+
+// The real application always passes identical note and transport URLs. The
+// private test harness supplies a loopback MPD as transport while retaining a
+// valid YouTube note identifier, allowing the actual native orchestration to
+// be tested without requesting third-party media.
+fn download_rust_from_source(
+    library: &Library, executable: &OsStr, mux: &Path, quickjs: &Path,
+    url: &str, transport_url: &str,
     mut on_progress: impl FnMut(download::Progress),
 ) -> Result<PathBuf, String> {
     let id = youtube::video_id(url).ok_or("unsupported single YouTube URL")?;
@@ -202,11 +214,11 @@ fn download_rust(
     let remaining = LIBRARY_MAX.saturating_sub(used).min(SINGLE_VIDEO_MAX);
     if remaining < 1024 * 1024 { return Err("local video quota exhausted".into()); }
     let stage = Stage::new(library)?;
-    let video = run_track(executable, stage.path(), url, Track::Video, remaining, 0, quickjs, &mut on_progress)?;
+    let video = run_track(executable, stage.path(), transport_url, Track::Video, remaining, 0, quickjs, &mut on_progress)?;
     if remaining.saturating_sub(video) < 1024 {
         return Err("no space for an AAC track after video download".into());
     }
-    let audio = run_track(executable, stage.path(), url, Track::Audio,
+    let audio = run_track(executable, stage.path(), transport_url, Track::Audio,
         remaining - video, video, quickjs, &mut on_progress)?;
     if video.saturating_add(audio) > remaining {
         return Err("media input streams exceeded local quota".into());
