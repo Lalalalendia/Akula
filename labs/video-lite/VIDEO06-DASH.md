@@ -4,7 +4,11 @@ Purpose: eliminate the biggest untested assumption after VIDEO-05 (#966):
 a normal MP4 fixture does **not** prove that YouTube-style separate fragmented
 DASH video and audio can be remuxed without FFmpeg in Akula.
 
-This experiment keeps the existing `mp4 = 0.14.0` crate and adds a small CLI
+The initial experiment proved that the 2023-era `mp4 = 0.14.0` reader
+cannot handle fragmented tracks when `trun` omits per-sample sizes and
+`tfhd`/`trex` provides defaults (`EntryInTrunNotFound`). The corrected CLI uses
+**`mp4-track = 0.1.0`**, a bounded pure-Rust demuxer/writer, instead.
+The lab adds a small CLI
 (`cargo run --manifest-path labs/video-lite/Cargo.toml --bin dash -- prove-pair
 <video.mp4> <audio.m4a> <result.mp4>`).
 
@@ -21,6 +25,9 @@ This experiment keeps the existing `mp4 = 0.14.0` crate and adds a small CLI
   timebase arithmetic without needing to load full input files into RAM.
 - Reopen the progressive MP4 output and compare each encoded sample against
   its source. Run the same acceptance on both Linux and Windows.
+- Independently validate both codecs, around 60-second duration, and successful
+  full H.264 + AAC decoding through a reference FFmpeg in Linux CI; the
+  reference decoder does not participate in Rust multiplexing.
 - No installable app, updater, cloud sync, vault data or third-party bundles
   are produced.
 
@@ -35,5 +42,10 @@ This experiment keeps the existing `mp4 = 0.14.0` crate and adds a small CLI
    be landed behind explicit-user-action and local-library-only invariants.
 4. Windows 7 actual VM and official yt-dlp Win10+ executable mismatch remain
    separate blockers.
+
+The Rust reader is configured with explicit limits: 8 MiB movie metadata,
+2 MiB per fragment box, 8 MiB per sample, 20,000 fragments, 400,000 samples
+per track, and nesting depth 20. These lab values are not a substitute for
+threat-model review, fuzzing, or testing the size limits on lengthy media.
 
 This is a proof of format support, not acceptance of arbitrary input files.
