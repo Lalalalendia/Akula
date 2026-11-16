@@ -4,7 +4,15 @@ on:
   pull_request:
     branches: [main, feat/video03-one-click-offline-20261116]
     paths:
+      # Rerun when the native code under acceptance changes, not only when
+      # the harness changes; otherwise a regression may bypass VIDEO-12.
+      - 'aquilum-app/native/src/video/**'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
       - 'labs/video-lite/video12/**'
+      - 'labs/video-lite/src/bin/dash.rs'
+      - 'labs/video-lite/Cargo.toml'
+      - 'labs/video-lite/fixtures/**'
       - '.github/workflows/akula-video12-native-real-offline.yml'
   workflow_dispatch:
 
