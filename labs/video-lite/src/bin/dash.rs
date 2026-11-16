@@ -60,11 +60,14 @@ impl Source {
             return Err("separate DASH input must have exactly one track".into());
         }
         let track = reader.tracks().first().ok_or("missing track")?;
-        if !accepts(track, kind) || track.timescale == 0 || track.sample_count == 0 {
-            return Err("unsupported codec, zero timescale or empty DASH track".into());
+        if !accepts(track, kind) || track.timescale == 0 {
+            return Err(format!("unsupported DASH track: kind={:?} codec={:?} timescale={}", track.kind, track.codec, track.timescale).into());
         }
-        let count = track.sample_count;
         let id = track.id;
+        // Fragmented MP4 can have stbl sample_count=0 in moov; actual
+        // samples are in moof/trun and exposed by the bounded reader.
+        let count = u32::try_from(reader.samples(id)?.len())?;
+        if count == 0 { return Err("fragmented DASH contains no samples".into()); }
         let cfg = configure(track);
         let fragments = reader.fragments().len();
         if fragments < 3 { return Err("DASH fixture must contain multiple fragments".into()); }
@@ -134,8 +137,9 @@ fn compare(input: &Path, output: &Path, kind: TrackKind) -> Result<()> {
     let output_track = after.tracks().iter().find(|track| accepts(track, kind))
         .ok_or("remuxed output track missing")?;
     let id = output_track.id;
-    if before.count != output_track.sample_count {
-        return Err(format!("sample count changed for {kind:?}").into());
+    let output_count = u32::try_from(after.samples(id)?.len())?;
+    if before.count != output_count {
+        return Err(format!("sample count changed for {kind:?}: {} vs {output_count}", before.count).into());
     }
     let count = before.count;
     for index in 0..count {
