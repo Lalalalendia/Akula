@@ -9,6 +9,20 @@ use std::sync::{Mutex, OnceLock};
 
 const TEST_ID: &str = "dQw4w9WgXcQ";
 
+// An observation-only native cursor coordinate. The GUI test still sends
+// real Windows pointer input; this never invokes a click inside Akula.
+#[repr(C)]
+struct NativePoint { x: i32, y: i32 }
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn GetCursorPos(point: *mut NativePoint) -> i32;
+}
+fn cursor() -> Option<(i32, i32)> {
+    let mut point = NativePoint { x: 0, y: 0 };
+    // SAFETY: Win32 writes to a live repr(C) point supplied by this function.
+    (unsafe { GetCursorPos(&mut point) } != 0).then_some((point.x, point.y))
+}
+
 fn hosted() -> bool {
     std::env::var("GITHUB_ACTIONS").ok().as_deref() == Some("true")
         && std::env::var("RUNNER_OS").ok().as_deref() == Some("Windows")
@@ -33,7 +47,7 @@ pub(crate) fn transport_url(source: &str) -> Result<String, String> {
 pub(crate) fn mark(event: &'static str) {
     if !hosted() || !matches!(event,
         "HOVER_DOWNLOAD" | "CLICK_DOWNLOAD" | "HOVER_LOCAL_PLAY" |
-        "CLICK_LOCAL_PLAY" | "DECODED_FRAME")
+        "CLICK_LOCAL_PLAY_ATTEMPT" | "CLICK_LOCAL_PLAY" | "DECODED_FRAME")
     {
         return;
     }
@@ -47,10 +61,15 @@ pub(crate) fn mark(event: &'static str) {
     static SEEN: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
     let mut seen = SEEN.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
     if seen.contains(event) { return; }
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path)
-        && writeln!(file, "VIDEO16_{event}").is_ok()
-    {
-        seen.insert(event);
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let recorded = if event.starts_with("HOVER_") {
+            cursor().is_some_and(|(x, y)|
+                writeln!(file, "VIDEO16_{event}_POINT:{x}:{y}\\nVIDEO16_{event}").is_ok()
+            )
+        } else {
+            writeln!(file, "VIDEO16_{event}").is_ok()
+        };
+        if recorded { seen.insert(event); }
     }
 }
 
