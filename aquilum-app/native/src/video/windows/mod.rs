@@ -36,7 +36,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn open(path: &Path) -> Option<Engine> {
-        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let path = crate::workspace::normalize(&std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()));
         let shared = Arc::new(Mutex::new(Shared::default()));
         let (commands, receiver) = channel();
         let (ready, opened) = channel();
