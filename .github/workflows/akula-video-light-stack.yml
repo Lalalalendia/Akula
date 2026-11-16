@@ -96,7 +96,7 @@ jobs:
           from pathlib import Path
           light=Path('aquilum-app/native/src/video/light.rs').read_text()
           queue=Path('aquilum-app/native/src/video/queue.rs').read_text()
-          for required in ('AKULA_RUST_MUX_BIN','AKULA_QUICKJS_BIN','download_one_or_legacy',
+          for required in ('AKULA_RUST_MUX_BIN','download_one_or_legacy',
                            'Library','Stage::new(library)','mux-pair','--no-playlist',
                            '--no-exec','--no-plugin-dirs','--no-remote-components',
                            '--no-js-runtimes','--js-runtimes',
@@ -106,7 +106,10 @@ jobs:
           assert 'super::light::download_one_or_legacy' in queue
           assert 'std::thread::spawn(move ||' in queue
           assert 'std::env::var_os("AKULA_RUST_MUX_BIN")' in light
-          assert 'std::env::var_os("AKULA_QUICKJS_BIN")' in light
+          assert 'akula-yt-dlp.exe' in light and 'akula-quickjs.exe' in light
+          assert 'verify_pinned_runtime(&ytdlp, &quickjs)' in light
+          assert 'download_rust(library, ytdlp.as_os_str(), &mux, &quickjs, url, on_progress)' in light
+          assert 'std::env::var_os("AKULA_QUICKJS_BIN")' not in light
           assert '"quickjs:{}", quickjs.display()' in light
           assert 'download::download_one(library, executable, url, on_progress)' in light
           assert 'bundled_mux_from_exe' in light
