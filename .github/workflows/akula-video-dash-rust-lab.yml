@@ -112,6 +112,31 @@ jobs:
           test -s video06-out/output.mp4
           echo "VIDEO06_RUST_FRAGMENTED_ACCEPTED platform=$RUNNER_OS no_ffmpeg_runtime=1"
           echo "VIDEO06_OUTPUT_BYTES=$(wc -c < video06-out/output.mp4)"
+      - name: Independently decode the Rust MP4 through FFmpeg (Linux only)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # FFmpeg is a CI reference decoder ONLY, never used to make the Rust output.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffprobe -v error -show_streams -show_format -of json video06-out/output.mp4 > video06-out/probe.json
+          python3 - <<'PY'
+          import json
+          with open('video06-out/probe.json',encoding='utf8') as f:
+              report=json.load(f)
+          actual={(s['codec_type'],s['codec_name']) for s in report.get('streams',[])}
+          expected={('video','h264'),('audio','aac')}
+          if actual != expected:
+              raise RuntimeError(f'Rust MP4 codec identity mismatch: {actual}')
+          duration=float(report['format']['duration'])
+          if not 55.0 <= duration <= 65.0:
+              raise RuntimeError(f'Rust MP4 duration changed: {duration}')
+          print('VIDEO06_REFERENCE_PROBE_PASS duration_seconds=',duration, 'codecs=', actual)
+          PY
+          ffmpeg -v error -nostdin -i video06-out/output.mp4 -map 0:v:0 -f null -
+          ffmpeg -v error -nostdin -i video06-out/output.mp4 -map 0:a:0 -f null -
+          echo 'VIDEO06_INDEPENDENT_DECODER_PASS video=h264 audio=aac rust_mux=1 ffmpeg_runtime=0'
       - name: Do not package the experiment
         shell: bash
         run: |
