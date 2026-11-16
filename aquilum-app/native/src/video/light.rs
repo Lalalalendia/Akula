@@ -193,7 +193,11 @@ fn download_rust(
     library: &Library, executable: &OsStr, mux: &Path, quickjs: &Path, url: &str,
     on_progress: impl FnMut(download::Progress),
 ) -> Result<PathBuf, String> {
-    download_rust_from_source(library, executable, mux, quickjs, url, url, on_progress)
+    #[cfg(all(windows, feature = "video-ui-e2e"))]
+    let transport = super::ui_acceptance::transport_url(url)?;
+    #[cfg(not(all(windows, feature = "video-ui-e2e")))]
+    let transport = url.to_owned();
+    download_rust_from_source(library, executable, mux, quickjs, url, &transport, on_progress)
 }
 
 // The real application always passes identical note and transport URLs. The
