@@ -7,6 +7,7 @@ on:
       - 'labs/video-lite/src/bin/dash.rs'
       - '.github/workflows/akula-video-dash-rust-lab.yml'
       - 'labs/video-lite/Cargo.toml'
+      - 'labs/video-lite/Cargo.lock'
       - 'labs/video-lite/fixtures/avc_aac_2s.mp4'
   workflow_dispatch:
 
@@ -105,7 +106,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo generate-lockfile --manifest-path labs/video-lite/Cargo.toml
+          test -s labs/video-lite/Cargo.lock
           cargo build --manifest-path labs/video-lite/Cargo.toml --release --locked --bin dash
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             BIN=labs/video-lite/target/release/dash.exe
