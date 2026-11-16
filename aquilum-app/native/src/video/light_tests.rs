@@ -196,3 +196,52 @@ fn successful_but_stale_rust_mux_does_not_publish_any_video() {
     assert!(library.existing(ID).unwrap().is_none());
     assert_eq!(fs::read_dir(library.root()).unwrap().count(), 0);
 }
+
+#[cfg(windows)]
+#[test]
+fn video13_installed_mux_accepts_exact_digest_and_rejects_tampering() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = temp.path().join("akula-app.exe");
+    fs::write(&app, b"test app placeholder").unwrap();
+    let mux = temp.path().join("akula-video-mux.exe");
+    fs::write(&mux, b"synthetic helper bytes").unwrap();
+    let data = fs::read(&mux).unwrap();
+    let sha: String = Sha256::digest(&data).iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(bundled_mux_from_exe(&app, &sha).unwrap(), mux);
+    assert!(bundled_mux_from_exe(Path::new("relative.exe"), &sha).is_err());
+    assert!(bundled_mux_from_exe(&app, "not-a-sha256").is_err());
+    assert!(bundled_mux_from_exe(&app, &sha.to_uppercase()).is_err());
+    let mut changed = data;
+    changed[0] ^= 0x01;
+    fs::write(&mux, changed).unwrap();
+    assert!(bundled_mux_from_exe(&app, &sha).unwrap_err().contains("SHA-256"));
+    fs::remove_file(&mux).unwrap();
+    assert!(bundled_mux_from_exe(&app, &sha).is_err());
+}
+
+#[cfg(windows)]
+#[test]
+fn video13_build_time_pin_accepts_only_exact_compiled_rust_helper() {
+    let pin = option_env!("AKULA_BUNDLED_MUX_SHA256");
+    let helper = std::env::var_os("AKULA_VIDEO13_TEST_MUX_BIN");
+    match (pin, helper) {
+        (None, None) => {
+            println!("VIDEO13_BUNDLE_NOT_CONFIGURED no_untrusted_helper=1");
+        }
+        (Some(expected), Some(helper)) => {
+            let temp = tempfile::tempdir().unwrap();
+            let app = temp.path().join("akula-app.exe");
+            fs::write(&app, b"non-executable app placeholder").unwrap();
+            let mux = temp.path().join("akula-video-mux.exe");
+            fs::copy(PathBuf::from(helper), &mux).unwrap();
+            assert_eq!(bundled_mux_from_exe(&app, expected).unwrap(), mux);
+            let mut file = fs::read(&mux).unwrap();
+            file[0] ^= 1;
+            fs::write(&mux, file).unwrap();
+            assert!(bundled_mux_from_exe(&app, expected).is_err(),
+                "modified helper must never execute");
+            println!("VIDEO13_COMPILED_RUST_MUX_PIN_PASS trusted_dir=1 tamper_rejected=1");
+        }
+        _ => panic!("VIDEO13 requires both a compiled-in hash and an exact test helper"),
+    }
+}
