@@ -1,0 +1,167 @@
+name: Akula VIDEO-10 real yt-dlp QuickJS Rust mux via local DASH (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'labs/video-lite/video10/**'
+      - '.github/workflows/akula-video-real-toolchain-offline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  synthetic-mpd:
+    name: Generate local-only AVC/AAC DASH MPD fixture (FFmpeg test generation only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Generate MPD and stream fragments without any remote media requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          test -s labs/video-lite/fixtures/avc_aac_2s.mp4
+          mkdir -p video10-fixture
+          ffmpeg -hide_banner -loglevel error -nostdin \
+            -stream_loop 2 -i labs/video-lite/fixtures/avc_aac_2s.mp4 \
+            -t 6 -map 0:v:0 -map 0:a:0 -c copy \
+            -f dash -seg_duration 1 -use_template 1 -use_timeline 1 \
+            video10-fixture/manifest.mpd
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          base = Path('video10-fixture')
+          mpd = base/'manifest.mpd'
+          tree = ET.parse(mpd)
+          ns = '{urn:mpeg:dash:schema:mpd:2011}'
+          asets = tree.findall('.//'+ns+'AdaptationSet')
+          reps = tree.findall('.//'+ns+'Representation')
+          assert len(asets) >= 2 and len(reps) >= 2, 'need distinct video and audio DASH streams'
+          files = list(base.iterdir())
+          assert sum(x.suffix == '.m4s' for x in files) >= 4, 'need init and real media segments'
+          assert all(x.is_file() for x in files)
+          assert not any('http://' in x or 'https://' in x for x in mpd.read_text().split('<BaseURL>')[1:]), 'MPD must have no remote base'
+          print('VIDEO10_SYNTHETIC_MPD_PASS files=', len(files), 'adaptation_sets=',len(asets), 'representations=',len(reps))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video10-local-synthetic-dash
+          path: video10-fixture/
+          if-no-files-found: error
+          retention-days: 2
+
+  windows-download:
+    name: Windows real yt-dlp + SHA-pinned QuickJS + pure Rust mux (localhost MPD)
+    needs: synthetic-mpd
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: video10-local-synthetic-dash
+          path: video10-fixture
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: labs/video-lite
+          shared-key: akula-video10-local-dash-real-binaries
+          save-if: false
+      - name: Build standalone size-optimized Rust MP4 mux (no FFmpeg)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo generate-lockfile --manifest-path labs/video-lite/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Rust lockfile failed' }
+          cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if ($LASTEXITCODE -ne 0) { throw 'Rust mux compile failed' }
+          $exe = 'labs/video-lite/target/release/dash.exe'
+          if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Rust mux executable missing' }
+          Write-Host "VIDEO10_RUST_MUX_BYTES=$((Get-Item $exe).Length)"
+      - name: Pin and execute official QuickJS-NG + yt-dlp, no remote components
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'video10-tools'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $qjs = Join-Path $dir 'qjs.exe'
+          $yt = Join-Path $dir 'yt-dlp.exe'
+          Invoke-WebRequest 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' -OutFile $qjs -UseBasicParsing
+          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' -OutFile $yt -UseBasicParsing
+          $qhash = (Get-FileHash -LiteralPath $qjs -Algorithm SHA256).Hash.ToLowerInvariant()
+          $yhash = (Get-FileHash -LiteralPath $yt -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($qhash -cne 'ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7') { throw 'QuickJS-NG binary has unexpected SHA256' }
+          if ($yhash -cne 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d') { throw 'yt-dlp binary has unexpected SHA256' }
+          if ((Get-Item $qjs).Length -ne 1873152 -or (Get-Item $yt).Length -ne 23575744) { throw 'Unexpected toolchain binary lengths' }
+          $qout = (& $qjs -e 'print("VIDEO10_QJS_LIVE_PROCESS_PASS")' 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0 -or !$qout.Contains('VIDEO10_QJS_LIVE_PROCESS_PASS')) { throw 'QuickJS is not executable' }
+          $version = (& $yt --ignore-config --no-plugin-dirs --no-remote-components --no-js-runtimes --js-runtimes "quickjs:$qjs" --version 2>&1 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -cne '2026.10.26') { throw 'yt-dlp cannot use selected QuickJS runtime' }
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO10_QJS=$qjs"
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO10_YT=$yt"
+          Write-Host 'VIDEO10_OFFICIAL_BINARY_PIN_PASS'
+      - name: Download separate DASH streams via real yt-dlp and remux via Rust
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path video10-output | Out-Null
+          python labs/video-lite/video10/real_toolchain.py --asset-root video10-fixture --scratch video10-output --yt-dlp $env:VIDEO10_YT --quickjs $env:VIDEO10_QJS --mux labs/video-lite/target/release/dash.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Real yt-dlp localhost DASH and pure Rust mux failed' }
+          if (!(Test-Path -LiteralPath video10-output/combined.mp4 -PathType Leaf)) { throw 'Rust remux output missing' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video10-windows-rust-muxed-mp4
+          path: video10-output/combined.mp4
+          if-no-files-found: error
+          retention-days: 2
+      - name: Guard against accidentally shipping binaries or staging user data
+        shell: pwsh
+        run: |
+          Write-Host 'VIDEO10_NONRELEASE_PASS synthetic_localhost_only=1 public_installer=0 youtube_requests=0'
+
+  independent-decode:
+    name: Independently FFprobe and decode resulting Windows Rust MP4
+    needs: windows-download
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: video10-windows-rust-muxed-mp4
+          path: video10-output
+      - name: Verify H.264/AAC decoding and duration using CI reference decoder
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          file video10-output/combined.mp4
+          ffprobe -v error -show_entries stream=codec_type,codec_name:format=duration -of json video10-output/combined.mp4 > video10-output/probe.json
+          python3 - <<'PY'
+          import json
+          with open('video10-output/probe.json',encoding='utf8') as f:
+              data=json.load(f)
+          codecs={(s['codec_type'],s['codec_name']) for s in data['streams']}
+          assert codecs == {('video','h264'),('audio','aac')}, codecs
+          duration=float(data['format']['duration'])
+          assert 4.0 <= duration <= 8.0, duration
+          print('VIDEO10_INDEPENDENT_PROBE_PASS codecs=H264,AAC duration=',duration)
+          PY
+          ffmpeg -hide_banner -loglevel error -nostdin -i video10-output/combined.mp4 -map 0:v:0 -f null -
+          ffmpeg -hide_banner -loglevel error -nostdin -i video10-output/combined.mp4 -map 0:a:0 -f null -
+          echo 'VIDEO10_INDEPENDENT_DECODE_PASS no_ffmpeg_for_mux=1'
