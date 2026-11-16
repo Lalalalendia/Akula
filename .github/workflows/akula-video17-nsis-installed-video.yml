@@ -6,6 +6,9 @@ on:
     paths:
       - 'aquilum-app/native/packaging/akula-windows-video17-lab.json'
       - 'scripts/windows-video17-installed-nsis.ps1'
+      - 'scripts/windows-video16-real-gui.ps1'
+      - 'aquilum-app/native/src/video/ui_acceptance.rs'
+      - 'aquilum-app/native/src/ui/editor/widget/media/mouse.rs'
       - '.github/workflows/akula-video17-nsis-installed-video.yml'
 
 permissions:
@@ -42,6 +45,10 @@ jobs:
           assert 'VIDEO16_HOVER_' not in Path('aquilum-app/native/src/video/queue.rs').read_text()
           assert 'AKULA_VIDEO16_MPD_URL' in probe
           assert 'media_press' in Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
+          mouse=Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
+          assert 'toolbar_items()' in mouse and 'r.center()' in mouse
+          assert 'ui_acceptance::hover(' in mouse
+          assert 'target_pixel(' in probe and 'VIDEO16_{event}_POINT:' in probe
           for path in ['aquilum-app/native/packaging/akula-windows.json',
                        '.github/workflows/akula-video16-real-windows-gui.yml']:
               assert Path(path).is_file()
