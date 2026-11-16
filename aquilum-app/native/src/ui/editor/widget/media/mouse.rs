@@ -56,6 +56,8 @@ impl TextEditor {
             MediaHit::Play | MediaHit::Toggle => {
                 if let Some(path) = path {
                     if crate::video::toggle(&path) {
+                        #[cfg(all(windows, feature = "video-ui-e2e"))]
+                        crate::video::ui_acceptance::mark("CLICK_LOCAL_PLAY");
                         self.videos.add(path);
                         ctx.request_anim_frame();
                     } else {
