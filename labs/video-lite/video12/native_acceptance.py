@@ -68,7 +68,7 @@ def main() -> None:
             "--manifest-path", str(repo / "aquilum-app" / "Cargo.toml"),
             "-p", "aquilum-native", "--bin", "aquilum-native",
             "--features", "installed",
-            "video::light::tests::real_windows_native_pipeline_remuxes_local_dash_without_syncing_media",
+            "video::light::integration_tests::real_windows_native_pipeline_remuxes_local_dash_without_syncing_media",
             "--", "--exact", "--nocapture",
         ]
         result = subprocess.run(command, cwd=repo, env=env,
