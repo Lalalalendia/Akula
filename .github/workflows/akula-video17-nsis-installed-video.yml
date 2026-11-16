@@ -1,0 +1,267 @@
+name: Akula VIDEO-17 actual NSIS installed video full-cycle (non-release)
+
+on:
+  pull_request:
+    branches: [main, feat/video03-one-click-offline-20261116]
+    paths:
+      - 'aquilum-app/native/packaging/akula-windows-video17-lab.json'
+      - 'scripts/windows-video17-installed-nsis.ps1'
+      - '.github/workflows/akula-video17-nsis-installed-video.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  boundaries:
+    name: Verify test-only NSIS config and prohibit production contamination
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Enforce test-only gate at source
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+          cargo=tomllib.loads(Path('aquilum-app/native/Cargo.toml').read_text())
+          assert cargo['features']['video-ui-e2e']==['video-rust-bundle']
+          assert 'video-ui-e2e' not in cargo['features']['installed']
+          assert 'video-rust-bundle' not in cargo['features']['installed']
+          probe=Path('aquilum-app/native/src/video/ui_acceptance.rs').read_text()
+          assert 'http://127.0.0.1:' in probe
+          assert 'RUNNER_ENVIRONMENT' in probe and 'github-hosted' in probe
+          assert 'dQw4w9WgXcQ' in probe
+          assert 'VIDEO16_HOVER_' not in Path('aquilum-app/native/src/video/queue.rs').read_text()
+          assert 'AKULA_VIDEO16_MPD_URL' in probe
+          assert 'media_press' in Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
+          for path in ['aquilum-app/native/packaging/akula-windows.json',
+                       '.github/workflows/akula-video16-real-windows-gui.yml']:
+              assert Path(path).is_file()
+          package=Path('aquilum-app/native/packaging/akula-windows.json').read_text()
+          assert 'video-ui-e2e' not in package and 'akula-yt-dlp' not in package
+          print('VIDEO16_NONSHIPPING_GUI_GATE_PASS localhost_only=1 packaged=0')
+          import json
+          release=json.loads(Path('aquilum-app/native/packaging/akula-windows.json').read_text())
+          trial=json.loads(Path('aquilum-app/native/packaging/akula-windows-video17-lab.json').read_text())
+          assert [p['path'] for p in release['binaries']] == ['akula-app','shiva-pdf-preview']
+          assert [p['path'] for p in trial['binaries']] == [
+              'akula-app','shiva-pdf-preview','akula-video-mux','akula-yt-dlp','akula-quickjs'
+          ]
+          assert trial['version'] == release['version']
+          assert trial['identifier'] == release['identifier'] == 'io.github.lalalendia.akula'
+          assert Path('scripts/windows-video17-installed-nsis.ps1').is_file()
+          assert 'video-ui-e2e' not in json.dumps(release)
+          print('VIDEO17_NONRELEASE_NSIS_POLICY_PASS staged_only=1 public_config_unmodified=1')
+          PY
+
+  fixture:
+    name: Generate synthetic H264/AAC DASH for real NSIS GUI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Generate only relative URL segments
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          test -s labs/video-lite/fixtures/avc_aac_2s.mp4
+          mkdir -p video16-fixture
+          ffmpeg -hide_banner -loglevel error -nostdin \
+            -stream_loop 2 -i labs/video-lite/fixtures/avc_aac_2s.mp4 \
+            -t 6 -map 0:v:0 -map 0:a:0 -c copy \
+            -f dash -seg_duration 1 -use_template 1 -use_timeline 1 \
+            video16-fixture/manifest.mpd
+          python3 - <<'PY'
+          import pathlib
+          import xml.etree.ElementTree as ET
+          root=pathlib.Path('video16-fixture')
+          ns='{urn:mpeg:dash:schema:mpd:2011}'
+          mpd=ET.parse(root/'manifest.mpd')
+          assert len(mpd.findall('.//'+ns+'Representation'))==2
+          assert len(list(root.glob('*.m4s')))>=4
+          for item in mpd.findall('.//'+ns+'SegmentTemplate'):
+              for key in ('media','initialization'):
+                  assert '://' not in item.attrib.get(key,'')
+          for item in mpd.findall('.//'+ns+'BaseURL'):
+              assert '://' not in (item.text or '')
+          print('VIDEO16_LOCAL_DASH_FIXTURE_PASS tracks=2')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video17-only-local-dash
+          path: video16-fixture/
+          retention-days: 2
+          if-no-files-found: error
+
+  real-windows:
+    name: Real NSIS install, five helpers, OS pointer, restart, play and uninstall
+    needs: [fixture, boundaries]
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/shiva
+          ref: 40b72a90b1dac39812c77c7321e57d613a81cb51
+          path: _shiva-preview
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: video17-only-local-dash
+          path: video16-fixture
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aquilum-app -> ../.artifacts/cargo-native
+            labs/video-lite
+          shared-key: akula-video16-real-gui-windows-v1
+          save-if: false
+      - name: Install pinned NSIS packager 0.11.8 (non-release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo install cargo-packager --version 0.11.8 --locked
+          if($LASTEXITCODE -ne 0){throw 'Pinned NSIS cargo-packager build failed'}
+      - name: Build pinned Shiva PDF sidecar from exact source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $commit=(git -C _shiva-preview rev-parse HEAD).Trim()
+          if($commit -cne '40b72a90b1dac39812c77c7321e57d613a81cb51'){throw 'Shiva commit mismatch'}
+          $env:CARGO_TARGET_DIR=Join-Path $env:RUNNER_TEMP 'video17-shiva-build'
+          cargo build --release --manifest-path _shiva-preview/Cargo.toml -p cli
+          if($LASTEXITCODE -ne 0){throw 'Pinned Shiva CLI build failed'}
+          $built=Join-Path $env:CARGO_TARGET_DIR 'release/shiva.exe'
+          if(!(Test-Path -LiteralPath $built -PathType Leaf)){throw 'Shiva CLI missing'}
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO17_SHIVA=$built"
+          Write-Host 'VIDEO17_PINNED_SHIVA_SOURCE_PASS'
+      - name: Build verified Rust mux with immutable Cargo.lock
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo test --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if($LASTEXITCODE -ne 0){throw 'VIDEO16 Rust mux tests failed'}
+          cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if($LASTEXITCODE -ne 0){throw 'VIDEO16 Rust mux build failed'}
+          $mux=(Resolve-Path labs/video-lite/target/release/dash.exe).Path
+          $pin=(Get-FileHash -LiteralPath $mux -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($pin -cnotmatch '^[0-9a-f]{64}$'){throw 'Invalid mux hash'}
+          Add-Content -Path $env:GITHUB_ENV -Value "AKULA_BUNDLED_MUX_SHA256=$pin"
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO16_MUX=$mux"
+      - name: Download exact upstream tools to CI temporary directory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $temp=Join-Path $env:RUNNER_TEMP 'video16-official'
+          New-Item -ItemType Directory -Path $temp -Force | Out-Null
+          $yt=Join-Path $temp 'yt-dlp.exe'
+          $js=Join-Path $temp 'qjs.exe'
+          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' -OutFile $yt -UseBasicParsing
+          Invoke-WebRequest 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' -OutFile $js -UseBasicParsing
+          if((Get-FileHash -LiteralPath $yt -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d'){throw 'yt-dlp pin mismatch'}
+          if((Get-FileHash -LiteralPath $js -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7'){throw 'QuickJS pin mismatch'}
+          if((Get-Item $yt).Length -ne 23575744 -or (Get-Item $js).Length -ne 1873152){throw 'Sidecar size mismatch'}
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO16_YT=$yt"
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO16_JS=$js"
+      - name: Package actual unsigned five-binary Akula NSIS from exact staged outputs
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo build --release --locked -p aquilum-native --features installed,video-rust-bundle,video-ui-e2e
+          if($LASTEXITCODE -ne 0){throw 'VIDEO17 Akula test-feature Release build failed'}
+          $stage=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
+          $compiled=Join-Path $stage 'aquilum-native.exe'
+          if(!(Test-Path -LiteralPath $compiled -PathType Leaf)){throw 'Built Akula binary missing'}
+          Copy-Item -LiteralPath $compiled -Destination (Join-Path $stage 'akula-app.exe') -Force
+          Copy-Item -LiteralPath $env:VIDEO17_SHIVA -Destination (Join-Path $stage 'shiva-pdf-preview.exe') -Force
+          Copy-Item -LiteralPath $env:VIDEO16_MUX -Destination (Join-Path $stage 'akula-video-mux.exe') -Force
+          Copy-Item -LiteralPath $env:VIDEO16_YT -Destination (Join-Path $stage 'akula-yt-dlp.exe') -Force
+          Copy-Item -LiteralPath $env:VIDEO16_JS -Destination (Join-Path $stage 'akula-quickjs.exe') -Force
+          $sha=(Get-FileHash -LiteralPath (Join-Path $stage 'akula-app.exe') -Algorithm SHA256).Hash
+          $dist=Join-Path $env:GITHUB_WORKSPACE 'dist'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          cargo packager -p aquilum-native --release --formats nsis --config native/packaging/akula-windows-video17-lab.json --out-dir $dist
+          if($LASTEXITCODE -ne 0){throw 'Real five-helper NSIS packaging failed'}
+          if((Get-FileHash -LiteralPath (Join-Path $stage 'akula-app.exe') -Algorithm SHA256).Hash -cne $sha) {
+            throw 'NSIS packaging unexpectedly modified the verified test Akula'
+          }
+          $setups=@(Get-ChildItem -LiteralPath $dist -Filter '*-setup.exe' -File)
+          if($setups.Count -ne 1){throw 'Expected exactly one genuine Akula NSIS'}
+          if($setups[0].Name.StartsWith('akula-app_')){
+            Rename-Item -LiteralPath $setups[0].FullName -NewName ($setups[0].Name -replace '^akula-app_', 'Akula_')
+          }
+          $candidate=Join-Path $dist 'Akula_0.3.20_x64-setup.exe'
+          if(!(Test-Path -LiteralPath $candidate -PathType Leaf)){throw 'Genuine NSIS identity missing'}
+          Write-Host 'VIDEO17_NSIS_BUILT_NONRELEASE_PASS signer=none main_version=0.3.20 binaries=5'
+      - name: Install real NSIS, verify exact five EXEs and run VIDEO-16 physical GUI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $setup=Join-Path $env:GITHUB_WORKSPACE 'dist/Akula_0.3.20_x64-setup.exe'
+          $stage=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
+          $fixture=Join-Path $env:GITHUB_WORKSPACE 'video16-fixture'
+          ./scripts/windows-video17-installed-nsis.ps1 -SetupPath $setup -StageDir $stage -FixtureDir $fixture
+          if($LASTEXITCODE -ne 0){throw 'VIDEO17 genuine NSIS end-to-end failed'}
+          Write-Host 'VIDEO17_GENUINE_NSIS_GUI_PASS'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video17-real-nsis-ui-local-mp4
+          path: video17-output/video17-installed.mp4
+          if-no-files-found: error
+          retention-days: 2
+      - name: No installer or publication
+        run: echo 'VIDEO17_NONRELEASE_PASS unsigned_installer=1 published=0 user_vault=0'
+
+  independent-decode:
+    name: Independently decode actual NSIS-installed GUI output
+    needs: real-windows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: video17-real-nsis-ui-local-mp4
+          path: video17-output
+      - name: Decode both video and audio with external FFmpeg
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffprobe -v error -count_frames -show_entries stream=codec_type,codec_name,nb_read_frames:format=duration -of json video17-output/video17-installed.mp4 > video17-output/probe.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('video17-output/probe.json').read_text())
+          streams=data['streams']
+          assert {(s['codec_type'],s['codec_name']) for s in streams}=={('video','h264'),('audio','aac')}
+          assert 4 <= float(data['format']['duration']) <= 8
+          assert all(int(s['nb_read_frames'])>=30 for s in streams)
+          print('VIDEO17_INSTALLED_NSIS_VIDEO_FRAMES_PASS')
+          PY
+          ffmpeg -hide_banner -loglevel error -nostdin -i video17-output/video17-installed.mp4 -map 0:v:0 -f null -
+          ffmpeg -hide_banner -loglevel error -nostdin -i video17-output/video17-installed.mp4 -map 0:a:0 -f null -
+          echo 'VIDEO17_INSTALLED_NSIS_INDEPENDENT_DECODE_PASS'
