@@ -279,3 +279,17 @@ fn video15_bundled_runtime_files_are_exact_pinned_siblings() {
     assert!(verify_pinned_runtime(&ytdlp, &quickjs).is_err());
     println!("VIDEO15_BUNDLED_RUNTIME_PINS_PASS location=sibling quickjs_tamper_rejected=1 ytdlp_missing_rejected=1");
 }
+
+
+#[cfg(all(not(windows), feature = "video-rust-bundle"))]
+#[test]
+fn video15_non_windows_trusted_bundle_refuses_legacy_fallback() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::at(temp.path().join("local-media"), &[]).unwrap();
+    let error = download_one_or_legacy(
+        &library, OsStr::new("fake-untrusted-yt-dlp"),
+        "https://youtu.be/dQw4w9WgXcQ", |_| {},
+    ).unwrap_err();
+    assert!(error.contains("Windows-only"), "unsupported OS silently fell back: {error}");
+    assert_eq!(fs::read_dir(library.root()).unwrap().count(), 0);
+}
