@@ -71,9 +71,12 @@ def main() -> None:
             "video::light::integration_tests::real_windows_native_pipeline_remuxes_local_dash_without_syncing_media",
             "--", "--exact", "--nocapture",
         ]
+        # Windows runner locales (e.g. cp1252) cannot decode arbitrary
+        # UTF-8 Rust/compiler output. Capture bytes and decode explicitly.
         result = subprocess.run(command, cwd=repo, env=env,
-                                capture_output=True, text=True, timeout=3600)
-        combined = result.stdout + "\n" + result.stderr
+                                capture_output=True, timeout=3600)
+        combined = ((result.stdout or b"").decode("utf-8", errors="replace")
+                    + "\n" + (result.stderr or b"").decode("utf-8", errors="replace"))
         print(combined[-12_000:])
         if result.returncode != 0 or "VIDEO12_NATIVE_REAL_TOOLCHAIN_PASS" not in combined:
             raise RuntimeError("native Akula integration did not pass; see Rust test output")
