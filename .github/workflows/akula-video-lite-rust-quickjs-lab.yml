@@ -1,0 +1,78 @@
+name: Akula VIDEO-05 Rust MP4 and QuickJS size lab (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'labs/video-lite/**'
+      - '.github/workflows/akula-video-lite-rust-quickjs-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native-rust-mp4:
+    name: Pure Rust split + remux with exact H264/AAC sample proof
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: labs/video-lite
+          shared-key: akula-video05-rust-mp4-v1
+          save-if: false
+      - name: Compile no-FFmpeg size-optimized Rust MP4 binary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo generate-lockfile --manifest-path labs/video-lite/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Rust lab failed to resolve its isolated dependencies' }
+          cargo build --manifest-path labs/video-lite/Cargo.toml --release --locked --bin akula-video-lite-lab
+          if ($LASTEXITCODE -ne 0) { throw 'Rust lab failed to compile' }
+          $exe = 'labs/video-lite/target/release/akula-video-lite-lab.exe'
+          if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Rust standalone MP4 executable absent' }
+          Write-Host "VIDEO05_RUST_BIN_BYTES=$((Get-Item -LiteralPath $exe).Length)"
+          Write-Host "VIDEO05_RUST_BIN_SHA256=$((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant())"
+      - name: Real original compressed H264/AAC sample roundtrip without ffmpeg
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'labs/video-lite/target/release/akula-video-lite-lab.exe'
+          $fixture = 'labs/video-lite/fixtures/avc_aac_2s.mp4'
+          $work = Join-Path $env:RUNNER_TEMP 'akula-video05-rust'
+          New-Item -ItemType Directory -Path $work -Force | Out-Null
+          try {
+            $output = Join-Path $work 'rust-muxed.mp4'
+            & $exe prove $fixture $work $output
+            if ($LASTEXITCODE -ne 0) { throw "Rust MP4 split/merge failed: $LASTEXITCODE" }
+            if (!(Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Rust MP4 output absent' }
+            Write-Host "VIDEO05_RUST_MP4_BYTES=$((Get-Item -LiteralPath $output).Length)"
+            Write-Host 'VIDEO05_RUST_NO_FFMPEG_ACCEPTED used_external_ffmpeg=0 sync_vault=0'
+          } finally {
+            Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+  quickjs:
+    name: SHA-pinned tiny QuickJS instead of full Deno
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: QuickJS-NG binary checksum, JS eval, yt-dlp CLI, payload size
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./labs/video-lite/check-quickjs.ps1 -ScratchRoot $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'QuickJS size lab failed' }
+          Write-Host 'VIDEO05_SLIM_NONRELEASE_PASS external_video=0 shipped=0'
