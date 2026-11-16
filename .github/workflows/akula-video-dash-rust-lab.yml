@@ -43,6 +43,12 @@ jobs:
           test -s "$SRC"
           ffmpeg -hide_banner -loglevel error -nostdin -stream_loop 29 -i "$SRC" -t 60 -map 0:v:0 -an -c:v copy -movflags +frag_keyframe+empty_moov+default_base_moof -frag_duration 500000 video06-fixtures/dash-video.mp4
           ffmpeg -hide_banner -loglevel error -nostdin -stream_loop 29 -i "$SRC" -t 60 -map 0:a:0 -vn -c:a copy -movflags +frag_keyframe+empty_moov+default_base_moof -frag_duration 500000 video06-fixtures/dash-audio.m4a
+          # A short video must not require three or more fragments; progressive
+          # standalone tracks must be accepted too, without a media encoder.
+          ffmpeg -hide_banner -loglevel error -nostdin -i "$SRC" -map 0:v:0 -an -c:v copy -movflags +frag_keyframe+empty_moov+default_base_moof -frag_duration 5000000 video06-fixtures/short-video.mp4
+          ffmpeg -hide_banner -loglevel error -nostdin -i "$SRC" -map 0:a:0 -vn -c:a copy -movflags +frag_keyframe+empty_moov+default_base_moof -frag_duration 5000000 video06-fixtures/short-audio.m4a
+          ffmpeg -hide_banner -loglevel error -nostdin -i "$SRC" -map 0:v:0 -an -c:v copy video06-fixtures/progressive-video.mp4
+          ffmpeg -hide_banner -loglevel error -nostdin -i "$SRC" -map 0:a:0 -vn -c:a copy video06-fixtures/progressive-audio.m4a
           python3 - <<'PY'
           import os, struct
           for filename in ('dash-video.mp4','dash-audio.m4a'):
@@ -112,6 +118,20 @@ jobs:
           test -s video06-out/output.mp4
           echo "VIDEO06_RUST_FRAGMENTED_ACCEPTED platform=$RUNNER_OS no_ffmpeg_runtime=1"
           echo "VIDEO06_OUTPUT_BYTES=$(wc -c < video06-out/output.mp4)"
+          "$BIN" mux-pair video06-fixtures/short-video.mp4 video06-fixtures/short-audio.m4a video06-out/single-fragment.mp4
+          "$BIN" mux-pair video06-fixtures/progressive-video.mp4 video06-fixtures/progressive-audio.m4a video06-out/progressive.mp4
+          test -s video06-out/single-fragment.mp4
+          test -s video06-out/progressive.mp4
+          original=$(sha256sum video06-out/single-fragment.mp4 | cut -d' ' -f1)
+          if "$BIN" mux-pair video06-fixtures/short-video.mp4 video06-fixtures/short-audio.m4a video06-out/single-fragment.mp4; then
+            echo 'VIDEO07_OVERWRITE_GUARD_FAILED'; exit 1
+          fi
+          test "$original" = "$(sha256sum video06-out/single-fragment.mp4 | cut -d' ' -f1)"
+          if "$BIN" mux-pair video06-fixtures/short-audio.m4a video06-fixtures/short-video.mp4 video06-out/bad.mp4; then
+            echo 'VIDEO07_UNSUPPORTED_CODEC_ACCEPTED'; exit 1
+          fi
+          test ! -e video06-out/bad.mp4
+          echo "VIDEO07_SHORT_AND_PROGRESSIVE_MUX_PASS platform=$RUNNER_OS no_overwrite=1 partial_cleanup=1"
       - name: Independently decode the Rust MP4 through FFmpeg (Linux only)
         if: runner.os == 'Linux'
         shell: bash
@@ -137,6 +157,19 @@ jobs:
           ffmpeg -v error -nostdin -i video06-out/output.mp4 -map 0:v:0 -f null -
           ffmpeg -v error -nostdin -i video06-out/output.mp4 -map 0:a:0 -f null -
           echo 'VIDEO06_INDEPENDENT_DECODER_PASS video=h264 audio=aac rust_mux=1 ffmpeg_runtime=0'
+          for mp4 in video06-out/single-fragment.mp4 video06-out/progressive.mp4; do
+            ffprobe -v error -show_entries stream=codec_type,codec_name -of json "$mp4" > video06-out/short-probe.json
+            python3 - <<'PY'
+          import json
+          with open('video06-out/short-probe.json',encoding='utf8') as f:
+              obj=json.load(f)
+          codecs={(x['codec_type'],x['codec_name']) for x in obj['streams']}
+          assert codecs=={('video','h264'),('audio','aac')},codecs
+          PY
+            ffmpeg -v error -nostdin -i "$mp4" -map 0:v:0 -f null -
+            ffmpeg -v error -nostdin -i "$mp4" -map 0:a:0 -f null -
+          done
+          echo 'VIDEO07_INDEPENDENT_DECODER_PASS one_fragment=1 progressive=1'
       - name: Do not package the experiment
         shell: bash
         run: |
