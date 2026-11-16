@@ -97,17 +97,17 @@ any downloaded archive or publish a tested executable automatically.
 
 | Dependency | Immutable reference | SHA-256 |
 | --- | --- | --- |
-| FFmpeg, LGPL static | \`FFmpeg-Builds/FFmpeg-Builds\`, \`autobuild-2026-11-15-12-40\`, \`ffmpeg-n8.1.3-35-gf1acb0a266-win64-lgpl-8.1.zip\` | \`272140baa96cbb9553eb57c03590e0b8d2c93ce352aa7f876c34fbc657536836\` |
-| Deno | \`denoland/deno\`, \`v2.9.8\`, \`deno-x86_64-pc-windows-msvc.zip\` | \`cba84b26e0df5ae7f74fc66b86a95b866872a86292ebd84fa1e959927edd93bf\` |
-| yt-dlp | \`yt-dlp/yt-dlp\`, \`2026.10.26\`, \`yt-dlp.exe\` | \`f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d\` |
+| FFmpeg, LGPL static | `FFmpeg-Builds/FFmpeg-Builds`, `autobuild-2026-10-31-12-59`, `ffmpeg-n8.1.3-27-g8dca1586f4-win64-lgpl-8.1.zip` | `d4c2a42673917b4a97104a3e9f082729a9730796b98664e37c0b7eba6c6c613d` |
+| Deno | `denoland/deno`, `v2.9.8`, `deno-x86_64-pc-windows-msvc.zip` | `cba84b26e0df5ae7f74fc66b86a95b866872a86292ebd84fa1e959927edd93bf` |
+| yt-dlp | `yt-dlp/yt-dlp`, `2026.10.26`, `yt-dlp.exe` | `f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d` |
 
-The lab in \`scripts/akula-video-deps-ffmpeg-deno-lab.ps1\`:
+The lab in `scripts/akula-video-deps-ffmpeg-deno-lab.ps1`:
 - rejects a tampered archive, then independently checks each downloaded SHA
   before extracting or executing third-party code;
-- verifies Deno \`--version\` and basic JS evaluation and checks that yt-dlp
+- verifies Deno `--version` and basic JS evaluation and checks that yt-dlp
   accepts the chosen Deno runtime argument **without contacting YouTube**;
 - runs pinned FFmpeg/ffprobe against a tiny, original H.264/AAC fixture,
-  splits video and audio streams, remuxes them with \`-c copy\`, checks codec
+  splits video and audio streams, remuxes them with `-c copy`, checks codec
   identities, and decodes the result;
 - records compressed archive and executable byte counts, and deletes scratch
   files. It does not modify or install into any Akula vault or cloud folder.
@@ -123,12 +123,15 @@ The lab in \`scripts/akula-video-deps-ffmpeg-deno-lab.ps1\`:
   on actual user machines, and the Windows 7 VM remain release blockers.
 - Even an LGPL binary needs attribution and compliance review; Deno and
   yt-dlp each carry their own licenses and bundled third-party components.
-- An archive of ~168 MB is not a good default installer payload without
+- A three-component compressed toolchain of ~234 MB (and ~385 MB for the
+  main executables) is not a good default installer payload without
   measuring smaller, reproducible packaging or optional, explicitly installed
   dependencies.
 
-Pin metadata read from GitHub Release API on 2026-11-16, not inferred from
-floating \`latest\` links:
-https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/tag/autobuild-2026-11-15-12-40
+The FFmpeg pin uses the last October 2026 daily build, which the upstream
+  retention policy keeps for two years; ordinary daily assets expire quickly.
+  Pin metadata read from GitHub Release API on 2026-11-16, not inferred from
+floating `latest` links:
+https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/tag/autobuild-2026-10-31-12-59
 https://github.com/denoland/deno/releases/tag/v2.9.8
 https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26
