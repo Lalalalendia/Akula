@@ -1,7 +1,7 @@
 mod frames;
+mod frames_reader;
 mod sound;
 mod worker;
-
 use std::path::Path;
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard};
