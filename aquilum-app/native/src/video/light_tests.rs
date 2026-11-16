@@ -107,6 +107,8 @@ fn yt_dlp_single_track_args_do_not_request_merge_or_postprocessing() {
         let args: Vec<String> = track_args(stage, track, SINGLE_VIDEO_MAX, URL, Path::new("/tmp/mock-qjs"))
             .iter().map(|s| s.to_string_lossy().into_owned()).collect();
         assert!(args.contains(&"--ignore-config".into()));
+        assert!(args.contains(&"--no-plugin-dirs".into()));
+        assert!(args.contains(&"--no-remote-components".into()));
         assert!(args.contains(&"--no-js-runtimes".into()));
         assert!(args.windows(2).any(|a| a[0] == "--js-runtimes"
             && a[1] == "quickjs:/tmp/mock-qjs"),
