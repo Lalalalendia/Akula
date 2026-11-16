@@ -1,7 +1,7 @@
 //! VIDEO-06 non-release: bounded pure-Rust remux of separate H264/AAC
 //! fragmented DASH MP4 tracks. FFmpeg is used by CI only to create fixtures.
 use mp4_track::{
-    Codec, Limits, Mp4Reader, Mp4Writer, Sample, SampleInput, Track, TrackConfig,
+    Codec, Edit, Limits, Mp4Reader, Mp4Writer, Sample, SampleInput, Track, TrackConfig,
     TrackId, TrackKind, WriterConfig,
 };
 use std::error::Error;
@@ -32,8 +32,50 @@ fn accepts(track: &Track, kind: TrackKind) -> bool {
     }
 }
 
-fn configure(track: &Track) -> TrackConfig {
-    TrackConfig {
+const OUTPUT_MOVIE_TIMESCALE: u32 = 1000;
+
+// DASH initialization segments may contain a one-entry edit list with
+// segment_duration=0 even though the later moof/trun samples have a real
+// duration. Reusing that edit verbatim made mvhd/tkhd duration zero and
+// rendered the output unplayable in FFmpeg and common native players.
+// Preserve the media start (e.g. AAC's 1024-sample encoder priming offset),
+// but derive a valid movie duration from the actual samples. Complex,
+// multi-edit timelines are rejected rather than silently desynchronized.
+fn normalize_edits(
+    edits: &[Edit], source_movie_scale: u32, media_scale: u32, media_duration: u64,
+) -> Result<Vec<Edit>> {
+    if edits.is_empty() { return Ok(Vec::new()); }
+    if edits.len() != 1 || source_movie_scale == 0 || media_scale == 0 {
+        return Err("complex or invalid MP4 edit list is not supported".into());
+    }
+    let mut edit = edits[0].clone();
+    if edit.media_rate != 1.0 {
+        return Err("non-unity MP4 edit playback rate is unsupported".into());
+    }
+    let start = edit.media_time.ok_or("empty edit timelines are not supported")?;
+    let available = media_duration.checked_sub(start)
+        .filter(|v| *v > 0).ok_or("MP4 edit media start exceeds track duration")?;
+    let media_ms = (u128::from(available) * u128::from(OUTPUT_MOVIE_TIMESCALE))
+        / u128::from(media_scale);
+    // Positive edits are expressed in the input movie timebase, while
+    // the new MP4 writer always uses 1000 movie units per second.
+    let requested_ms = if edit.segment_duration == 0 {
+        media_ms
+    } else {
+        (u128::from(edit.segment_duration) * u128::from(OUTPUT_MOVIE_TIMESCALE))
+            / u128::from(source_movie_scale)
+    };
+    if requested_ms == 0 || requested_ms > media_ms {
+        return Err("MP4 edit would create a zero-duration or overlong output".into());
+    }
+    edit.segment_duration = u64::try_from(requested_ms)?;
+    Ok(vec![edit])
+}
+
+fn configure(
+    track: &Track, source_movie_scale: u32, media_duration: u64,
+) -> Result<TrackConfig> {
+    Ok(TrackConfig {
         kind: track.kind,
         timescale: track.timescale,
         language: track.language.clone(),
@@ -41,8 +83,10 @@ fn configure(track: &Track) -> TrackConfig {
         codec: track.codec.clone(),
         width: track.width,
         height: track.height,
-        edit_list: track.edit_list.clone(),
-    }
+        edit_list: normalize_edits(
+            &track.edit_list, source_movie_scale, track.timescale, media_duration,
+        )?,
+    })
 }
 
 struct Source {
@@ -66,9 +110,18 @@ impl Source {
         let id = track.id;
         // Fragmented MP4 can have stbl sample_count=0 in moov; actual
         // samples are in moof/trun and exposed by the bounded reader.
-        let count = u32::try_from(reader.samples(id)?.len())?;
-        if count == 0 { return Err("fragmented DASH contains no samples".into()); }
-        let cfg = configure(track);
+        let mut media_duration = 0u64;
+        let mut sample_count = 0usize;
+        for sample in reader.samples(id)? {
+            media_duration = media_duration.checked_add(u64::from(sample.duration))
+                .ok_or("MP4 media duration overflow")?;
+            sample_count += 1;
+        }
+        let count = u32::try_from(sample_count)?;
+        if count == 0 || media_duration == 0 {
+            return Err("DASH track has no duration-bearing samples".into());
+        }
+        let cfg = configure(track, reader.movie_timescale(), media_duration)?;
         let fragments = reader.fragments().len();
         if require_fragments && fragments < 3 {
             return Err("strict DASH fixture must contain multiple fragments".into());
@@ -196,6 +249,9 @@ fn run() -> Result<()> {
     if output.tracks().len() != 2 {
         return Err("output is not a two-track MP4".into());
     }
+    if output.movie_duration() == 0 {
+        return Err("Rust MP4 has zero movie duration after DASH remux".into());
+    }
     if result.metadata()?.len() < 1024 {
         return Err("output MP4 unexpectedly small".into());
     }
@@ -212,5 +268,46 @@ fn main() {
     if let Err(error) = run() {
         eprintln!("DASH_RUST_FAILURE: {error}");
         std::process::exit(1);
+    }
+}
+
+
+#[cfg(test)]
+mod timing_tests {
+    use super::*;
+
+    #[test]
+    fn repairs_zero_duration_dash_edit_and_preserves_aac_priming() {
+        let source = [Edit {
+            segment_duration: 0,
+            media_time: Some(1024),
+            media_rate: 1.0,
+        }];
+        let output = normalize_edits(&source, 1000, 16_000, 97_282).unwrap();
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].media_time, Some(1024));
+        assert_eq!(output[0].segment_duration, 6016);
+        assert_eq!(source[0].segment_duration, 0);
+    }
+
+    #[test]
+    fn rescale_existing_edit_movie_timebase() {
+        let source = [Edit {
+            segment_duration: 24_000,
+            media_time: Some(0),
+            media_rate: 1.0,
+        }];
+        let output = normalize_edits(&source, 4000, 48_000, 48_000 * 7).unwrap();
+        assert_eq!(output[0].segment_duration, 6000);
+    }
+
+    #[test]
+    fn rejects_empty_complex_or_overlong_edits() {
+        let empty = Edit { segment_duration: 0, media_time: None, media_rate: 1.0 };
+        assert!(normalize_edits(&[empty], 1000, 16000, 96000).is_err());
+        let bad = Edit { segment_duration: 0, media_time: Some(100_000), media_rate: 1.0 };
+        assert!(normalize_edits(&[bad], 1000, 16000, 96000).is_err());
+        let multi = Edit { segment_duration: 500, media_time: Some(0), media_rate: 1.0 };
+        assert!(normalize_edits(&[multi.clone(), multi], 1000, 16000, 96000).is_err());
     }
 }
