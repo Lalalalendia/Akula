@@ -7,6 +7,7 @@ on:
       - 'aquilum-app/native/src/video/library.rs'
       - 'aquilum-app/native/src/video/download.rs'
       - 'aquilum-app/native/src/video/download_tests.rs'
+      - 'aquilum-app/native/src/video/windows/frames_reader.rs'
       - 'aquilum-app/native/src/video/fixtures/native_avc_aac_test.mp4'
       - 'aquilum-app/native/src/video/queue.rs'
       - 'aquilum-app/native/src/app/embeds/video.rs'
