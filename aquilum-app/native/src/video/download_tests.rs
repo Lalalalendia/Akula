@@ -143,7 +143,7 @@ use super::*;
             ("advanced", MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING),
             ("Win7-basic", MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING),
         ] {
-            let step = (|| -> Result<String, String> {
+            let step = unsafe { (|| -> Result<String, String> {
                 let mut holder = None;
                 unsafe { MFCreateAttributes(&mut holder, 1) }
                     .map_err(|e| format!("MFCreateAttributes {e:?}"))?;
@@ -173,7 +173,7 @@ use super::*;
                 reader.SetCurrentMediaType(stream, None, &kind)
                     .map_err(|e| format!("SetCurrentMediaType {e:?}"))?;
                 Ok(format!("RGB32 configured size={native_size}"))
-            })();
+            })() };
             report.push_str(&format!("; {label}={step:?}"));
         }
         report
