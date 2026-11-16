@@ -1,0 +1,49 @@
+name: Akula VIDEO-04 pinned yt-dlp Win10 lab (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/akula-video-deps-win10-lab.ps1'
+      - '.github/workflows/akula-video-deps-win10-lab.yml'
+      - 'docs/release/video-local-toolchain.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pinned-downloader:
+    name: Pinned upstream binary checksum and version only
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Validate pinned yt-dlp hash before execution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/akula-video-deps-win10-lab.ps1 -ScratchRoot $env:RUNNER_TEMP
+      - name: Guard against a false packaging acceptance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $script = Get-Content 'scripts/akula-video-deps-win10-lab.ps1' -Raw
+          foreach ($required in @(
+            'VIDEO04_NEGATIVE_HASH_TEST_PASS',
+            'VIDEO04_PINNED_YTDLP_EXE_PASS',
+            'VIDEO04_NOT_ACCEPTED',
+            'Assert-PinnedHash $exe $expectedSha256'
+          )) {
+            if (!$script.Contains($required)) { throw "Missing non-release acceptance guard: $required" }
+          }
+          if ($script.Contains('--remote-components') -or $script.Contains('https://www.youtube.com/')) {
+            throw 'VIDEO-04 must never fetch arbitrary EJS code or download real video'
+          }
+          Write-Host 'VIDEO04_NONRELEASE_GATE_PASS no_release_bundle=1 no_media_download=1'
