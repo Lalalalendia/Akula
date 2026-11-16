@@ -14,6 +14,7 @@ on:
       - 'labs/video-lite/video12/**'
       - 'labs/video-lite/src/bin/dash.rs'
       - 'labs/video-lite/Cargo.toml'
+      - 'labs/video-lite/Cargo.lock'
       - 'labs/video-lite/fixtures/**'
       - '.github/workflows/akula-video12-native-real-offline.yml'
   workflow_dispatch:
@@ -102,8 +103,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo generate-lockfile --manifest-path labs/video-lite/Cargo.toml
-          if ($LASTEXITCODE -ne 0) { throw 'Rust helper lockfile unavailable' }
+          if (!(Test-Path 'labs/video-lite/Cargo.lock' -PathType Leaf)) { throw 'locked video-lite dependencies missing' }
           cargo test --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Rust edit-list and timeline regression' }
           cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash

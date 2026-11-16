@@ -2,7 +2,7 @@ name: Akula VIDEO-05 Rust MP4 and QuickJS size lab (non-release)
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/video03-one-click-offline-20261116]
     paths:
       - 'labs/video-lite/**'
       - '.github/workflows/akula-video-lite-rust-quickjs-lab.yml'
@@ -34,8 +34,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo generate-lockfile --manifest-path labs/video-lite/Cargo.toml
-          if ($LASTEXITCODE -ne 0) { throw 'Rust lab failed to resolve its isolated dependencies' }
+          if (!(Test-Path 'labs/video-lite/Cargo.lock' -PathType Leaf)) { throw 'Rust lab lockfile missing' }
           cargo build --manifest-path labs/video-lite/Cargo.toml --release --locked --bin akula-video-lite-lab
           if ($LASTEXITCODE -ne 0) { throw 'Rust lab failed to compile' }
           $exe = 'labs/video-lite/target/release/akula-video-lite-lab.exe'

@@ -9,6 +9,7 @@ on:
       - 'aquilum-app/native/Cargo.toml'
       - 'labs/video-lite/src/bin/dash.rs'
       - 'labs/video-lite/Cargo.toml'
+      - 'labs/video-lite/Cargo.lock'
       - '.github/workflows/akula-video13-trusted-mux-candidate.yml'
   workflow_dispatch:
 
@@ -38,6 +39,7 @@ jobs:
           import tomllib
           main = Path('aquilum-app/native/src/video/light.rs').read_text()
           cfg = tomllib.loads(Path('aquilum-app/native/Cargo.toml').read_text())
+          assert Path('labs/video-lite/Cargo.lock').is_file(), 'bundled mux must use reviewed Cargo.lock'
           assert 'video-rust-bundle' in cfg['features']
           assert 'option_env!("AKULA_BUNDLED_MUX_SHA256")' in main
           assert 'bundled_mux_from_exe(&application, expected)' in main
@@ -76,8 +78,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo generate-lockfile --manifest-path labs/video-lite/Cargo.toml
-          if ($LASTEXITCODE -ne 0) { throw 'helper dependencies unavailable' }
+          if (!(Test-Path 'labs/video-lite/Cargo.lock' -PathType Leaf)) { throw 'locked video-lite dependencies missing' }
           cargo test --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
           if ($LASTEXITCODE -ne 0) { throw 'mux timeline regression' }
           cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
