@@ -175,7 +175,24 @@ function Find-Real-Hover([Diagnostics.Process]$P,[string]$Name) {
             [AkulaVideo16Pointer]::Move($hwnd,$P.Id,$x,$y)
             Start-Sleep -Milliseconds 12
             if(Has-Event $Name){
-                [AkulaVideo16Pointer]::Click($hwnd,$P.Id,$x,$y)
+                # Mouse moves are asynchronous: click the exact Win32 pixel
+                # reported by Akula's native hover hit-test, not scan position.
+                $prefix='VIDEO16_'+$Name+'_POINT:'
+                $record=@([IO.File]::ReadAllLines($ProbePath) |
+                    Where-Object { $_.StartsWith($prefix, [StringComparison]::Ordinal) } |
+                    Select-Object -Last 1)
+                if($record.Count -ne 1){throw "VIDEO16 hover point missing for $Name"}
+                $coords=$record[0].Substring($prefix.Length).Split(':')
+                if($coords.Count -ne 2 -or $coords[0] -notmatch '^-?[0-9]+$' -or
+                   $coords[1] -notmatch '^-?[0-9]+$'){
+                    throw "VIDEO16 invalid hover point for $Name"
+                }
+                $px=[int]$coords[0]; $py=[int]$coords[1]
+                if($px -lt $left -or $px -gt $right -or $py -lt $top -or $py -gt $bottom){
+                    throw "VIDEO16 hover witness outside native editor"
+                }
+                [AkulaVideo16Pointer]::Click($hwnd,$P.Id,$px,$py)
+                Write-Host "VIDEO16_ACTUAL_HOVER_POINT_CLICK event=$Name x=$px y=$py"
                 $found=$true
                 break
             }
@@ -235,6 +252,14 @@ try{
         throw 'VIDEO16 playback after restart changed synced Markdown'
     }
     Write-Host 'VIDEO16_RESTART_DECODED_GUI_FRAME_PASS real_pointer=1 local_copy=1 decoded_frame=1'
+} catch {
+    if(Test-Path -LiteralPath $ProbePath -PathType Leaf) {
+        Write-Host 'VIDEO16_GUI_EVENT_DIAGNOSTICS_BEGIN'
+        [IO.File]::ReadAllLines($ProbePath) | Select-Object -Last 25 |
+            ForEach-Object { Write-Host $_ }
+        Write-Host 'VIDEO16_GUI_EVENT_DIAGNOSTICS_END'
+    }
+    throw
 } finally {
     if($null -ne $proc){
         $proc.Refresh()
