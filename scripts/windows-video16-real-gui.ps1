@@ -71,12 +71,15 @@ public static class AkulaVideo16Pointer {
         IntPtr target=WindowFromPoint(new Point {X=x,Y=y});
         if(target==IntPtr.Zero || GetAncestor(target,2)!=hwnd || GetForegroundWindow()!=hwnd)
             throw new InvalidOperationException("VIDEO16 refuses a click outside Akula window");
-        var events=new Input[] {
-            new Input {Type=0,Flags=0x0002},
-            new Input {Type=0,Flags=0x0004}
-        };
-        if(SendInput(2,events,Marshal.SizeOf(typeof(Input)))!=2)
-            throw new InvalidOperationException("Real Windows pointer click failed");
+        var down=new Input[] { new Input {Type=0,Flags=0x0002} };
+        var up=new Input[] { new Input {Type=0,Flags=0x0004} };
+        if(SendInput(1,down,Marshal.SizeOf(typeof(Input)))!=1)
+            throw new InvalidOperationException("Real Windows pointer down failed");
+        // Let the GUI dispatch the native down before the up, not as a
+        // same-batch 0-ms pair while the editor is processing hover layout.
+        Thread.Sleep(85);
+        if(SendInput(1,up,Marshal.SizeOf(typeof(Input)))!=1)
+            throw new InvalidOperationException("Real Windows pointer up failed");
     }
 }
 '@
@@ -191,8 +194,15 @@ function Find-Real-Hover([Diagnostics.Process]$P,[string]$Name) {
                 if($px -lt $left -or $px -gt $right -or $py -lt $top -or $py -gt $bottom){
                     throw "VIDEO16 hover witness outside native editor"
                 }
+                [AkulaVideo16Pointer]::Move($hwnd,$P.Id,$px,$py)
+                # First prove Akula actually processed a real mouse move
+                # over the target button center. A hover at its edge is
+                # insufficient evidence that a later click will hit.
+                $centerName=if($Name -ceq 'HOVER_DOWNLOAD'){'CENTER_DOWNLOAD_READY'}else{'CENTER_LOCAL_PLAY_READY'}
+                Wait-Event $centerName 30
+                Start-Sleep -Milliseconds 120
                 [AkulaVideo16Pointer]::Click($hwnd,$P.Id,$px,$py)
-                Write-Host "VIDEO16_ACTUAL_HOVER_POINT_CLICK event=$Name x=$px y=$py"
+                Write-Host "VIDEO16_ACTUAL_HOVER_POINT_CLICK event=$Name center=$centerName x=$px y=$py"
                 $found=$true
                 break
             }
