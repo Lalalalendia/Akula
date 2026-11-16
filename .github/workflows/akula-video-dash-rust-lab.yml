@@ -2,7 +2,7 @@ name: Akula VIDEO-06 fragmented DASH remux in Rust (non-release)
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/video03-one-click-offline-20261116]
     paths:
       - 'labs/video-lite/src/bin/dash.rs'
       - '.github/workflows/akula-video-dash-rust-lab.yml'
