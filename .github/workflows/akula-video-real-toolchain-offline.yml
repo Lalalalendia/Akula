@@ -88,6 +88,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           cargo generate-lockfile --manifest-path labs/video-lite/Cargo.toml
           if ($LASTEXITCODE -ne 0) { throw 'Rust lockfile failed' }
+          cargo test --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Rust DASH edit-list normalization unit tests failed' }
           cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
           if ($LASTEXITCODE -ne 0) { throw 'Rust mux compile failed' }
           $exe = 'labs/video-lite/target/release/dash.exe'
@@ -151,15 +153,25 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
           file video10-output/combined.mp4
-          ffprobe -v error -show_entries stream=codec_type,codec_name:format=duration -of json video10-output/combined.mp4 > video10-output/probe.json
+          ffprobe -v error -count_frames -show_entries stream=codec_type,codec_name,nb_read_frames,duration:format=duration -of json video10-output/combined.mp4 > video10-output/probe.json
           python3 - <<'PY'
           import json
           with open('video10-output/probe.json',encoding='utf8') as f:
               data=json.load(f)
           codecs={(s['codec_type'],s['codec_name']) for s in data['streams']}
           assert codecs == {('video','h264'),('audio','aac')}, codecs
+          # Zero-duration elst tables can make ffmpeg exit successfully while
+          # decoding *zero frames*. Require a positive movie duration and
+          # actual decoded frames for both streams; do not count metadata.
           duration=float(data['format']['duration'])
           assert 4.0 <= duration <= 8.0, duration
+          for stream in data['streams']:
+              stream_duration=float(stream['duration'])
+              frames=int(stream['nb_read_frames'])
+              assert 4.0 <= stream_duration <= 8.0, stream
+              assert frames >= 30, stream
+              print('VIDEO10_DECODED_FRAMES_PASS codec=',stream['codec_name'],
+                    'frames=',frames,'stream_duration=',stream_duration)
           print('VIDEO10_INDEPENDENT_PROBE_PASS codecs=H264,AAC duration=',duration)
           PY
           ffmpeg -hide_banner -loglevel error -nostdin -i video10-output/combined.mp4 -map 0:v:0 -f null -
