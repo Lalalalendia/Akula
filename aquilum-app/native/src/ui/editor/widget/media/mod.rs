@@ -2,12 +2,10 @@ mod keys;
 mod mouse;
 #[cfg(feature = "memory-probe")]
 mod probe;
-
 use super::*;
 use crate::ui::editor::embed::media::{self, EmbedLine};
 use crate::ui::editor::embed::{MediaHit, MediaOverlay, MediaView, View};
 use crate::ui::editor::resolve::Request;
-
 const FULL: [f64; 4] = [0.0, 0.0, 100.0, 100.0];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
