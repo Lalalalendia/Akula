@@ -2,7 +2,7 @@ name: Akula VIDEO-05 Rust MP4 and QuickJS size lab (non-release)
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/video03-one-click-offline-20261116]
     paths:
       - 'labs/video-lite/**'
       - '.github/workflows/akula-video-lite-rust-quickjs-lab.yml'
