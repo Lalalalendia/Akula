@@ -328,8 +328,10 @@ pub(super) fn download_one_or_legacy(
     if std::env::var_os("AKULA_RUST_MUX_BIN").is_some() {
         return Err("AKULA_RUST_MUX_BIN is no longer supported: arbitrary mux executables are refused".into());
     }
-    #[cfg(windows)]
-    if let Some(expected) = option_env!("AKULA_BUNDLED_MUX_SHA256") {
+    #[cfg(all(windows, feature = "video-rust-bundle"))]
+    {
+        let expected = option_env!("AKULA_BUNDLED_MUX_SHA256")
+            .ok_or("video-rust-bundle requires a compiled-in mux SHA-256; refusing legacy fallback")?;
         let application = std::env::current_exe()
             .map_err(|e| format!("cannot locate installed Akula executable: {e}"))?;
         let mux = bundled_mux_from_exe(&application, expected)?;
@@ -340,9 +342,12 @@ pub(super) fn download_one_or_legacy(
         // An exact hash pin is required for both external parsing tools.
         // No PATH fallback or remote runtime components are permitted here.
         verify_pinned_runtime(Path::new(executable), &quickjs)?;
-        return download_rust(library, executable, &mux, &quickjs, url, on_progress);
+        download_rust(library, executable, &mux, &quickjs, url, on_progress)
     }
-    download::download_one(library, executable, url, on_progress)
+    #[cfg(not(all(windows, feature = "video-rust-bundle")))]
+    {
+        download::download_one(library, executable, url, on_progress)
+    }
 }
 
 #[cfg(test)]
