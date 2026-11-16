@@ -5,6 +5,8 @@ use crate::ui::editor::resolve::Request;
 impl TextEditor {
     pub(in crate::ui::editor::widget) fn media_press(&mut self, ctx: &mut EventCtx<'_>, point: Point, count: u8) -> bool {
         let under = self.media_under(point);
+        #[cfg(all(windows, feature = "video-ui-e2e"))]
+        crate::video::ui_acceptance::press_hit(under.is_some_and(|(_, hit)| hit == MediaHit::Download), under.is_some());
         if self.media.crop.is_some_and(|(s, _)| under.is_none_or(|(u, _)| u != s)) {
             self.end_crop(false);
             ctx.request_layout();
@@ -36,8 +38,7 @@ impl TextEditor {
             MediaHit::Source => self.show_source(ctx, start),
             MediaHit::Download => self.request(Request::DownloadVideo { url: line.src }),
             MediaHit::Grip => {
-                let step = if matches!(line.params.align, Alignment::Center) { 2.0 } else { 1.0 };
-                self.media.drag = Some((start, Drag::Resize { x0: point.x, w0: frame.width(), step })); ctx.capture_pointer();
+                let step = if matches!(line.params.align, Alignment::Center) { 2.0 } else { 1.0 }; self.media.drag = Some((start, Drag::Resize { x0: point.x, w0: frame.width(), step })); ctx.capture_pointer();
             }
             MediaHit::Play | MediaHit::Toggle => {
                 if let Some(path) = path {
@@ -146,8 +147,7 @@ impl TextEditor {
         false
     }
     pub(in crate::ui::editor::widget) fn media_release(&mut self, ctx: &mut EventCtx<'_>) {
-        let Some((start, drag)) = self.media.drag.take() else { return };
-        if let (Drag::Resize { .. }, Some((_, width))) = (drag, self.doc.resized.take())
+        let Some((start, drag)) = self.media.drag.take() else { return }; if let (Drag::Resize { .. }, Some((_, width))) = (drag, self.doc.resized.take())
             && let Some(mut line) = self.media_view(start).map(|v| v.line.clone())
         {
             line.params.resize(width);
