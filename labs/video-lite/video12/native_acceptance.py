@@ -23,7 +23,8 @@ class LocalOnly(http.server.SimpleHTTPRequestHandler):
         return
 
 def hash_and_check(path: Path, sha: str) -> None:
-    observed = hashlib.file_digest(path.open("rb"), "sha256").hexdigest()
+    with path.open("rb") as data:
+        observed = hashlib.file_digest(data, "sha256").hexdigest()
     if observed != sha:
         raise RuntimeError(f"pin failed for {path.name}: {observed}")
 
