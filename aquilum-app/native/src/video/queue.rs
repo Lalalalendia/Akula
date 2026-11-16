@@ -60,7 +60,7 @@ pub fn enqueue(
                 let executable = std::env::var_os("AKULA_YT_DLP_BIN")
                     .filter(|value| !value.is_empty())
                     .unwrap_or_else(|| OsString::from("yt-dlp"));
-                download::download_one(&library, &executable, &url, |progress| {
+                super::light::download_one_or_legacy(&library, &executable, &url, |progress| {
                     change(&id, Status::Downloading(progress));
                     if progress.downloaded.saturating_sub(last_notification) >= 1024 * 1024
                         || progress.downloaded == progress.total.unwrap_or(u64::MAX)
