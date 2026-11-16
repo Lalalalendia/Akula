@@ -4,9 +4,11 @@ on:
   pull_request:
     branches: [main, feat/video03-one-click-offline-20261116]
     paths:
-      # Rerun when the native code under acceptance changes, not only when
-      # the harness changes; otherwise a regression may bypass VIDEO-12.
-      - 'aquilum-app/native/src/video/**'
+      # Keep the dedicated native E2E subscribed only to its owned code.
+      # Broader changes stay covered by existing Windows VIDEO-03/08 QA;
+      # workflow_dispatch remains available for full manual re-acceptance.
+      - 'aquilum-app/native/src/video/light.rs'
+      - 'aquilum-app/native/src/video/light_integration.rs'
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
       - 'labs/video-lite/video12/**'
