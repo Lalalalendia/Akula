@@ -13,14 +13,14 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type Reader = Mp4Reader<BufReader<File>>;
 
 fn constrained_reader(path: &Path) -> Result<Reader> {
-    let limit = Limits {
-        max_moov_bytes: 8 * 1024 * 1024,
-        max_moof_bytes: 2 * 1024 * 1024,
-        max_sample_bytes: 8 * 1024 * 1024,
-        max_fragments: 20_000,
-        max_sample_count: 400_000,
-        max_depth: 20,
-    };
+    // Limits is non-exhaustive: start with upstream defaults and tighten them.
+    let mut limit = Limits::default();
+    limit.max_moov_bytes = 8 * 1024 * 1024;
+    limit.max_moof_bytes = 2 * 1024 * 1024;
+    limit.max_sample_bytes = 8 * 1024 * 1024;
+    limit.max_fragments = 20_000;
+    limit.max_sample_count = 400_000;
+    limit.max_depth = 20;
     Ok(Mp4Reader::open_with(BufReader::new(File::open(path)?), limit)?)
 }
 
