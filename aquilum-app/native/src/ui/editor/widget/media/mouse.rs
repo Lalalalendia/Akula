@@ -18,11 +18,7 @@ impl TextEditor {
         let Some(view) = self.media_view(start) else { return false };
         let (line, frame, video, image, path, crop_now) = (view.line.clone(), view.frame, view.video, view.image.clone(), view.path.clone(), view.crop());
         match hit {
-            MediaHit::Zoom => {
-                if let Some(image) = image {
-                    self.request(Request::View(image, path));
-                }
-            }
+            MediaHit::Zoom => { if let Some(image) = image { self.request(Request::View(image, path)); } }
             MediaHit::Align => {
                 let mut line = line;
                 line.params.align = match line.params.align {
@@ -64,11 +60,7 @@ impl TextEditor {
                     self.request(Request::Open { target: line.src, wiki: false, new_tab: false });
                 }
             }
-            MediaHit::Mute => {
-                if let Some(path) = &path {
-                    crate::video::mute(path);
-                }
-            }
+            MediaHit::Mute => { if let Some(path) = &path { crate::video::mute(path); } }
             MediaHit::Bar => {
                 if let Some(path) = &path {
                     let top = self.doc.top(self.doc.at_offset(start));
