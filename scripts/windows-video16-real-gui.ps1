@@ -104,9 +104,21 @@ if (Test-Path -LiteralPath $movie) { throw 'Fixture MP4 already present' }
 if (Test-Path -LiteralPath $ProbePath) { throw 'Old GUI probe is present' }
 $proc = $null
 
+# Exact line matching is critical: CLICK_LOCAL_PLAY_ATTEMPT is not
+# CLICK_LOCAL_PLAY, which is only emitted after actual successful toggle().
+function Exact-Event([string[]]$Lines,[string]$Name) {
+    return ($Lines -ccontains ('VIDEO16_' + $Name))
+}
+if (Exact-Event @('VIDEO16_CLICK_LOCAL_PLAY_ATTEMPT') 'CLICK_LOCAL_PLAY') {
+    throw 'VIDEO16 accepted a Play attempt as successful playback'
+}
+if (!(Exact-Event @('VIDEO16_CLICK_LOCAL_PLAY') 'CLICK_LOCAL_PLAY')) {
+    throw 'VIDEO16 failed to recognize a real Play success'
+}
+Write-Host 'VIDEO16_EXACT_EVENT_MATCH_PASS'
 function Has-Event([string]$Name) {
     if (!(Test-Path -LiteralPath $ProbePath -PathType Leaf)) { return $false }
-    return [IO.File]::ReadAllText($ProbePath).Contains(('VIDEO16_'+$Name))
+    return (Exact-Event ([IO.File]::ReadAllLines($ProbePath)) $Name)
 }
 function Start-Akula {
     $args = '--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $VaultPath,$DataDir,$note

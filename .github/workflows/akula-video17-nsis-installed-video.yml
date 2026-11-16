@@ -51,6 +51,11 @@ jobs:
           assert 'SendInput(1,down' in Path('scripts/windows-video16-real-gui.ps1').read_text()
           assert "Wait-Event $pressName" in Path('scripts/windows-video16-real-gui.ps1').read_text()
           assert "Wait-Event 'WINDOW_POINTER_DOWN'" in Path('scripts/windows-video16-real-gui.ps1').read_text()
+          gui = Path('scripts/windows-video16-real-gui.ps1').read_text()
+          assert "return ($Lines -ccontains ('VIDEO16_' + $Name))" in gui
+          assert 'VIDEO16_EXACT_EVENT_MATCH_PASS' in gui
+          assert 'VIDEO16_CLICK_LOCAL_PLAY_ATTEMPT' in gui
+          assert 'ReadAllText($ProbePath).Contains' not in gui
           mouse=Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
           assert 'toolbar_items()' in mouse and 'r.center()' in mouse
           assert 'ui_acceptance::hover(' in mouse
