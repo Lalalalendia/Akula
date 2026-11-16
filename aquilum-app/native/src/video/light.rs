@@ -286,25 +286,67 @@ fn verify_pinned_runtime(_ytdlp: &Path, _quickjs: &Path) -> Result<(), String> {
     Err("VIDEO-09 opt-in is Windows-only until non-Windows executable pins are validated".into())
 }
 
-/// Opt-in staging route, preserving legacy behavior until there is an
-/// independently audited installer for yt-dlp, QuickJS and the Rust muxer.
+// VIDEO-13: a shipping Rust mux comes from the *same installed directory*
+// as Akula, with its exact digest compiled into the main executable.
+// A manifest next to the helper cannot authenticate itself, so no external
+// manifest or environment variable is allowed to select or pin this EXE.
+// Installed builds without a bundled digest retain the existing legacy
+// downloader; they do not execute an unverified Rust helper.
+#[cfg(windows)]
+fn bundled_mux_from_exe(application: &Path, expected_sha256: &str) -> Result<PathBuf, String> {
+    if expected_sha256.len() != 64
+        || !expected_sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err("invalid compiled-in Akula Rust mux SHA-256".into());
+    }
+    if !application.is_absolute() {
+        return Err("Akula executable path must be absolute".into());
+    }
+    let directory = application.parent().ok_or("Akula executable has no parent directory")?;
+    let parent = fs::symlink_metadata(directory)
+        .map_err(|e| format!("cannot inspect Akula installation directory: {e}"))?;
+    if !parent.is_dir() || parent.file_type().is_symlink() {
+        return Err("Akula installation directory is not a regular directory".into());
+    }
+    use std::os::windows::fs::MetadataExt;
+    if parent.file_attributes() & 0x0000_0400 != 0 {
+        return Err("Akula installation directory is a reparse point".into());
+    }
+    let mux = directory.join("akula-video-mux.exe");
+    let size = safe_file(&mux, 128 * 1024 * 1024)?;
+    verify_pin(&mux, size, expected_sha256, "Akula bundled Rust mux")?;
+    Ok(mux)
+}
+
+/// The only production Rust path is the installer-staged, build-time-pinned
+/// sidecar next to the running Akula executable. The old arbitrary-path opt-in
+/// is rejected. No download of executables happens at runtime.
 pub(super) fn download_one_or_legacy(
     library: &Library, executable: &OsStr, url: &str,
     on_progress: impl FnMut(download::Progress),
 ) -> Result<PathBuf, String> {
-    let requested = std::env::var_os("AKULA_RUST_MUX_BIN").filter(|s| !s.is_empty());
-    match requested {
-        Some(mux) => {
-            let quickjs = std::env::var_os("AKULA_QUICKJS_BIN")
-                .filter(|s| !s.is_empty())
-                .ok_or("AKULA_QUICKJS_BIN must explicitly specify pinned QuickJS-NG")?;
-            let quickjs = PathBuf::from(quickjs);
-            // Production route cannot use a yt-dlp or JS interpreter resolved
-            // through PATH, untrusted config or an unverified executable.
-            verify_pinned_runtime(Path::new(executable), &quickjs)?;
-            download_rust(library, executable, &PathBuf::from(mux), &quickjs, url, on_progress)
-        }
-        None => download::download_one(library, executable, url, on_progress),
+    if std::env::var_os("AKULA_RUST_MUX_BIN").is_some() {
+        return Err("AKULA_RUST_MUX_BIN is no longer supported: arbitrary mux executables are refused".into());
+    }
+    #[cfg(all(windows, feature = "video-rust-bundle"))]
+    {
+        let expected = option_env!("AKULA_BUNDLED_MUX_SHA256")
+            .ok_or("video-rust-bundle requires a compiled-in mux SHA-256; refusing legacy fallback")?;
+        let application = std::env::current_exe()
+            .map_err(|e| format!("cannot locate installed Akula executable: {e}"))?;
+        let mux = bundled_mux_from_exe(&application, expected)?;
+        let quickjs = std::env::var_os("AKULA_QUICKJS_BIN")
+            .filter(|s| !s.is_empty())
+            .ok_or("AKULA_QUICKJS_BIN must specify SHA-pinned QuickJS-NG")?;
+        let quickjs = PathBuf::from(quickjs);
+        // An exact hash pin is required for both external parsing tools.
+        // No PATH fallback or remote runtime components are permitted here.
+        verify_pinned_runtime(Path::new(executable), &quickjs)?;
+        download_rust(library, executable, &mux, &quickjs, url, on_progress)
+    }
+    #[cfg(not(all(windows, feature = "video-rust-bundle")))]
+    {
+        download::download_one(library, executable, url, on_progress)
     }
 }
 

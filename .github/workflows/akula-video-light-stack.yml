@@ -108,7 +108,11 @@ jobs:
           assert 'std::env::var_os("AKULA_RUST_MUX_BIN")' in light
           assert 'std::env::var_os("AKULA_QUICKJS_BIN")' in light
           assert '"quickjs:{}", quickjs.display()' in light
-          assert 'None => download::download_one' in light
+          assert 'download::download_one(library, executable, url, on_progress)' in light
+          assert 'bundled_mux_from_exe' in light
+          assert 'AKULA_BUNDLED_MUX_SHA256' in light
+          assert 'AKULA_RUST_MUX_BIN is no longer supported' in light
+          assert 'akula-video-mux.exe' in light
           assert 'Err("VIDEO-09 opt-in is Windows-only' in light
           for forbidden in ('--merge-output-format','--postprocessor-args','https://www.youtube.com/watch?v='):
               assert forbidden not in light,forbidden
