@@ -86,7 +86,8 @@ fn track_args(stage: &Path, track: Track, remaining: u64, url: &str, quickjs: &P
     // --no-js-runtimes removes yt-dlp's default Deno runtime.
     let js_runtime = format!("quickjs:{}", quickjs.display());
     [
-        "--ignore-config", "--no-js-runtimes", "--js-runtimes", &js_runtime, "--no-cache-dir", "--no-cookies", "--no-playlist",
+        "--ignore-config", "--no-plugin-dirs", "--no-remote-components",
+        "--no-js-runtimes", "--js-runtimes", &js_runtime, "--no-cache-dir", "--no-cookies", "--no-playlist",
         "--no-exec", "--no-overwrites", "--no-color", "--no-write-info-json",
         "--no-write-thumbnail", "--no-write-subs", "--no-write-auto-subs",
         "--no-write-comments", "--no-download-archive", "--restrict-filenames",
