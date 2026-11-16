@@ -195,14 +195,17 @@ function Find-Real-Hover([Diagnostics.Process]$P,[string]$Name) {
                     throw "VIDEO16 hover witness outside native editor"
                 }
                 [AkulaVideo16Pointer]::Move($hwnd,$P.Id,$px,$py)
-                # First prove Akula actually processed a real mouse move
-                # over the target button center. A hover at its edge is
-                # insufficient evidence that a later click will hit.
-                $centerName=if($Name -ceq 'HOVER_DOWNLOAD'){'CENTER_DOWNLOAD_READY'}else{'CENTER_LOCAL_PLAY_READY'}
-                Wait-Event $centerName 30
+                # An extra center-hover callback is not a reliable action witness:
+                # the real hit target can change between Play and Toggle after
+                # layout. Verify the physical Windows down and the actual media
+                # handler instead; the caller still requires the download/Play
+                # result and a decoded frame.
                 Start-Sleep -Milliseconds 120
                 [AkulaVideo16Pointer]::Click($hwnd,$P.Id,$px,$py)
-                Write-Host "VIDEO16_ACTUAL_HOVER_POINT_CLICK event=$Name center=$centerName x=$px y=$py"
+                Wait-Event 'WINDOW_POINTER_DOWN' 30
+                $pressName=if($Name -ceq 'HOVER_DOWNLOAD'){'PRESS_DOWNLOAD'}else{'CLICK_LOCAL_PLAY_ATTEMPT'}
+                Wait-Event $pressName 30
+                Write-Host "VIDEO16_ACTUAL_HOVER_POINT_CLICK event=$Name down=WINDOW_POINTER_DOWN dispatch=$pressName x=$px y=$py"
                 $found=$true
                 break
             }
