@@ -53,6 +53,8 @@ public static class AkulaVideo16Pointer {
     [DllImport("user32.dll", SetLastError=true)] static extern bool SetCursorPos(int x,int y);
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint n, [In] Input[] data, int size);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+    public static bool IsForeground(IntPtr hwnd) { return GetForegroundWindow()==hwnd; }
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point p);
     [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd,uint flags);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
@@ -144,15 +146,9 @@ function Foreground([Diagnostics.Process]$P) {
     if($P.HasExited){throw 'Akula exited before GUI input'}
     $hwnd=[IntPtr]$P.MainWindowHandle
     for($i=0;$i -lt 20;$i++){
-        [void][AkulaVideo16Pointer]::Move
-        # SetForegroundWindow is allowed only for our verified process.
-        $api='[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);'
-        if(!('AkulaVideo16Focus' -as [type])){
-            Add-Type -Namespace AkulaVideo16Focus -Name Native -MemberDefinition $api
-        }
-        [AkulaVideo16Focus.Native]::SetForegroundWindow($hwnd) | Out-Null
+        [AkulaVideo16Pointer]::SetForegroundWindow($hwnd) | Out-Null
         Start-Sleep -Milliseconds 150
-        if([AkulaVideo16Focus.Native]::SetForegroundWindow($hwnd)){ return $hwnd }
+        if([AkulaVideo16Pointer]::IsForeground($hwnd)){ return $hwnd }
     }
     throw 'VIDEO16 cannot focus real Akula foreground window'
 }
