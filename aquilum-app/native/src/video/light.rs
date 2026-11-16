@@ -199,10 +199,14 @@ fn download_rust(
 // Official Windows binaries checked against the exact VIDEO-05 proof.
 // Updating either runtime requires a version/size/hash change plus CI proof.
 // Never download or update an executable from user content or runtime EJS.
+#[cfg(windows)]
 const QUICKJS_WINDOWS_BYTES: u64 = 1_873_152;
+#[cfg(windows)]
 const YTDLP_WINDOWS_BYTES: u64 = 23_575_744;
+#[cfg(windows)]
 const QUICKJS_WINDOWS_SHA256: &str =
     "ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7";
+#[cfg(windows)]
 const YTDLP_WINDOWS_SHA256: &str =
     "f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d";
 
