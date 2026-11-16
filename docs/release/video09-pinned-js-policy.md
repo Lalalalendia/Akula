@@ -22,7 +22,8 @@ staging is created, Akula verifies:
 - Both must be normal files, not symlinks or Windows reparse points.
   Hash verification reads each file in bounded chunks.
 - yt-dlp always receives
-  `--ignore-config --no-js-runtimes --js-runtimes quickjs:<verified-path>`.
+  `--ignore-config --no-plugin-dirs --no-remote-components`
+  `--no-js-runtimes --js-runtimes quickjs:<verified-path>`.
   This disables the default Deno option and constrains selection to one
   known QuickJS runtime. Remote EJS component downloads remain disabled
   by the default (the official yt-dlp executable ships the EJS package).
