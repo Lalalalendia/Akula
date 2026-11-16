@@ -54,6 +54,9 @@ jobs:
           assert "return ($Lines -ccontains ('VIDEO16_' + $Name))" in gui
           assert 'VIDEO16_EXACT_EVENT_MATCH_PASS' in gui
           assert 'VIDEO16_CLICK_LOCAL_PLAY_ATTEMPT' in gui
+          assert 'ctx.window_transform() * point' in Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
+          assert 'ClientToScreen' in probe and 'target_client_pixel' in probe
+          assert 'VIDEO16_{event}_CURSOR:' in probe
           assert 'ReadAllText($ProbePath).Contains' not in gui
           for path in ['aquilum-app/native/packaging/akula-windows.json',
                        '.github/workflows/akula-video16-real-windows-gui.yml']:

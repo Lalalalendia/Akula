@@ -133,7 +133,7 @@ impl TextEditor {
                 _ => None,
             });
             let delta = center.map(|c| (c.x + self.shift().x - point.x, c.y + self.doc.top(self.doc.at_offset(start)) - point.y));
-            crate::video::ui_acceptance::hover(hit == MediaHit::Download, hit == MediaHit::Play, view.is_some_and(|v| v.path.is_some()), delta);
+            crate::video::ui_acceptance::hover(hit == MediaHit::Download, hit == MediaHit::Play, view.is_some_and(|v| v.path.is_some()), delta, { let p = ctx.window_transform() * point; (p.x, p.y) }, ctx.scale_factor());
         }
         if hover != self.media.hover {
             self.media.hover = hover;

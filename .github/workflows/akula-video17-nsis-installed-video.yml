@@ -55,11 +55,14 @@ jobs:
           assert "return ($Lines -ccontains ('VIDEO16_' + $Name))" in gui
           assert 'VIDEO16_EXACT_EVENT_MATCH_PASS' in gui
           assert 'VIDEO16_CLICK_LOCAL_PLAY_ATTEMPT' in gui
+          assert 'ctx.window_transform() * point' in Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
+          assert 'ClientToScreen' in probe and 'target_client_pixel' in probe
+          assert 'VIDEO16_{event}_CURSOR:' in probe
           assert 'ReadAllText($ProbePath).Contains' not in gui
           mouse=Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
           assert 'toolbar_items()' in mouse and 'r.center()' in mouse
           assert 'ui_acceptance::hover(' in mouse
-          assert 'target_pixel(' in probe and 'VIDEO16_{event}_POINT:' in probe
+          assert 'target_client_pixel(' in probe and 'VIDEO16_{event}_POINT:' in probe
           for path in ['aquilum-app/native/packaging/akula-windows.json',
                        '.github/workflows/akula-video16-real-windows-gui.yml']:
               assert Path(path).is_file()
