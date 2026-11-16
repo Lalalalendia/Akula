@@ -140,6 +140,10 @@ impl TextEditor {
             return true;
         }
         let hover = self.media_under(point);
+        #[cfg(all(windows, feature = "video-ui-e2e"))]
+        if let Some((start, hit)) = hover {
+            crate::video::ui_acceptance::hover(hit, self.media_view(start).is_some_and(|v| v.path.is_some()));
+        }
         if hover != self.media.hover {
             self.media.hover = hover;
             let start = hover.map(|(s, _)| s);
