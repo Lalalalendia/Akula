@@ -1,12 +1,9 @@
 use masonry::peniko::{ImageAlphaType, ImageBrush};
 use windows::Win32::Media::MediaFoundation::{
-    IMFSample, IMFSourceReader, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_SOURCE_READER_ALL_STREAMS,
-    MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READERF_ENDOFSTREAM, MFCreateAttributes,
-    MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Video, MFVideoFormat_RGB32,
+    IMFSample, IMFSourceReader, MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READERF_ENDOFSTREAM,
 };
 use windows::core::HSTRING;
 
-const MAX_WIDTH: u32 = 1280;
 const STREAM: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
 
 pub struct Frames {
@@ -20,28 +17,8 @@ pub struct Frames {
 
 impl Frames {
     pub fn open(source: &HSTRING) -> Option<Frames> {
-        unsafe {
-            let mut attributes = None;
-            MFCreateAttributes(&mut attributes, 1).ok()?;
-            let attributes = attributes?;
-            attributes.SetUINT32(&MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, 1).ok()?;
-            let reader = MFCreateSourceReaderFromURL(source, &attributes).ok()?;
-            reader.SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false).ok()?;
-            reader.SetStreamSelection(STREAM, true).ok()?;
-            let size = reader.GetNativeMediaType(STREAM, 0).ok()?.GetUINT64(&MF_MT_FRAME_SIZE).ok()?;
-            let (w, h) = ((size >> 32) as u32, size as u32);
-            let (w, h) = if w > MAX_WIDTH { (MAX_WIDTH, ((u64::from(h) * u64::from(MAX_WIDTH) / u64::from(w)) as u32).max(2) & !1) } else { (w, h) };
-            let kind = MFCreateMediaType().ok()?;
-            kind.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).ok()?;
-            kind.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32).ok()?;
-            kind.SetUINT64(&MF_MT_FRAME_SIZE, (u64::from(w) << 32) | u64::from(h)).ok()?;
-            reader.SetCurrentMediaType(STREAM, None, &kind).ok()?;
-            let current = reader.GetCurrentMediaType(STREAM).ok()?;
-            let size = current.GetUINT64(&MF_MT_FRAME_SIZE).ok()?;
-            let (width, height) = ((size >> 32) as u32, size as u32);
-            let stride = current.GetUINT32(&MF_MT_DEFAULT_STRIDE).map_or((width * 4) as i32, |s| s as i32);
-            Some(Frames { reader, width, height, stride, next: None, ended: false })
-        }
+        let (reader, width, height, stride) = super::frames_reader::open(source)?;
+        Some(Frames { reader, width, height, stride, next: None, ended: false })
     }
 
     pub fn ended(&self) -> bool {
