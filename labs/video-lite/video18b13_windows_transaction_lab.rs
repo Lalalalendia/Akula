@@ -13,6 +13,7 @@ const COMPONENTS: [&str; 5] = [
 ];
 const JOURNAL: &str = "VIDEO18B13-PREPARED-1:0123456789abcdef\n";
 const ACK: &str = "VIDEO18B13-FIRST-FRAME-TEST-ONLY:0123456789abcdef\n";
+const COMMITTED: &str = "VIDEO18B13-COMMITTED:0123456789abcdef\n";
 
 fn safe_real_dir(path: &Path) -> Result<bool, String> {
     match fs::symlink_metadata(path) {
@@ -98,10 +99,12 @@ impl Gate {
     fn failed(&self)->PathBuf {self.root.join("failed")}
     fn journal(&self)->PathBuf {self.root.join("journal.v1")}
     fn ack_path(&self)->PathBuf {self.root.join("ack.v1")}
+    fn committed(&self)->PathBuf {self.root.join("committed.v1")}
 
     fn prepare_and_promote(&self,stop_after: &str) -> Result<(),String> {
         if safe_real_dir(&self.backup())? || safe_real_dir(&self.failed())?
-            || self.journal().exists() || self.ack_path().exists() {
+            || self.journal().exists() || self.ack_path().exists()
+            || self.committed().exists() {
             return Err("VIDEO18B13_HOLD: cannot start while another generation is pending".into());
         }
         check_components(&self.live(),"OLD")?;
@@ -128,13 +131,24 @@ impl Gate {
     fn recover(&self) -> Result<&'static str,String> {
         let journal = receipt(&self.journal(),JOURNAL)?;
         let ack = receipt(&self.ack_path(),ACK)?;
+        let committed = receipt(&self.committed(),COMMITTED)?;
         let has_previous=safe_real_dir(&self.backup())?;
         let has_live=safe_real_dir(&self.live())?;
         let has_candidate=safe_real_dir(&self.stage())?;
         let has_failed=safe_real_dir(&self.failed())?;
         if !journal {
-            if has_previous || ack || has_failed || !has_live {
+            if has_previous || has_failed || !has_live {
                 return Err("VIDEO18B13_HOLD: orphan generation without journal".into());
+            }
+            if committed && !has_candidate {
+                check_components(&self.live(),"NEW")?;
+                if ack {
+                    fs::remove_file(self.ack_path()).map_err(|e| e.to_string())?;
+                }
+                return Ok("CLEAN_COMMITTED");
+            }
+            if ack || committed {
+                return Err("VIDEO18B13_HOLD: orphan ACK or partial commit without journal".into());
             }
             check_components(&self.live(),"OLD")?;
             return Ok("CLEAN_OLD");
@@ -146,14 +160,23 @@ impl Gate {
             check_components(&self.live(),"NEW")?;
             if has_previous {
                 check_components(&self.backup(),"OLD")?;
+            }
+            if !committed {
+                durable_new(&self.committed(),COMMITTED.as_bytes())?;
+            }
+            if has_previous {
                 fs::remove_dir_all(self.backup()).map_err(|e| e.to_string())?;
             }
-            // Delete journal before ack so crash cannot lose all commit proof.
+            // The committed receipt persists, so an interrupted ACK/journal
+            // cleanup can resume without misclassifying the new generation.
             fs::remove_file(self.journal()).map_err(|e| e.to_string())?;
             fs::remove_file(self.ack_path()).map_err(|e| e.to_string())?;
             return Ok("COMMITTED_AFTER_ACK");
         }
         // No GUI ACK: never silently commit an unconfirmed generation.
+        if committed {
+            return Err("VIDEO18B13_HOLD: committed receipt without a matching ACK".into());
+        }
         if has_previous {
             check_components(&self.backup(),"OLD")?;
             if has_live {
@@ -235,6 +258,7 @@ mod tests {
         check_components(&gate.live(),"NEW").unwrap();
         assert!(!gate.backup().exists());
         assert!(!gate.journal().exists());
+        assert_eq!(gate.recover().unwrap(),"CLEAN_COMMITTED");
         drop(gate);
         fs::remove_dir_all(root).unwrap();
     }
