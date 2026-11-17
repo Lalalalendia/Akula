@@ -69,7 +69,7 @@ pub(super) const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1Ymx
 /// on the exact manifest and installer, plus signed size/SHA-256 admission.
 /// This grants NO automatic NSIS crash rollback (manual repair for beta).
 pub(super) const fn channel_ready() -> bool {
-    cfg!(all(target_os = "windows", feature = "installed"))
+    cfg!(all(target_os = "windows", feature = "installed", not(feature = "video-rust-bundle")))
 }
 
 #[derive(Clone, Debug)]
@@ -172,8 +172,8 @@ mod input_tests {
             .expect("owner-provided key must be a valid Minisign public key");
         assert_eq!(
             channel_ready(),
-            cfg!(all(target_os = "windows", feature = "installed")),
-            "only signed installed Windows beta may use Akula-owned releases",
+            cfg!(all(target_os = "windows", feature = "installed", not(feature = "video-rust-bundle"))),
+            "experimental video bundle must not inherit the two-EXE updater",
         );
     }
 
