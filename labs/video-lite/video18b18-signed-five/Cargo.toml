@@ -8,6 +8,10 @@ description = "Nonshipping five-component signed candidate admission proof, no u
 
 [workspace]
 
+[features]
+# Compiled only into an ephemeral GitHub-hosted Windows test controller.
+lab-only-signature = []
+
 [dependencies]
 base64 = "0.22"
 minisign-verify = "0.2"

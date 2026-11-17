@@ -61,23 +61,30 @@ struct Component {
 /// The digest binds a future generation-specific ACK to the exact signed
 /// manifest bytes, not just a freely caller-supplied version string.
 #[derive(Debug)]
-pub(crate) struct SignedFive {
+pub struct SignedFive {
     manifest_sha256: String,
     manifest: Manifest,
 }
 impl SignedFive {
-    pub(crate) fn version(&self) -> &str {
+    pub fn version(&self) -> &str {
         &self.manifest.version
     }
-    pub(crate) fn generation_sha256(&self) -> &str {
+    pub fn generation_sha256(&self) -> &str {
         &self.manifest_sha256
+    }
+    /// Authenticated build provenance, never supplied by a raw caller.
+    pub fn source_commit(&self) -> &str {
+        &self.manifest.source_commit
+    }
+    pub fn cargo_lock_sha256(&self) -> &str {
+        &self.manifest.cargo_lock_sha256
     }
 
     /// Verify a caller-selected staging directory under an external trusted
     /// install lock. This neither grants authority to that path nor prevents a
     /// subsequent TOCTOU mutation. The privileged controller must enforce
     /// the protected root, ACL, lock, and rehash at its own activation point.
-    pub(crate) fn verify_stage(&self, current: &Path) -> Result<(), String> {
+    pub fn verify_stage(&self, current: &Path) -> Result<(), String> {
         check_path(current, true)?;
         let entries = fs::read_dir(current)
             .map_err(|e| hold(&format!("cannot enumerate staged generation: {e}")))?
@@ -198,6 +205,26 @@ fn admit_with_key(
     let manifest = inspect_authenticated(raw, installed_floor)?;
     let manifest_sha256 = Sha256::digest(raw).iter().map(|b| format!("{b:02x}")).collect();
     Ok(SignedFive { manifest_sha256, manifest })
+}
+
+/// PR-only injection of an ephemeral verification key for protected Windows
+/// integration tests. Not a product entrypoint: the standalone Cargo package
+/// is publish=false and no Akula runtime Cargo graph imports it.
+#[cfg(all(windows, feature = "lab-only-signature"))]
+pub fn admit_hosted_lab_signature(
+    raw: &[u8], signature: &str, test_key: &str, installed_floor: &str,
+) -> Result<SignedFive, String> {
+    for (name, expected) in [
+        ("GITHUB_ACTIONS", "true"),
+        ("RUNNER_OS", "Windows"),
+        ("RUNNER_ENVIRONMENT", "github-hosted"),
+        ("GITHUB_EVENT_NAME", "pull_request"),
+    ] {
+        if std::env::var(name).ok().as_deref() != Some(expected) {
+            return Err(hold("disposable hosted Windows PR proof only"));
+        }
+    }
+    admit_with_key(raw, signature, test_key, installed_floor)
 }
 
 /// No video release authority is currently enabled, even though Akula has an
