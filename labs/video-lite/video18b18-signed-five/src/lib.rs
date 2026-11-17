@@ -196,7 +196,7 @@ fn admit_with_key(
     verify(raw, signature, trusted_key)
         .map_err(|_| hold("publisher signature authentication failed"))?;
     let manifest = inspect_authenticated(raw, installed_floor)?;
-    let manifest_sha256 = format!("{:x}", Sha256::digest(raw));
+    let manifest_sha256 = Sha256::digest(raw).iter().map(|b| format!("{b:02x}")).collect();
     Ok(SignedFive { manifest_sha256, manifest })
 }
 
@@ -259,7 +259,7 @@ fn hash_pe(path: &Path) -> Result<(u64, String), String> {
     if bytes != initial.len() || bytes != after.len() {
         return Err(hold("PE changed size during verification"));
     }
-    Ok((bytes, format!("{:x}", hasher.finalize())))
+    Ok((bytes, hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()))
 }
 
 #[cfg(test)]
@@ -285,7 +285,7 @@ mod tests {
         let (root, bytes, signature, key) = fixture();
         let admitted = admit_with_key(&bytes, &signature, &key, "0.3.20").unwrap();
         assert_eq!(admitted.version(), "0.3.21");
-        assert_eq!(admitted.generation_sha256(), format!("{:x}", Sha256::digest(&bytes)));
+        assert_eq!(admitted.generation_sha256(), Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect::<String>());
         let stage = root.join("current");
         admitted.verify_stage(&stage).unwrap();
         let mut changed = bytes.clone();
@@ -354,20 +354,19 @@ mod tests {
             assert!(inspect_authenticated(&serde_json::to_vec(&data).unwrap(), "0.3.20").is_err(), "{bad}");
         }
         data["version"] = json!("0.3.21");
-        let components = data["components"].as_array_mut().unwrap();
-        components.swap(0, 1);
+        data["components"].as_array_mut().unwrap().swap(0, 1);
         assert!(inspect_authenticated(&serde_json::to_vec(&data).unwrap(), "0.3.20").is_err());
-        components.swap(0, 1);
-        components[4]["filename"] = json!("AKULA-QUICKJS.exe");
+        data["components"].as_array_mut().unwrap().swap(0, 1);
+        data["components"][4]["filename"] = json!("AKULA-QUICKJS.exe");
         assert!(inspect_authenticated(&serde_json::to_vec(&data).unwrap(), "0.3.20").is_err());
-        components[4]["filename"] = json!("akula-quickjs.exe");
-        let duplicated = components[4].clone();
-        components.push(duplicated);
+        data["components"][4]["filename"] = json!("akula-quickjs.exe");
+        let duplicate = data["components"][4].clone();
+        data["components"].as_array_mut().unwrap().push(duplicate);
         assert!(inspect_authenticated(&serde_json::to_vec(&data).unwrap(), "0.3.20").is_err());
-        components.pop();
-        components[0]["sha256"] = json!("A".repeat(64));
+        data["components"].as_array_mut().unwrap().pop();
+        data["components"][0]["sha256"] = json!("A".repeat(64));
         assert!(inspect_authenticated(&serde_json::to_vec(&data).unwrap(), "0.3.20").is_err());
-        components[0]["sha256"] = json!("a".repeat(64));
+        data["components"][0]["sha256"] = json!("a".repeat(64));
         data["unexpected"] = json!(true);
         assert!(inspect_authenticated(&serde_json::to_vec(&data).unwrap(), "0.3.20").is_err());
     }
