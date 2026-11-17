@@ -33,6 +33,8 @@ if ((git -C (Join-Path $repo '_shiva-preview') rev-parse HEAD).Trim() -cne
     '40b72a90b1dac39812c77c7321e57d613a81cb51') {
     throw 'VIDEO18B04 upstream Shiva source is not pinned'
 }
+# The checked-out Shiva revision has NO tracked Cargo.lock. Cargo may
+# generate a lock during the build; record its digest as UNREVIEWED evidence.
 $lockPaths = @('aquilum-app/Cargo.lock','labs/video-lite/Cargo.lock','_shiva-preview/Cargo.lock')
 $locks = [ordered]@{}
 foreach ($lock in $lockPaths) {
@@ -42,6 +44,8 @@ foreach ($lock in $lockPaths) {
     }
     $locks[$lock] = (Get-FileHash -LiteralPath $lockfile -Algorithm SHA256).Hash.ToLowerInvariant()
 }
+$shivaLockReview = 'GENERATED_UNREVIEWED_NOT_TRACKED_IN_PINNED_REVISION'
+Write-Host 'VIDEO18B04_SHIVA_LOCK_HOLD generated_dependency_lock_is_not_a_source_pin=1'
 function Reject-Reparse([string]$path) {
     $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
@@ -137,6 +141,7 @@ try {
         mode = 'NON-RELEASE FIVE-EXE CUSTODY - UNSIGNED'
         source_commit = $env:EXPECTED_HEAD_SHA
         shiva_commit = '40b72a90b1dac39812c77c7321e57d613a81cb51'
+        shiva_lock_review = $shivaLockReview
         lock_sha256 = $locks
         release_admitted = $false
         files = $records
