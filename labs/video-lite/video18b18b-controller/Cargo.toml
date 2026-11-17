@@ -1,0 +1,15 @@
+[package]
+name = "akula-video18b18b-controller-lab"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Nonshipping protected Windows controller witness over signed five PE set"
+
+[workspace]
+
+[dependencies]
+akula-video18b18-signed-five = { path = "../video18b18-signed-five", features = ["lab-only-signature"] }
+chaptera-update-engine = { path = "../../../_rar2-pinned/crates/chaptera-update-engine" }
+chaptera-update-orchestrator = { path = "../../../_rar2-pinned/crates/chaptera-update-orchestrator" }
+base64 = "0.22"
+sha2 = "0.10"
