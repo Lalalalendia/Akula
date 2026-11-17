@@ -9,10 +9,10 @@ const COMPONENTS: [&str; 5] = [
     "akula-yt-dlp.exe", "akula-quickjs.exe",
 ];
 
-fn seed(dir: &Path, gen: &str) {
+fn seed(dir: &Path, generation: &str) {
     fs::create_dir_all(dir).unwrap();
     for name in COMPONENTS {
-        fs::write(dir.join(name), format!("MZ-VIDEO18B15-{gen}-{name}")).unwrap();
+        fs::write(dir.join(name), format!("MZ-VIDEO18B15-{generation}-{name}")).unwrap();
     }
 }
 fn exact_five(dir: &Path) -> Result<(), String> {
@@ -46,11 +46,11 @@ fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
     fs::write(&note,b"preserve private note\n").unwrap();
     (tmp,root,candidate,note)
 }
-fn assert_generation(dir: &Path, gen: &str) {
+fn assert_generation(dir: &Path, generation: &str) {
     exact_five(dir).unwrap();
     for name in COMPONENTS {
         assert_eq!(fs::read(dir.join(name)).unwrap(),
-                   format!("MZ-VIDEO18B15-{gen}-{name}").as_bytes());
+                   format!("MZ-VIDEO18B15-{generation}-{name}").as_bytes());
     }
 }
 fn begin(engine: &UpdateEngine, candidate: &Path, tx: &str) {
