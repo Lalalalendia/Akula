@@ -1,0 +1,77 @@
+name: Akula VIDEO-18b-15 pinned rar2 five-component adapter lab (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'labs/video-lite/video18b15_rar2_engine_bridge.rs'
+      - '.github/workflows/akula-video18b15-rar2-bridge.yml'
+      - '.github/scripts/video18b15-rar2-bridge.test.cjs'
+      - 'docs/release/video18b15-rar2-engine-bridge.md'
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Forbid unpinned source and updater publication
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Source and negative contracts
+        run: node --test .github/scripts/video18b15-rar2-bridge.test.cjs
+  engine:
+    name: Pinned rar2 engine five-Akula-fixture recovery
+    needs: contract
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/rar2
+          ref: 32a803e67244836d2794f9bbbdf9b24deab63d7e
+          path: _rar2-pinned
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Exact upstream pin, native Windows recovery, no shipping updater
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pin='32a803e67244836d2794f9bbbdf9b24deab63d7e'
+          if ((git -C _rar2-pinned rev-parse HEAD).Trim() -cne $pin) {
+            throw 'VIDEO18B15_HOLD: upstream rar2 source pin mismatch'
+          }
+          $source=Join-Path $env:GITHUB_WORKSPACE 'labs/video-lite/video18b15_rar2_engine_bridge.rs'
+          $dest=Join-Path $env:GITHUB_WORKSPACE '_rar2-pinned/crates/chaptera-update-engine/tests/video18b15_akula_five.rs'
+          if (!(Test-Path -LiteralPath $source -PathType Leaf) -or (Test-Path -LiteralPath $dest)) {
+            throw 'VIDEO18B15_HOLD: invalid isolated adapter test files'
+          }
+          Copy-Item -LiteralPath $source -Destination $dest -ErrorAction Stop
+          Push-Location _rar2-pinned
+          try {
+            # The audited rar2 source commit intentionally lacks a root Cargo.lock.
+            # Resolve in this isolated disposable checkout; never claim a pinned
+            # dependency graph or reuse the result as a production build.
+            if (Test-Path -LiteralPath Cargo.lock) {
+              throw 'VIDEO18B15_HOLD: unexpected unreviewed upstream lock state'
+            }
+            cargo generate-lockfile
+            if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath Cargo.lock)) {
+              throw 'VIDEO18B15_HOLD: disposable lab lock resolution failed'
+            }
+            Write-Host "VIDEO18B15_EPHEMERAL_LOCK_ONLY sha256=$((Get-FileHash -LiteralPath Cargo.lock -Algorithm SHA256).Hash.ToLowerInvariant())"
+            cargo test --locked -p chaptera-update-engine --test video18b15_akula_five -- --nocapture
+            if ($LASTEXITCODE -ne 0) {throw 'VIDEO18B15_HOLD: pinned engine adapter failed'}
+          } finally { Pop-Location }
+          Write-Host 'VIDEO18B15_PINNED_RAR2_ENGINE_AKULA_FIVE_PASS'
