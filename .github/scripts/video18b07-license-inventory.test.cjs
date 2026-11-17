@@ -47,9 +47,13 @@ test('VIDEO18B07 rejects missing graph nodes instead of silently truncating depe
   assert.throws(()=>reachablePackages(m,'cli'),/VIDEO18B07/);
 });
 test('VIDEO18B07 detects missing transitive license metadata and does not approve it',()=>{
-  const m=sampleAll();m.mux.packages[1].license=null;
+  const m=sampleAll();
+  // This package ID is shared by all three workspaces. Make all copies agree:
+  // a single immutable dependency cannot declare conflicting license metadata.
+  for (const workspace of Object.values(m)) workspace.packages[1].license=null;
   const r=makeInventory(m,allowance(),head);
   assert.equal(componentPackage(m.mux.packages[1]).review_status,'BLOCKED_MISSING_LICENSE_METADATA');
+  assert.equal(r.missing_license_metadata.length,1);
   assert.equal(r.release_admitted,false);
 });
 test('VIDEO18B07 rejects removed release HOLD',()=>{
