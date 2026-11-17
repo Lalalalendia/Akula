@@ -30,11 +30,11 @@ if ($allow.schema -ne 1 -or $allow.release_admitted -ne $false -or
     throw 'VIDEO18B04 source allowlist must remain an exact five-file non-release HOLD'
 }
 if ((git -C (Join-Path $repo '_shiva-preview') rev-parse HEAD).Trim() -cne
-    '40b72a90b1dac39812c77c7321e57d613a81cb51') {
+    'cb542d30d2c18a18b1ee457f5158d5b0f551757e') {
     throw 'VIDEO18B04 upstream Shiva source is not pinned'
 }
-# The checked-out Shiva revision has NO tracked Cargo.lock. Cargo may
-# generate a lock during the build; record its digest as UNREVIEWED evidence.
+# Shiva source revision contains an audited, tracked workspace Cargo.lock.
+# A generated/resolved lock in CI must never substitute for the pinned bytes.
 $lockPaths = @('aquilum-app/Cargo.lock','labs/video-lite/Cargo.lock','_shiva-preview/Cargo.lock')
 $locks = [ordered]@{}
 foreach ($lock in $lockPaths) {
@@ -44,8 +44,28 @@ foreach ($lock in $lockPaths) {
     }
     $locks[$lock] = (Get-FileHash -LiteralPath $lockfile -Algorithm SHA256).Hash.ToLowerInvariant()
 }
-$shivaLockReview = 'GENERATED_UNREVIEWED_NOT_TRACKED_IN_PINNED_REVISION'
-Write-Host 'VIDEO18B04_SHIVA_LOCK_HOLD generated_dependency_lock_is_not_a_source_pin=1'
+$shivaDir = Join-Path $repo '_shiva-preview'
+$trackedLock = (git -C $shivaDir ls-files --error-unmatch -- Cargo.lock 2>$null | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $trackedLock -cne 'Cargo.lock') {
+    throw 'VIDEO18B05 source-pinned Shiva Cargo.lock must be tracked in git'
+}
+$shivaDefinition = @($allow.components | Where-Object { $_.name -ceq 'shiva-pdf-preview.exe' })[0]
+$expectedShivaLock = $shivaDefinition.lock_sha256
+$expectedShivaCrlf = $shivaDefinition.checkout_crlf_sha256
+$expectedBlob = $shivaDefinition.git_blob_sha1
+$actualBlob = (git -C $shivaDir rev-parse HEAD:Cargo.lock).Trim()
+$shivaCheckoutHash = $locks['_shiva-preview/Cargo.lock']
+if (!$expectedShivaLock -or $expectedShivaLock.Length -ne 64 -or
+    $actualBlob -cne $expectedBlob -or
+    ($shivaCheckoutHash -cne $expectedShivaLock -and
+     $shivaCheckoutHash -cne $expectedShivaCrlf)) {
+    throw 'VIDEO18B05 Shiva Cargo.lock source blob or exact LF/CRLF checkout pin rejected'
+}
+# Git stores LF. Windows checkout can convert the exact text to CRLF.
+# Record the raw checkout SHA separately; report a canonical source SHA-256.
+$locks['_shiva-preview/Cargo.lock'] = $expectedShivaLock
+$shivaLockReview = 'TRACKED_SOURCE_LOCK_PINNED_TRANSITIVE_NOTICES_UNREVIEWED'
+Write-Host 'VIDEO18B05_SHIVA_LOCK_PIN_PASS tracked=1 source_blob=1 exact_checkout=1'
 function Reject-Reparse([string]$path) {
     $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
@@ -140,8 +160,9 @@ try {
         schema = 1
         mode = 'NON-RELEASE FIVE-EXE CUSTODY - UNSIGNED'
         source_commit = $env:EXPECTED_HEAD_SHA
-        shiva_commit = '40b72a90b1dac39812c77c7321e57d613a81cb51'
+        shiva_commit = 'cb542d30d2c18a18b1ee457f5158d5b0f551757e'
         shiva_lock_review = $shivaLockReview
+        shiva_lock_checkout_sha256 = $shivaCheckoutHash
         lock_sha256 = $locks
         release_admitted = $false
         files = $records
