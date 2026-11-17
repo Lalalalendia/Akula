@@ -1,0 +1,60 @@
+name: Akula VIDEO-18b-13 five-component crash recovery lab (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'labs/video-lite/video18b13_windows_transaction_lab.rs'
+      - '.github/scripts/video18b13-generation-crash-contract.test.cjs'
+      - '.github/workflows/akula-video18b13-generation-crash-lab.yml'
+      - 'docs/release/video18b13-five-exe-crash-recovery.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source-contract:
+    name: Fail-closed crash journal and no-release policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Refuse silent release admission or missing crash phases
+        run: node --test .github/scripts/video18b13-generation-crash-contract.test.cjs
+
+  windows-generation-recovery:
+    name: Windows OS-lock, five-file abrupt exit, recovery and ACK-only commit
+    needs: source-contract
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile the standalone NON-SHIPPING Rust state machine
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if($env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_EVENT_NAME -cne 'pull_request' -or $env:RUNNER_OS -cne 'Windows'){throw 'VIDEO18B13 hosted Windows PR only'}
+          if((git rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA){throw 'VIDEO18B13 checkout mismatch'}
+          rustc --edition=2021 --test -Dwarnings labs/video-lite/video18b13_windows_transaction_lab.rs -o (Join-Path $env:RUNNER_TEMP 'video18b13-crash-lab.exe')
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18B13 Rust transaction lab compile failed'}
+      - name: Run actual short-lived child process exit and five-file rollback tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe=Join-Path $env:RUNNER_TEMP 'video18b13-crash-lab.exe'
+          & $exe --nocapture --test-threads=1
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18B13 crash-recovery acceptance failed'}
+          Write-Host 'VIDEO18B13_FIVE_EXE_PROCESS_CRASH_RECOVERY_PASS synthetic=1 signed=0 release=0'
