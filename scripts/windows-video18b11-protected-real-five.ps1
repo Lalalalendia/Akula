@@ -167,8 +167,8 @@ try {
         throw 'VIDEO18B11 lab must preserve the non-release five-EXE source boundary'
     }
     $allowed = @(
-        ([IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\\') + '\\')
-        ([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\\') + '\\')
+        ([IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar)
+        ([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar)
     )
     $original = @{}
     foreach ($name in $names) {
