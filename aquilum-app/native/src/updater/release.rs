@@ -69,14 +69,7 @@ pub(super) const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1Ymx
 /// on the exact manifest and installer, plus signed size/SHA-256 admission.
 /// This grants NO automatic NSIS crash rollback (manual repair for beta).
 pub(super) const fn channel_ready() -> bool {
-    // VIDEO-18b-12: the existing signed per-user NSIS has no
-    // atomic five-EXE rollback. Keep stock two-EXE updates working,
-    // but refuse the experimental video bundle until transaction acceptance.
-    cfg!(all(
-        target_os = "windows",
-        feature = "installed",
-        not(feature = "video-rust-bundle")
-    ))
+    cfg!(all(target_os = "windows", feature = "installed", not(feature = "video-rust-bundle")))
 }
 
 #[derive(Clone, Debug)]
