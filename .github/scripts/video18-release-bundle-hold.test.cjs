@@ -97,6 +97,28 @@ function validateReleaseGates(cargo, signed) {
     'HOLD: publisher workflow cannot silently adopt unapproved helper binary set');
 }
 
+// The workflow must re-run whenever any file this security gate inspects
+// can change. Otherwise a packager edit can bypass an otherwise green gate.
+function validateHoldTriggerCoverage(workflow) {
+  const header = workflow.split(/\r?\npermissions:/, 1)[0];
+  assert.match(header, /^on:\r?\n  pull_request:/m, 'HOLD: missing PR event');
+  const lines = header.split(/\r?\n/);
+  for (const input of [
+    '.github/scripts/video18-release-bundle-hold.test.cjs',
+    '.github/workflows/akula-video18-release-bundle-hold.yml',
+    '.github/workflows/akula-windows-signed-candidate.yml',
+    'aquilum-app/native/Cargo.toml',
+    'aquilum-app/native/packaging/akula-windows.json',
+    'aquilum-app/native/packaging/akula-windows-video17-lab.json',
+    'scripts/akula-win7-nsis-candidate.ps1',
+    'scripts/akula-win7-signed-stage.ps1',
+    'scripts/test-windows-beta.ps1'
+  ]) {
+    assert.ok(lines.includes("      - '" + input + "'"),
+      'HOLD: missing signed-release trigger ' + input);
+  }
+}
+
 test('VIDEO-18 public signed NSIS remains two-binary and VIDEO-17 lab is isolated', () => {
   validatePackageSplit(config(RELEASE), config(LAB));
   const signed = file('.github/workflows/akula-windows-signed-candidate.yml');
@@ -159,4 +181,12 @@ test('VIDEO-18 refuses switching the signed publisher to the unsigned lab packag
   );
   assert.notEqual(changed, packager, 'the mutation must change the reviewed packaging route');
   assert.throws(() => validatePackagerRoute(signed, changed), /HOLD/);
+});
+
+test('VIDEO-18 cannot silently lose signed-installer workflow triggers', () => {
+  const workflow = file('.github/workflows/akula-video18-release-bundle-hold.yml');
+  validateHoldTriggerCoverage(workflow);
+  const removed = workflow.replace("      - 'scripts/akula-win7-nsis-candidate.ps1'\n", '');
+  assert.notEqual(removed, workflow, 'the negative test must remove a real path');
+  assert.throws(() => validateHoldTriggerCoverage(removed), /HOLD: missing signed-release trigger/);
 });
