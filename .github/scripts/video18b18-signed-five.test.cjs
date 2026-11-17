@@ -23,7 +23,7 @@ function verify(rust,wf,fixture,toml){
     'VIDEO18B18_HOLD: release channel must be disabled');
   assert.match(rust,/if !VIDEO_FIVE_CHANNEL_READY \{\s*return Err\(hold\("five-EXE release channel is disabled"\)\);/,
     'VIDEO18B18_HOLD: actual product admission must refuse before parse');
-  assert.match(rust,/verify\(raw, signature, trusted_key\)[\s\S]*?inspect_authenticated\(raw, installed_floor\)/,
+  assert.match(rust,/^\s+verify\(raw, signature, trusted_key\)\s*\.map_err\(\|_\| hold\("publisher signature authentication failed"\)\)\?;\s*let manifest = inspect_authenticated\(raw, installed_floor\)/m,
     'VIDEO18B18_HOLD: parse must follow authentic signature');
   assert.match(rust,/struct Manifest \{[\s\S]*?components: Vec<Component>,/,
     'VIDEO18B18_HOLD: sealed manifest must bind members');
