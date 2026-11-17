@@ -40,6 +40,16 @@ test('VIDEO18B09 reports only target-reachable Windows closure and keeps release
  assert.equal(r.license_text_review_complete,false);
  assert.equal(r.bundled_executables.length,5);
 });
+test('VIDEO18B10 local source does not imply first-party license ownership',()=>{
+ const a=sample();const local=a.evidence.packages.find(p=>p.name==='aquilum-native');
+ local.status='TEXT_NOT_VERIFIED';
+ const r=buildTriage(a.filtered,a.full,a.evidence,a.allow,head);
+ const entry=r.priority_review_queue.find(p=>p.name==='aquilum-native');
+ assert.equal(entry.source,'local-source');
+ assert.equal(entry.review_priority,'LOCAL_SOURCE_OR_VENDOR_REVIEW');
+ assert.ok(!r.priority_review_queue.some(p=>p.review_priority==='FIRST_PARTY_DOCUMENT'));
+ assert.equal(r.release_admitted,false);
+});
 test('VIDEO18B09 rejects release promotion, mismatched SHA, wrong five executable bundle',()=>{
  const a=sample();a.full.release_admitted=true;
  assert.throws(()=>buildTriage(a.filtered,a.full,a.evidence,a.allow,head),/HOLD/);
