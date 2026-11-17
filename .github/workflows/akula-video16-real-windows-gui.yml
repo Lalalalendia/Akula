@@ -5,7 +5,6 @@ on:
     branches: [main, feat/video03-one-click-offline-20261116]
     paths:
       - 'aquilum-app/native/src/video/ui_acceptance.rs'
-      - 'aquilum-app/native/src/ui/editor/widget/widget_events.rs'
       - 'labs/video-lite/video16/**'
       - 'scripts/windows-video16-real-gui.ps1'
       - '.github/workflows/akula-video16-real-windows-gui.yml'
@@ -58,6 +57,12 @@ jobs:
           assert 'ClientToScreen' in probe and 'target_client_pixel' in probe
           assert 'VIDEO16_{event}_CURSOR:' in probe
           assert 'ReadAllText($ProbePath).Contains' not in gui
+          assert '[IO.File]::Open($ProbePath' in gui
+          assert '[IO.FileShare]::ReadWrite' in gui
+          assert 'catch [System.IO.IOException]' in gui
+          assert 'function Complete-ProbeLines' in gui
+          assert '[IO.File]::ReadAllLines($ProbePath)' not in gui
+          assert 'VIDEO16 treated unterminated success as a real Play event' in gui
           for path in ['aquilum-app/native/packaging/akula-windows.json',
                        '.github/workflows/akula-video16-real-windows-gui.yml']:
               assert Path(path).is_file()

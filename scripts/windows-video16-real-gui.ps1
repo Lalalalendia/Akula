@@ -116,9 +116,45 @@ if (!(Exact-Event @('VIDEO16_CLICK_LOCAL_PLAY') 'CLICK_LOCAL_PLAY')) {
     throw 'VIDEO16 failed to recognize a real Play success'
 }
 Write-Host 'VIDEO16_EXACT_EVENT_MATCH_PASS'
+# Ignore a concurrently-written last line until Akula terminates it with LF.
+# This is a pure parser, not a replacement for exact GUI action witnesses.
+function Complete-ProbeLines([string]$Text) {
+    $last=$Text.LastIndexOf("`n")
+    if ($last -lt 0) { return @() }
+    return @($Text.Substring(0,$last+1) -split "`r?`n" |
+        Where-Object { $_.Length -gt 0 })
+}
+if (Exact-Event (Complete-ProbeLines "VIDEO16_CLICK_LOCAL_PLAY_ATTEMPT`nVIDEO16_CLICK_LOCAL_PLAY") 'CLICK_LOCAL_PLAY') {
+    throw 'VIDEO16 treated unterminated success as a real Play event'
+}
+if (!(Exact-Event (Complete-ProbeLines "VIDEO16_CLICK_LOCAL_PLAY`n") 'CLICK_LOCAL_PLAY')) {
+    throw 'VIDEO16 failed to read a completed Play event'
+}
+# Both processes can access the diagnostic file concurrently. Windows
+# ReadAllLines() uses an incompatible default share mode when Rust appends.
+# A bounded retry handles any transient writer-exclusive open without
+# pretending that an event arrived.
+function Read-ProbeLines {
+    if (!(Test-Path -LiteralPath $ProbePath -PathType Leaf)) { return @() }
+    for ($attempt=0; $attempt -lt 16; $attempt++) {
+        $stream=$null; $reader=$null
+        try {
+            $stream=[IO.File]::Open($ProbePath,[IO.FileMode]::Open,
+                [IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+            $reader=[IO.StreamReader]::new($stream,[Text.Encoding]::UTF8,$true)
+            return @(Complete-ProbeLines $reader.ReadToEnd())
+        } catch [System.IO.IOException] {
+            if ($attempt -eq 15) { throw }
+        } finally {
+            if ($null -ne $reader) { $reader.Dispose() }
+            elseif ($null -ne $stream) { $stream.Dispose() }
+        }
+        Start-Sleep -Milliseconds 25
+    }
+    throw 'VIDEO16 probe read could not acquire shared file after bounded retries'
+}
 function Has-Event([string]$Name) {
-    if (!(Test-Path -LiteralPath $ProbePath -PathType Leaf)) { return $false }
-    return (Exact-Event ([IO.File]::ReadAllLines($ProbePath)) $Name)
+    return (Exact-Event (Read-ProbeLines) $Name)
 }
 function Start-Akula {
     $args = '--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $VaultPath,$DataDir,$note
@@ -193,7 +229,7 @@ function Find-Real-Hover([Diagnostics.Process]$P,[string]$Name) {
                 # Mouse moves are asynchronous: click the exact Win32 pixel
                 # reported by Akula's native hover hit-test, not scan position.
                 $prefix='VIDEO16_'+$Name+'_POINT:'
-                $record=@([IO.File]::ReadAllLines($ProbePath) |
+                $record=@(Read-ProbeLines |
                     Where-Object { $_.StartsWith($prefix, [StringComparison]::Ordinal) } |
                     Select-Object -Last 1)
                 if($record.Count -ne 1){throw "VIDEO16 hover point missing for $Name"}
@@ -280,7 +316,7 @@ try{
 } catch {
     if(Test-Path -LiteralPath $ProbePath -PathType Leaf) {
         Write-Host 'VIDEO16_GUI_EVENT_DIAGNOSTICS_BEGIN'
-        [IO.File]::ReadAllLines($ProbePath) | Select-Object -Last 25 |
+        Read-ProbeLines | Select-Object -Last 25 |
             ForEach-Object { Write-Host $_ }
         Write-Host 'VIDEO16_GUI_EVENT_DIAGNOSTICS_END'
     }
