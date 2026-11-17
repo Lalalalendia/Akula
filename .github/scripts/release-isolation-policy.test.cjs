@@ -58,7 +58,7 @@ test('RELEASE-LOCK refuses widening stock signed updater to the video experiment
   assert.ok(updater.includes(original));
   const weakened = updater.replace(original, 'feature = "video-rust-bundle"');
   assert.notEqual(weakened,updater);
-  const gate = weakened.split('pub(super) const fn channel_ready() -> bool {', 2)[1]?.split('\\n}',1)[0];
+  const gate = weakened.split('pub(super) const fn channel_ready() -> bool {', 2)[1]?.split('\n}',1)[0];
   assert.ok(gate, 'negative fixture must retain the release gate body');
   assert.throws(() => assert.match(gate,
     /cfg!\(all\(\s*target_os = "windows",\s*feature = "installed",\s*not\(feature = "video-rust-bundle"\)/,
