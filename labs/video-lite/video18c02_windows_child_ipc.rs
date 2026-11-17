@@ -15,6 +15,7 @@ mod lab {
     use std::mem::{size_of, zeroed};
     use std::os::windows::ffi::OsStrExt;
     use std::ptr::{null, null_mut};
+    use std::time::{Duration, Instant};
 
     const PIPE: u32 = 3;
     const INHERIT: u32 = 1;
@@ -71,6 +72,8 @@ mod lab {
         fn WaitForSingleObject(handle: *mut c_void, milliseconds: u32) -> u32;
         fn GetExitCodeProcess(handle: *mut c_void, code: *mut u32) -> i32;
         fn TerminateProcess(handle: *mut c_void, code: u32) -> i32;
+        fn PeekNamedPipe(handle: *mut c_void, buffer: *mut c_void, bytes: u32,
+            read: *mut u32, available: *mut u32, left: *mut u32) -> i32;
         fn ReadFile(handle: *mut c_void, buffer: *mut c_void, bytes: u32,
             read: *mut u32, overlapped: *mut c_void) -> i32;
         fn WriteFile(handle: *mut c_void, buffer: *const c_void, bytes: u32,
@@ -222,13 +225,30 @@ mod lab {
         if unsafe { GetExitCodeProcess(process.0, &mut exit) } == 0 {
             return Err("child exit cannot be verified".into());
         }
+        // Child exit does not imply pipe EOF: a malicious descendant might
+        // inherit its write end. Never block on a blind synchronous ReadFile.
+        // PeekNamedPipe reports bytes already available without waiting; only
+        // ReadFile that many bytes, and stop within a separate receive deadline.
+        let read_deadline = Instant::now() + Duration::from_secs(3);
         let mut all = Vec::new();
-        loop {
+        while Instant::now() < read_deadline {
+            let mut available = 0u32;
+            if unsafe { PeekNamedPipe(reader.0, null_mut(), 0,
+                null_mut(), &mut available, null_mut()) } == 0 {
+                break; // Broken or unreadable pipe: fail closed unless exact ACK.
+            }
+            if available == 0 {
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
+            if available > 256 || all.len() + available as usize > 256 {
+                break; // Duplicate/oversized ACK: do not read beyond protocol cap.
+            }
             let mut part = [0u8; 256];
             let mut got = 0u32;
-            let ok = unsafe { ReadFile(reader.0, part.as_mut_ptr().cast(), 256,
-                &mut got, null_mut()) };
-            if ok == 0 || got == 0 { break; } // Child exited and pipe is closed.
+            let ok = unsafe { ReadFile(reader.0, part.as_mut_ptr().cast(),
+                available, &mut got, null_mut()) };
+            if ok == 0 || got == 0 { break; }
             all.extend_from_slice(&part[..got as usize]);
             if all.len() > 256 { break; }
         }
