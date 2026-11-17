@@ -57,6 +57,12 @@ jobs:
           assert 'ClientToScreen' in probe and 'target_client_pixel' in probe
           assert 'VIDEO16_{event}_CURSOR:' in probe
           assert 'ReadAllText($ProbePath).Contains' not in gui
+          assert '[IO.File]::Open($ProbePath' in gui
+          assert '[IO.FileShare]::ReadWrite' in gui
+          assert 'catch [System.IO.IOException]' in gui
+          assert 'function Complete-ProbeLines' in gui
+          assert '[IO.File]::ReadAllLines($ProbePath)' not in gui
+          assert 'VIDEO16 treated unterminated success as a real Play event' in gui
           mouse=Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
           assert 'toolbar_items()' in mouse and 'r.center()' in mouse
           assert 'ui_acceptance::hover(' in mouse
