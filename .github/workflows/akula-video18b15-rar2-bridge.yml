@@ -60,6 +60,17 @@ jobs:
           Copy-Item -LiteralPath $source -Destination $dest -ErrorAction Stop
           Push-Location _rar2-pinned
           try {
+            # The audited rar2 source commit intentionally lacks a root Cargo.lock.
+            # Resolve in this isolated disposable checkout; never claim a pinned
+            # dependency graph or reuse the result as a production build.
+            if (Test-Path -LiteralPath Cargo.lock) {
+              throw 'VIDEO18B15_HOLD: unexpected unreviewed upstream lock state'
+            }
+            cargo generate-lockfile
+            if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath Cargo.lock)) {
+              throw 'VIDEO18B15_HOLD: disposable lab lock resolution failed'
+            }
+            Write-Host "VIDEO18B15_EPHEMERAL_LOCK_ONLY sha256=$((Get-FileHash -LiteralPath Cargo.lock -Algorithm SHA256).Hash.ToLowerInvariant())"
             cargo test --locked -p chaptera-update-engine --test video18b15_akula_five -- --nocapture
             if ($LASTEXITCODE -ne 0) {throw 'VIDEO18B15_HOLD: pinned engine adapter failed'}
           } finally { Pop-Location }
