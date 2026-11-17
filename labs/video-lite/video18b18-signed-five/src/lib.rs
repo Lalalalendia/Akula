@@ -72,6 +72,13 @@ impl SignedFive {
     pub fn generation_sha256(&self) -> &str {
         &self.manifest_sha256
     }
+    /// Authenticated build provenance, never supplied by a raw caller.
+    pub fn source_commit(&self) -> &str {
+        &self.manifest.source_commit
+    }
+    pub fn cargo_lock_sha256(&self) -> &str {
+        &self.manifest.cargo_lock_sha256
+    }
 
     /// Verify a caller-selected staging directory under an external trusted
     /// install lock. This neither grants authority to that path nor prevents a
