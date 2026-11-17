@@ -8,8 +8,6 @@ on:
       - 'scripts/windows-video17-installed-nsis.ps1'
       - 'scripts/windows-video16-real-gui.ps1'
       - 'aquilum-app/native/src/video/ui_acceptance.rs'
-      - 'aquilum-app/native/src/ui/editor/widget/widget_events.rs'
-      - 'aquilum-app/native/src/ui/editor/widget/media/mouse.rs'
       - '.github/workflows/akula-video17-nsis-installed-video.yml'
 
 permissions:
