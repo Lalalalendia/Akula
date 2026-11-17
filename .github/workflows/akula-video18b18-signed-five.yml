@@ -4,8 +4,8 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'aquilum-app/native/src/updater/release/video_five_candidate.rs'
-      - 'aquilum-app/native/src/updater/release.rs'
+      - 'labs/video-lite/video18b18-signed-five/src/lib.rs'
+      - 'labs/video-lite/video18b18-signed-five/Cargo.toml'
       - '.github/workflows/akula-video18b18-signed-five.yml'
       - '.github/scripts/video18b18-signed-five.test.cjs'
       - '.github/scripts/video18b18-five-fixture.cjs'
@@ -41,19 +41,12 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: aquilum-app -> ../.artifacts/cargo-native
-          shared-key: akula-main-gate-v1
-          add-job-id-key: false
-          save-if: false
-      - name: Install native Rust test requirements and offline Minisign
+      - name: Install offline test-only Minisign CLI
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq minisign libgtk-3-dev libxkbcommon-dev \
-            libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+          sudo apt-get install -y -qq minisign
       - name: Generate ephemeral unsigned five-MZ fixture and sign with disposable real key
         shell: bash
         env:
@@ -79,8 +72,16 @@ jobs:
           AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT: ${{ runner.temp }}/video18b18-${{ github.event.pull_request.number }}-${{ github.run_id }}
         run: |
           set -euo pipefail
-          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native \
-            --features video-ui-e2e video_five_candidate -- --nocapture
+          manifest='labs/video-lite/video18b18-signed-five/Cargo.toml'
+          lock='labs/video-lite/video18b18-signed-five/Cargo.lock'
+          if test -e "$lock"; then
+            echo 'VIDEO18B18_HOLD: unreviewed lock appeared in disposable proof' >&2
+            exit 1
+          fi
+          cargo generate-lockfile --manifest-path "$manifest"
+          test -s "$lock"
+          echo "VIDEO18B18_EPHEMERAL_LOCK_ONLY sha256=$(sha256sum "$lock" | cut -d' ' -f1)"
+          cargo test --manifest-path "$manifest" --locked -- --nocapture
           echo 'VIDEO18B18_SIGNED_FIVE_RUST_ADMISSION_PASS release=0'
       - name: Erase disposable private key and test files
         if: always()
