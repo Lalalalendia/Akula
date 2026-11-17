@@ -1,0 +1,95 @@
+name: Akula VIDEO-18b-18 real Minisign five-PE admission (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'labs/video-lite/video18b18-signed-five/src/lib.rs'
+      - 'labs/video-lite/video18b18-signed-five/Cargo.toml'
+      - '.github/workflows/akula-video18b18-signed-five.yml'
+      - '.github/scripts/video18b18-signed-five.test.cjs'
+      - '.github/scripts/video18b18-five-fixture.cjs'
+      - 'docs/release/video18b18-signed-five-admission.md'
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source:
+    name: Fail closed on signing root, five PE identity and disabled updater
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Source and negative contracts
+        run: node --test .github/scripts/video18b18-signed-five.test.cjs
+
+  offline-real-minisign:
+    name: Verify test-only Minisign signature and real Rust five-byte identity
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install offline test-only Minisign CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq minisign
+      - name: Generate ephemeral unsigned five-MZ fixture and sign with disposable real key
+        shell: bash
+        env:
+          AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT: ${{ runner.temp }}/video18b18-${{ github.event.pull_request.number }}-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          node .github/scripts/video18b18-five-fixture.cjs "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT"
+          minisign -G -W -s "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT/test-publisher.key" \
+            -p "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT/test-publisher.pub"
+          minisign -S -s "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT/test-publisher.key" \
+            -m "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT/five-manifest.json" \
+            -x "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT/five-manifest.minisig" \
+            -c 'VIDEO18B18 disposable non-release signature' -t 'test-only signature'
+          test -s "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT/five-manifest.minisig"
+          minisign -Vm "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT/five-manifest.json" \
+            -x "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT/five-manifest.minisig" \
+            -p "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT/test-publisher.pub" -Q
+          echo 'VIDEO18B18_REAL_MINISIGN_PR_FIXTURE_PASS'
+      - name: Run actual native Rust manifest signature/byte-level negative tests
+        shell: bash
+        env:
+          AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT: ${{ runner.temp }}/video18b18-${{ github.event.pull_request.number }}-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          manifest='labs/video-lite/video18b18-signed-five/Cargo.toml'
+          lock='labs/video-lite/video18b18-signed-five/Cargo.lock'
+          if test -e "$lock"; then
+            echo 'VIDEO18B18_HOLD: unreviewed lock appeared in disposable proof' >&2
+            exit 1
+          fi
+          cargo generate-lockfile --manifest-path "$manifest"
+          test -s "$lock"
+          echo "VIDEO18B18_EPHEMERAL_LOCK_ONLY sha256=$(sha256sum "$lock" | cut -d' ' -f1)"
+          cargo test --manifest-path "$manifest" --locked -- --nocapture
+          echo 'VIDEO18B18_SIGNED_FIVE_RUST_ADMISSION_PASS release=0'
+      - name: Erase disposable private key and test files
+        if: always()
+        shell: bash
+        env:
+          AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT: ${{ runner.temp }}/video18b18-${{ github.event.pull_request.number }}-${{ github.run_id }}
+        run: |
+          case "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT" in
+            "$RUNNER_TEMP"/video18b18-*) rm -rf -- "$AKULA_VIDEO18B18_SIGNED_FIXTURE_ROOT" ;;
+            *) echo 'VIDEO18B18_HOLD: refusing cleanup outside temp'; exit 1 ;;
+          esac
