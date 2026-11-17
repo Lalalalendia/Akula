@@ -6,6 +6,11 @@ use std::io::Read;
 // installation; the Windows transaction/Bridge/ACK remain separate gates.
 #[allow(dead_code)]
 mod signed_candidate;
+// Distinct five-PE publisher-signed VIDEO-18 candidate: separate release HOLD.
+// Neither normal Windows NSIS updates nor any product apply path may call this.
+#[cfg(any(test, all(target_os = "windows", feature = "video-rust-bundle")))]
+#[allow(dead_code)]
+mod video_five_candidate;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use signed_candidate::SignedCandidate;
 
