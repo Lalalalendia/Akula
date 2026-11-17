@@ -43,6 +43,13 @@ function verify(ps,mouse,py,wf){
     'local media leaked to note vault',
     'installed uninstall lost or altered private local media'
   ])assert.ok(ps.includes(term),'VIDEO18B14_HOLD: missing real NSIS/GUI boundary '+term);
+  // The Windows VIDEO-16 acceptance seam deliberately records events only to this basename.
+  // The per-run NSIS stage is a unique RUNNER_TEMP directory, not a global log.
+  assert.ok(ps.includes("$probe=Join-Path $stage 'video16-events.log'"),
+    'VIDEO18B14_HOLD: protected GUI probe filename cannot be observed by the native app');
+  assert.match(read('aquilum-app/native/src/video/ui_acceptance.rs'),
+    /path\.file_name\(\).*?Some\("video16-events\.log"\)/s,
+    'VIDEO18B14_HOLD: probe basename diverges from non-shipping app witness');
   assert.match(ps,/Start-Process -FilePath \$setup -ArgumentList '\/S' -Wait -PassThru/);
   assert.match(ps,/Start-Process -FilePath \$uninstaller -ArgumentList '\/S' -Wait -PassThru/);
   for(const term of [
@@ -112,4 +119,12 @@ test('VIDEO18B14 rejects missing fifth binary or loss of CI source trigger',()=>
   assert.notEqual(wf,badWf);
   assert.throws(()=>verify(ps,mouse,py,badWf),/VIDEO18B14_HOLD/);
   assert.throws(()=>verify(ps,mouse,py,wf+'\nworkflow_dispatch:\n'),/VIDEO18B14_HOLD/);
+});
+
+test('VIDEO18B14 rejects a renamed event probe that cannot receive native hover events',()=>{
+  const ps=read(paths.orchestrator), mouse=read(paths.pointer), py=read(paths.python), wf=read(paths.workflow);
+  const bad=ps.replace("$probe=Join-Path $stage 'video16-events.log'",
+    "$probe=Join-Path $stage 'video18b14-events.log'");
+  assert.notEqual(bad,ps);
+  assert.throws(()=>verify(bad,mouse,py,wf),/VIDEO18B14_HOLD/);
 });
