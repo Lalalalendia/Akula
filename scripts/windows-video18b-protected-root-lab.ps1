@@ -67,6 +67,11 @@ public static class AkulaVideo18bAclProbe {
         bool denied = false;
         try { operation(); }
         catch (UnauthorizedAccessException) { denied = true; }
+        catch (IOException ex) when (ex.HResult == unchecked((int)0x80070005)) {
+            // Some Win32 directory operations surface ERROR_ACCESS_DENIED as IOException.
+            denied = true;
+        }
+        if (denied) Console.WriteLine("VIDEO18B_EXACT_ACCESS_DENIED " + label);
         if (!denied)
             throw new InvalidOperationException("VIDEO18B standard-user mutation unexpectedly permitted: " + label);
     }
@@ -93,6 +98,7 @@ public static class AkulaVideo18bAclProbe {
                     ExpectDenied("overwrite:" + name, () => File.WriteAllText(file, "ATTACK", Encoding.UTF8));
                     denied++;
                 }
+                Console.WriteLine("VIDEO18B_FIVE_HELPER_READ_AND_OVERWRITE_DENIAL_PASS");
                 string ytdlp = Path.Combine(protectedRoot, "akula-yt-dlp.exe");
                 ExpectDenied("delete", () => File.Delete(ytdlp)); denied++;
                 ExpectDenied("rename", () => File.Move(ytdlp, ytdlp + ".renamed")); denied++;
@@ -140,6 +146,12 @@ try {
     $securePassword = ConvertTo-SecureString -String $password -AsPlainText -Force
     New-LocalUser -Name $accountName -Password $securePassword -PasswordNeverExpires -ErrorAction Stop | Out-Null
     $createdAccount = $true
+    # Local account creation may not add Users explicitly on every hosted image.
+    $usersSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+    $usersMembers = @(Get-LocalGroupMember -SID $usersSid -ErrorAction Stop)
+    if (@($usersMembers | Where-Object { $_.Name -match [regex]::Escape($accountName) }).Count -eq 0) {
+        Add-LocalGroupMember -SID $usersSid -Member $accountName -ErrorAction Stop
+    }
     if ([bool](Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop |
         Where-Object { $_.Name -match [regex]::Escape($accountName) })) {
         throw 'VIDEO18B fixture user unexpectedly belongs to Administrators'

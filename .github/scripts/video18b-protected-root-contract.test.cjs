@@ -42,6 +42,8 @@ function verifyLab(source, workflow) {
   assert.match(header, /^on:\r?\n  pull_request:\r?\n    branches: \[main\]/m);
   assert.ok(header.includes("      - '" + PS + "'"), 'VIDEO18B_HOLD: no source subscription');
   assert.ok(header.includes("      - '" + WF + "'"), 'VIDEO18B_HOLD: no workflow subscription');
+  assert.match(workflow, /concurrency:\s*\n  group:/, 'VIDEO18B_HOLD: missing workflow concurrency');
+  assert.match(workflow, /cancel-in-progress:/, 'VIDEO18B_HOLD: missing cancellation policy');
   assert.match(workflow, /runs-on: windows-2022/, 'VIDEO18B_HOLD: real Windows runner required');
   assert.match(workflow, /persist-credentials: false/, 'VIDEO18B_HOLD: repository credentials must not persist');
   assert.match(workflow, /windows-video18b-protected-root-lab\.ps1/, 'VIDEO18B_HOLD: real ACL lab must run');
@@ -55,6 +57,12 @@ test('VIDEO18B changing ACL to allow user write must be rejected', () => {
   const weaker = before.replace("'*S-1-5-32-545:(OI)(CI)RX'", "'*S-1-5-32-545:(OI)(CI)M'");
   assert.notEqual(weaker, before);
   assert.throws(() => verifyLab(weaker, read(WF)), /VIDEO18B_HOLD/);
+});
+test('VIDEO18B removing workflow concurrency must be rejected', () => {
+  const wf = read(WF);
+  const weaker = wf.replace(/concurrency:[\s\S]*?\njobs:/, 'jobs:');
+  assert.notEqual(weaker, wf);
+  assert.throws(() => verifyLab(read(PS), weaker), /VIDEO18B_HOLD/);
 });
 test('VIDEO18B removing user impersonation must be rejected', () => {
   const before = read(PS);
