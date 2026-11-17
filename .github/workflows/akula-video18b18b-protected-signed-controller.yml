@@ -165,10 +165,28 @@ jobs:
         run: |
           choco install nsis --version=3.11.0 --yes --no-progress
           if($LASTEXITCODE -ne 0){ throw 'VIDEO18B18B_HOLD: pinned NSIS compiler unavailable' }
-          choco install minisign --version=0.8.0 --yes --no-progress
-          if($LASTEXITCODE -ne 0 -or !(Get-Command minisign.exe -ErrorAction SilentlyContinue)){
-            throw 'VIDEO18B18B_HOLD: pinned lab-only Minisign CLI unavailable'
+          # Chocolatey minisign 0.8 does not support -W; use source-pinned
+          # upstream 0.12 with a reviewed immutable SHA-256 (Scoop/Main).
+          $url='https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip'
+          $sha='37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479'
+          $archive=Join-Path $env:RUNNER_TEMP 'video18b18b-minisign-0.12-win64.zip'
+          $directory=Join-Path $env:RUNNER_TEMP 'video18b18b-minisign-0.12'
+          Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+          if((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $sha){
+            throw 'VIDEO18B18B_HOLD: official minisign 0.12 archive SHA256 mismatch'
           }
+          Expand-Archive -LiteralPath $archive -DestinationPath $directory -ErrorAction Stop
+          $binaryDir=Join-Path $directory 'minisign-win64/x86_64'
+          $binary=Join-Path $binaryDir 'minisign.exe'
+          if(!(Test-Path -LiteralPath $binary -PathType Leaf)){
+            throw 'VIDEO18B18B_HOLD: pinned upstream Minisign x86_64 missing'
+          }
+          & $binary -v
+          if($LASTEXITCODE -ne 0){
+            throw 'VIDEO18B18B_HOLD: official Minisign 0.12 cannot start'
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $binaryDir
+          Write-Host 'VIDEO18B18B_PINNED_MINISIGN_012_PASS archive_sha256=1 x86_64=1'
           $tokens=$null; $errors=$null
           [System.Management.Automation.Language.Parser]::ParseFile(
             (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-video18b18b-protected-signed-controller.ps1'),
