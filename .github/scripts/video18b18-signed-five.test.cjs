@@ -75,7 +75,7 @@ function verify(rust,wf,fixture,toml){
     'video18b18-signed-five/Cargo.toml',
     'cargo generate-lockfile',
     'VIDEO18B18_EPHEMERAL_LOCK_ONLY',
-    'cargo test --locked',
+    'cargo test --manifest-path "$manifest" --locked',
     'persist-credentials: false',
     'permissions:\n  contents: read',
     'if: always()',
