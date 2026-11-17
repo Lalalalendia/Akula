@@ -5,6 +5,8 @@
 //! from an authorized editor snapshot. A row index here is an ephemeral
 //! snapshot locator, NEVER a durable key for review history.
 
+pub mod identity;
+
 use std::collections::BTreeSet;
 
 /// Explicit column roles chosen for each source table.
@@ -89,7 +91,6 @@ pub fn preview_table(
     let header = rows.first().ok_or(MappingError::MissingHeader)?;
     let width = header.len();
     mapping.validate(width)?;
-
     let mut items = Vec::new();
     let mut skipped = Vec::new();
     let data_rows = rows.len().saturating_sub(1);
@@ -103,7 +104,6 @@ pub fn preview_table(
             skipped.push(SkippedRow { source_row, problem: RowProblem::EmptyQuestion });
             continue;
         }
-
         // Do not conflate distinct meanings or infer synonyms.
         let mut accepted_answers: Vec<String> = Vec::new();
         for column in &mapping.answers {
