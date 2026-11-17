@@ -16,6 +16,8 @@ const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const names=['akula-app','shiva-pdf-preview','akula-video-mux','akula-yt-dlp','akula-quickjs'];
 function verify(ps,mouse,py,wf){
   for(const n of names)assert.ok(ps.includes("'"+n+"'"),'VIDEO18B14_HOLD: missing genuine EXE '+n);
+  assert.match(ps,/\$names=@\('akula-app','shiva-pdf-preview','akula-video-mux','akula-yt-dlp','akula-quickjs'\)/,
+    'VIDEO18B14_HOLD: actual stage must contain exact five expected binaries, in order');
   for(const term of [
     "RUNNER_ENVIRONMENT -cne 'github-hosted'",
     "GITHUB_EVENT_NAME -cne 'pull_request'",
