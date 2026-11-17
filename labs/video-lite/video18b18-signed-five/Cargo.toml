@@ -1,0 +1,16 @@
+[package]
+name = "akula-video18b18-signed-five"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
+description = "Nonshipping five-component signed candidate admission proof, no update authority"
+
+[workspace]
+
+[dependencies]
+base64 = "0.22"
+minisign-verify = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
