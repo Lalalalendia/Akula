@@ -69,6 +69,8 @@ function verify(a,am,c,cm,ps,wf){
   }
   for(const n of names)assert.ok(c.includes('"'+n+'"'),
     'VIDEO18B18B_HOLD: exact five PE names missing '+n);
+  assert.match(c,/let owner=InstallLock::try_acquire\(&root\)\.unwrap\(\);/,
+    'VIDEO18B18B_HOLD: primary OS lock must have one concrete owner');
   assert.ok(!/\bconfirm_candidate\s*\(/.test(c),
     'VIDEO18B18B_HOLD: cannot commit without a real presented-frame ACK');
   assert.ok(!/std::process::Command|ShellExecuteW|channel_ready\s*\(\s*\)/.test(c),
@@ -121,7 +123,7 @@ test('VIDEO18B18B negative: reject missing trust, replaced key or disabled OS lo
     [a.replace('admit_with_key(raw, signature, test_key, installed_floor)','inspect_authenticated(raw, installed_floor)'),am,c,cm,ps,wf],
     [a,am,c.replace('InstallLock::try_acquire(&root)','InstallLock::acquire(&root)'),cm,ps,wf],
     [a,am,c.replace('RecoveryOutcome::UnconfirmedCandidateRolledBack','RecoveryOutcome::NothingToDo'),cm,ps,wf],
-    [a,am,c,cm,ps.replace('ref: '+pin,'ref: main'),wf],
+    [a,am,c,cm,ps.replace("$pin='"+pin+"'", "$pin='main'"),wf],
   ];
   for(const row of cases) {
     assert.notDeepEqual(row,[a,am,c,cm,ps,wf]);
