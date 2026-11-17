@@ -1,0 +1,51 @@
+name: Akula VIDEO-18b-03 protected installed NSIS lab (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/windows-video18b03-protected-nsis-lab.ps1'
+      - 'scripts/video18b-protected-five-mock.nsi'
+      - '.github/scripts/video18b03-protected-nsis-contract.test.cjs'
+      - '.github/workflows/akula-video18b03-protected-nsis-lab.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Fail-closed protected NSIS policy and negative tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify installer scope and four fail-closed mutations
+        run: node --test .github/scripts/video18b03-protected-nsis-contract.test.cjs
+
+  protected-nsis:
+    name: Install real protected NSIS, reject 11 non-admin attacks and uninstall
+    needs: contract
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Install pinned NSIS 3.11.0 for laboratory only
+        shell: pwsh
+        run: |
+          choco install nsis --version=3.11.0 --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'VIDEO18B03 pinned lab compiler unavailable' }
+      - name: Install and probe isolated five-mock NSIS without release
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: ./scripts/windows-video18b03-protected-nsis-lab.ps1
