@@ -15,9 +15,13 @@ function fixture(){
  fs.writeFileSync(path.join(one,'Cargo.toml'),'[package]\nname="dummy"\n');
  fs.writeFileSync(path.join(one,'LICENSE'),'original terms');
  const pkg={id:'dummy 1.0.0',name:'dummy',version:'1.0.0',source:'local-source',manifest_path:path.join(one,'Cargo.toml'),license:'MIT'};
- const meta={packages:[pkg],resolve:{nodes:[{id:pkg.id,deps:[]}]}};
- const inventory={release_admitted:false,legal_approval:false,exact_akula_head:head,unique_packages:[{name:pkg.name,version:pkg.version,source:pkg.source}]};
- return {dir,one,pkg,meta,inventory};
+ const metas={};
+ for(const [key,name] of [['akula','aquilum-native'],['mux','akula-video-lite-lab'],['shiva','cli']]){
+   const rootPkg={...pkg,id:name+' 1.0.0',name};
+   metas[key]={packages:[rootPkg],resolve:{nodes:[{id:rootPkg.id,deps:[]}]}};
+ }
+ const inventory={release_admitted:false,legal_approval:false,exact_akula_head:head,unique_packages:Object.values(metas).map(x=>({name:x.packages[0].name,version:x.packages[0].version,source:x.packages[0].source}))};
+ return {dir,one,pkg,metas,inventory};
 }
 test('VIDEO18B08 records an actual license file by digest without auto approval',t=>{
  const f=fixture();t.after(()=>fs.rmSync(f.dir,{recursive:true,force:true}));
@@ -25,8 +29,8 @@ test('VIDEO18B08 records an actual license file by digest without auto approval'
  assert.equal(e.status,'TEXT_FOUND_REQUIRES_REVIEW');
  assert.equal(e.files[0].status,'PRESENT_UNREVIEWED');
  assert.match(e.files[0].sha256,/^[a-f0-9]{64}$/);
- const r=buildEvidence({akula:f.meta,mux:f.meta,shiva:f.meta},f.inventory,allow,head);
- assert.equal(r.package_count,1);
+ const r=buildEvidence(f.metas,f.inventory,allow,head);
+ assert.equal(r.package_count,3);
  assert.equal(r.release_admitted,false);
  assert.equal(r.legal_approval,false);
  assert.equal(r.license_text_review_complete,false);
@@ -44,10 +48,10 @@ test('VIDEO18B08 refuses path escape, missing file, oversized file and symlinks'
 });
 test('VIDEO18B08 rejects missing inventory closure, false approval, and incorrect SPDX',t=>{
  const f=fixture();t.after(()=>fs.rmSync(f.dir,{recursive:true,force:true}));
- assert.throws(()=>buildEvidence({akula:f.meta,mux:f.meta,shiva:f.meta},{...f.inventory,unique_packages:[]},allow,head),/mismatch/);
- assert.throws(()=>buildEvidence({akula:f.meta,mux:f.meta,shiva:f.meta},{...f.inventory,release_admitted:true},allow,head),/HOLD/);
+ assert.throws(()=>buildEvidence(f.metas,{...f.inventory,unique_packages:[]},allow,head),/mismatch/);
+ assert.throws(()=>buildEvidence(f.metas,{...f.inventory,release_admitted:true},allow,head),/HOLD/);
  const changed=structuredClone(allow);changed.components[2].license='unknown';
- assert.throws(()=>buildEvidence({akula:f.meta,mux:f.meta,shiva:f.meta},f.inventory,changed,head),/HOLD/);
+ assert.throws(()=>buildEvidence(f.metas,f.inventory,changed,head),/HOLD/);
 });
 test('VIDEO18B08 workflow is exact-head, read-only and retains HOLD',()=>{
  const header=workflow.split(/\r?\npermissions:/,1)[0];
