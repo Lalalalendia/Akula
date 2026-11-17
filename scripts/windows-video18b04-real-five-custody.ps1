@@ -49,13 +49,23 @@ $trackedLock = (git -C $shivaDir ls-files --error-unmatch -- Cargo.lock 2>$null 
 if ($LASTEXITCODE -ne 0 -or $trackedLock -cne 'Cargo.lock') {
     throw 'VIDEO18B05 source-pinned Shiva Cargo.lock must be tracked in git'
 }
-$expectedShivaLock = @($allow.components | Where-Object { $_.name -ceq 'shiva-pdf-preview.exe' })[0].lock_sha256
+$shivaDefinition = @($allow.components | Where-Object { $_.name -ceq 'shiva-pdf-preview.exe' })[0]
+$expectedShivaLock = $shivaDefinition.lock_sha256
+$expectedShivaCrlf = $shivaDefinition.checkout_crlf_sha256
+$expectedBlob = $shivaDefinition.git_blob_sha1
+$actualBlob = (git -C $shivaDir rev-parse HEAD:Cargo.lock).Trim()
+$shivaCheckoutHash = $locks['_shiva-preview/Cargo.lock']
 if (!$expectedShivaLock -or $expectedShivaLock.Length -ne 64 -or
-    $locks['_shiva-preview/Cargo.lock'] -cne $expectedShivaLock) {
-    throw 'VIDEO18B05 tracked Shiva Cargo.lock SHA256 differs from approved source pin'
+    $actualBlob -cne $expectedBlob -or
+    ($shivaCheckoutHash -cne $expectedShivaLock -and
+     $shivaCheckoutHash -cne $expectedShivaCrlf)) {
+    throw 'VIDEO18B05 Shiva Cargo.lock source blob or exact LF/CRLF checkout pin rejected'
 }
+# Git stores LF. Windows checkout can convert the exact text to CRLF.
+# Record the raw checkout SHA separately; report a canonical source SHA-256.
+$locks['_shiva-preview/Cargo.lock'] = $expectedShivaLock
 $shivaLockReview = 'TRACKED_SOURCE_LOCK_PINNED_TRANSITIVE_NOTICES_UNREVIEWED'
-Write-Host 'VIDEO18B05_SHIVA_LOCK_PIN_PASS tracked=1 sha256_match=1'
+Write-Host 'VIDEO18B05_SHIVA_LOCK_PIN_PASS tracked=1 source_blob=1 exact_checkout=1'
 function Reject-Reparse([string]$path) {
     $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
@@ -152,6 +162,7 @@ try {
         source_commit = $env:EXPECTED_HEAD_SHA
         shiva_commit = 'cb542d30d2c18a18b1ee457f5158d5b0f551757e'
         shiva_lock_review = $shivaLockReview
+        shiva_lock_checkout_sha256 = $shivaCheckoutHash
         lock_sha256 = $locks
         release_admitted = $false
         files = $records

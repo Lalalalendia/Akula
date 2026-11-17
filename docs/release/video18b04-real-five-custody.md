@@ -26,6 +26,10 @@ upstream runtimes, then:
    `Cargo.lock` is **tracked by Git at the exact source revision** and matches
    the pinned SHA-256 `62b83af03e4079f6603eef7f7170edc4138a8233ad57829adf13baacd3f2b1d4`. Shiva is built with `cargo --locked`.
    This solves dependency-version pinning, **not** the complete license audit.
+   The canonical Git blob is `e9d6d1feee9ef3c76df19ce24033e6f34f0181d6` and has the LF SHA-256
+   `62b83af03e4079f6603eef7f7170edc4138a8233ad57829adf13baacd3f2b1d4`. Windows checkouts can have CRLF line endings
+   (SHA-256 `80a05fc499cdc6961256d4b1569db828d6a5e56506aa37af60ac25c0d196c9f1`); the gate accepts only these two exact
+   byte representations of the one tracked source, not arbitrary changes.
 2. Copies exactly five actual PE/MZ executables to a disposable, non-release
    stage and verifies their sizes, SHA-256, reparse-point restrictions and
    source/copy equality.
