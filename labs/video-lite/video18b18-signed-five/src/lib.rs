@@ -61,15 +61,15 @@ struct Component {
 /// The digest binds a future generation-specific ACK to the exact signed
 /// manifest bytes, not just a freely caller-supplied version string.
 #[derive(Debug)]
-pub(super) struct SignedFive {
+pub(crate) struct SignedFive {
     manifest_sha256: String,
     manifest: Manifest,
 }
 impl SignedFive {
-    pub(super) fn version(&self) -> &str {
+    pub(crate) fn version(&self) -> &str {
         &self.manifest.version
     }
-    pub(super) fn generation_sha256(&self) -> &str {
+    pub(crate) fn generation_sha256(&self) -> &str {
         &self.manifest_sha256
     }
 
@@ -77,7 +77,7 @@ impl SignedFive {
     /// install lock. This neither grants authority to that path nor prevents a
     /// subsequent TOCTOU mutation. The privileged controller must enforce
     /// the protected root, ACL, lock, and rehash at its own activation point.
-    pub(super) fn verify_stage(&self, current: &Path) -> Result<(), String> {
+    pub(crate) fn verify_stage(&self, current: &Path) -> Result<(), String> {
         check_path(current, true)?;
         let entries = fs::read_dir(current)
             .map_err(|e| hold(&format!("cannot enumerate staged generation: {e}")))?
@@ -203,7 +203,7 @@ fn admit_with_key(
 /// No video release authority is currently enabled, even though Akula has an
 /// existing pinned publisher key for its ordinary two-component NSIS beta.
 #[allow(dead_code)]
-pub(super) fn admit(
+pub(crate) fn admit(
     raw: &[u8], signature: &str, installed_floor: &str,
 ) -> Result<SignedFive, String> {
     if !VIDEO_FIVE_CHANNEL_READY {
