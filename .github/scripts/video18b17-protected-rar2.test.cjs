@@ -73,6 +73,8 @@ function verify(rs,ps,wf){
  ]){
    assert.ok(rs.includes(word),'VIDEO18B17_HOLD: missing lock or rollback witness '+word);
  }
+ assert.match(rs,/const COMPONENTS: \[&str; 5\] = \[\s*"akula-app.exe",\s*"shiva-pdf-preview.exe",\s*"akula-video-mux.exe",\s*"akula-yt-dlp.exe",\s*"akula-quickjs.exe",?\s*\];/,
+   'VIDEO18B17_HOLD: exact five-member component declaration changed');
  for(const name of five)assert.ok(rs.includes('"'+name+'"'),
     'VIDEO18B17_HOLD: incomplete exact five PE allowlist '+name);
  assert.ok(!/confirm_candidate\s*\(/.test(rs),
