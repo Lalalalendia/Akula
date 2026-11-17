@@ -244,7 +244,7 @@ mod lab {
             ("GITHUB_EVENT_NAME", "pull_request"),
             ("RUNNER_OS", "Windows"),
             ("RUNNER_ENVIRONMENT", "github-hosted"),
-        ].iter().all(|(key, value)| std::env::var(key).as_deref() == Ok(*value))
+        ].iter().all(|(key, value)| matches!(std::env::var(key), Ok(v) if v == *value))
     }
 
     pub fn main() {
