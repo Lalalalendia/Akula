@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "scope": "VIDEO-18b-04 NON-RELEASE five-EXE provenance laboratory",
+  "supported_windows": [
+    "10",
+    "11"
+  ],
+  "release_admitted": false,
+  "installer_signing_authorized": false,
+  "stage_binary_distribution_authorized": false,
+  "independent_owner_approval_required": true,
+  "components": [
+    {
+      "name": "akula-app.exe",
+      "kind": "source-built",
+      "repository": "Lalalalendia/Akula",
+      "reference": "PR exact source HEAD",
+      "source_path": "aquilum-app/native",
+      "lock_path": "aquilum-app/Cargo.lock",
+      "license": "AGPL-3.0-only",
+      "license_notice": "LICENSE",
+      "license_status": "REVIEW_FOR_DISTRIBUTION"
+    },
+    {
+      "name": "shiva-pdf-preview.exe",
+      "kind": "source-built",
+      "repository": "Lalalalendia/shiva",
+      "reference": "40b72a90b1dac39812c77c7321e57d613a81cb51",
+      "source_path": "cli",
+      "lock_path": "_shiva-preview/Cargo.lock",
+      "license": "cli license-file ../LICENSE missing; lib states MIT OR Apache-2.0",
+      "license_notice": "LICENSE-MIT + LICENSE-APACHE",
+      "license_status": "BLOCKED_LICENSE_FILE_MISMATCH"
+    },
+    {
+      "name": "akula-video-mux.exe",
+      "kind": "source-built",
+      "repository": "Lalalalendia/Akula",
+      "reference": "PR exact source HEAD",
+      "source_path": "labs/video-lite",
+      "lock_path": "labs/video-lite/Cargo.lock",
+      "license": "not declared in labs/video-lite/Cargo.toml",
+      "license_notice": "LICENSE",
+      "license_status": "REVIEW_REQUIRED"
+    },
+    {
+      "name": "akula-yt-dlp.exe",
+      "kind": "pinned-upstream",
+      "repository": "yt-dlp/yt-dlp",
+      "reference": "2026.10.26",
+      "source_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe",
+      "sha256": "f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d",
+      "size_bytes": 23575744,
+      "license": "Unlicense",
+      "license_notice": "https://github.com/yt-dlp/yt-dlp/blob/2026.10.26/LICENSE",
+      "license_status": "REVIEW_BUNDLED_DEPENDENCIES"
+    },
+    {
+      "name": "akula-quickjs.exe",
+      "kind": "pinned-upstream",
+      "repository": "quickjs-ng/quickjs",
+      "reference": "v0.18.0",
+      "source_url": "https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe",
+      "sha256": "ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7",
+      "size_bytes": 1873152,
+      "license": "MIT",
+      "license_notice": "https://github.com/quickjs-ng/quickjs/blob/v0.18.0/LICENSE",
+      "license_status": "REVIEW_NOTICE_PACKAGING"
+    }
+  ],
+  "blocked_until": [
+    "Source and bundled-dependency license notices independently reviewed",
+    "Real signed protected installer with exact five-file custody accepted",
+    "Protected transactional update, rollback and installer identity migration accepted",
+    "Real media source compatibility and owner release approval accepted"
+  ]
+}
