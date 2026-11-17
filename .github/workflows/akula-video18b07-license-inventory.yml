@@ -1,0 +1,79 @@
+name: Akula VIDEO-18b-07 Rust transitive license inventory (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/scripts/video18b07-license-inventory.cjs'
+      - '.github/scripts/video18b07-license-inventory.test.cjs'
+      - '.github/workflows/akula-video18b07-license-inventory.yml'
+      - 'docs/release/video18b07-license-inventory.md'
+      - 'docs/release/video18b04-five-exe-allowlist.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source-contract:
+    name: Fail-closed license inventory and non-release contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Validate full reachable Cargo graph and negative release tests
+        run: node --test .github/scripts/video18b07-license-inventory.test.cjs
+
+  cargo-license-inventory:
+    name: Resolve exact Rust dependency licensing without executing any build
+    runs-on: ubuntu-24.04
+    needs: source-contract
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/shiva
+          ref: cb542d30d2c18a18b1ee457f5158d5b0f551757e
+          path: _shiva-preview
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Generate exact lock-backed reachable dependency graphs, all features
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --all-features --format-version 1 --manifest-path aquilum-app/Cargo.toml > "$RUNNER_TEMP/video18b07-akula.json"
+          cargo metadata --locked --all-features --format-version 1 --manifest-path labs/video-lite/Cargo.toml > "$RUNNER_TEMP/video18b07-mux.json"
+          cargo metadata --locked --all-features --format-version 1 --manifest-path _shiva-preview/Cargo.toml > "$RUNNER_TEMP/video18b07-shiva.json"
+          echo 'VIDEO18B07_ALL_FEATURES_LOCKED_METADATA_PASS'
+      - name: Generate review-only transitive SPDX metadata inventory with release HOLD
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test "$(git -C _shiva-preview rev-parse HEAD)" = 'cb542d30d2c18a18b1ee457f5158d5b0f551757e'
+          node .github/scripts/video18b07-license-inventory.cjs \
+            "$RUNNER_TEMP/video18b07-akula.json" \
+            "$RUNNER_TEMP/video18b07-mux.json" \
+            "$RUNNER_TEMP/video18b07-shiva.json" \
+            docs/release/video18b04-five-exe-allowlist.json \
+            "$EXPECTED_HEAD_SHA" \
+            "$RUNNER_TEMP/video18b07-license-HOLD.json"
+      - name: Retain only JSON metadata inventory for one day
+        uses: actions/upload-artifact@v4
+        with:
+          name: video18b07-rust-license-metadata-NOT-APPROVAL
+          path: ${{ runner.temp }}/video18b07-license-HOLD.json
+          if-no-files-found: error
+          retention-days: 1
