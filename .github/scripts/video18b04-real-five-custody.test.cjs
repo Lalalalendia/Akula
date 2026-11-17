@@ -37,7 +37,8 @@ function validate(p, ps, workflow, reference) {
   assert.equal(shiva.git_blob_sha1,'e9d6d1feee9ef3c76df19ce24033e6f34f0181d6');
   assert.equal(shiva.license_status,'REVIEW_TRANSITIVE_DEPENDENCY_NOTICES');
   assert.ok(shiva.license.includes('MIT OR Apache-2.0'),'HOLD: Shiva license metadata was not repaired');
-  assert.equal(p.components[2].license_status,'REVIEW_REQUIRED');
+  assert.equal(p.components[2].license_status,'REVIEW_TRANSITIVE_DEPENDENCY_NOTICES');
+  assert.equal(p.components[2].license,'AGPL-3.0-only');
   for (const c of p.components.filter(x=>x.kind==='pinned-upstream')) {
     const pin = pins[c.name];
     assert.ok(pin,'HOLD: unexpected upstream EXE');

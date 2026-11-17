@@ -1,0 +1,85 @@
+name: Akula VIDEO-18b-08 license file evidence (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/scripts/video18b08-license-file-evidence.cjs'
+      - '.github/scripts/video18b08-license-file-evidence.test.cjs'
+      - '.github/workflows/akula-video18b08-license-file-evidence.yml'
+      - '.github/scripts/video18b07-license-inventory.cjs'
+      - 'docs/release/video18b04-five-exe-allowlist.json'
+      - 'docs/release/video18b08-license-file-evidence.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Safe digest and release HOLD tests
+        run: node --test .github/scripts/video18b08-license-file-evidence.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs
+
+  cargo-license-file-evidence:
+    needs: source-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/shiva
+          ref: cb542d30d2c18a18b1ee457f5158d5b0f551757e
+          path: _shiva-preview
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve immutable Cargo dependency graphs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --all-features --format-version 1 --manifest-path aquilum-app/Cargo.toml > "$RUNNER_TEMP/video18b08-akula.json"
+          cargo metadata --locked --all-features --format-version 1 --manifest-path labs/video-lite/Cargo.toml > "$RUNNER_TEMP/video18b08-mux.json"
+          cargo metadata --locked --all-features --format-version 1 --manifest-path _shiva-preview/Cargo.toml > "$RUNNER_TEMP/video18b08-shiva.json"
+      - name: Collect bounded file evidence while refusing release
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test "$(git -C _shiva-preview rev-parse HEAD)" = 'cb542d30d2c18a18b1ee457f5158d5b0f551757e'
+          node .github/scripts/video18b07-license-inventory.cjs \
+            "$RUNNER_TEMP/video18b08-akula.json" \
+            "$RUNNER_TEMP/video18b08-mux.json" \
+            "$RUNNER_TEMP/video18b08-shiva.json" \
+            docs/release/video18b04-five-exe-allowlist.json \
+            "$EXPECTED_HEAD_SHA" \
+            "$RUNNER_TEMP/video18b08-inventory-HOLD.json"
+          node .github/scripts/video18b08-license-file-evidence.cjs \
+            "$RUNNER_TEMP/video18b08-akula.json" \
+            "$RUNNER_TEMP/video18b08-mux.json" \
+            "$RUNNER_TEMP/video18b08-shiva.json" \
+            "$RUNNER_TEMP/video18b08-inventory-HOLD.json" \
+            docs/release/video18b04-five-exe-allowlist.json \
+            "$EXPECTED_HEAD_SHA" \
+            "$RUNNER_TEMP/video18b08-license-file-evidence-HOLD.json"
+      - name: Retain JSON evidence only, not licenses or binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: video18b08-license-file-evidence-NOT-APPROVAL
+          path: ${{ runner.temp }}/video18b08-license-file-evidence-HOLD.json
+          if-no-files-found: error
+          retention-days: 1
