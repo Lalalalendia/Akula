@@ -224,7 +224,7 @@ try {
             throw 'VIDEO18B11 NSIS did not install all five genuine binaries'
         }
         Assert-NotReparse $file
-        if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -cne $original[$name]) {
+        if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $original[$name]) {
             throw 'VIDEO18B11 NSIS changed installed real EXE SHA256'
         }
     }
@@ -256,7 +256,7 @@ try {
     $proof = [AkulaVideo18bRealAclProbe]::Run($accountName, $password, $root, $media)
     foreach ($name in $names) {
         $file = Join-Path $root ($name + '.exe')
-        if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -cne $original[$name]) {
+        if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $original[$name]) {
             throw 'VIDEO18B11 protected executable was altered during an attacker test'
         }
     }
