@@ -2,6 +2,7 @@
 const fs=require('node:fs');
 const path=require('node:path');
 const crypto=require('node:crypto');
+const {reachablePackages}=require('./video18b07-license-inventory.cjs');
 const MAX_BYTES=256*1024;
 const CANDIDATES=['LICENSE','LICENSE-MIT','LICENSE-APACHE','LICENSE-APACHE-2.0','LICENSE.md','LICENSE.txt','LICENCE','LICENCE.md','COPYING','COPYING.md','NOTICE','NOTICE.md','NOTICE.txt','UNLICENSE'];
 function fileEvidence(root,relative){
@@ -37,11 +38,11 @@ function buildEvidence(metas,inventory,allow,head){
   if(!/^[0-9a-f]{40}$/.test(head)||!inventory||inventory.release_admitted!==false||inventory.legal_approval!==false||!Array.isArray(inventory.unique_packages))throw Error('VIDEO18B08: invalid inventory or HOLD');
   if(inventory.exact_akula_head!==head)throw Error('VIDEO18B08: inventory HEAD mismatch');
   if(!allow||allow.release_admitted!==false||allow.components?.length!==5||allow.components[2].license!=='AGPL-3.0-only')throw Error('VIDEO18B08: allowlist/HOLD mismatch');
-  const all=Object.values(metas).flatMap(meta=>{
-    if(!meta||!Array.isArray(meta.packages)||!Array.isArray(meta.resolve?.nodes))throw Error('VIDEO18B08: invalid Cargo graph');
-    const ids=new Set(meta.resolve.nodes.map(n=>n.id));
-    return meta.packages.filter(p=>ids.has(p.id));
-  });
+  const all=[
+    ...reachablePackages(metas.akula,'aquilum-native'),
+    ...reachablePackages(metas.mux,'akula-video-lite-lab'),
+    ...reachablePackages(metas.shiva,'cli'),
+  ];
   const byKey=new Map();
   for(const pkg of all){
     const key=[pkg.name,pkg.version,pkg.source||'local-source'].join('\u0001');
