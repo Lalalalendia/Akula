@@ -27,6 +27,7 @@ function verify(wf,rust){
     'permissions:\n  contents: read']){
     assert.ok(wf.includes(term),'VIDEO18B15_HOLD: missing source custody '+term);
   }
+  assert.match(rust,/const COMPONENTS: \[&str; 5\] = \[\s*"akula-app.exe",\s*"shiva-pdf-preview.exe",\s*"akula-video-mux.exe",\s*"akula-yt-dlp.exe",\s*"akula-quickjs.exe",?\s*\];/, 'VIDEO18B15_HOLD: exact five-member tuple changed');
   for(const term of ['UpdateEngine','RecoveryOutcome',
     'COMPONENTS: [&str; 5]', '"akula-app.exe"',
     '"shiva-pdf-preview.exe"','"akula-video-mux.exe"',
