@@ -51,6 +51,8 @@ function validate(p, ps, workflow, reference) {
     "GITHUB_EVENT_NAME -cne 'pull_request'",
     'EXPECTED_HEAD_SHA','Reject-Reparse','Check-Pe',
     'Get-AuthenticodeSignature',
+    'Check-Pe $target',
+    'VIDEO18B04_SHIVA_LOCK_HOLD',
     'AKULA_BUNDLED_MUX_SHA256',
     'VIDEO18B04_TAMPER_REFUSAL_PASS',
     'VIDEO18B04_LICENSE_RELEASE_HOLD_PASS',
@@ -99,6 +101,5 @@ test('VIDEO18B04 refuses disabled real custody PE test', () => {
   const [p,ps,wf,ref]=inputs();const changed=ps.replace('Check-Pe $target','');
   assert.notEqual(changed,ps);
   // In addition to the positive presence, prevent invalid stage mutation.
-  assert.ok(!changed.includes('Check-Pe $target'));
-  assert.ok(ps.includes('Check-Pe $target'));
+  assert.throws(()=>validate(p,changed,wf,ref),/HOLD/);
 });
