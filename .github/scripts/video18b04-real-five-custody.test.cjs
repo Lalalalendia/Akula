@@ -31,9 +31,11 @@ function validate(p, ps, workflow, reference) {
     }
   }
   const shiva = p.components[1];
-  assert.equal(shiva.reference,'40b72a90b1dac39812c77c7321e57d613a81cb51');
-  assert.equal(shiva.license_status,'BLOCKED_LICENSE_FILE_MISMATCH');
-  assert.ok(shiva.license.includes('../LICENSE missing'),'HOLD: Shiva CLI license-file mismatch not resolved');
+  assert.equal(shiva.reference,'cb542d30d2c18a18b1ee457f5158d5b0f551757e');
+  assert.equal(shiva.license_status,'REVIEW_TRANSITIVE_NOTICES');
+  assert.equal(shiva.license,'MIT OR Apache-2.0');
+  assert.ok(ps.includes('62b83af03e4079f6603eef7f7170edc4138a8233ad57829adf13baacd3f2b1d4'),'HOLD: missing immutable Shiva source lock SHA256');
+  assert.ok(workflow.includes('cargo build --release --locked --manifest-path _shiva-preview/Cargo.toml'),'HOLD: Shiva must build with --locked');
   assert.equal(p.components[2].license_status,'REVIEW_REQUIRED');
   for (const c of p.components.filter(x=>x.kind==='pinned-upstream')) {
     const pin = pins[c.name];
@@ -52,7 +54,7 @@ function validate(p, ps, workflow, reference) {
     'EXPECTED_HEAD_SHA','Reject-Reparse','Check-Pe',
     'Get-AuthenticodeSignature',
     'Check-Pe $target',
-    'VIDEO18B04_SHIVA_LOCK_HOLD',
+    'VIDEO18B04_SHIVA_LOCK_TRACKED_PASS',
     'AKULA_BUNDLED_MUX_SHA256',
     'VIDEO18B04_TAMPER_REFUSAL_PASS',
     'VIDEO18B04_LICENSE_RELEASE_HOLD_PASS',

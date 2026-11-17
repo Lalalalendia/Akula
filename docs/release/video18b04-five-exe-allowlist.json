@@ -25,12 +25,12 @@
       "name": "shiva-pdf-preview.exe",
       "kind": "source-built",
       "repository": "Lalalalendia/shiva",
-      "reference": "40b72a90b1dac39812c77c7321e57d613a81cb51",
+      "reference": "cb542d30d2c18a18b1ee457f5158d5b0f551757e",
       "source_path": "cli",
       "lock_path": "_shiva-preview/Cargo.lock",
-      "license": "cli license-file ../LICENSE missing; lib states MIT OR Apache-2.0",
+      "license": "MIT OR Apache-2.0",
       "license_notice": "LICENSE-MIT + LICENSE-APACHE",
-      "license_status": "BLOCKED_LICENSE_FILE_MISMATCH"
+      "license_status": "REVIEW_TRANSITIVE_NOTICES"
     },
     {
       "name": "akula-video-mux.exe",

@@ -30,11 +30,11 @@ if ($allow.schema -ne 1 -or $allow.release_admitted -ne $false -or
     throw 'VIDEO18B04 source allowlist must remain an exact five-file non-release HOLD'
 }
 if ((git -C (Join-Path $repo '_shiva-preview') rev-parse HEAD).Trim() -cne
-    '40b72a90b1dac39812c77c7321e57d613a81cb51') {
+    'cb542d30d2c18a18b1ee457f5158d5b0f551757e') {
     throw 'VIDEO18B04 upstream Shiva source is not pinned'
 }
-# The checked-out Shiva revision has NO tracked Cargo.lock. Cargo may
-# generate a lock during the build; record its digest as UNREVIEWED evidence.
+# Shiva source now tracks Cargo.lock. Verify exact Git commit and lock content.
+# License notice review remains a separate release HOLD.
 $lockPaths = @('aquilum-app/Cargo.lock','labs/video-lite/Cargo.lock','_shiva-preview/Cargo.lock')
 $locks = [ordered]@{}
 foreach ($lock in $lockPaths) {
@@ -44,8 +44,12 @@ foreach ($lock in $lockPaths) {
     }
     $locks[$lock] = (Get-FileHash -LiteralPath $lockfile -Algorithm SHA256).Hash.ToLowerInvariant()
 }
-$shivaLockReview = 'GENERATED_UNREVIEWED_NOT_TRACKED_IN_PINNED_REVISION'
-Write-Host 'VIDEO18B04_SHIVA_LOCK_HOLD generated_dependency_lock_is_not_a_source_pin=1'
+& git -C (Join-Path $repo '_shiva-preview') cat-file -e HEAD:Cargo.lock
+if ($LASTEXITCODE -ne 0 -or $locks['_shiva-preview/Cargo.lock'] -cne '62b83af03e4079f6603eef7f7170edc4138a8233ad57829adf13baacd3f2b1d4') {
+    throw 'VIDEO18B04 source-tracked Shiva Cargo.lock missing or SHA-256 changed'
+}
+$shivaLockReview = 'TRACKED_SOURCE_PINNED_TRANSITIVE_LICENSE_REVIEW_PENDING'
+Write-Host 'VIDEO18B04_SHIVA_LOCK_TRACKED_PASS source_committed=1 locked_build=1'
 function Reject-Reparse([string]$path) {
     $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
@@ -140,7 +144,7 @@ try {
         schema = 1
         mode = 'NON-RELEASE FIVE-EXE CUSTODY - UNSIGNED'
         source_commit = $env:EXPECTED_HEAD_SHA
-        shiva_commit = '40b72a90b1dac39812c77c7321e57d613a81cb51'
+        shiva_commit = 'cb542d30d2c18a18b1ee457f5158d5b0f551757e'
         shiva_lock_review = $shivaLockReview
         lock_sha256 = $locks
         release_admitted = $false
