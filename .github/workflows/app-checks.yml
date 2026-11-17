@@ -228,6 +228,8 @@ jobs:
         run: |
           set -euo pipefail
           node --test .github/scripts/release-source-contract.test.cjs
+          # Required on every PR, even if optional VIDEO-13/16/17 paths do not match.
+          node --test .github/scripts/video18-release-bundle-hold.test.cjs
           node .github/scripts/release-source-contract.cjs
           node --test .github/scripts/akula-version.test.cjs
           node scripts/akula-version.cjs check

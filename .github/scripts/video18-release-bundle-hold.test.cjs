@@ -105,6 +105,7 @@ function validateHoldTriggerCoverage(workflow) {
   const lines = header.split(/\r?\n/);
   for (const input of [
     '.github/scripts/video18-release-bundle-hold.test.cjs',
+    'aquilum-app/native/src/video/light_windows_version.rs',
     '.github/workflows/akula-video18-release-bundle-hold.yml',
     '.github/workflows/akula-windows-signed-candidate.yml',
     'aquilum-app/native/Cargo.toml',
@@ -189,4 +190,73 @@ test('VIDEO-18 cannot silently lose signed-installer workflow triggers', () => {
   const removed = workflow.replace("      - 'scripts/akula-win7-nsis-candidate.ps1'\n", '');
   assert.notEqual(removed, workflow, 'the negative test must remove a real path');
   assert.throws(() => validateHoldTriggerCoverage(removed), /HOLD: missing signed-release trigger/);
+});
+
+function validateWindowsVideoRuntimeGate(light, guard) {
+  assert.match(light,
+    /#\[cfg\(all\(windows, feature = "video-rust-bundle"\)\)\]\s*#\[path = "light_windows_version\.rs"\]\s*mod windows_version;/,
+    'HOLD: Windows runtime gate module must be feature-scoped');
+  const route = light.split('pub(super) fn download_one_or_legacy(', 2)[1];
+  assert.ok(route, 'HOLD: missing bundled downloader');
+  const gate = route.indexOf('windows_version::require_pinned_windows_video_runtime()?;');
+  const locate = route.indexOf('let application = std::env::current_exe()');
+  assert.ok(gate >= 0 && locate > gate,
+    'HOLD: pinned runtime must reject unsupported OS before locating tools');
+  assert.match(guard, /fn RtlGetVersion\(version: \*mut OsVersionInfo\) -> i32;/,
+    'HOLD: Windows version must be queried from ntdll');
+  assert.match(guard, /major\s*>=\s*10\b/,
+    'HOLD: pinned video runtime must require Windows 10 or newer');
+  assert.match(guard, /if unsafe \{ RtlGetVersion\(&mut version\) \} != 0/,
+    'HOLD: OS-probe failure must prevent executing helpers');
+  assert.match(guard, /!supports_pinned_windows_video_runtime\(version\.major\)/,
+    'HOLD: unsupported OS must be rejected at runtime');
+}
+
+test('VIDEO-18b experimental video downloader has a pre-spawn Windows 10+ gate', () => {
+  validateWindowsVideoRuntimeGate(
+    file('aquilum-app/native/src/video/light.rs'),
+    file('aquilum-app/native/src/video/light_windows_version.rs')
+  );
+});
+
+test('VIDEO-18b refuses removing the OS gate or lowering the Windows version floor', () => {
+  const light = file('aquilum-app/native/src/video/light.rs');
+  const guard = file('aquilum-app/native/src/video/light_windows_version.rs');
+  const noCall = light.replace('windows_version::require_pinned_windows_video_runtime()?;', '');
+  assert.notEqual(noCall, light);
+  assert.throws(() => validateWindowsVideoRuntimeGate(noCall, guard), /HOLD/);
+  const win7 = guard.replace('major >= 10', 'major >= 6');
+  assert.notEqual(win7, guard);
+  assert.throws(() => validateWindowsVideoRuntimeGate(light, win7), /HOLD/);
+  const unsupportedProbe = guard.replace('fn RtlGetVersion(', 'fn GetVersionExW(');
+  assert.notEqual(unsupportedProbe, guard);
+  assert.throws(() => validateWindowsVideoRuntimeGate(light, unsupportedProbe), /HOLD/);
+});
+
+function validateVersionGuardWorkflowCoverage(contents) {
+  const source = 'aquilum-app/native/src/video/light_windows_version.rs';
+  for (const [name, body] of Object.entries(contents)) {
+    const header = body.split(/\r?\npermissions:/, 1)[0];
+    assert.match(header, /^on:\r?\n  pull_request:/m, 'HOLD: missing PR trigger ' + name);
+    assert.ok(header.split(/\r?\n/).includes("      - '" + source + "'"),
+      'HOLD: missing Windows-version source trigger for ' + name);
+  }
+}
+
+test('VIDEO-18b changes to Windows-version guard must rerun real native GUI/NSIS and HOLD', () => {
+  const names = [
+    'akula-video13-trusted-mux-candidate.yml',
+    'akula-video16-real-windows-gui.yml',
+    'akula-video17-nsis-installed-video.yml',
+    'akula-video18-release-bundle-hold.yml'
+  ];
+  const workflows = Object.fromEntries(names.map(name =>
+    [name, file('.github/workflows/' + name)]));
+  validateVersionGuardWorkflowCoverage(workflows);
+  const name = names[2];
+  const mut = {...workflows, [name]: workflows[name].replace(
+    "      - 'aquilum-app/native/src/video/light_windows_version.rs'\n", '')};
+  assert.notEqual(mut[name], workflows[name], 'negative trigger mutation must modify workflow');
+  assert.throws(() => validateVersionGuardWorkflowCoverage(mut),
+    /HOLD: missing Windows-version source trigger/);
 });

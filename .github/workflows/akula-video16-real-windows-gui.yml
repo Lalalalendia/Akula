@@ -5,6 +5,7 @@ on:
     branches: [main, feat/video03-one-click-offline-20261116]
     paths:
       - 'aquilum-app/native/src/video/ui_acceptance.rs'
+      - 'aquilum-app/native/src/video/light_windows_version.rs'
       - 'labs/video-lite/video16/**'
       - 'scripts/windows-video16-real-gui.ps1'
       - '.github/workflows/akula-video16-real-windows-gui.yml'
@@ -55,6 +56,11 @@ jobs:
           assert 'VIDEO16_CLICK_LOCAL_PLAY_ATTEMPT' in gui
           assert 'ctx.window_transform() * point' in Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
           assert 'ClientToScreen' in probe and 'target_client_pixel' in probe
+          version = Path('aquilum-app/native/src/video/light_windows_version.rs').read_text()
+          assert 'RtlGetVersion' in version and 'requires Windows 10 or newer' in version
+          light = Path('aquilum-app/native/src/video/light.rs').read_text()
+          download = light.split('pub(super) fn download_one_or_legacy(', 1)[1]
+          assert download.index('windows_version::require_pinned_windows_video_runtime()?') < download.index('let application = std::env::current_exe()')
           assert 'VIDEO16_{event}_CURSOR:' in probe
           assert 'ReadAllText($ProbePath).Contains' not in gui
           assert '[IO.File]::Open($ProbePath' in gui
