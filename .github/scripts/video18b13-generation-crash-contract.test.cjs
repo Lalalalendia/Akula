@@ -46,7 +46,7 @@ test('VIDEO18B13 requires real Windows process crash, receipt, five-member rollb
 test('VIDEO18B13 rejects missing Windows OS lock or damaged generation receipt',()=>{
  const s=read(rust),w=read(wfPath);
  for(const token of ['lock.try_lock()','f.sync_all()','fs::rename(self.backup(),self.live())','VIDEO18B13-COMMITTED:']){
-  const m=s.replace(token,'DISABLED_'+token);
+  const m=s.replace(token,'REMOVED_BOUNDARY');
   assert.notEqual(m,s);
   assert.throws(()=>validate(m,w),/VIDEO18B13_HOLD/);
  }
