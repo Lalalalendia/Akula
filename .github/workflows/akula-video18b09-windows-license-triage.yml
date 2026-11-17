@@ -1,0 +1,105 @@
+name: Akula VIDEO-18b-09 Windows-target license triage (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/scripts/video18b09-windows-license-triage.cjs'
+      - '.github/scripts/video18b09-windows-license-triage.test.cjs'
+      - '.github/workflows/akula-video18b09-windows-license-triage.yml'
+      - '.github/scripts/video18b08-license-file-evidence.cjs'
+      - '.github/scripts/video18b07-license-inventory.cjs'
+      - 'docs/release/video18b04-five-exe-allowlist.json'
+      - 'docs/release/video18b09-windows-license-triage.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source-contract:
+    name: Fail-closed target closure and non-release tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify source, graph mismatch, license and release HOLD negatives
+        run: node --test .github/scripts/video18b09-windows-license-triage.test.cjs
+
+  windows-target-license-triage:
+    name: Windows-msvc pinned video feature closure and license review queue
+    needs: source-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/shiva
+          ref: cb542d30d2c18a18b1ee457f5158d5b0f551757e
+          path: _shiva-preview
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve exact pinned all-feature conservative reference graphs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --all-features --format-version 1 --manifest-path aquilum-app/Cargo.toml > "$RUNNER_TEMP/video18b09-full-akula.json"
+          cargo metadata --locked --all-features --format-version 1 --manifest-path labs/video-lite/Cargo.toml > "$RUNNER_TEMP/video18b09-full-mux.json"
+          cargo metadata --locked --all-features --format-version 1 --manifest-path _shiva-preview/Cargo.toml > "$RUNNER_TEMP/video18b09-full-shiva.json"
+      - name: Resolve Windows video feature graphs for precisely named package roots
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 --filter-platform x86_64-pc-windows-msvc \
+            --features installed,video-rust-bundle \
+            --manifest-path aquilum-app/native/Cargo.toml > "$RUNNER_TEMP/video18b09-win-akula.json"
+          cargo metadata --locked --format-version 1 --filter-platform x86_64-pc-windows-msvc \
+            --manifest-path labs/video-lite/Cargo.toml > "$RUNNER_TEMP/video18b09-win-mux.json"
+          cargo metadata --locked --format-version 1 --filter-platform x86_64-pc-windows-msvc \
+            --manifest-path _shiva-preview/cli/Cargo.toml > "$RUNNER_TEMP/video18b09-win-shiva.json"
+      - name: Reproduce immutable evidence and reject mismatched target graphs
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test "$(git -C _shiva-preview rev-parse HEAD)" = cb542d30d2c18a18b1ee457f5158d5b0f551757e
+          node .github/scripts/video18b07-license-inventory.cjs \
+            "$RUNNER_TEMP/video18b09-full-akula.json" \
+            "$RUNNER_TEMP/video18b09-full-mux.json" \
+            "$RUNNER_TEMP/video18b09-full-shiva.json" \
+            docs/release/video18b04-five-exe-allowlist.json \
+            "$EXPECTED_HEAD_SHA" "$RUNNER_TEMP/video18b09-full-inventory.json"
+          node .github/scripts/video18b08-license-file-evidence.cjs \
+            "$RUNNER_TEMP/video18b09-full-akula.json" \
+            "$RUNNER_TEMP/video18b09-full-mux.json" \
+            "$RUNNER_TEMP/video18b09-full-shiva.json" \
+            "$RUNNER_TEMP/video18b09-full-inventory.json" \
+            docs/release/video18b04-five-exe-allowlist.json \
+            "$EXPECTED_HEAD_SHA" "$RUNNER_TEMP/video18b09-full-evidence.json"
+          node .github/scripts/video18b09-windows-license-triage.cjs \
+            "$RUNNER_TEMP/video18b09-win-akula.json" \
+            "$RUNNER_TEMP/video18b09-win-mux.json" \
+            "$RUNNER_TEMP/video18b09-win-shiva.json" \
+            "$RUNNER_TEMP/video18b09-full-inventory.json" \
+            "$RUNNER_TEMP/video18b09-full-evidence.json" \
+            docs/release/video18b04-five-exe-allowlist.json \
+            "$EXPECTED_HEAD_SHA" "$RUNNER_TEMP/video18b09-windows-triage-HOLD.json"
+      - name: Retain only non-approval JSON report, no binaries or license texts
+        uses: actions/upload-artifact@v4
+        with:
+          name: video18b09-windows-target-licenses-NOT-APPROVAL
+          path: ${{ runner.temp }}/video18b09-windows-triage-HOLD.json
+          if-no-files-found: error
+          retention-days: 1
