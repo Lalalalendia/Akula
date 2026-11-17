@@ -53,7 +53,7 @@ test('Negative: removing OS PID or handle allowlist must fail source contract',(
   const src=read(sourcePath),wf=read(workflowPath);
   for(const [changedSource,changedWorkflow] of [
     [src.replace('GetProcessId(process.0)','GetCurrentProcessId()'),wf],
-    [src.replace('ATTRIBUTE_HANDLE_LIST','ATTRIBUTE_BAD_LIST'),wf],
+    [src.replaceAll('ATTRIBUTE_HANDLE_LIST','ATTRIBUTE_BAD_LIST'),wf],
     [src.replace('if all.len() > 256 { break; }','if false { break; }'),wf],
     [src,wf.replace("      - '"+sourcePath+"'\n",'')]
   ]) {
