@@ -90,9 +90,11 @@ function buildTriage(targetMetas,conservative,evidence,allowlist,head) {
   const packages=[...found.values()].sort((a,b)=>
     a.name.localeCompare(b.name)||a.version.localeCompare(b.version)||a.source.localeCompare(b.source));
   const needsText=packages.filter(p=>p.license_file_status==='TEXT_NOT_VERIFIED');
+  // Cargo `source=null` means a local checkout, not proven first-party ownership.
+  // Vendored third-party crates also appear as local-source; review provenance.
   // Priorities are review order, NOT evidence of a legal violation.
   for(const p of needsText) {
-    p.review_priority=p.source==='local-source'?'FIRST_PARTY_DOCUMENT':
+    p.review_priority=p.source==='local-source'?'LOCAL_SOURCE_OR_VENDOR_REVIEW':
       p.roots.includes('mux')||p.roots.includes('shiva')?'RUNTIME_COMPONENT_DEPENDENCY':'APPLICATION_DEPENDENCY';
   }
   return {
