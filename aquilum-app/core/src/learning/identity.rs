@@ -265,6 +265,34 @@ mod tests {
     }
 
     #[test]
+    fn empty_source_or_row_id_never_produces_a_match() {
+        let s = source();
+        let row = cells(&["eat", "есть"]);
+        let rows = vec![row.clone()];
+        let p = old(&s, &[("a", row)]);
+        let other = Source { note_id: String::new(), ..s.clone() };
+        assert_eq!(reconcile(&p, Current { source: &other, rows: &rows }), Err(Error::InvalidSource));
+        let mut p = p;
+        p.rows[0].id.clear();
+        assert_eq!(reconcile(&p, Current { source: &s, rows: &rows }), Err(Error::InvalidPreviousRow));
+    }
+
+    #[test]
+    fn missing_row_and_changed_context_never_reassign_history() {
+        let s = source();
+        let p = old(&s, &[("run", cells(&["run", "управлять", "company"]))]);
+        let removed = reconcile(&p, Current { source: &s, rows: &[] }).unwrap();
+        assert!(removed.attached.is_empty());
+        assert_eq!(removed.held[0].reason, HoldReason::MissingOrEdited);
+        assert!(removed.unbound.is_empty());
+        let changed = vec![cells(&["run", "управлять", "program"])];
+        let next = reconcile(&p, Current { source: &s, rows: &changed }).unwrap();
+        assert!(next.attached.is_empty());
+        assert_eq!(next.held[0].reason, HoldReason::MissingOrEdited);
+        assert_eq!(next.unbound, [1]);
+    }
+
+    #[test]
     fn distinct_cell_boundaries_and_unicode_do_not_collide() {
         assert_ne!(digest(&cells(&["ab", "c"])), digest(&cells(&["a", "bc"])));
         assert_ne!(digest(&cells(&["run|бегать"])), digest(&cells(&["run", "бегать"])));
