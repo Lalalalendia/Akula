@@ -105,6 +105,7 @@ function validateHoldTriggerCoverage(workflow) {
   const lines = header.split(/\r?\n/);
   for (const input of [
     '.github/scripts/video18-release-bundle-hold.test.cjs',
+    'aquilum-app/native/src/video/light_windows_version.rs',
     '.github/workflows/akula-video18-release-bundle-hold.yml',
     '.github/workflows/akula-windows-signed-candidate.yml',
     'aquilum-app/native/Cargo.toml',
@@ -230,4 +231,32 @@ test('VIDEO-18b refuses removing the OS gate or lowering the Windows version flo
   const unsupportedProbe = guard.replace('fn RtlGetVersion(', 'fn GetVersionExW(');
   assert.notEqual(unsupportedProbe, guard);
   assert.throws(() => validateWindowsVideoRuntimeGate(light, unsupportedProbe), /HOLD/);
+});
+
+function validateVersionGuardWorkflowCoverage(contents) {
+  const source = 'aquilum-app/native/src/video/light_windows_version.rs';
+  for (const [name, body] of Object.entries(contents)) {
+    const header = body.split(/\\r?\\npermissions:/, 1)[0];
+    assert.match(header, /^on:\\r?\\n  pull_request:/m, 'HOLD: missing PR trigger ' + name);
+    assert.ok(header.split(/\\r?\\n/).includes("      - '" + source + "'"),
+      'HOLD: missing Windows-version source trigger for ' + name);
+  }
+}
+
+test('VIDEO-18b changes to Windows-version guard must rerun real native GUI/NSIS and HOLD', () => {
+  const names = [
+    'akula-video13-trusted-mux-candidate.yml',
+    'akula-video16-real-windows-gui.yml',
+    'akula-video17-nsis-installed-video.yml',
+    'akula-video18-release-bundle-hold.yml'
+  ];
+  const workflows = Object.fromEntries(names.map(name =>
+    [name, file('.github/workflows/' + name)]));
+  validateVersionGuardWorkflowCoverage(workflows);
+  const name = names[2];
+  const mut = {...workflows, [name]: workflows[name].replace(
+    "      - 'aquilum-app/native/src/video/light_windows_version.rs'\\n", '')};
+  assert.notEqual(mut[name], workflows[name], 'negative trigger mutation must modify workflow');
+  assert.throws(() => validateVersionGuardWorkflowCoverage(mut),
+    /HOLD: missing Windows-version source trigger/);
 });

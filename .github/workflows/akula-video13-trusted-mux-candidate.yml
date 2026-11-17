@@ -5,6 +5,7 @@ on:
     branches: [main, feat/video03-one-click-offline-20261116]
     paths:
       - 'aquilum-app/native/src/video/light.rs'
+      - 'aquilum-app/native/src/video/light_windows_version.rs'
       - 'aquilum-app/native/src/video/light_tests.rs'
       - 'aquilum-app/native/Cargo.toml'
       - 'labs/video-lite/src/bin/dash.rs'
