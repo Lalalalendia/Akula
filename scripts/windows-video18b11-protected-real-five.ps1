@@ -166,8 +166,10 @@ try {
             (($names | ForEach-Object { $_ + '.exe' }) -join ',')) {
         throw 'VIDEO18B11 lab must preserve the non-release five-EXE source boundary'
     }
-    $allowed = @([IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\') + '\',
-                 [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\')
+    $allowed = @(
+        ([IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\\') + '\\')
+        ([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\\') + '\\')
+    )
     $original = @{}
     foreach ($name in $names) {
         $source = [IO.Path]::GetFullPath($sources[$name])
