@@ -48,7 +48,18 @@ test('safe standalone Windows beta remains separate; updater remains off', () =>
   assert.equal(decoded.split('\n')[0], 'untrusted comment: minisign public key: D7A66B6D4046F6C5');
   assert.match(decoded.split('\n')[1], /^RW[A-Za-z0-9+/]+$/);
   assert.equal(decoded.split('\n').filter(Boolean).length, 2);
-  assert.match(updater, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(target_os = "windows", feature = "installed"\)\)\s*\}/);
+  assert.match(updater, /pub\(super\) const fn channel_ready\(\) -> bool \{[\s\S]*?cfg!\(all\(\s*target_os = "windows",\s*feature = "installed",\s*not\(feature = "video-rust-bundle"\)\s*\)\)/,
+    'stock signed update remains enabled; experimental five-EXE update is HOLD');
+});
+
+test('RELEASE-LOCK refuses widening stock signed updater to the video experiment', () => {
+  const updater = file('aquilum-app/native/src/updater/release.rs');
+  const original = 'not(feature = "video-rust-bundle")';
+  assert.ok(updater.includes(original));
+  const weakened = updater.replace(original, 'feature = "video-rust-bundle"');
+  assert.notEqual(weakened,updater);
+  assert.doesNotMatch(weakened, /cfg!\(all\(\s*target_os = "windows",\s*feature = "installed",\s*not\(feature = "video-rust-bundle"\)/,
+    'negative fixture must actually lose the video-update HOLD');
 });
 
 test('this policy runs when the release workflow is edited', () => {
