@@ -42,9 +42,9 @@
       "reference": "PR exact source HEAD",
       "source_path": "labs/video-lite",
       "lock_path": "labs/video-lite/Cargo.lock",
-      "license": "not declared in labs/video-lite/Cargo.toml",
+      "license": "AGPL-3.0-only",
       "license_notice": "LICENSE",
-      "license_status": "REVIEW_REQUIRED"
+      "license_status": "REVIEW_TRANSITIVE_DEPENDENCY_NOTICES"
     },
     {
       "name": "akula-yt-dlp.exe",
