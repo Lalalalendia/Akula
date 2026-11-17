@@ -10,6 +10,9 @@ on:
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/native/packaging/akula-windows.json'
       - 'aquilum-app/native/packaging/akula-windows-video17-lab.json'
+      - 'scripts/akula-win7-nsis-candidate.ps1'
+      - 'scripts/akula-win7-signed-stage.ps1'
+      - 'scripts/test-windows-beta.ps1'
 
 permissions:
   contents: read
