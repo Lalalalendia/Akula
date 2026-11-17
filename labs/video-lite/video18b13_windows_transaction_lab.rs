@@ -71,9 +71,9 @@ struct Gate {
 impl Gate {
     fn acquire(root: &Path) -> Result<Self, String> {
         // Never permit running this test against real installation paths.
-        if std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
-            || std::env::var("GITHUB_EVENT_NAME").as_deref() != Ok("pull_request")
-            || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
+        if std::env::var("RUNNER_ENVIRONMENT").ok().as_deref() != Some("github-hosted")
+            || std::env::var("GITHUB_EVENT_NAME").ok().as_deref() != Some("pull_request")
+            || std::env::var("RUNNER_OS").ok().as_deref() != Some("Windows")
         {
             return Err("VIDEO18B13_HOLD: hosted Windows PR fixture required".into());
         }
