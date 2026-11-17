@@ -64,5 +64,5 @@ jobs:
           node --test .github/scripts/release-isolation-policy.test.cjs
           # Linux rollback/update authority must remain OFF even though the
           # independently signed Windows beta is now allowed.
-          grep -A2 'const fn channel_ready()' aquilum-app/native/src/updater/release.rs | grep -Fq 'cfg!(all(target_os = "windows", feature = "installed"))'
+          grep -A2 'const fn channel_ready()' aquilum-app/native/src/updater/release.rs | grep -Fq 'cfg!(all(target_os = "windows", feature = "installed", not(feature = "video-rust-bundle")))'
           echo 'AKULA_RELEASE_HOLD_PASS publisher_root=pinned linux_updater=disabled'
