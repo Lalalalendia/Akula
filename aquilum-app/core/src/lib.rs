@@ -5,6 +5,7 @@ pub mod app_core;
 pub mod documents;
 pub mod files;
 pub mod history;
+pub mod learning;
 pub mod link_title;
 pub mod markdown;
 #[cfg(feature = "messaging-core-lab")]
