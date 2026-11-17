@@ -1,0 +1,41 @@
+name: Akula VIDEO-18b-02 protected root Windows ACL negative lab (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/windows-video18b-protected-root-lab.ps1'
+      - '.github/scripts/video18b-protected-root-contract.test.cjs'
+      - '.github/workflows/akula-video18b-protected-root-lab.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Fail-closed source and workflow contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Run negative contract tests
+        run: node --test .github/scripts/video18b-protected-root-contract.test.cjs
+
+  protected-root:
+    name: Real non-admin token cannot mutate five protected mock EXEs
+    needs: contract
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Probe disposable protected root using unprivileged Windows user
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: ./scripts/windows-video18b-protected-root-lab.ps1
