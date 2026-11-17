@@ -286,12 +286,12 @@ fn video15_bundled_runtime_files_are_exact_pinned_siblings() {
 fn video18b_windows7_and_windows8_never_admit_pinned_toolchain() {
     for (major, minor) in [(5, 1), (6, 0), (6, 1), (6, 2), (6, 3), (9, 9)] {
         assert!(
-            !supports_pinned_windows_video_runtime(major),
+            !windows_version::supports_pinned_windows_video_runtime(major),
             "unsupported Windows {major}.{minor} admitted pinned yt-dlp"
         );
     }
     for major in [10, 11, 12] {
-        assert!(supports_pinned_windows_video_runtime(major));
+        assert!(windows_version::supports_pinned_windows_video_runtime(major));
     }
 }
 
@@ -300,7 +300,7 @@ fn video18b_windows7_and_windows8_never_admit_pinned_toolchain() {
 fn video18b_real_windows_version_probe_fails_closed() {
     // This test runs on the same host as VIDEO-13, but still does not prove
     // compatibility on an actual Windows 7/8 VM or release-ready packaging.
-    match require_pinned_windows_video_runtime() {
+    match windows_version::require_pinned_windows_video_runtime() {
         Ok(()) => println!("VIDEO18B_WIN10_RUNTIME_VERSION_PASS supported_host=1"),
         Err(error) => {
             assert!(

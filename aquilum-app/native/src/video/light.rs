@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use super::{download, library::{Library, LIBRARY_MAX, SINGLE_VIDEO_MAX}, youtube};
+#[cfg(all(windows, feature = "video-rust-bundle"))]
+#[path = "light_windows_version.rs"]
+mod windows_version;
 
 struct Stage(PathBuf);
 impl Stage {
@@ -241,9 +244,7 @@ fn download_rust_from_source(
     Ok(target)
 }
 
-// Official Windows binaries checked against the exact VIDEO-05 proof.
-// Updating either runtime requires a version/size/hash change plus CI proof.
-// Never download or update an executable from user content or runtime EJS.
+// VIDEO-05: pinned official runtimes. Never fetch executables or EJS at runtime.
 #[cfg(windows)]
 const QUICKJS_WINDOWS_BYTES: u64 = 1_873_152;
 #[cfg(windows)]
@@ -286,8 +287,7 @@ fn verify_pinned_runtime(_ytdlp: &Path, _quickjs: &Path) -> Result<(), String> {
     Err("VIDEO-09 opt-in is Windows-only until non-Windows executable pins are validated".into())
 }
 
-// Experimental Rust mux is resolved beside Akula, pinned at build time.
-// Never trust an adjacent unsigned manifest or an arbitrary helper path.
+// Experimental mux: pinned sibling of Akula, never an arbitrary runtime path.
 #[cfg(windows)]
 fn bundled_mux_from_exe(application: &Path, expected_sha256: &str) -> Result<PathBuf, String> {
     if expected_sha256.len() != 64
@@ -314,51 +314,6 @@ fn bundled_mux_from_exe(application: &Path, expected_sha256: &str) -> Result<Pat
     Ok(mux)
 }
 
-// The pinned official yt-dlp.exe requires Windows 10 or newer. Do not rely
-// on GetVersionExW, whose answer can depend on the application manifest.
-// The version-only gate does not authorize shipping or certify OS APIs.
-#[cfg(all(windows, feature = "video-rust-bundle"))]
-fn supports_pinned_windows_video_runtime(major: u32) -> bool {
-    major >= 10
-}
-
-#[cfg(all(windows, feature = "video-rust-bundle"))]
-fn require_pinned_windows_video_runtime() -> Result<(), String> {
-    // Exact C layout of RTL_OSVERSIONINFOW / OSVERSIONINFOW.
-    #[repr(C)]
-    struct OsVersionInfo {
-        size: u32,
-        major: u32,
-        minor: u32,
-        build: u32,
-        platform: u32,
-        service_pack: [u16; 128],
-    }
-    #[link(name = "ntdll")]
-    unsafe extern "system" {
-        fn RtlGetVersion(version: *mut OsVersionInfo) -> i32;
-    }
-    let mut version = OsVersionInfo {
-        size: std::mem::size_of::<OsVersionInfo>() as u32,
-        major: 0,
-        minor: 0,
-        build: 0,
-        platform: 0,
-        service_pack: [0; 128],
-    };
-    // NTSTATUS_SUCCESS is zero; an unqueryable OS fails closed.
-    if unsafe { RtlGetVersion(&mut version) } != 0 {
-        return Err("VIDEO-18b cannot verify Windows version; pinned yt-dlp must not run".into());
-    }
-    if !supports_pinned_windows_video_runtime(version.major) {
-        return Err(format!(
-            "VIDEO-18b pinned yt-dlp requires Windows 10 or newer; found {}.{}",
-            version.major, version.minor
-        ));
-    }
-    Ok(())
-}
-
 /// The only production Rust path is the installer-staged, build-time-pinned
 /// sidecar next to the running Akula executable. The old arbitrary-path opt-in
 /// is rejected. No download of executables happens at runtime.
@@ -371,16 +326,14 @@ pub(super) fn download_one_or_legacy(
     }
     #[cfg(all(windows, feature = "video-rust-bundle"))]
     {
-        // Reject unsupported Windows before opening or spawning any sidecar.
-        require_pinned_windows_video_runtime()?;
+        windows_version::require_pinned_windows_video_runtime()?;
         let expected = option_env!("AKULA_BUNDLED_MUX_SHA256")
             .ok_or("video-rust-bundle requires a compiled-in mux SHA-256; refusing legacy fallback")?;
         let application = std::env::current_exe()
             .map_err(|e| format!("cannot locate installed Akula executable: {e}"))?;
         let mux = bundled_mux_from_exe(&application, expected)?;
         let directory = application.parent().ok_or("Akula executable has no parent directory")?;
-        // VIDEO-15: both tools are pinned siblings; never execute the queue's
-        // PATH/env-selected executable or a user-selected JS runtime.
+        // VIDEO-15: reject PATH/environment fallback for both pinned tools.
         let ytdlp = directory.join("akula-yt-dlp.exe");
         let quickjs = directory.join("akula-quickjs.exe");
         verify_pinned_runtime(&ytdlp, &quickjs)?;
