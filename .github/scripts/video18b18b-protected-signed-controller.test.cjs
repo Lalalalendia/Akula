@@ -71,7 +71,7 @@ function verify(a,am,c,cm,ps,wf){
     'VIDEO18B18B_HOLD: exact five PE names missing '+n);
   assert.match(c,/let owner=InstallLock::try_acquire\(&root\)\.unwrap\(\);/,
     'VIDEO18B18B_HOLD: primary OS lock must have one concrete owner');
-  assert.ok(!/\bconfirm_candidate\s*\(/.test(c),
+  assert.ok(!/\bconfirm_candidate\s*\(/.test(c.replace(/\/\/[^\n]*/g,'')),
     'VIDEO18B18B_HOLD: cannot commit without a real presented-frame ACK');
   assert.ok(!/std::process::Command|ShellExecuteW|channel_ready\s*\(\s*\)/.test(c),
     'VIDEO18B18B_HOLD: candidate must never run or enter product release');
