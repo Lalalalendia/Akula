@@ -71,12 +71,15 @@ public static class AkulaVideo16Pointer {
         IntPtr target=WindowFromPoint(new Point {X=x,Y=y});
         if(target==IntPtr.Zero || GetAncestor(target,2)!=hwnd || GetForegroundWindow()!=hwnd)
             throw new InvalidOperationException("VIDEO16 refuses a click outside Akula window");
-        var events=new Input[] {
-            new Input {Type=0,Flags=0x0002},
-            new Input {Type=0,Flags=0x0004}
-        };
-        if(SendInput(2,events,Marshal.SizeOf(typeof(Input)))!=2)
-            throw new InvalidOperationException("Real Windows pointer click failed");
+        var down=new Input[] { new Input {Type=0,Flags=0x0002} };
+        var up=new Input[] { new Input {Type=0,Flags=0x0004} };
+        if(SendInput(1,down,Marshal.SizeOf(typeof(Input)))!=1)
+            throw new InvalidOperationException("Real Windows pointer down failed");
+        // Let the GUI dispatch the native down before the up, not as a
+        // same-batch 0-ms pair while the editor is processing hover layout.
+        Thread.Sleep(85);
+        if(SendInput(1,up,Marshal.SizeOf(typeof(Input)))!=1)
+            throw new InvalidOperationException("Real Windows pointer up failed");
     }
 }
 '@
@@ -101,9 +104,21 @@ if (Test-Path -LiteralPath $movie) { throw 'Fixture MP4 already present' }
 if (Test-Path -LiteralPath $ProbePath) { throw 'Old GUI probe is present' }
 $proc = $null
 
+# Exact line matching is critical: CLICK_LOCAL_PLAY_ATTEMPT is not
+# CLICK_LOCAL_PLAY, which is only emitted after actual successful toggle().
+function Exact-Event([string[]]$Lines,[string]$Name) {
+    return ($Lines -ccontains ('VIDEO16_' + $Name))
+}
+if (Exact-Event @('VIDEO16_CLICK_LOCAL_PLAY_ATTEMPT') 'CLICK_LOCAL_PLAY') {
+    throw 'VIDEO16 accepted a Play attempt as successful playback'
+}
+if (!(Exact-Event @('VIDEO16_CLICK_LOCAL_PLAY') 'CLICK_LOCAL_PLAY')) {
+    throw 'VIDEO16 failed to recognize a real Play success'
+}
+Write-Host 'VIDEO16_EXACT_EVENT_MATCH_PASS'
 function Has-Event([string]$Name) {
     if (!(Test-Path -LiteralPath $ProbePath -PathType Leaf)) { return $false }
-    return [IO.File]::ReadAllText($ProbePath).Contains(('VIDEO16_'+$Name))
+    return (Exact-Event ([IO.File]::ReadAllLines($ProbePath)) $Name)
 }
 function Start-Akula {
     $args = '--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $VaultPath,$DataDir,$note
@@ -191,8 +206,18 @@ function Find-Real-Hover([Diagnostics.Process]$P,[string]$Name) {
                 if($px -lt $left -or $px -gt $right -or $py -lt $top -or $py -gt $bottom){
                     throw "VIDEO16 hover witness outside native editor"
                 }
+                [AkulaVideo16Pointer]::Move($hwnd,$P.Id,$px,$py)
+                # An extra center-hover callback is not a reliable action witness:
+                # the real hit target can change between Play and Toggle after
+                # layout. Verify the physical Windows down and the actual media
+                # handler instead; the caller still requires the download/Play
+                # result and a decoded frame.
+                Start-Sleep -Milliseconds 120
                 [AkulaVideo16Pointer]::Click($hwnd,$P.Id,$px,$py)
-                Write-Host "VIDEO16_ACTUAL_HOVER_POINT_CLICK event=$Name x=$px y=$py"
+                Wait-Event 'WINDOW_POINTER_DOWN' 30
+                $pressName=if($Name -ceq 'HOVER_DOWNLOAD'){'PRESS_DOWNLOAD'}else{'CLICK_LOCAL_PLAY_ATTEMPT'}
+                Wait-Event $pressName 30
+                Write-Host "VIDEO16_ACTUAL_HOVER_POINT_CLICK event=$Name down=WINDOW_POINTER_DOWN dispatch=$pressName x=$px y=$py"
                 $found=$true
                 break
             }

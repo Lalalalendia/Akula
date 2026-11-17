@@ -5,6 +5,8 @@ use crate::ui::editor::resolve::Request;
 impl TextEditor {
     pub(in crate::ui::editor::widget) fn media_press(&mut self, ctx: &mut EventCtx<'_>, point: Point, count: u8) -> bool {
         let under = self.media_under(point);
+        #[cfg(all(windows, feature = "video-ui-e2e"))]
+        crate::video::ui_acceptance::press_hit(under.is_some_and(|(_, hit)| hit == MediaHit::Download), under.is_some());
         if self.media.crop.is_some_and(|(s, _)| under.is_none_or(|(u, _)| u != s)) {
             self.end_crop(false);
             ctx.request_layout();
@@ -29,21 +31,14 @@ impl TextEditor {
                 self.rewrite(start, &line);
                 self.changed(ctx);
             }
-            MediaHit::Crop if self.media.crop.is_some() => {
-                self.end_crop(true);
-                self.changed(ctx);
-            }
+            MediaHit::Crop if self.media.crop.is_some() => { self.end_crop(true); self.changed(ctx); }
             MediaHit::Crop => {
-                self.media.crop = Some((start, line.params.crop.unwrap_or(FULL)));
-                self.doc.uncropped = Some(start);
-                ctx.request_layout();
+                self.media.crop = Some((start, line.params.crop.unwrap_or(FULL))); self.doc.uncropped = Some(start); ctx.request_layout();
             }
             MediaHit::Source => self.show_source(ctx, start),
             MediaHit::Download => self.request(Request::DownloadVideo { url: line.src }),
             MediaHit::Grip => {
-                let step = if matches!(line.params.align, Alignment::Center) { 2.0 } else { 1.0 };
-                self.media.drag = Some((start, Drag::Resize { x0: point.x, w0: frame.width(), step }));
-                ctx.capture_pointer();
+                let step = if matches!(line.params.align, Alignment::Center) { 2.0 } else { 1.0 }; self.media.drag = Some((start, Drag::Resize { x0: point.x, w0: frame.width(), step })); ctx.capture_pointer();
             }
             MediaHit::Play | MediaHit::Toggle => {
                 if let Some(path) = path {
@@ -65,8 +60,7 @@ impl TextEditor {
             MediaHit::Mute => { if let Some(path) = &path { crate::video::mute(path); } }
             MediaHit::Bar => {
                 if let Some(path) = &path {
-                    let top = self.doc.top(self.doc.at_offset(start));
-                    let local = Point::new(point.x - self.shift().x, point.y - top);
+                    let local = Point::new(point.x - self.shift().x, point.y - self.doc.top(self.doc.at_offset(start)));
                     if let Some(view) = self.media_view(start) {
                         crate::video::seek(path, view.seek_fraction(local));
                     }
@@ -132,7 +126,14 @@ impl TextEditor {
         let hover = self.media_under(point);
         #[cfg(all(windows, feature = "video-ui-e2e"))]
         if let Some((start, hit)) = hover {
-            crate::video::ui_acceptance::hover(hit == MediaHit::Download, hit == MediaHit::Play, self.media_view(start).is_some_and(|v| v.path.is_some()));
+            let view = self.media_view(start);
+            let center = view.and_then(|v| match hit {
+                MediaHit::Download => v.toolbar_items().into_iter().find(|(h, _)| *h == Some(hit)).map(|(_, r)| r.center()),
+                MediaHit::Play if v.path.is_some() => Some(v.frame.center()),
+                _ => None,
+            });
+            let delta = center.map(|c| (c.x + self.shift().x - point.x, c.y + self.doc.top(self.doc.at_offset(start)) - point.y));
+            crate::video::ui_acceptance::hover(hit == MediaHit::Download, hit == MediaHit::Play, view.is_some_and(|v| v.path.is_some()), delta, { let p = ctx.window_transform() * point; (p.x, p.y) }, ctx.scale_factor());
         }
         if hover != self.media.hover {
             self.media.hover = hover;
@@ -146,8 +147,7 @@ impl TextEditor {
         false
     }
     pub(in crate::ui::editor::widget) fn media_release(&mut self, ctx: &mut EventCtx<'_>) {
-        let Some((start, drag)) = self.media.drag.take() else { return };
-        if let (Drag::Resize { .. }, Some((_, width))) = (drag, self.doc.resized.take())
+        let Some((start, drag)) = self.media.drag.take() else { return }; if let (Drag::Resize { .. }, Some((_, width))) = (drag, self.doc.resized.take())
             && let Some(mut line) = self.media_view(start).map(|v| v.line.clone())
         {
             line.params.resize(width);
