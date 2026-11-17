@@ -27,8 +27,10 @@ function verify(gui,dispatch,updater,frame,wf){
   assert.match(updater,/mod frame_ack;/);
   assert.match(updater,/pub\(crate\) use frame_ack::on_first_presented_frame;/);
   assert.match(dispatch,/\#\[path = "windows_first_gui_ack.rs"\]\s*mod windows_first_gui_ack;/);
-  assert.ok(dispatch.includes('feature = "video-rust-bundle"')&&dispatch.includes('feature = "video-ui-e2e"'),
-    'VIDEO18C_HOLD: Windows ack must be experimental only');
+  assert.equal((dispatch.match(/feature = "video-rust-bundle"/g)||[]).length,3,
+    'VIDEO18C_HOLD: every Windows module/dispatch/fallback must require experimental bundle');
+  assert.equal((dispatch.match(/feature = "video-ui-e2e"/g)||[]).length,3,
+    'VIDEO18C_HOLD: every Windows module/dispatch/fallback must require test-only GUI');
   assert.ok(frame.includes(allowedWindows),'VIDEO18C_HOLD: Windows not guarded as test video');
   assert.equal(frame.split(hook).length,2,'VIDEO18C_HOLD: GUI callback must exist once');
   const idx=frame.indexOf(hook);
