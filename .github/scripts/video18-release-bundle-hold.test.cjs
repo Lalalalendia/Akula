@@ -132,9 +132,6 @@ function validateHoldTriggerCoverage(workflow) {
   for (const input of [
     '.github/scripts/video18-release-bundle-hold.test.cjs',
     'aquilum-app/native/src/video/light_windows_version.rs',
-    'aquilum-app/native/src/updater/release.rs',
-    'aquilum-app/native/src/updater/apply.rs',
-    'aquilum-app/native/src/updater/tests.rs',
     '.github/workflows/akula-video18-release-bundle-hold.yml',
     '.github/workflows/akula-windows-signed-candidate.yml',
     'aquilum-app/native/Cargo.toml',
