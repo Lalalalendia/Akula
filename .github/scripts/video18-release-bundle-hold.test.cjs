@@ -99,6 +99,32 @@ function validateReleaseGates(cargo, signed) {
 
 // The workflow must re-run whenever any file this security gate inspects
 // can change. Otherwise a packager edit can bypass an otherwise green gate.
+function validateExperimentalWindowsUpdaterHOLD(releaseSource, applySource) {
+  const marker='pub(super) const fn channel_ready() -> bool {';
+  const block=releaseSource.split(marker,2)[1]?.split('\n}',1)[0];
+  assert.ok(block,'HOLD: missing signed Windows update channel guard');
+  assert.match(block,/cfg!\(all\(\s*target_os = "windows",\s*feature = "installed",\s*not\(feature = "video-rust-bundle"\)\s*\)\)/,
+    'HOLD: experimental video builds must never inherit normal two-EXE NSIS updates');
+  assert.match(applySource,/if !super::release::channel_ready\(\) \{[\s\S]*?return Err\("HOLD:/,
+    'HOLD: Windows apply must refuse before staging signed setup and stopping UI');
+}
+test('VIDEO-18b-12 experimental video build cannot apply ordinary signed two-EXE Windows update',()=>{
+  validateExperimentalWindowsUpdaterHOLD(
+    file('aquilum-app/native/src/updater/release.rs'),
+    file('aquilum-app/native/src/updater/apply.rs')
+  );
+});
+test('VIDEO-18b-12 refuses turning off video-update HOLD or moving it after side effects',()=>{
+  const release=file('aquilum-app/native/src/updater/release.rs');
+  const apply=file('aquilum-app/native/src/updater/apply.rs');
+  const weakened=release.replace('not(feature = "video-rust-bundle")','feature = "video-rust-bundle"');
+  assert.notEqual(weakened,release);
+  assert.throws(()=>validateExperimentalWindowsUpdaterHOLD(weakened,apply),/HOLD/);
+  const bypass=apply.replace('if !super::release::channel_ready() {','if false {');
+  assert.notEqual(bypass,apply);
+  assert.throws(()=>validateExperimentalWindowsUpdaterHOLD(release,bypass),/HOLD/);
+});
+
 function validateHoldTriggerCoverage(workflow) {
   const header = workflow.split(/\r?\npermissions:/, 1)[0];
   assert.match(header, /^on:\r?\n  pull_request:/m, 'HOLD: missing PR event');
@@ -106,6 +132,9 @@ function validateHoldTriggerCoverage(workflow) {
   for (const input of [
     '.github/scripts/video18-release-bundle-hold.test.cjs',
     'aquilum-app/native/src/video/light_windows_version.rs',
+    'aquilum-app/native/src/updater/release.rs',
+    'aquilum-app/native/src/updater/apply.rs',
+    'aquilum-app/native/src/updater/tests.rs',
     '.github/workflows/akula-video18-release-bundle-hold.yml',
     '.github/workflows/akula-windows-signed-candidate.yml',
     'aquilum-app/native/Cargo.toml',
