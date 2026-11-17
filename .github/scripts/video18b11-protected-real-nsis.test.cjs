@@ -39,6 +39,8 @@ function validate(ps,nsi,wf){
  ]) assert.ok(ps.includes(term),'VIDEO18B11_HOLD: missing trust/real installation evidence '+term);
  assert.ok(!ps.includes('VIDEO18B11-LAB-ONLY:'),'VIDEO18B11_HOLD: cannot use inert mock files');
  assert.match(ps,/real_exe_sha256=5 signed=0/);
+ const comparisons=(ps.match(/Get-FileHash -LiteralPath \$file -Algorithm SHA256\)\.Hash\.ToLowerInvariant\(\) -cne \$original\[\$name\]/g)||[]);
+ assert.equal(comparisons.length,2,'VIDEO18B11_HOLD: installed and post-attack PE hash checks must normalize hexadecimal case');
  const hdr=wf.split(/\r?\npermissions:/,1)[0];
  assert.match(hdr,/^on:\r?\n  pull_request:\r?\n    branches: \[main\]/m);
  for(const file of [psPath,nsiPath,wfPath,testPath,docPath])assert.ok(hdr.includes("      - '"+file+"'"),'VIDEO18B11_HOLD: lost source trigger '+file);
