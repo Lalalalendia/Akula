@@ -59,7 +59,7 @@ function verify(ps,mouse,py,wf){
   for(const term of [
     'AKULA_VIDEO18B14_PROTECTED_GUI','ProgramFiles','re.fullmatch',
     'AkulaVideo18bRealNsisLab-',
-    'args.exe.resolve(strict=True) != installed',
+    'installed.resolve(strict=True) != installed',
     'scripts/windows-video18b14-protected-gui.ps1',
     'RestrictedLocalServer','http.server.ThreadingHTTPServer',
     'VIDEO16_REAL_MOUSE_DOWNLOAD_PASS',
