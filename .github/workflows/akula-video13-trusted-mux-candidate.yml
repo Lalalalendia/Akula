@@ -46,6 +46,13 @@ jobs:
           assert 'akula-video-mux.exe' in main
           assert 'akula-yt-dlp.exe' in main and 'akula-quickjs.exe' in main
           assert 'verify_pinned_runtime(&ytdlp, &quickjs)' in main
+          # VIDEO-18b: reject Windows 7/8 before reading or launching any pinned sidecar.
+          assert 'RtlGetVersion' in main and 'requires Windows 10 or newer' in main
+          assert 'supports_pinned_windows_video_runtime(version.major)' in main
+          download = main.split('pub(super) fn download_one_or_legacy(', 1)[1]
+          assert download.index('require_pinned_windows_video_runtime()?') < download.index('let application = std::env::current_exe()')
+          tests = Path('aquilum-app/native/src/video/light_tests.rs').read_text()
+          assert 'video18b_windows7_and_windows8_never_admit_pinned_toolchain' in tests
           assert 'std::env::var_os("AKULA_QUICKJS_BIN")' not in main
           assert 'video-rust-bundle is Windows-only: refusing unpinned legacy fallback' in main
           assert '#[cfg(not(feature = "video-rust-bundle"))]' in main
