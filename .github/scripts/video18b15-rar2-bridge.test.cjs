@@ -21,6 +21,7 @@ function verify(wf,rust){
   for(const term of ['repository: Lalalalendia/rar2',
     'ref: '+pin, "$pin='"+pin+"'",
     'git -C _rar2-pinned rev-parse HEAD',
+    'cargo generate-lockfile', 'VIDEO18B15_EPHEMERAL_LOCK_ONLY',
     'cargo test --locked -p chaptera-update-engine',
     '--test video18b15_akula_five',
     'persist-credentials: false',
