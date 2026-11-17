@@ -1,0 +1,137 @@
+name: Akula VIDEO-18b-04 real five EXE custody attestation (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/release/video18b04-five-exe-allowlist.json'
+      - 'docs/release/video18b04-real-five-custody.md'
+      - 'scripts/windows-video18b04-real-five-custody.ps1'
+      - '.github/scripts/video18b04-real-five-custody.test.cjs'
+      - '.github/workflows/akula-video18b04-real-five-custody.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Fail-closed provenance, license HOLD and tamper negatives
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Validate source and five EXE custody release boundary
+        run: node --test .github/scripts/video18b04-real-five-custody.test.cjs
+
+  real-five:
+    name: Compile three real EXEs, pin two upstream, attest exactly five (no release)
+    needs: contract
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/shiva
+          ref: 40b72a90b1dac39812c77c7321e57d613a81cb51
+          path: _shiva-preview
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aquilum-app -> ../.artifacts/cargo-native
+            labs/video-lite
+          shared-key: akula-video16-real-gui-windows-v1
+          save-if: false
+      - name: Parse real custody PowerShell script before expensive builds
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-video18b04-real-five-custody.ps1'),
+            [ref]$tokens,[ref]$errors) | Out-Null
+          if($errors.Count -ne 0){ throw "VIDEO18B04 invalid PowerShell: $($errors | Out-String)" }
+          Write-Host 'VIDEO18B04_POWERSHELL_PARSE_PASS'
+      - name: Build source-pinned Shiva CLI (upstream lock still requires review)
+        shell: pwsh
+        env:
+          VIDEO18B04_SHIVA_COMMIT: 40b72a90b1dac39812c77c7321e57d613a81cb51
+        run: |
+          $ErrorActionPreference='Stop'
+          $commit=(git -C _shiva-preview rev-parse HEAD).Trim()
+          if($commit -cne $env:VIDEO18B04_SHIVA_COMMIT){throw 'Shiva commit changed'}
+          $env:CARGO_TARGET_DIR=Join-Path $env:RUNNER_TEMP 'video18b04-shiva'
+          cargo build --release --manifest-path _shiva-preview/Cargo.toml -p cli
+          if($LASTEXITCODE -ne 0){throw 'Pinned Shiva build failed'}
+          $file=Join-Path $env:CARGO_TARGET_DIR 'release/shiva.exe'
+          if(!(Test-Path -LiteralPath $file -PathType Leaf)){throw 'Built Shiva CLI missing'}
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO18B04_SHIVA=$file"
+      - name: Build Rust mux with immutable reviewed Cargo.lock
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo test --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if($LASTEXITCODE -ne 0){throw 'Rust mux tests failed'}
+          cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if($LASTEXITCODE -ne 0){throw 'Rust mux build failed'}
+          $mux=(Resolve-Path labs/video-lite/target/release/dash.exe).Path
+          $pin=(Get-FileHash -LiteralPath $mux -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -Path $env:GITHUB_ENV -Value "AKULA_BUNDLED_MUX_SHA256=$pin"
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO18B04_MUX=$mux"
+      - name: Download and verify exact upstream yt-dlp and QuickJS bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'video18b04-upstream'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $yt=Join-Path $dir 'yt-dlp.exe'
+          $js=Join-Path $dir 'qjs.exe'
+          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' -OutFile $yt -UseBasicParsing
+          Invoke-WebRequest 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' -OutFile $js -UseBasicParsing
+          $allow=Get-Content -LiteralPath docs/release/video18b04-five-exe-allowlist.json -Raw | ConvertFrom-Json
+          foreach($pair in @(@('akula-yt-dlp.exe',$yt),@('akula-quickjs.exe',$js))){
+            $entry=@($allow.components | Where-Object {$_.name -ceq $pair[0]})
+            if($entry.Count -ne 1 -or
+              (Get-FileHash -LiteralPath $pair[1] -Algorithm SHA256).Hash.ToLowerInvariant() -cne $entry[0].sha256 -or
+              (Get-Item -LiteralPath $pair[1]).Length -ne $entry[0].size_bytes){
+              throw "VIDEO18B04 upstream pin failure: $($pair[0])"
+            }
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO18B04_YT=$yt"
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO18B04_JS=$js"
+          Write-Host 'VIDEO18B04_UPSTREAM_PINS_PASS downloaded=2 exact_sha256_and_size=1'
+      - name: Build actual Akula with experimental Rust video feature (no package)
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo build --release --locked -p aquilum-native --features installed,video-rust-bundle,video-ui-e2e
+          if($LASTEXITCODE -ne 0){throw 'Akula video-enabled lab build failed'}
+          $app=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release/aquilum-native.exe'
+          if(!(Test-Path -LiteralPath $app -PathType Leaf)){throw 'Video Akula binary missing'}
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO18B04_APP=$app"
+      - name: Attest exact real five EXEs, reject mutation and preserve license HOLD
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          ./scripts/windows-video18b04-real-five-custody.ps1 -AppPath $env:VIDEO18B04_APP -ShivaPath $env:VIDEO18B04_SHIVA -MuxPath $env:VIDEO18B04_MUX -YtDlpPath $env:VIDEO18B04_YT -QuickJsPath $env:VIDEO18B04_JS -ReportPath (Join-Path $env:RUNNER_TEMP 'video18b04-custody.json')
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18B04 real provenance proof failed'}
+      - name: Retain only unsigned custody JSON for one day, no executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: video18b04-five-exe-hashes-NOT-RELEASE
+          path: ${{ runner.temp }}/video18b04-custody.json
+          if-no-files-found: error
+          retention-days: 1
