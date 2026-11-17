@@ -31,9 +31,10 @@ function validate(p, ps, workflow, reference) {
     }
   }
   const shiva = p.components[1];
-  assert.equal(shiva.reference,'40b72a90b1dac39812c77c7321e57d613a81cb51');
-  assert.equal(shiva.license_status,'BLOCKED_LICENSE_FILE_MISMATCH');
-  assert.ok(shiva.license.includes('../LICENSE missing'),'HOLD: Shiva CLI license-file mismatch not resolved');
+  assert.equal(shiva.reference,'cb542d30d2c18a18b1ee457f5158d5b0f551757e');
+  assert.equal(shiva.lock_sha256,'62b83af03e4079f6603eef7f7170edc4138a8233ad57829adf13baacd3f2b1d4');
+  assert.equal(shiva.license_status,'REVIEW_TRANSITIVE_DEPENDENCY_NOTICES');
+  assert.ok(shiva.license.includes('MIT OR Apache-2.0'),'HOLD: Shiva license metadata was not repaired');
   assert.equal(p.components[2].license_status,'REVIEW_REQUIRED');
   for (const c of p.components.filter(x=>x.kind==='pinned-upstream')) {
     const pin = pins[c.name];
@@ -52,7 +53,9 @@ function validate(p, ps, workflow, reference) {
     'EXPECTED_HEAD_SHA','Reject-Reparse','Check-Pe',
     'Get-AuthenticodeSignature',
     'Check-Pe $target',
-    'VIDEO18B04_SHIVA_LOCK_HOLD',
+    'VIDEO18B05_SHIVA_LOCK_PIN_PASS',
+    'git -C $shivaDir ls-files --error-unmatch -- Cargo.lock',
+    '$locks[\'_shiva-preview/Cargo.lock\'] -cne $expectedShivaLock',
     'AKULA_BUNDLED_MUX_SHA256',
     'VIDEO18B04_TAMPER_REFUSAL_PASS',
     'VIDEO18B04_LICENSE_RELEASE_HOLD_PASS',
@@ -70,6 +73,9 @@ function validate(p, ps, workflow, reference) {
   assert.match(workflow,/persist-credentials: false/);
   assert.match(workflow,/retention-days: 1/);
   assert.match(workflow,/shiva_commit/i);
+  assert.ok(workflow.includes('cb542d30d2c18a18b1ee457f5158d5b0f551757e'),'HOLD: workflow is not pinned to repaired Shiva');
+  assert.ok(workflow.includes('cargo build --release --locked --manifest-path _shiva-preview/Cargo.toml -p cli'),'HOLD: Shiva must build from immutable lock');
+  assert.ok(workflow.includes('62b83af03e4079f6603eef7f7170edc4138a8233ad57829adf13baacd3f2b1d4'),'HOLD: missing pinned lock hash check');
   assert.match(workflow,/video18b04-five-exe-allowlist\.json/);
   assert.ok(!workflow.includes('workflow_dispatch:'),'HOLD: no manual publishing entrypoint');
   assert.ok(!/actions\/upload-artifact[\s\S]*\.(exe|zip)/i.test(workflow),'HOLD: never upload unsigned EXEs');
@@ -102,4 +108,16 @@ test('VIDEO18B04 refuses disabled real custody PE test', () => {
   assert.notEqual(changed,ps);
   // In addition to the positive presence, prevent invalid stage mutation.
   assert.throws(()=>validate(p,changed,wf,ref),/HOLD/);
+});
+
+test('VIDEO18B05 rejects changing the committed Shiva Cargo.lock SHA256', () => {
+  const [p,ps,wf,ref]=inputs();
+  p.components[1].lock_sha256='0'.repeat(64);
+  assert.throws(()=>validate(p,ps,wf,ref),/HOLD|AssertionError/);
+});
+test('VIDEO18B05 rejects switching Shiva CI build to unlocked dependency resolution', () => {
+  const [p,ps,wf,ref]=inputs();
+  const changed=wf.replace('cargo build --release --locked --manifest-path _shiva-preview/Cargo.toml -p cli','cargo build --release --manifest-path _shiva-preview/Cargo.toml -p cli');
+  assert.notEqual(changed,wf);
+  assert.throws(()=>validate(p,ps,changed,ref),/HOLD/);
 });

@@ -30,11 +30,11 @@ if ($allow.schema -ne 1 -or $allow.release_admitted -ne $false -or
     throw 'VIDEO18B04 source allowlist must remain an exact five-file non-release HOLD'
 }
 if ((git -C (Join-Path $repo '_shiva-preview') rev-parse HEAD).Trim() -cne
-    '40b72a90b1dac39812c77c7321e57d613a81cb51') {
+    'cb542d30d2c18a18b1ee457f5158d5b0f551757e') {
     throw 'VIDEO18B04 upstream Shiva source is not pinned'
 }
-# The checked-out Shiva revision has NO tracked Cargo.lock. Cargo may
-# generate a lock during the build; record its digest as UNREVIEWED evidence.
+# Shiva source revision contains an audited, tracked workspace Cargo.lock.
+# A generated/resolved lock in CI must never substitute for the pinned bytes.
 $lockPaths = @('aquilum-app/Cargo.lock','labs/video-lite/Cargo.lock','_shiva-preview/Cargo.lock')
 $locks = [ordered]@{}
 foreach ($lock in $lockPaths) {
@@ -44,8 +44,18 @@ foreach ($lock in $lockPaths) {
     }
     $locks[$lock] = (Get-FileHash -LiteralPath $lockfile -Algorithm SHA256).Hash.ToLowerInvariant()
 }
-$shivaLockReview = 'GENERATED_UNREVIEWED_NOT_TRACKED_IN_PINNED_REVISION'
-Write-Host 'VIDEO18B04_SHIVA_LOCK_HOLD generated_dependency_lock_is_not_a_source_pin=1'
+$shivaDir = Join-Path $repo '_shiva-preview'
+$trackedLock = (git -C $shivaDir ls-files --error-unmatch -- Cargo.lock 2>$null | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $trackedLock -cne 'Cargo.lock') {
+    throw 'VIDEO18B05 source-pinned Shiva Cargo.lock must be tracked in git'
+}
+$expectedShivaLock = @($allow.components | Where-Object { $_.name -ceq 'shiva-pdf-preview.exe' })[0].lock_sha256
+if (!$expectedShivaLock -or $expectedShivaLock.Length -ne 64 -or
+    $locks['_shiva-preview/Cargo.lock'] -cne $expectedShivaLock) {
+    throw 'VIDEO18B05 tracked Shiva Cargo.lock SHA256 differs from approved source pin'
+}
+$shivaLockReview = 'TRACKED_SOURCE_LOCK_PINNED_TRANSITIVE_NOTICES_UNREVIEWED'
+Write-Host 'VIDEO18B05_SHIVA_LOCK_PIN_PASS tracked=1 sha256_match=1'
 function Reject-Reparse([string]$path) {
     $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
@@ -140,7 +150,7 @@ try {
         schema = 1
         mode = 'NON-RELEASE FIVE-EXE CUSTODY - UNSIGNED'
         source_commit = $env:EXPECTED_HEAD_SHA
-        shiva_commit = '40b72a90b1dac39812c77c7321e57d613a81cb51'
+        shiva_commit = 'cb542d30d2c18a18b1ee457f5158d5b0f551757e'
         shiva_lock_review = $shivaLockReview
         lock_sha256 = $locks
         release_admitted = $false
