@@ -102,12 +102,17 @@ function verify(a,am,c,cm,ps,wf){
     'ref: '+pin,
     'repository: Lalalalendia/shiva',
     'choco install nsis --version=3.11.0',
-    'choco install minisign --version=0.8.0',
+    'minisign-0.12-win64.zip',
+    '37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479',
+    'VIDEO18B18B_PINNED_MINISIGN_012_PASS',
+    'Expand-Archive -LiteralPath $archive',
     'persist-credentials: false',
     'permissions:\n  contents: read',
     'node --test .github/scripts/video18b18b-protected-signed-controller.test.cjs',
     'windows-video18b18b-protected-signed-controller.ps1',
   ])assert.ok(wf.includes(word),'VIDEO18B18B_HOLD: Windows CI contract missing '+word);
+  assert.ok(!wf.includes('choco install minisign --version=0.8.0'),
+    'VIDEO18B18B_HOLD: legacy 0.8 cannot create noninteractive ephemeral keys');
   assert.ok(!wf.includes('workflow_dispatch:')&&!/contents:\s*write|gh release create|publish_beta|cargo packager/i.test(wf),
     'VIDEO18B18B_HOLD: nonshipping scope breached');
   assert.ok(!/path:\s*(?:\$\{\{.*\}\}\/)?[^\n]*\.(exe|msi|key|minisig)/.test(wf),
