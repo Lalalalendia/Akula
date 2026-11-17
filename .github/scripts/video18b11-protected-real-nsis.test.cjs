@@ -58,7 +58,7 @@ function validate(ps,nsi,wf){
    'windows-video18b11-protected-real-five.ps1',
    'Remove-LocalUser',
  ]) assert.ok((wf+'\n'+ps).includes(term),'VIDEO18B11_HOLD: missing pinned real component '+term);
- assert.ok(!wf.includes('workflow_dispatch:'));
+ assert.ok(!wf.includes('workflow_dispatch:'),'VIDEO18B11_HOLD: no manual workflow dispatch');
  assert.ok(!/gh release create|publish_beta\s*:\s*true|cargo packager signer|upload-artifact[\s\S]*\.(?:exe|msi|zip)/i.test(wf),'VIDEO18B11_HOLD: unsigned real EXEs must not be published');
 }
 test('VIDEO18B11 requires actual protected NSIS with five real executables and 11 attack denials',()=>validate(read(psPath),read(nsiPath),read(wfPath)));
