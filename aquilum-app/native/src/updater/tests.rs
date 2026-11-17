@@ -16,16 +16,16 @@ fn independent_akula_signed_update_channel_is_windows_installed_only() {
     assert!(!PUBLIC_KEY.is_empty(), "owner-pinned Akula public key must be compiled in");
     assert_eq!(
         channel_ready(),
-        cfg!(all(target_os = "windows", feature = "installed")),
+        cfg!(all(target_os = "windows", feature = "installed", not(feature = "video-rust-bundle"))),
     );
     assert_eq!(
         available(),
-        cfg!(all(target_os = "windows", feature = "installed")),
+        cfg!(all(target_os = "windows", feature = "installed", not(feature = "video-rust-bundle"))),
         "only own signed Windows beta has a live update channel",
     );
 }
 
-#[cfg(not(all(target_os = "windows", feature = "installed")))]
+#[cfg(not(all(target_os = "windows", feature = "installed", not(feature = "video-rust-bundle"))))]
 #[test]
 fn disabled_update_channel_never_starts_network_work() {
     let updater = Updater::new(Arc::new(|| {}));
@@ -58,7 +58,21 @@ fn installed_windows_apply_cannot_accept_unsigned_bytes() {
         b"MZ synthetic unsigned NSIS bytes".to_vec(),
     );
     assert!(result.is_err(), "unsigned bytes must never produce an installer");
-    assert_eq!(channel_ready(), cfg!(feature = "installed"));
+    assert_eq!(channel_ready(), cfg!(all(feature = "installed", not(feature = "video-rust-bundle"))));
+}
+
+#[cfg(all(target_os = "windows", feature = "video-rust-bundle"))]
+#[test]
+fn experimental_five_exe_build_cannot_reach_legacy_windows_nsis() {
+    assert!(!channel_ready(), "five-EXE Windows video cannot inherit the legacy updater");
+    assert!(!available(), "experimental video must offer no standard signed update");
+    assert!(super::release::find().unwrap_err().contains("HOLD"),
+        "experimental video update discovery must fail before network access");
+    let updater = Updater::new(Arc::new(|| {}));
+    updater.check();
+    assert_eq!(updater.status(), Status::Idle);
+    updater.install();
+    assert_eq!(updater.status(), Status::Idle);
 }
 
 #[test]
