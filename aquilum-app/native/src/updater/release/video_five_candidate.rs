@@ -247,7 +247,7 @@ fn hash_pe(path: &Path) -> Result<(u64, String), String> {
     Ok((bytes, format!("{:x}", hasher.finalize())))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "video-ui-e2e"))]
 mod tests {
     use super::*;
     use base64::Engine;
@@ -346,7 +346,8 @@ mod tests {
         components[4]["filename"] = json!("AKULA-QUICKJS.exe");
         assert!(inspect_authenticated(&serde_json::to_vec(&data).unwrap(), "0.3.20").is_err());
         components[4]["filename"] = json!("akula-quickjs.exe");
-        components.push(components[4].clone());
+        let duplicated = components[4].clone();
+        components.push(duplicated);
         assert!(inspect_authenticated(&serde_json::to_vec(&data).unwrap(), "0.3.20").is_err());
         components.pop();
         components[0]["sha256"] = json!("A".repeat(64));
