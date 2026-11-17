@@ -45,6 +45,70 @@ jobs:
       - name: Validate source and five EXE custody release boundary
         run: node --test .github/scripts/video18b18b-protected-signed-controller.test.cjs .github/scripts/video18b17-protected-rar2.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs
 
+  # Isolated short Windows proof runs in parallel with the expensive five-PE
+  # source build, so Rust controller/API and Minisign errors surface early.
+  preflight:
+    name: Windows controller compiles and pinned Minisign can sign without prompt
+    needs: contract
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/rar2
+          ref: 32a803e67244836d2794f9bbbdf9b24deab63d7e
+          path: _rar2-pinned
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile exact stand-alone Windows controller test without running protected install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $manifest='labs/video-lite/video18b18b-controller/Cargo.toml'
+          if(Test-Path 'labs/video-lite/video18b18b-controller/Cargo.lock'){
+            throw 'VIDEO18B18B_HOLD: preflight must not use an unreviewed committed lock'
+          }
+          cargo generate-lockfile --manifest-path $manifest
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18B18B_HOLD: controller dependency graph'}
+          cargo test --locked --no-run --manifest-path $manifest --lib
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18B18B_HOLD: controller Rust compile'}
+          Write-Host 'VIDEO18B18B_WINDOWS_RUST_CONTROLLER_COMPILE_PASS'
+      - name: Verify pinned upstream Minisign 0.12 supports noninteractive generation/sign/verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip'
+          $sha='37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479'
+          $temp=Join-Path $env:RUNNER_TEMP 'video18b18b-early-minisign'
+          if(Test-Path -LiteralPath $temp){throw 'VIDEO18B18B_HOLD: preflight temp reuse'}
+          New-Item -ItemType Directory -Path $temp -ErrorAction Stop | Out-Null
+          try {
+            $zip=Join-Path $temp 'minisign-0.12-win64.zip'
+            Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+            if((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $sha){
+              throw 'VIDEO18B18B_HOLD: preflight Minisign archive changed'
+            }
+            Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $temp 'unpacked') -ErrorAction Stop
+            $binary=Join-Path $temp 'unpacked/minisign-win64/x86_64/minisign.exe'
+            if(!(Test-Path -LiteralPath $binary -PathType Leaf)){
+              throw 'VIDEO18B18B_HOLD: missing verified x86_64 Minisign'
+            }
+            & $binary -G -W -s (Join-Path $temp 'first.key') -p (Join-Path $temp 'first.pub')
+            if($LASTEXITCODE -ne 0){throw 'VIDEO18B18B_HOLD: noninteractive keygen failed'}
+            [IO.File]::WriteAllText((Join-Path $temp 'signed.txt'),'VIDEO18B18B signed fixture only')
+            & $binary -S -s (Join-Path $temp 'first.key') -m (Join-Path $temp 'signed.txt') -x (Join-Path $temp 'signed.minisig')
+            if($LASTEXITCODE -ne 0){throw 'VIDEO18B18B_HOLD: noninteractive signature failed'}
+            & $binary -Vm (Join-Path $temp 'signed.txt') -x (Join-Path $temp 'signed.minisig') -p (Join-Path $temp 'first.pub') -Q
+            if($LASTEXITCODE -ne 0){throw 'VIDEO18B18B_HOLD: independently verified signature failed'}
+            Write-Host 'VIDEO18B18B_WINDOWS_MINISIGN_012_PREFLIGHT_PASS keygen=1 signature=1 verified=1'
+          } finally {
+            Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
   real-five:
     name: Protected Windows signed-five real-PE admission and forced rollback under pinned rar2
     needs: contract
