@@ -17,10 +17,10 @@ function fixture(){
  const pkg={id:'dummy 1.0.0',name:'dummy',version:'1.0.0',source:'local-source',manifest_path:path.join(one,'Cargo.toml'),license:'MIT'};
  const metas={};
  for(const [key,name] of [['akula','aquilum-native'],['mux','akula-video-lite-lab'],['shiva','cli']]){
-   const rootPkg={...pkg,id:name+' 1.0.0',name};
+   const rootPkg={...pkg,id:name+' 1.0.0',name,source:null};
    metas[key]={packages:[rootPkg],resolve:{nodes:[{id:rootPkg.id,deps:[]}]}};
  }
- const inventory={release_admitted:false,legal_approval:false,exact_akula_head:head,unique_packages:Object.values(metas).map(x=>({name:x.packages[0].name,version:x.packages[0].version,source:x.packages[0].source}))};
+ const inventory={release_admitted:false,legal_approval:false,exact_akula_head:head,unique_packages:Object.values(metas).map(x=>({name:x.packages[0].name,version:x.packages[0].version,source:x.packages[0].source||'local-source'}))};
  return {dir,one,pkg,metas,inventory};
 }
 test('VIDEO18B08 records an actual license file by digest without auto approval',t=>{
