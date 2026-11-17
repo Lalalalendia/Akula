@@ -21,6 +21,8 @@ function contract(src,workflow) {
     'ATTRIBUTE_HANDLE_LIST', 'EXTENDED_STARTUPINFO_PRESENT',
     'CreateProcessW(', 'GetProcessId(', 'BCryptGenRandom(',
     'WaitForSingleObject(', 'DEADLINE_MS', 'DeleteProcThreadAttributeList(',
+    'PeekNamedPipe(reader.0', 'while Instant::now() < read_deadline',
+    'available, &mut got',
     'GetFileType(unrelated)', 'drop(writer);', 'wrong-nonce',
     'duplicate', 'silent', 'all == expected.as_bytes()',
     'VIDEO18C02_REAL_PARENT_CHILD_PIPE_PASS',
@@ -55,6 +57,9 @@ test('Negative: removing OS PID or handle allowlist must fail source contract',(
     [src.replace('GetProcessId(process.0)','GetCurrentProcessId()'),wf],
     [src.replaceAll('ATTRIBUTE_HANDLE_LIST','ATTRIBUTE_BAD_LIST'),wf],
     [src.replace('if all.len() > 256 { break; }','if false { break; }'),wf],
+    [src.replace('while Instant::now() < read_deadline','while true'),wf],
+    [src.replace('PeekNamedPipe(reader.0','InvalidPeek(reader.0'),wf],
+    [src.replace('available, &mut got','256, &mut got'),wf],
     [src,wf.replace("      - '"+sourcePath+"'\n",'')]
   ]) {
     assert.throws(()=>contract(changedSource,changedWorkflow),/VIDEO18C02_HOLD/);
