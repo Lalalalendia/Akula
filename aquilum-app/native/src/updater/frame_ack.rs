@@ -8,18 +8,18 @@
 mod windows_first_gui_ack;
 
 #[cfg(all(target_os = "linux", feature = "installed"))]
-pub(super) fn on_first_presented_frame() {
+pub(crate) fn on_first_presented_frame() {
     super::linux_first_gui_ack::on_first_presented_frame();
 }
 
 #[cfg(all(target_os = "macos", feature = "installed"))]
-pub(super) fn on_first_presented_frame() {
+pub(crate) fn on_first_presented_frame() {
     super::startup_ack::on_first_presented_frame();
 }
 
 #[cfg(all(target_os = "windows", feature = "installed",
     feature = "video-rust-bundle", feature = "video-ui-e2e"))]
-pub(super) fn on_first_presented_frame() {
+pub(crate) fn on_first_presented_frame() {
     windows_first_gui_ack::on_first_presented_frame();
 }
 
@@ -30,7 +30,7 @@ pub(super) fn on_first_presented_frame() {
         feature = "video-rust-bundle", feature = "video-ui-e2e")
 )))]
 #[allow(dead_code)]
-pub(super) fn on_first_presented_frame() {
+pub(crate) fn on_first_presented_frame() {
     // Ordinary Windows two-EXE and unsupported platforms never emit the lab
     // receipt. They cannot accidentally authorize the video generation.
 }
