@@ -3,18 +3,18 @@ mod cache;
 mod dataview;
 mod links;
 mod media;
+mod offline_video;
 mod resolver;
 mod youtube;
+mod video;
 #[cfg(test)]
 mod testing;
-
 pub use media::prune_remote;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
 use aquilum_core::Core;
 use aquilum_core::search::error::SearchError;
 use aquilum_core::search::paths::is_markdown;

@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::sync::Arc;
-
 use masonry::kurbo::Point;
 use masonry::peniko::ImageBrush;
 
@@ -59,6 +58,7 @@ pub struct Media {
 pub enum Request {
     TableMenu { at: Point, commands: Vec<(Command, bool)> },
     Open { target: String, wiki: bool, new_tab: bool },
+    DownloadVideo { url: String },
     View(ImageBrush, Option<std::path::PathBuf>),
     ToggleTask { target: String, line: usize },
     Read { file: std::path::PathBuf, page: Option<std::path::PathBuf>, title: String },

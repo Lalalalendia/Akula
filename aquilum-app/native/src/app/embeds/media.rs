@@ -127,7 +127,7 @@ fn inline_image(source: &str) -> Option<Fetch<Media>> {
     })
 }
 
-fn poster(path: &Path) -> Option<crate::images::Picture> {
+pub(super) fn poster(path: &Path) -> Option<crate::images::Picture> {
     if let Some(picture) = crate::images::cached(path) {
         return Some(picture);
     }

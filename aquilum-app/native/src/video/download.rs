@@ -2,7 +2,7 @@
 //! Download to a disposable directory on the SAME local filesystem, verify
 //! the completed file, then publish with atomic no-clobber hard-link.
 use std::ffi::{OsStr, OsString};
-use std::fs::{self, File};
+use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -16,7 +16,7 @@ pub struct Progress {
     pub total: Option<u64>,
 }
 
-fn parse_progress(line: &str) -> Option<Progress> {
+pub(super) fn parse_progress(line: &str) -> Option<Progress> {
     let body = line.strip_prefix("AKULA_PROGRESS:")?;
     let mut fields = body.split(':');
     let downloaded = fields.next()?.trim().parse().ok()?;
@@ -36,7 +36,7 @@ fn command_args(url: &str, stage: &Path, max_bytes: u64) -> Vec<OsString> {
         "--no-download-archive", "--restrict-filenames", "--newline",
         "--progress", "--no-warnings", "--retries", "3",
         "--fragment-retries", "3", "--socket-timeout", "20",
-        "--format", "bv*[height<=720]+ba/b[height<=720]",
+        "--format", "bv[vcodec^=avc1][height<=720]+ba[acodec^=mp4a]/b[vcodec^=avc1][acodec^=mp4a][height<=720]",
         "--merge-output-format", "mp4",
         "--output", "%(id)s.%(ext)s",
         "--paths", &home, "--paths", &temp,
@@ -175,7 +175,10 @@ pub fn download_one(
     if used.saturating_add(bytes) > LIBRARY_MAX || bytes > allowance {
         return Err("video would exceed the local library quota".into());
     }
-    File::open(&staged).and_then(|file| file.sync_all()).map_err(|e| e.to_string())?;
+    // On Windows FlushFileBuffers requires a writable file handle. A read-only
+    // File::open handle can fail with ACCESS_DENIED after yt-dlp succeeded.
+    fs::OpenOptions::new().read(true).write(true).open(&staged)
+        .and_then(|file| file.sync_all()).map_err(|e| e.to_string())?;
     let ext = staged.extension().and_then(|e| e.to_str()).ok_or("invalid yt-dlp output extension")?;
     let target = library.published(id, ext).map_err(|e| e.to_string())?;
     if let Some(existing) = library.existing(id).map_err(|e| e.to_string())? {
@@ -188,103 +191,5 @@ pub fn download_one(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn progress_is_structured_and_untrusted_lines_are_ignored() {
-        assert_eq!(parse_progress("AKULA_PROGRESS:100:200:0"), Some(Progress { downloaded: 100, total: Some(200) }));
-        assert_eq!(parse_progress("AKULA_PROGRESS:100:0:180"), Some(Progress { downloaded: 100, total: Some(180) }));
-        assert!(parse_progress("[download] 100% of 50 MiB").is_none());
-        assert!(parse_progress("AKULA_PROGRESS:not-a-number:30:10").is_none());
-    }
-
-    #[test]
-    fn command_never_invokes_shell_or_uses_external_config() {
-        let args: Vec<String> = command_args(
-            "https://youtu.be/dQw4w9WgXcQ", Path::new("/tmp/private"), SINGLE_VIDEO_MAX
-        ).iter().map(|s| s.to_string_lossy().into_owned()).collect();
-        for needed in ["--ignore-config", "--no-playlist", "--no-exec", "--restrict-filenames", "--max-filesize"] {
-            assert!(args.contains(&needed.to_owned()), "{needed}");
-        }
-        assert_eq!(args.last().unwrap(), "https://youtu.be/dQw4w9WgXcQ");
-        assert!(args.contains(&"home:/tmp/private".to_string()));
-        assert!(args.contains(&"--no-cookies".to_owned()));
-        assert!(!args.iter().any(|s| s == "--cookies" || s == "--cookies-from-browser" || s.starts_with("--cookies=")));
-    }
-
-    #[test]
-    fn incomplete_or_aliased_download_never_becomes_published() {
-        let dir = tempfile::tempdir().unwrap();
-        let id = "dQw4w9WgXcQ";
-        fs::write(dir.path().join(format!("{id}.part")), b"part").unwrap();
-        assert!(completed(dir.path(), id).is_err());
-        fs::write(dir.path().join(format!("{id}.mp4")), b"file").unwrap();
-        assert!(completed(dir.path(), id).is_ok());
-        fs::write(dir.path().join(format!("{id}.webm")), b"second").unwrap();
-        assert!(completed(dir.path(), id).is_err());
-    }
-
-    #[cfg(unix)]
-    fn fake_executable(root: &Path, body: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        let file = root.join("fake-yt-dlp.sh");
-        fs::write(&file, format!("#!/bin/sh\nset -eu\n{body}\n")).unwrap();
-        let mut perms = fs::metadata(&file).unwrap().permissions();
-        perms.set_mode(0o700);
-        fs::set_permissions(&file, perms).unwrap();
-        file
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn synthetic_process_downloads_once_and_preserves_completed_bytes() {
-        let temp = tempfile::tempdir().unwrap();
-        let library = Library::at(temp.path().join("media"), &[]).unwrap();
-        let exe = fake_executable(temp.path(), r#"
-            stage=""
-            for arg do
-              case "$arg" in
-                home:*) stage=$(printf '%s' "$arg" | cut -c6-);;
-              esac
-            done
-            test -n "$stage"
-            printf 'synthetic-media-bytes' > "$stage/dQw4w9WgXcQ.mp4"
-            printf 'AKULA_PROGRESS:21:21:0\n'
-        "#);
-        let mut seen = Vec::new();
-        let first = download_one(&library, exe.as_os_str(), "https://youtu.be/dQw4w9WgXcQ", |p| seen.push(p)).unwrap();
-        assert_eq!(fs::read(&first).unwrap(), b"synthetic-media-bytes");
-        assert!(seen.iter().any(|p| p.total == Some(21)));
-        let second = download_one(&library, OsStr::new("missing-executable"), "https://youtu.be/dQw4w9WgXcQ", |_| {}).unwrap();
-        assert_eq!(first, second, "dedup must avoid a second download");
-        assert_eq!(fs::read_dir(library.root()).unwrap().count(), 1, "no partial temp directories");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn failed_process_leaves_no_download_or_partials() {
-        let temp = tempfile::tempdir().unwrap();
-        let library = Library::at(temp.path().join("media"), &[]).unwrap();
-        let exe = fake_executable(temp.path(), r#"
-            stage=""
-            for arg do
-              case "$arg" in home:*) stage=$(printf '%s' "$arg" | cut -c6-);; esac
-            done
-            test -n "$stage"
-            printf 'incomplete' > "$stage/dQw4w9WgXcQ.mp4.part"
-            exit 12
-        "#);
-        assert!(download_one(&library, exe.as_os_str(), "https://youtu.be/dQw4w9WgXcQ", |_| {}).is_err());
-        assert!(library.existing("dQw4w9WgXcQ").unwrap().is_none());
-        assert_eq!(fs::read_dir(library.root()).unwrap().count(), 0, "temporary files cleaned");
-    }
-
-    #[test]
-    fn invalid_host_is_rejected_before_spawning_executable() {
-        let dir = tempfile::tempdir().unwrap();
-        let library = Library::at(dir.path().join("media"), &[]).unwrap();
-        let err = download_one(&library, OsStr::new("nonexistent-yt-dlp"), "https://evil.example/video", |_| {});
-        assert!(err.unwrap_err().contains("unsupported"));
-        assert_eq!(fs::read_dir(library.root()).unwrap().count(), 0);
-    }
-}
+#[path = "download_tests.rs"]
+mod tests;

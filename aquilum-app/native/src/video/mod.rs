@@ -1,6 +1,10 @@
 pub(crate) mod download;
 pub(crate) mod library;
+pub(crate) mod light;
+pub(crate) mod queue;
 pub(crate) mod youtube;
+#[cfg(all(windows, feature = "video-ui-e2e"))]
+pub(crate) mod ui_acceptance;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
@@ -9,7 +13,6 @@ mod macos;
 mod stub;
 #[cfg(target_os = "windows")]
 mod windows;
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -29,9 +32,7 @@ pub fn poster(path: &Path) -> Option<ImageBrush> {
 
 #[cfg(target_os = "macos")]
 pub use self::macos::poster;
-
 const MOVED: f64 = 0.05;
-
 #[derive(Clone, Debug, Default)]
 pub struct State {
     pub frame: Option<ImageBrush>,
@@ -45,7 +46,6 @@ struct Player {
     engine: Engine,
     state: State,
 }
-
 impl Player {
     fn tick(&mut self) -> bool {
         let fresh = self.engine.frame();

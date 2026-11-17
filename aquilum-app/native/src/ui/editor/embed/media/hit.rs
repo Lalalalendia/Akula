@@ -1,12 +1,12 @@
 use masonry::kurbo::Point;
 use super::{HANDLE_HIT, MIN_CROP, MediaView, PLAY};
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MediaHit {
     Zoom,
     Align,
     Crop,
     Source,
+    Download,
     Grip,
     Play,
     Image,
@@ -17,7 +17,6 @@ pub enum MediaHit {
     Bar,
     Outside,
 }
-
 #[derive(Clone, Debug, Default)]
 pub struct MediaOverlay {
     pub hovered: bool,
@@ -25,9 +24,10 @@ pub struct MediaOverlay {
     pub hover: Option<MediaHit>,
     pub crop: Option<[f64; 4]>,
     pub video: Option<crate::video::State>,
+    pub download: Option<f64>,
+    pub failed: bool,
     pub fade: f32,
 }
-
 impl MediaView {
     pub fn hit(&self, p: Point, overlay: &MediaOverlay) -> MediaHit {
         if self.frame.area() <= 0.0 {

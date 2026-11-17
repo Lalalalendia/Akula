@@ -249,8 +249,15 @@ fn run() -> Result<()> {
     if output.tracks().len() != 2 {
         return Err("output is not a two-track MP4".into());
     }
-    if output.movie_duration() == 0 {
+    if output.movie_duration() == 0 || output.movie_timescale() == 0 {
         return Err("Rust MP4 has zero movie duration after DASH remux".into());
+    }
+    let duration_ms = u64::try_from(
+        (u128::from(output.movie_duration()) * 1000u128)
+            / u128::from(output.movie_timescale()),
+    )?;
+    if duration_ms == 0 {
+        return Err("Rust MP4 movie duration is less than one millisecond".into());
     }
     if result.metadata()?.len() < 1024 {
         return Err("output MP4 unexpectedly small".into());
@@ -259,7 +266,7 @@ fn run() -> Result<()> {
     if strict {
         println!("DASH_RUST_FRAGMENTED_REMUX_PASS video_samples={vcount} audio_samples={acount} video_fragments={vfragments} audio_fragments={afragments} output_bytes={} ffmpeg_in_runtime=0", result.metadata()?.len());
     } else {
-        println!("DASH_RUST_MUX_PAIR_PASS video_samples={vcount} audio_samples={acount} video_fragments={vfragments} audio_fragments={afragments} output_bytes={} ffmpeg_in_runtime=0", result.metadata()?.len());
+        println!("DASH_RUST_MUX_PAIR_PASS protocol=v2 duration_ms={duration_ms} video_samples={vcount} audio_samples={acount} video_fragments={vfragments} audio_fragments={afragments} output_bytes={} ffmpeg_in_runtime=0", result.metadata()?.len());
     }
     Ok(())
 }

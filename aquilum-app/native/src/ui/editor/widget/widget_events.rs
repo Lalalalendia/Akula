@@ -50,12 +50,12 @@ impl TextEditor {
     }
 
     pub(super) fn do_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        if self.compose.is_some() || !self.laid_out() {
-            return;
-        }
+        if self.compose.is_some() || !self.laid_out() { return; }
         match event {
             PointerEvent::Down(PointerButtonEvent { button: None | Some(PointerButton::Primary), state, .. }) => {
                 self.close_suggest();
+                #[cfg(all(windows, feature = "video-ui-e2e"))]
+                crate::video::ui_acceptance::mark("WINDOW_POINTER_DOWN");
                 let point = ctx.local_position(state.position);
                 let new_tab = crate::ui::keymap::action(state.modifiers);
                 if self.code_header_press(ctx, point)

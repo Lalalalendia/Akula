@@ -1,0 +1,240 @@
+name: Akula VIDEO-16 real Windows GUI click and restart (non-release)
+
+on:
+  pull_request:
+    branches: [main, feat/video03-one-click-offline-20261116]
+    paths:
+      - 'aquilum-app/native/src/video/ui_acceptance.rs'
+      - 'labs/video-lite/video16/**'
+      - 'scripts/windows-video16-real-gui.ps1'
+      - '.github/workflows/akula-video16-real-windows-gui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  boundaries:
+    name: Forbid non-local GUI media or production-feature activation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Enforce test-only gate at source
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+          cargo=tomllib.loads(Path('aquilum-app/native/Cargo.toml').read_text())
+          assert cargo['features']['video-ui-e2e']==['video-rust-bundle']
+          assert 'video-ui-e2e' not in cargo['features']['installed']
+          assert 'video-rust-bundle' not in cargo['features']['installed']
+          probe=Path('aquilum-app/native/src/video/ui_acceptance.rs').read_text()
+          assert 'http://127.0.0.1:' in probe
+          assert 'RUNNER_ENVIRONMENT' in probe and 'github-hosted' in probe
+          assert 'dQw4w9WgXcQ' in probe
+          assert 'VIDEO16_HOVER_' not in Path('aquilum-app/native/src/video/queue.rs').read_text()
+          assert 'AKULA_VIDEO16_MPD_URL' in probe
+          assert 'media_press' in Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
+          assert 'WINDOW_POINTER_DOWN' in Path('aquilum-app/native/src/ui/editor/widget/widget_events.rs').read_text()
+          assert 'PRESS_DOWNLOAD' in probe and 'CENTER_DOWNLOAD_READY' in probe
+          assert 'SendInput(1,down' in Path('scripts/windows-video16-real-gui.ps1').read_text()
+          assert "Wait-Event $pressName" in Path('scripts/windows-video16-real-gui.ps1').read_text()
+          assert "Wait-Event 'WINDOW_POINTER_DOWN'" in Path('scripts/windows-video16-real-gui.ps1').read_text()
+          gui = Path('scripts/windows-video16-real-gui.ps1').read_text()
+          assert "return ($Lines -ccontains ('VIDEO16_' + $Name))" in gui
+          assert 'VIDEO16_EXACT_EVENT_MATCH_PASS' in gui
+          assert 'VIDEO16_CLICK_LOCAL_PLAY_ATTEMPT' in gui
+          assert 'ctx.window_transform() * point' in Path('aquilum-app/native/src/ui/editor/widget/media/mouse.rs').read_text()
+          assert 'ClientToScreen' in probe and 'target_client_pixel' in probe
+          assert 'VIDEO16_{event}_CURSOR:' in probe
+          assert 'ReadAllText($ProbePath).Contains' not in gui
+          assert '[IO.File]::Open($ProbePath' in gui
+          assert '[IO.FileShare]::ReadWrite' in gui
+          assert 'catch [System.IO.IOException]' in gui
+          assert 'function Complete-ProbeLines' in gui
+          assert '[IO.File]::ReadAllLines($ProbePath)' not in gui
+          assert 'VIDEO16 treated unterminated success as a real Play event' in gui
+          for path in ['aquilum-app/native/packaging/akula-windows.json',
+                       '.github/workflows/akula-video16-real-windows-gui.yml']:
+              assert Path(path).is_file()
+          package=Path('aquilum-app/native/packaging/akula-windows.json').read_text()
+          assert 'video-ui-e2e' not in package and 'akula-yt-dlp' not in package
+          print('VIDEO16_NONSHIPPING_GUI_GATE_PASS localhost_only=1 packaged=0')
+          PY
+
+  fixture:
+    name: Generate local six-second H264/AAC DASH fixture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Generate only relative URL segments
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          test -s labs/video-lite/fixtures/avc_aac_2s.mp4
+          mkdir -p video16-fixture
+          ffmpeg -hide_banner -loglevel error -nostdin \
+            -stream_loop 2 -i labs/video-lite/fixtures/avc_aac_2s.mp4 \
+            -t 6 -map 0:v:0 -map 0:a:0 -c copy \
+            -f dash -seg_duration 1 -use_template 1 -use_timeline 1 \
+            video16-fixture/manifest.mpd
+          python3 - <<'PY'
+          import pathlib
+          import xml.etree.ElementTree as ET
+          root=pathlib.Path('video16-fixture')
+          ns='{urn:mpeg:dash:schema:mpd:2011}'
+          mpd=ET.parse(root/'manifest.mpd')
+          assert len(mpd.findall('.//'+ns+'Representation'))==2
+          assert len(list(root.glob('*.m4s')))>=4
+          for item in mpd.findall('.//'+ns+'SegmentTemplate'):
+              for key in ('media','initialization'):
+                  assert '://' not in item.attrib.get(key,'')
+          for item in mpd.findall('.//'+ns+'BaseURL'):
+              assert '://' not in (item.text or '')
+          print('VIDEO16_LOCAL_DASH_FIXTURE_PASS tracks=2')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video16-only-local-dash
+          path: video16-fixture/
+          retention-days: 2
+          if-no-files-found: error
+
+  real-windows:
+    name: Actual pointer click, local MP4, restart and decoded GUI frame
+    needs: [fixture, boundaries]
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: video16-only-local-dash
+          path: video16-fixture
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aquilum-app -> ../.artifacts/cargo-native
+            labs/video-lite
+          shared-key: akula-video16-real-gui-windows-v1
+          save-if: false
+      - name: Build verified Rust mux with immutable Cargo.lock
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo test --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if($LASTEXITCODE -ne 0){throw 'VIDEO16 Rust mux tests failed'}
+          cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if($LASTEXITCODE -ne 0){throw 'VIDEO16 Rust mux build failed'}
+          $mux=(Resolve-Path labs/video-lite/target/release/dash.exe).Path
+          $pin=(Get-FileHash -LiteralPath $mux -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($pin -cnotmatch '^[0-9a-f]{64}$'){throw 'Invalid mux hash'}
+          Add-Content -Path $env:GITHUB_ENV -Value "AKULA_BUNDLED_MUX_SHA256=$pin"
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO16_MUX=$mux"
+      - name: Download exact upstream tools to CI temporary directory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $temp=Join-Path $env:RUNNER_TEMP 'video16-official'
+          New-Item -ItemType Directory -Path $temp -Force | Out-Null
+          $yt=Join-Path $temp 'yt-dlp.exe'
+          $js=Join-Path $temp 'qjs.exe'
+          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' -OutFile $yt -UseBasicParsing
+          Invoke-WebRequest 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' -OutFile $js -UseBasicParsing
+          if((Get-FileHash -LiteralPath $yt -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d'){throw 'yt-dlp pin mismatch'}
+          if((Get-FileHash -LiteralPath $js -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7'){throw 'QuickJS pin mismatch'}
+          if((Get-Item $yt).Length -ne 23575744 -or (Get-Item $js).Length -ne 1873152){throw 'Sidecar size mismatch'}
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO16_YT=$yt"
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO16_JS=$js"
+      - name: Build non-published Windows UI candidate with all four binaries
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo build --release --locked -p aquilum-native --features installed,video-rust-bundle,video-ui-e2e
+          if($LASTEXITCODE -ne 0){throw 'VIDEO16 GUI candidate failed to compile'}
+          $compiled=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release/aquilum-native.exe'
+          if(!(Test-Path -LiteralPath $compiled -PathType Leaf)){throw 'Candidate executable missing'}
+          $dir=Join-Path $env:LOCALAPPDATA 'Akula'
+          if(Test-Path -LiteralPath $dir){throw 'VIDEO16 refuses to overwrite an existing app installation'}
+          New-Item -ItemType Directory -Path $dir | Out-Null
+          Copy-Item -LiteralPath $compiled -Destination (Join-Path $dir 'akula-app.exe')
+          Copy-Item -LiteralPath $env:VIDEO16_MUX -Destination (Join-Path $dir 'akula-video-mux.exe')
+          Copy-Item -LiteralPath $env:VIDEO16_YT -Destination (Join-Path $dir 'akula-yt-dlp.exe')
+          Copy-Item -LiteralPath $env:VIDEO16_JS -Destination (Join-Path $dir 'akula-quickjs.exe')
+          if((Get-FileHash -LiteralPath (Join-Path $dir 'akula-app.exe')).Hash -cne (Get-FileHash -LiteralPath $compiled).Hash){throw 'Staged Akula is not the compiled candidate'}
+          if((Get-FileHash -LiteralPath (Join-Path $dir 'akula-video-mux.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:AKULA_BUNDLED_MUX_SHA256){throw 'Staged mux was modified'}
+          Write-Host 'VIDEO16_NONRELEASE_STAGE_PASS app=1 mux=1 ytdlp=1 quickjs=1 installer=0'
+      - name: Actually click Akula Download and Play via foreground HWND
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Path video16-output -Force | Out-Null
+          $exe=Join-Path $env:LOCALAPPDATA 'Akula/akula-app.exe'
+          $vault=Join-Path $env:RUNNER_TEMP 'video16-vault'
+          $data=Join-Path $env:RUNNER_TEMP 'video16-data'
+          $probe=Join-Path $env:RUNNER_TEMP 'video16-events.log'
+          python labs/video-lite/video16/gui_acceptance.py --repo . --manifest-dir video16-fixture --exe $exe --vault $vault --data $data --probe $probe --output video16-output/video16-ui.mp4
+          if($LASTEXITCODE -ne 0){throw 'VIDEO16 installed-style real GUI E2E failed'}
+          Write-Host 'VIDEO16_REAL_GUI_PASS source=local_dash no_youtube=1 note_unchanged=1'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video16-real-ui-local-mp4
+          path: video16-output/video16-ui.mp4
+          if-no-files-found: error
+          retention-days: 2
+      - name: No installer or publication
+        run: echo 'VIDEO16_NONRELEASE_PASS installer=0 release=0 user_vault=0'
+
+  independent-decode:
+    name: Independently decode GUI-downloaded MP4
+    needs: real-windows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: video16-real-ui-local-mp4
+          path: video16-output
+      - name: Decode both video and audio with external FFmpeg
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffprobe -v error -count_frames -show_entries stream=codec_type,codec_name,nb_read_frames:format=duration -of json video16-output/video16-ui.mp4 > video16-output/probe.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('video16-output/probe.json').read_text())
+          streams=data['streams']
+          assert {(s['codec_type'],s['codec_name']) for s in streams}=={('video','h264'),('audio','aac')}
+          assert 4 <= float(data['format']['duration']) <= 8
+          assert all(int(s['nb_read_frames'])>=30 for s in streams)
+          print('VIDEO16_GUI_OUTPUT_FRAMES_PASS')
+          PY
+          ffmpeg -hide_banner -loglevel error -nostdin -i video16-output/video16-ui.mp4 -map 0:v:0 -f null -
+          ffmpeg -hide_banner -loglevel error -nostdin -i video16-output/video16-ui.mp4 -map 0:a:0 -f null -
+          echo 'VIDEO16_GUI_INDEPENDENT_DECODE_PASS'
