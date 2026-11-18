@@ -3,7 +3,9 @@ const {test}=require('node:test');const assert=require('node:assert/strict');
 const fs=require('node:fs');const path=require('node:path');
 const root=path.resolve(__dirname,'../..');
 const paths={cargo:'aquilum-app/native/Cargo.toml',core:'aquilum-app/core/Cargo.toml',
-  windows:'aquilum-app/native/packaging/akula-windows.json',lock:'aquilum-app/Cargo.lock',
+  windows:'aquilum-app/native/packaging/akula-windows.json',
+  lab:'aquilum-app/native/packaging/akula-windows-video17-lab.json',
+  lock:'aquilum-app/Cargo.lock',
   build:'aquilum-app/native/build.rs',verifier:'labs/video-lite/video18c02b04-native-pe-version.rs',
   workflow:'.github/workflows/akula-video18c02b05-real-native-version.yml',
   doc:'docs/release/video18c02b05-real-native-version.md'};
@@ -19,6 +21,8 @@ function gate(a){
     'VIDEO18C02B05_HOLD: core locked package version differs');
   assert.equal(JSON.parse(a.windows).version,'0.3.21',
     'VIDEO18C02B05_HOLD: Windows packager version differs');
+  assert.equal(JSON.parse(a.lab).version,'0.3.21',
+    'VIDEO18C02B05_HOLD: isolated five-PE lab packager version differs');
   for(const s of ['CARGO_PKG_VERSION','win32_fixed_version_info(&package_version)'])
     assert.ok(a.build.includes(s),'VIDEO18C02B05_HOLD: native PE version resource bypass');
   for(const s of ['GetFileVersionInfoW','VerQueryValueW',
@@ -49,6 +53,7 @@ test('Negative mutations cannot bypass version, signing boundary or CI proof',()
     ['cargo','version = "0.3.21"','version = "0.3.20"'],
     ['core','version = "0.3.21"','version = "0.3.20"'],
     ['windows','"version": "0.3.21"','"version": "0.3.20"'],
+    ['lab','"version": "0.3.21"','"version": "0.3.20"'],
     ['lock','name = "aquilum-core"\nversion = "0.3.21"','name = "aquilum-core"\nversion = "0.3.20"'],
     ['lock','name = "aquilum-native"\nversion = "0.3.21"','name = "aquilum-native"\nversion = "0.3.20"'],
     ['build','CARGO_PKG_VERSION','FAKE_VERSION'],

@@ -6,6 +6,7 @@ on:
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/native/packaging/akula-windows.json'
+      - 'aquilum-app/native/packaging/akula-windows-video17-lab.json'
       - 'aquilum-app/Cargo.lock'
       - 'aquilum-app/native/build.rs'
       - 'labs/video-lite/video18c02b04-native-pe-version.rs'
