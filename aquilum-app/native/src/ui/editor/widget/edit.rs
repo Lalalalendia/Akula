@@ -42,6 +42,9 @@ impl TextEditor {
     pub(super) fn apply_change(&mut self, range: Range<usize>, inserted: String) -> Change {
         let removed = self.doc.copy(range.clone());
         self.doc.replace(range.clone(), &inserted);
+        // Never leave an annotated range painted on different text after edits,
+        // including undo/redo, external changes and multi-cursor operations.
+        self.annotation_overlay.clear();
         let change = Change { at: range.start, removed, inserted };
         // Keep code-view offsets bound to their opening fence, never to a
         // line index that can be reused after an edit or document replacement.
