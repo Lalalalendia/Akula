@@ -164,9 +164,12 @@ impl RegistryStore {
         let payload = encode(registry)?;
         let tx = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| StoreError::Storage)?;
-        let current: i64 = tx.query_row(
-            "SELECT revision FROM language_registry WHERE id=1", [], |r| r.get(0),
+        let (current, previous_payload): (i64, Vec<u8>) = tx.query_row(
+            "SELECT revision,payload FROM language_registry WHERE id=1",
+            [], |r| Ok((r.get(0)?, r.get(1)?)),
         ).map_err(|_| StoreError::CorruptStore)?;
+        // Refuse to replace data corrupted after this connection was opened.
+        decode(&previous_payload)?;
         if u64::try_from(current).map_err(|_| StoreError::CorruptStore)? != expected_revision {
             return Err(StoreError::StaleRevision);
         }
@@ -242,7 +245,8 @@ mod tests {
         let mut store = RegistryStore::open(&dir.path().join("study.sqlite")).unwrap();
         store.save(0, &registry()).unwrap();
         let mut broken = registry();
-        broken.collections[0].members.push(broken.collections[0].members[0].clone());
+        let duplicate = broken.collections[0].members[0].clone();
+        broken.collections[0].members.push(duplicate);
         assert_eq!(
             store.save(1, &broken),
             Err(StoreError::InvalidRegistry(CollectionError::DuplicateMembership))
@@ -271,7 +275,7 @@ mod tests {
         let path = dir.path().join("study.sqlite");
         let store = RegistryStore::open(&path).unwrap();
         store.connection.execute(
-            "UPDATE language_registry SET payload=?1 WHERE id=1", params![b"{ bad"],
+            "UPDATE language_registry SET payload=?1 WHERE id=1", params![&b"{ bad"[..]],
         ).unwrap();
         assert_eq!(store.load(), Err(StoreError::CorruptStore));
         drop(store);
@@ -286,7 +290,7 @@ mod tests {
         store.save(0, &registry).unwrap();
         store.connection.execute(
             "UPDATE language_registry SET payload=?1 WHERE id=1",
-            params![br#"{"version":2,"registry":{"collections":[],"tables":[]}}"#],
+            params![&br#"{"version":2,"registry":{"collections":[],"tables":[]}}"#[..]],
         ).unwrap();
         assert_eq!(store.load(), Err(StoreError::UnsupportedSchema));
     }
