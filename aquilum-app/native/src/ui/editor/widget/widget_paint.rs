@@ -78,6 +78,12 @@ impl TextEditor {
                 self.paint_backdrop(painter, i);
             }
         }
+        // Annotation backgrounds are inert view projections, not Markdown styles.
+        // Host supplies only scopes/revisions it has already authorized; the
+        // layer is cleared on every edit or note reset before repainting.
+        for span in &self.annotation_overlay {
+            self.paint_range(painter, shown.clone(), span.bytes.clone(), span.color.multiply_alpha(0.28));
+        }
         let range = self.selection();
         if !range.is_empty() && ctx.is_window_focused() {
             let sel_color = props.get::<SelectionColor>(ctx.property_cache()).color;
