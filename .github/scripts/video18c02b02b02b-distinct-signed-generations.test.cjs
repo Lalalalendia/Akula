@@ -24,7 +24,7 @@ function guard(ps,wf,doc){
     "if($oldHashes['akula-app'] -ceq $newHashes['akula-app'])",
     "Assert-Set $root $oldHashes $true",
     "Assert-Set $current $newHashes $false",
-    "source_commit=$gen[3]","cargo_lock_sha256=$lockSha",
+    "source_commit=$gen[3]","cargo_lock_sha256=$gen[6]",
     "version=$gen[4]","& $mini -S -s $key",
     "& $mini -Vm $manifest -x $signature -p $pub -Q",
     "& $mini -Vm $manifests.new.manifest -x $manifests.old.signature",
