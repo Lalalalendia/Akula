@@ -38,7 +38,7 @@ function check(script,workflow,doc){
     '$pinned.StartTime.ToUniversalTime() -ne $started',
     'if(!$process.CloseMainWindow() -or !$process.WaitForExit(20000))',
     '(Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $noteHash',
-    "VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS",
+    "Write-Output 'VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS",
     '$process.Kill($true)',
   ]) assert.ok(script.includes(marker),'VIDEO18C02B02B02A_HOLD: missing fail-closed check '+marker);
   assert.ok(script.includes("!$oldApp.StartsWith(($temp.TrimEnd('\\')+'\\')"),
@@ -85,6 +85,7 @@ test('Negative: weakened old-source pin, PE comparison, OS witness or source cus
   for(const [field,from,to] of [
     ['script',"$oldHash -ceq $newHash",'$false'],
     ['script',"(git -C $oldTree rev-parse HEAD).Trim() -cne $oldCommit",'$false'],
+    ['script',"Write-Output 'VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS","Write-Host 'VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS"],
     ['script',"$process.MainWindowTitle.Contains('Akula')",'$true'],
     ['script','$pinned.StartTime.ToUniversalTime() -ne $started','$false'],
     ['script','[IO.FileAttributes]::ReparsePoint','[IO.FileAttributes]::None'],

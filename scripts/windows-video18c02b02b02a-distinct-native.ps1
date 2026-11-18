@@ -151,7 +151,7 @@ try {
      (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $noteHash) {
     throw 'VIDEO18C02B02B02A_HOLD: PE or user note changed after old GUI launch'
   }
-  Write-Host 'VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS old_process=1 pinned_pid=1 visible_window=1 clean_exit=1 note_preserved=1 new_signed_ack_separate=1 no_update=1 release=0'
+  Write-Output 'VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS old_process=1 pinned_pid=1 visible_window=1 clean_exit=1 note_preserved=1 new_signed_ack_separate=1 no_update=1 release=0'
 } finally {
   if(!$process.HasExited){
     $process.Kill($true)
