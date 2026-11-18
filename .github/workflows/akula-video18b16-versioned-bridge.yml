@@ -195,7 +195,7 @@ jobs:
         shell: pwsh
         working-directory: _akula-historical/aquilum-app
         env:
-          EXPECTED_HEAD_SHA: \${{ github.event.pull_request.head.sha }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           $ErrorActionPreference='Stop'
           $old='ec6d6d48a78e60fca7a6f810b825418500bad64b'
@@ -223,7 +223,7 @@ jobs:
       - name: Attest two distinct source-built PE and launch genuine historical GUI
         shell: pwsh
         env:
-          EXPECTED_HEAD_SHA: \${{ github.event.pull_request.head.sha }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           $ErrorActionPreference='Stop'
           ./scripts/windows-video18c02b02b02a-distinct-native.ps1 -OldAppPath $env:VIDEO18C02B02B02A_OLD_APP -NewAppPath $env:VIDEO18B04_APP
