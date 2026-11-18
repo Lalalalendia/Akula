@@ -33,6 +33,9 @@ function gate(build,rust,workflow,doc){
     'cargo build --release --locked -p aquilum-native',
     'VIDEO18C02B04_FALSE_VERSION_DENIED_PASS',
     'VIDEO18C02B04_NATIVE_PE_IDENTITY_PASS',
+    '$deniedExit=$LASTEXITCODE',
+    'VIDEO18C02B04_HOLD: signed label is not a genuine newer native PE version',
+    '$global:LASTEXITCODE=0',
     'rustc --edition=2024 --test',
     'git rev-parse HEAD','EXPECTED_HEAD_SHA',
     'github.event.pull_request.head.sha',
@@ -57,6 +60,8 @@ test('Fail closed when version, Windows identity, HEAD or false-label refusal is
     ['rust','GetFileVersionInfoW','FakeVersionQuery'],
     ['rust','RUNNER_ENVIRONMENT','NO_RUNNER_GUARD'],
     ['rust','only exact source-built native EXE admitted','allow any path'],
+    ['workflow','$global:LASTEXITCODE=0','$global:LASTEXITCODE=1'],
+    ['workflow','VIDEO18C02B04_HOLD: signed label is not a genuine newer native PE version','FAKE_REJECTION'],
     ['workflow','VIDEO18C02B04_FALSE_VERSION_DENIED_PASS','PHANTOM_VERSION_ALLOWED'],
     ['workflow','cargo build --release --locked -p aquilum-native','echo fake-built'],
   ]){

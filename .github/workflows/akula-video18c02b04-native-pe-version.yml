@@ -104,9 +104,13 @@ jobs:
           if($identityExit -ne 0 -or !(($identity|Out-String).Contains('VIDEO18C02B04_NATIVE_PE_IDENTITY_PASS'))){
             throw 'VIDEO18C02B04_HOLD: native VERSIONINFO and source mismatch'
           }
-          & $witness --admit $env:VIDEO18C02B04_APP $sourceVersion 0.3.20 0.3.21
-          if($LASTEXITCODE -eq 0){
-            throw 'VIDEO18C02B04_HOLD: fictitious signed version 0.3.21 admitted for real 0.3.20 executable'
+          $denied=@(& $witness --admit $env:VIDEO18C02B04_APP $sourceVersion 0.3.20 0.3.21 2>&1)
+          $deniedExit=$LASTEXITCODE
+          $denied | Out-Host
+          if($deniedExit -eq 0 -or !(($denied | Out-String).Contains('VIDEO18C02B04_HOLD: signed label is not a genuine newer native PE version'))){
+            throw 'VIDEO18C02B04_HOLD: expected strict version mismatch rejection was not observed'
           }
+          # Expected nonzero native status is consumed; avoid failing the pwsh step.
+          $global:LASTEXITCODE=0
           Write-Host 'VIDEO18C02B04_FALSE_VERSION_DENIED_PASS actual=0.3.20 phantom=0.3.21 release=0'
           Remove-Item -LiteralPath $witness -Force -ErrorAction Stop
