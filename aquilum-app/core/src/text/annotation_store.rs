@@ -12,7 +12,7 @@ use std::path::Path;
 use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use super::annotations::{DocumentIdentity, TextAnchor, MAX_ANNOTATED_SPAN_BYTES, MAX_DOCUMENT_BYTES};
+use super::annotations::{TextAnchor, MAX_ANNOTATED_SPAN_BYTES, MAX_DOCUMENT_BYTES};
 
 const VERSION: i64 = 1;
 const MAX_RECORDS: usize = 4096;
@@ -257,7 +257,7 @@ impl AnnotationStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::annotations::{capture, MAX_DOCUMENT_BYTES};
+    use super::super::annotations::{capture, DocumentIdentity};
 
     fn doc() -> DocumentIdentity {
         DocumentIdentity { vault_id: "vault-A".into(), note_id: "doc-A".into() }
