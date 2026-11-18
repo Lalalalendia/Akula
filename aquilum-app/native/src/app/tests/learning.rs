@@ -9,12 +9,17 @@ fn lang02_named_collection_native_gui_persists_without_mutating_markdown() {
     let mut h = Harness::new();
     let path = h.vault.path().join("a.md");
     let markdown = "| Term | Translation |\n| --- | --- |\n| star | звезда |";
+    assert!(h.app.open(&mut h.root, path.clone()), "test fixture note must be opened");
     h.replace_body(markdown);
     h.save_now();
     let saved = std::fs::read(&path).unwrap();
     assert!(h.app.note.as_ref().is_some_and(|n| n.clean_cache_hash().is_some()));
-    h.focus_editor();
-    h.key(Key::Named(NamedKey::End), Modifiers::CONTROL);
+    let body = h.app.note_ids.as_ref().unwrap().body;
+    let inside_table = markdown.find("star").unwrap();
+    h.root.focus_on(Some(body.id()));
+    body.edit(&mut h.root, |mut editor| {
+        crate::ui::editor::TextEditor::select_byte_range(&mut editor, inside_table, inside_table);
+    });
 
     h.app.open_study_add(&mut h.root);
     let question = match &h.app.popup {
