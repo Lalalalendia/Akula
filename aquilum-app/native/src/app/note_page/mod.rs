@@ -100,7 +100,7 @@ impl App {
         let edit_elapsed = started.elapsed();
         #[cfg(test)]
         let phases = Slot::take_replace_timings();
-        self.refresh_save_error(root);
+        self.refresh_save_error(root); self.auto_show_annotations_after_note_open(root);
         #[cfg(test)]
         note::page::record_page_install(started.elapsed(), edit_elapsed, phases);
     }
