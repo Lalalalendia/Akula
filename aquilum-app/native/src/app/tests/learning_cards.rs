@@ -119,3 +119,18 @@ fn lang05_start_without_selected_collection_cannot_open_a_quiz() {
     h.act(layer, MenuChoice::Item(2));
     assert!(matches!(h.app.popup, Some(Popup::StudyPreview { .. })));
 }
+
+#[test]
+fn lang05_note_actions_menu_starts_study_without_changing_existing_action_positions() {
+    let mut h = Harness::new();
+    bind_fixture(&mut h);
+    h.app.open_note_actions_menu(&mut h.root, masonry::kurbo::Point::new(20.0, 20.0));
+    let layer = match &h.app.popup {
+        Some(Popup::NoteActionsMenu { layer }) => *layer,
+        _ => panic!("note actions menu must exist"),
+    };
+    // This is the append-only command at index 7; old actions keep indices.
+    h.act(layer, MenuChoice::Item(7));
+    assert!(matches!(h.app.popup, Some(Popup::StudyPicker { .. })),
+        "Study flashcards action must open the collection picker");
+}
