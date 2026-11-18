@@ -205,7 +205,7 @@ jobs:
               (git -C ../.. rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA){
             throw 'VIDEO18C02B02B02A_HOLD: wrong old/new source commit'
           }
-          if((git rev-parse HEAD:Cargo.lock).Trim() -cne
+          if((git rev-parse HEAD:aquilum-app/Cargo.lock).Trim() -cne
               (git -C ../.. rev-parse HEAD:aquilum-app/Cargo.lock).Trim()){
             throw 'VIDEO18C02B02B02A_HOLD: historical dependency lock differs from current'
           }
