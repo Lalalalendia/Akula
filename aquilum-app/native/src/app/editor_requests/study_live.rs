@@ -3,7 +3,8 @@
 //! The active window already owns the latest editor Rope. Use only that
 //! buffer, the registered read-only note identity and a private revision
 //! stamp. All other open tabs remain excluded from closed-disk reads.
-//! Never open a vault path, persist cells or create a document identity here.
+//! Check only a bounded backing checksum after identity validation; never
+//! use disk contents for cards, persist cells or create document identities.
 
 use aquilum_core::learning::state::StudyState;
 use aquilum_core::learning::table_anchors::NoteKey;
@@ -54,6 +55,15 @@ impl App {
                     .as_deref() == Some(current_path.as_path()))
                     .then(|| NoteKey { vault_id: vault.clone(), note_id: source.note_id.clone() })
             })?;
+        // The editor buffer supplies words. The registered backing file
+        // must still match the editor's base hash; refuse external replacement.
+        // Read only a bounded checksum, never disk cells for study cards.
+        if std::fs::metadata(&current_path).ok()?.len() > MAX_STUDY_SOURCE_BYTES
+            || aquilum_core::files::document::read_file_hash_impl(&current_path)
+                .ok().as_deref() != Some(baseline_hash.as_str())
+        {
+            return None;
+        }
         let body = self.text.to_string();
         let tables = TextEditor::scan_study_source(&body).ok()?;
         let stamp = LiveEditorStamp {
