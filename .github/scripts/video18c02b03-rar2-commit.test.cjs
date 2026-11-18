@@ -41,7 +41,8 @@ function check(rust,cargo,script,workflow,doc){
     'chaptera-update-engine','chaptera-update-orchestrator'
   ])assert.ok(cargo.includes(needle),'VIDEO18C02B03_HOLD: nonshipping crate lost '+needle);
   for(const needle of [
-    'Rar2Positive','VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS',
+    'Rar2Positive','$proof | Write-Output',
+    'VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS',
     'VIDEO18C02B02B02B_DISTINCT_SIGNED_GENERATIONS_PASS',
     'VIDEO18C02B02B_SIGNED_RUNNABLE_GUI_ACK_PASS'
   ])assert.ok(script.includes(needle),'VIDEO18C02B03_HOLD: script lost admitted lab '+needle);
@@ -76,6 +77,7 @@ test('Negative mutations fail closed for signed identity, Windows ACK, OS lock a
     ['rust','need(!accepted','need(accepted'],
     ['rust','RecoveryOutcome::UnconfirmedCandidateRolledBack','RecoveryOutcome::NothingToDo'],
     ['rust','["wrong-nonce","wrong-generation","good"]','["good"]'],
+    ['script','$proof | Write-Output','$proof | Out-Host'],
     ['workflow','VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS','SKIP_REAL_RAR2'],
     ['workflow','needs: [contract, preflight]','needs: contract']
   ]){
