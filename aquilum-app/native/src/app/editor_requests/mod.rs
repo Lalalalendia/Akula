@@ -48,7 +48,7 @@ impl App {
                 });
                 false
             }
-            Request::DownloadVideo { url } => { self.download_video(&url); false }
+            Request::DownloadVideo { url } => { self.download_video(root, &url); false }
             Request::Open { target, wiki, new_tab } => {
                 let target = if wiki { crate::links::Target::Wiki(target) } else { crate::links::Target::Url(target) };
                 self.open_target(root, target, new_tab)
