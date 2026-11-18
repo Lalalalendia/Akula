@@ -131,7 +131,7 @@ mod signed_lab {
         let wrong_sha = if digest == "f".repeat(64) { "0".repeat(64) }
             else { "f".repeat(64) };
         let wrong_generation =
-            super::gui_launcher::lab::case(&app, &wrong_sha, "good", Some(&verify))?;
+            super::gui_launcher::lab::case(&app, &wrong_sha, "wrong-generation", Some(&verify))?;
         if wrong_generation { return Err("wrong signed manifest digest was accepted".into()); }
 
         signed.verify_stage(current)?;
