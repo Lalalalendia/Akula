@@ -95,6 +95,13 @@
     "copyCode": "Copy code",
     "insertFrontmatter": "Insert metadata",
     "annotation": {
+      "explain": "Edit highlight explanation…",
+      "explainTitle": "Highlight explanation",
+      "explainHint": "Add a brief explanation (optional)",
+      "saveNote": "Save explanation",
+      "cancel": "Cancel",
+      "selectSaved": "Select exactly one saved, current highlight first.",
+      "noteSaved": "Explanation saved to local metadata.",
       "highlight": "Highlight selection…",
       "show": "Show saved highlights",
       "hide": "Hide highlights",
