@@ -7,7 +7,7 @@ mod folder_colors;
 mod graph;
 mod image_files;
 mod harness;
-mod keys;
+mod keys; mod learning;
 #[cfg(feature = "memory-probe")]
 mod memory;
 mod misc;
