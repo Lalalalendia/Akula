@@ -232,7 +232,7 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          # A PowerShell script is not a native executable: LASTEXITCODE can be stale.
+          # A PowerShell script is not a native executable: a previous native exit code can be stale.
           # ErrorActionPreference=Stop propagates a terminating script error.
           $proof=@(./scripts/windows-video18c02b02b02a-distinct-native.ps1 -OldAppPath $env:VIDEO18C02B02B02A_OLD_APP -NewAppPath $env:VIDEO18B04_APP 2>&1)
           $proof | Out-Host
