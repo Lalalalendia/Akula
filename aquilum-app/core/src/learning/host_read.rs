@@ -77,6 +77,18 @@ impl<'a> HostStudyReader<'a> {
         state: &StudyState,
         selected_ids: &[String],
     ) -> Result<SelectedStudyTexts, StudyReadError> {
+        self.read_selected_excluding(state, selected_ids, &BTreeSet::new())
+    }
+
+    /// Trusted caller must exclude every document with an open native editor
+    /// tab, even when DocumentHub itself has no open session for that tab.
+    /// Exclusions are evaluated BEFORE any descriptor or file content read.
+    pub fn read_selected_excluding(
+        &self,
+        state: &StudyState,
+        selected_ids: &[String],
+        excluded: &BTreeSet<NoteKey>,
+    ) -> Result<SelectedStudyTexts, StudyReadError> {
         state::validate(state).map_err(StudyReadError::InvalidState)?;
         let mut notes = BTreeSet::new();
         for selected_id in selected_ids {
@@ -97,6 +109,10 @@ impl<'a> HostStudyReader<'a> {
             available: Vec::new(), unavailable: Vec::new(),
         };
         for note in notes {
+            if excluded.contains(&note) {
+                result.unavailable.push(note);
+                continue;
+            }
             match self.read_closed(&note) {
                 Some((text, raw_hash)) => result.available.push(
                     LiveStudyText { note, text, raw_hash },
@@ -258,6 +274,21 @@ mod tests {
         assert!(output.available.is_empty());
         assert_eq!(output.unavailable.len(), 1);
         assert!(!output.available.iter().any(|note| note.text.contains("secret")));
+    }
+
+    #[test]
+    fn caller_exclusion_refuses_open_native_tab_before_reading_file() {
+        let case = fixture();
+        let reader = HostStudyReader::open(&case.core, case.vault.path(), case.workspace).unwrap();
+        let key = NoteKey { vault_id: case.workspace.to_string(), note_id: case.doc.to_string() };
+        let excluded = BTreeSet::from([key.clone()]);
+        let output = reader.read_selected_excluding(
+            &case.state, &["words".into()], &excluded,
+        ).unwrap();
+        assert!(output.available.is_empty());
+        assert_eq!(output.unavailable, [key]);
+        // Exclusion is not a mutation of original notes or saved membership.
+        assert!(case.path.is_file());
     }
 
     #[test]
