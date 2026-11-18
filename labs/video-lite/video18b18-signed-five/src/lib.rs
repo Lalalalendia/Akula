@@ -80,6 +80,39 @@ impl SignedFive {
         &self.manifest.cargo_lock_sha256
     }
 
+    /// Verify the exact first-presented-GUI receipt against this authenticated
+    /// five-PE manifest, never against an arbitrary caller-supplied EXE digest.
+    ///
+    /// This is read-only: the trusted external Windows supervisor must separately
+    /// pin the OS child HANDLE/creation identity, private inherited pipe, first
+    /// visible frame, deadline, protected install root, lock and journal.
+    /// A valid receipt must NOT authorize confirm_candidate or publication.
+    pub fn verify_first_presented_frame_ack(
+        &self,
+        receipt: &[u8],
+        expected_nonce: &str,
+        pinned_os_child_pid: u32,
+    ) -> Result<(), String> {
+        if receipt.is_empty() || receipt.len() > 256 {
+            return Err(hold("empty or oversized first-frame receipt"));
+        }
+        if !lowercase_hex(expected_nonce, 32) || pinned_os_child_pid <= 1 {
+            return Err(hold("invalid supervisor nonce or pinned OS child PID"));
+        }
+        // Both version and SHA originate only from the cryptographically
+        // admitted SignedFive object. Exact byte comparison rejects CRLF,
+        // duplicate/trailing receipts, wrong field order or alternate encodings.
+        let expected = format!(
+            "AKULA-WIN-FIRST-PRESENTED-V1\\t{expected_nonce}\\t{}\\t{}\\t{pinned_os_child_pid}\\n",
+            self.version(),
+            self.generation_sha256(),
+        );
+        if receipt != expected.as_bytes() {
+            return Err(hold("first-frame receipt not bound to signed five-PE generation"));
+        }
+        Ok(())
+    }
+
     /// Verify a caller-selected staging directory under an external trusted
     /// install lock. This neither grants authority to that path nor prevents a
     /// subsequent TOCTOU mutation. The privileged controller must enforce
@@ -356,6 +389,62 @@ mod tests {
             std::os::unix::fs::symlink(&stage, &alias).unwrap();
             assert!(admitted.verify_stage(&alias).is_err(), "symlinked tree accepted");
             fs::remove_file(alias).unwrap();
+        }
+    }
+
+    #[test]
+    fn first_frame_ack_is_bound_to_authenticated_five_pe_manifest_not_gui_exe_hash() {
+        let (root, bytes, signature, key) = fixture();
+        let admitted = admit_with_key(&bytes, &signature, &key, "0.3.20").unwrap();
+        let nonce = "0123456789abcdef0123456789abcdef";
+        let pid = 4567u32;
+        let exact = format!(
+            "AKULA-WIN-FIRST-PRESENTED-V1\\t{nonce}\\t{}\\t{}\\t{pid}\\n",
+            admitted.version(), admitted.generation_sha256(),
+        );
+        admitted.verify_first_presented_frame_ack(exact.as_bytes(), nonce, pid).unwrap();
+
+        let executable_hash: String = Sha256::digest(
+            fs::read(root.join("current/akula-app.exe")).unwrap(),
+        ).iter().map(|b| format!("{b:02x}")).collect();
+        assert_ne!(executable_hash, admitted.generation_sha256(),
+            "GUI-only digest must not masquerade as signed generation");
+        let gui_only = exact.replace(admitted.generation_sha256(), &executable_hash);
+        assert!(admitted.verify_first_presented_frame_ack(gui_only.as_bytes(), nonce, pid).is_err());
+
+        for mutated in [
+            exact.replace(nonce, "00000000000000000000000000000000"),
+            exact.replace("\\t0.3.21\\t", "\\t0.3.22\\t"),
+            exact.replace(&pid.to_string(), "4568"),
+            exact.replace(admitted.generation_sha256(), &"f".repeat(64)),
+            exact.replace("\\t", " "),
+            exact.replace("\\n", "\\r\\n"),
+            format!("{exact}{exact}"),
+            format!("{exact}trailing"),
+        ] {
+            assert!(admitted.verify_first_presented_frame_ack(
+                mutated.as_bytes(), nonce, pid,
+            ).is_err(), "untrusted/malformed ACK was accepted: {mutated:?}");
+        }
+        let mut invalid_binary = exact.as_bytes().to_vec();
+        invalid_binary.push(0);
+        assert!(admitted.verify_first_presented_frame_ack(
+            &invalid_binary, nonce, pid,
+        ).is_err());
+        assert!(admitted.verify_first_presented_frame_ack(
+            &[b'x'; 257], nonce, pid,
+        ).is_err());
+        for invalid_nonce in ["", "0", "A123456789abcdef0123456789abcdef",
+            "0123456789abcdef0123456789abcde\\n",
+            "0123456789abcdef0123456789abcde_"] {
+            assert!(admitted.verify_first_presented_frame_ack(
+                exact.as_bytes(), invalid_nonce, pid,
+            ).is_err());
+        }
+        for invalid_pid in [0, 1, pid + 1] {
+            assert!(admitted.verify_first_presented_frame_ack(
+                exact.as_bytes(), nonce, invalid_pid,
+            ).is_err());
         }
     }
 
