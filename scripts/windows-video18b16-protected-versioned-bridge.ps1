@@ -254,6 +254,31 @@ try {
   Copy-Item -LiteralPath (Join-Path $stage 'akula-quickjs.exe') -Destination (Join-Path $current 'akula-quickjs.exe') -ErrorAction Stop
   Assert-Five $current
   Write-Host 'VIDEO18B16_TORN_CURRENT_REJECTED_PASS old_fallback=5 restored_current=5'
+  # VIDEO-18c-02b-01: actual current/Akula GUI first-frame receipt. This
+  # external rustc test binary never opens rar2, confirms or modifies an update.
+  $ackSource=Join-Path $repo 'labs/video-lite/video18c02b_real_gui_ack.rs'
+  $ackLab=Join-Path $temp ('Video18c02bRealGui-'+$tag+'.exe')
+  Assert-RealFile $ackSource
+  if(Test-Path -LiteralPath $ackLab){ throw 'VIDEO18C02B_HOLD: stale supervisor binary' }
+  try {
+    & rustc --edition=2024 -C opt-level=1 $ackSource -o $ackLab
+    if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $ackLab -PathType Leaf)){
+      throw 'VIDEO18C02B_HOLD: independent Windows GUI supervisor did not compile'
+    }
+    $ackOutput=@(& $ackLab (Join-Path $current 'akula-app.exe') $expected['akula-app'] 2>&1)
+    $ackExit=$LASTEXITCODE
+    $ackOutput | Out-Host
+    if($ackExit -ne 0 -or !(($ackOutput | Out-String).Contains('VIDEO18C02B_REAL_GUI_ACK_PASS'))){
+      throw 'VIDEO18C02B_HOLD: real protected current GUI frame ACK or wrong-nonce denial failed'
+    }
+  } finally {
+    if(Test-Path -LiteralPath $ackLab -PathType Leaf){
+      Remove-Item -LiteralPath $ackLab -Force -ErrorAction Stop
+    }
+  }
+  Assert-Five $current
+  Assert-Flat $root
+  Write-Host 'VIDEO18C02B_PROTECTED_CURRENT_GUI_INTACT_PASS old=5 current=5 nonrelease=1'
   & icacls.exe $media '/inheritance:r' '/grant:r' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)M' | Out-Host
   if ($LASTEXITCODE -ne 0) { throw 'VIDEO18B16_HOLD: cannot provision isolated local media ACL' }
   $secure=ConvertTo-SecureString -String $password -AsPlainText -Force
