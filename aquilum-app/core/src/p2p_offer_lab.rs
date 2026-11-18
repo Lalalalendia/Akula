@@ -362,13 +362,9 @@ fn valid_label(label: &str) -> bool {
         return false;
     }
     let bytes = upper.as_bytes();
-    if bytes.len() == 4
+    !(bytes.len() == 4
         && (&bytes[..3] == b"COM" || &bytes[..3] == b"LPT")
-        && (b'1'..=b'9').contains(&bytes[3])
-    {
-        return false;
-    }
-    true
+        && (b'1'..=b'9').contains(&bytes[3]))
 }
 
 #[cfg(test)]

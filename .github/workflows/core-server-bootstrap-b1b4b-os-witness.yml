@@ -53,11 +53,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          count=0
-          for binary in .artifacts/cargo-native/debug/deps/server_bootstrap_b1b4b-*; do
-            if [[ -f "$binary" && -x "$binary" && "$binary" != *.d ]]; then
-              sudo -n "$PWD/$binary" --nocapture
-              count=$((count + 1))
-            fi
-          done
-          test "$count" -eq 1
+          binary=$(python3 scripts/ci/resolve_cargo_root_test.py server_bootstrap_b1b4b server-bootstrap-b1b4b-os-witness-lab)
+          sudo -n "$binary" --nocapture

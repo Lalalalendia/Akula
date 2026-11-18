@@ -45,14 +45,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          found=0
-          for candidate in .artifacts/cargo-native/debug/deps/server_bootstrap_b1b3c-*; do
-            if [[ -f "$candidate" && -x "$candidate" && "$candidate" != *.d ]]; then
-              sudo -n "$PWD/$candidate" --nocapture
-              found=$((found + 1))
-            fi
-          done
-          test "$found" -eq 1
+          binary=$(python3 scripts/ci/resolve_cargo_root_test.py server_bootstrap_b1b3c server-bootstrap-b1b3c-pinned-fd-lab)
+          sudo -n "$binary" --nocapture
       - name: Real systemd root process rechecks verified signed ELF FD
         shell: bash
         run: |
