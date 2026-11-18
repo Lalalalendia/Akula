@@ -1,4 +1,5 @@
 name: Akula VIDEO-TOOLS-01a protected three-PE identity lab (non-release)
+# github-hosted Windows PR-only; no artifact uploads, signing or publisher environment.
 on:
   pull_request:
     branches: [main]
