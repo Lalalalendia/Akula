@@ -131,7 +131,8 @@ mod tests {
     #[test]
     fn selected_table_content_must_still_match() {
         let source = "| Q | A |\n| --- | --- |\n| eat | есть |";
-        let snap = selected(source, "eat", "неверно");
+        let mut snap = selected(source, "eat", "есть");
+        snap.cells[1][1] = "неверно".into();
         assert_eq!(collect(source, &snap).err(), Some(NoteScanError::SelectionChanged));
     }
 
