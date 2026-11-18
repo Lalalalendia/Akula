@@ -1,0 +1,14 @@
+[package]
+name = "akula-video18c02b02b-signed-gui-lab"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
+description = "Disposable Windows PR-only verified signed-five manifest and real first-frame GUI ACK witness"
+
+[workspace]
+
+[dependencies]
+akula-video18b18-signed-five = { path = "../video18b18-signed-five", features = ["lab-only-signature"] }
+base64 = "0.22"
+sha2 = "0.11"
