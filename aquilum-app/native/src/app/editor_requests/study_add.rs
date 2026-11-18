@@ -29,6 +29,7 @@ fn group_choices(store: &StudyStore) -> Result<Vec<(String, String)>, StateError
     for group in store.load()?.state.registry.collections {
         if group.id != "common" { choices.push((group.id, group.name)); }
     }
+    choices.push((String::new(), t("editor.table.studyNew")));
     Ok(choices)
 }
 
@@ -37,7 +38,7 @@ impl App {
         let selected = (|| {
             let session = self.session.as_ref()?;
             let note = self.note.as_ref()?;
-            if note.save_error.is_some() || self.tabs.active().path.as_deref() != Some(note.path.as_path()) {
+            if note.clean_cache_hash().is_none() || self.tabs.active().path.as_deref() != Some(note.path.as_path()) {
                 return None;
             }
             let document = session.document(&self.workspace.core, &note.path)?;
@@ -61,7 +62,6 @@ impl App {
         let layer = self.study_menu(root, &t("editor.table.studyQuestion"), &entries);
         self.popup = Some(Popup::StudyAddQuestion { layer, pending });
     }
-
     pub(in crate::app) fn on_study_add_question(
         &mut self, root: &mut RenderRoot, layer: WidgetId,
         pending: PendingTable, action: &ErasedAction,
@@ -81,7 +81,6 @@ impl App {
         let layer = self.study_menu(root, &t("editor.table.studyAnswer"), &choices);
         self.popup = Some(Popup::StudyAddAnswer { layer, pending, question });
     }
-
     pub(in crate::app) fn on_study_add_answer(
         &mut self, root: &mut RenderRoot, layer: WidgetId,
         pending: PendingTable, question: usize, action: &ErasedAction,
@@ -127,6 +126,7 @@ impl App {
         };
         root.remove_layer(layer);
         let Some((id, name)) = choices.get(*index) else { return };
+        if id.is_empty() { self.open_study_new_collection(root, pending); return; }
         match self.bind_live_table(root, &pending, id, name) {
             Ok(()) => self.study_add_notice(root, &t_with("editor.table.studySaved", &[("name", name)]), true),
             Err(StateError::DuplicateTable | StateError::NeedsRebind) =>
@@ -137,13 +137,13 @@ impl App {
         }
     }
 
-    fn bind_live_table(
+    pub(super) fn bind_live_table(
         &mut self, root: &RenderRoot, pending: &PendingColumns,
         group_id: &str, group_name: &str,
     ) -> Result<(), StateError> {
         let session = self.session.as_ref().ok_or(StateError::InvalidSelection)?;
         let note = self.note.as_ref().ok_or(StateError::InvalidSelection)?;
-        if note.path != pending.table.path || note.save_error.is_some()
+        if note.path != pending.table.path || note.clean_cache_hash().is_none()
             || self.tabs.active().path.as_deref() != Some(note.path.as_path())
         {
             return Err(StateError::InvalidSelection);
@@ -168,7 +168,7 @@ impl App {
         Ok(())
     }
 
-    fn study_add_notice(&mut self, root: &mut RenderRoot, message: &str, success: bool) {
+    pub(super) fn study_add_notice(&mut self, root: &mut RenderRoot, message: &str, success: bool) {
         let title = if success { "editor.table.studyAddedTitle" } else { "editor.table.studyTitle" };
         let (widget, dialog) = ConfirmDialog::new(
             &t(title), message, &t("editor.table.studyClose"), &t("editor.table.studyOk"),

@@ -150,7 +150,6 @@ pub fn bind_table(
     if preview.items.is_empty() {
         return Err(StateError::EmptyStudyTable);
     }
-
     // Do not alter the caller state until the entire candidate is valid.
     let mut updated = state.clone();
     let record_pos = updated.anchors.iter().position(|r| &r.note == note);
@@ -205,6 +204,7 @@ pub fn bind_table(
     } else {
         updated.registry.tables.push(ConfiguredTable { source: source.clone(), columns });
     }
+    if updated.registry.collections.iter().any(|group| group.id != collection_id && group.name.to_lowercase() == collection_name.to_lowercase()) { return Err(StateError::InvalidCollection); }
     if let Some(group) = updated.registry.collections.iter_mut().find(|g| g.id == collection_id) {
         if !group.members.contains(&source) {
             group.members.push(source.clone());
