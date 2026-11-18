@@ -98,8 +98,12 @@ jobs:
           $witness=Join-Path $env:RUNNER_TEMP 'video18c02b04-version-witness.exe'
           rustc --edition=2024 labs/video-lite/video18c02b04-native-pe-version.rs -o $witness
           if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B04_HOLD: no Windows PE witness'}
-          & $witness --identify $env:VIDEO18C02B04_APP $sourceVersion
-          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B04_HOLD: native VERSIONINFO and source mismatch'}
+          $identity=@(& $witness --identify $env:VIDEO18C02B04_APP $sourceVersion 2>&1)
+          $identityExit=$LASTEXITCODE
+          $identity | Out-Host
+          if($identityExit -ne 0 -or !(($identity|Out-String).Contains('VIDEO18C02B04_NATIVE_PE_IDENTITY_PASS'))){
+            throw 'VIDEO18C02B04_HOLD: native VERSIONINFO and source mismatch'
+          }
           & $witness --admit $env:VIDEO18C02B04_APP $sourceVersion 0.3.20 0.3.21
           if($LASTEXITCODE -eq 0){
             throw 'VIDEO18C02B04_HOLD: fictitious signed version 0.3.21 admitted for real 0.3.20 executable'
