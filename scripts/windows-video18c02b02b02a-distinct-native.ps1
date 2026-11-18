@@ -28,12 +28,19 @@ if($oldApp -cne $OldAppPath -or $newApp -cne $NewAppPath -or
    (git -C $repo rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA) {
   throw 'VIDEO18C02B02B02A_HOLD: stale or wrong-source PE generation'
 }
-function Assert-RealFile([string]$file) {
+function Assert-RealInput([string]$file) {
   $item=Get-Item -LiteralPath $file -Force -ErrorAction Stop
   if($item.PSIsContainer -or
      ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
-     $item.Length -lt 512) {
-    throw "VIDEO18C02B02B02A_HOLD: not a genuine non-reparse PE $file"
+     $item.Length -lt 1) {
+    throw "VIDEO18C02B02B02A_HOLD: not a genuine non-reparse input file $file"
+  }
+}
+function Assert-RealFile([string]$file) {
+  Assert-RealInput $file
+  $item=Get-Item -LiteralPath $file -Force -ErrorAction Stop
+  if($item.Length -lt 512) {
+    throw "VIDEO18C02B02B02A_HOLD: PE unexpectedly short $file"
   }
   $stream=[IO.File]::OpenRead($file)
   try {
@@ -53,7 +60,7 @@ $oldCargo=Join-Path $oldTree 'aquilum-app/native/Cargo.toml'
 $newCargo=Join-Path $repo 'aquilum-app/native/Cargo.toml'
 $oldLock=Join-Path $oldTree 'aquilum-app/Cargo.lock'
 $newLock=Join-Path $repo 'aquilum-app/Cargo.lock'
-foreach($file in @($oldCargo,$newCargo,$oldLock,$newLock)){Assert-RealFile $file}
+foreach($file in @($oldCargo,$newCargo,$oldLock,$newLock)){Assert-RealInput $file}
 $oldCargoBlob=(git -C $oldTree rev-parse HEAD:aquilum-app/native/Cargo.toml).Trim()
 $newCargoBlob=(git -C $repo rev-parse HEAD:aquilum-app/native/Cargo.toml).Trim()
 $oldLockBlob=(git -C $oldTree rev-parse HEAD:aquilum-app/Cargo.lock).Trim()
