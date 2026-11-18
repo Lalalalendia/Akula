@@ -5,7 +5,7 @@ use crate::ui::editor::table::{Command, Outcome, Session, Table, TableView};
 mod ime;
 mod keys;
 mod mouse;
-mod study;
+mod study; mod study_note;
 impl TextEditor {
     fn table_under(&self, point: Point) -> Option<(usize, Point)> {
         match self.head_embed_at(point)? {
