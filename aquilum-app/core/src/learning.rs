@@ -11,7 +11,7 @@ pub mod store;
 pub mod editor_snapshot;
 pub mod table_anchors;
 pub mod anchor_store;
-pub mod activation;
+pub mod activation; pub mod practice;
 pub mod state;
 use std::collections::BTreeSet;
 /// Explicit column roles chosen for each source table.

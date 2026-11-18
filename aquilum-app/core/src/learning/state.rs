@@ -70,7 +70,7 @@ struct Payload {
     state: StudyState,
 }
 
-fn validate(state: &StudyState) -> Result<(), StateError> {
+pub(crate) fn validate(state: &StudyState) -> Result<(), StateError> {
     collections::validate(&state.registry).map_err(StateError::InvalidCollections)?;
     table_anchors::validate_anchors(&state.anchors).map_err(StateError::InvalidAnchors)?;
     for table in &state.registry.tables {
