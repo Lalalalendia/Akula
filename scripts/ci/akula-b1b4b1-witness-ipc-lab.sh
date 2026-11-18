@@ -166,16 +166,17 @@ else:
 PY
 # Seed one real, owner-signed, fsynced B1b1c CAS record before service
 # launch. The separately running UID0 witness must read that exact revision.
-seeded=0
-for testbinary in .artifacts/cargo-native/debug/deps/server_bootstrap_b1b4b-*; do
-  if [[ -f "$testbinary" && -x "$testbinary" && "$testbinary" != *.d ]]; then
-    sudo env GITHUB_ACTIONS=true \
-      AKULA_B1B4B1_CI_SEED=APPROVED_DISPOSABLE_ROOT_CAS_ONLY \
-      "$PWD/$testbinary" ci_optional_real_witness_ipc_checkpoint_fixture --exact --nocapture
-    seeded=$((seeded + 1))
-  fi
-done
-test "$seeded" -eq 1
+# The preceding CI step captured the exact compiler-artifact path from
+# Cargo's JSON output, verified it under the locked workspace build root,
+# and executed the same binary's 12 root tests. Do not search debug/deps.
+testbinary="${AKULA_B1B4B1_TEST_BIN:-}"
+[[ -n "$testbinary" && -f "$testbinary" && -x "$testbinary" && ! -L "$testbinary" ]]
+build_root="$(realpath -e .artifacts/cargo-native)"
+selected="$(realpath -e "$testbinary")"
+[[ "$selected" == "$build_root"/* && "${selected##*/}" == server_bootstrap_b1b4b-* ]]
+sudo env GITHUB_ACTIONS=true \
+  AKULA_B1B4B1_CI_SEED=APPROVED_DISPOSABLE_ROOT_CAS_ONLY \
+  "$selected" ci_optional_real_witness_ipc_checkpoint_fixture --exact --nocapture
 [[ "$(sudo find "$journal_dir" -mindepth 1 -maxdepth 1 -name '*.record' | wc -l)" == 1 ]]
 record="$journal_dir/witness-0000000000000001.record"
 [[ "$(sudo stat -c '%u:%a' "$record")" == "0:600" ]]

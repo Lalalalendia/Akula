@@ -6,16 +6,15 @@ set -euo pipefail
 [[ "$GITHUB_ACTIONS" == "true" && "$RUNNER_OS" == "Linux" ]]
 test -f "$lab/v1.node" && test -f "$lab/v1.manifest" && test -f "$lab/v1.sig"
 test -x .artifacts/cargo-native/debug/examples/akula_b1b2b_release_fixture
-signed_binary_count=0
-for testbin in .artifacts/cargo-native/debug/deps/server_bootstrap_b1c0-*; do
-  if [[ -f "$testbin" && -x "$testbin" && "$testbin" != *.d ]]; then
-    cp -- "$testbin" "$lab/b1c1-commit-test"
-    strip --strip-debug "$lab/b1c1-commit-test"
-    chmod 0555 "$lab/b1c1-commit-test"
-    signed_binary_count=$((signed_binary_count + 1))
-  fi
-done
-test "$signed_binary_count" -eq 1
+testbin="${AKULA_B1C1_COMMIT_TEST_BINARY:-}"
+[[ -n "$testbin" && -f "$testbin" && -x "$testbin" && ! -L "$testbin" ]]
+build_root="$(realpath -e .artifacts/cargo-native)"
+selected="$(realpath -e "$testbin")"
+[[ "$selected" == "$build_root"/* && "${selected##*/}" == server_bootstrap_b1c0-* ]]
+# Exact compiler-artifact witness selected before QEMU boot, no directory scan.
+cp -- "$selected" "$lab/b1c1-commit-test"
+strip --strip-debug "$lab/b1c1-commit-test"
+chmod 0555 "$lab/b1c1-commit-test"
 # Verify pre-boot trust key and EXACT signed B1a release first.
 signed_pub_sha="$(sha256sum "$lab/v1.pub" | cut -d ' ' -f1)"
 ssh_lab "test \"\$(sudo sha256sum /etc/akula-b1b2b-lab-public.ed25519 | cut -d ' ' -f1)\" = '$signed_pub_sha'"

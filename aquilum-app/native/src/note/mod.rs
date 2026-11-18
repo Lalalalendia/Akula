@@ -1,5 +1,5 @@
 pub(crate) mod bridge;
-mod read;
+mod read; mod study;
 mod recovery;
 mod save;
 use std::path::{Path, PathBuf};
