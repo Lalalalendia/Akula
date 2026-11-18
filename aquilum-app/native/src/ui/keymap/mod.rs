@@ -47,7 +47,7 @@ pub enum Command {
     Back,
     Forward,
     QuickOpen,
-    Templates,
+    Templates, StudyFlashcards,
     FindInNote,
     FocusMode,
     WideMode,

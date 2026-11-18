@@ -704,6 +704,7 @@
       "back": "Back",
       "forward": "Forward",
       "globalSearch": "Search the vault",
+      "studyFlashcards": "Start flashcards from any workspace tab",
       "newFromTemplate": "New note from template",
       "pageSearch": "Find in note",
       "focusMode": "Focus mode",

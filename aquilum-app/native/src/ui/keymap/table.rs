@@ -24,7 +24,7 @@ pub const BINDINGS: &[Binding] = &[
     bind(Scope::Global, Back, "back", &[named(K::ArrowLeft).alt().only(Os::Other), letter('[').action().only(Os::Mac)]),
     bind(Scope::Global, Forward, "forward", &[named(K::ArrowRight).alt().only(Os::Other), letter(']').action().only(Os::Mac)]),
     bind(Scope::Global, QuickOpen, "globalSearch", &[letter('o').action()]),
-    bind(Scope::Global, Templates, "newFromTemplate", &[letter('u').action()]),
+    bind(Scope::Global, Templates, "newFromTemplate", &[letter('u').action()]), bind(Scope::Global, StudyFlashcards, "studyFlashcards", &[letter('k').action().shift()]),
     bind(Scope::Global, FindInNote, "pageSearch", &[letter('f').action()]),
     bind(Scope::Global, FocusMode, "focusMode", &[letter('f').action().shift()]),
     bind(Scope::Global, WideMode, "wideMode", &[letter('l').action().shift()]),
