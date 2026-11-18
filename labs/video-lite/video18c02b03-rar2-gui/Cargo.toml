@@ -1,0 +1,16 @@
+[package]
+name = "akula-video18c02b03-rar2-positive-lab"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
+description = "NON-RELEASE Windows protected signed five-PE candidate: rar2 real GUI ACK -> confirm and negative rollback"
+
+[workspace]
+
+[dependencies]
+akula-video18b18-signed-five = { path = "../video18b18-signed-five", features = ["lab-only-signature"] }
+chaptera-update-engine = { path = "../../../_rar2-pinned/crates/chaptera-update-engine" }
+chaptera-update-orchestrator = { path = "../../../_rar2-pinned/crates/chaptera-update-orchestrator" }
+base64 = "0.22"
+sha2 = "0.11"
