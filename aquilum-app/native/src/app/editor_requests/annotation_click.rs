@@ -27,7 +27,7 @@ fn selected_explanation<'a>(
     {
         return None;
     }
-    let mut selected = AuthorizedEditor {
+    let selected = AuthorizedEditor {
         path: editor.path.clone(),
         document: editor.document.clone(),
         baseline_hash: editor.baseline_hash.clone(),
@@ -35,7 +35,6 @@ fn selected_explanation<'a>(
         selection: range,
     };
     let result = trusted_explanation(records, &selected);
-    selected.selection = 0..0;
     result
 }
 
