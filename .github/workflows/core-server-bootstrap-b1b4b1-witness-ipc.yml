@@ -97,6 +97,9 @@ jobs:
           )"
           test -n "$binary"
           sudo -n "$binary" --nocapture
+          # Next systemd IPC acceptance must use this same exact Cargo artifact,
+          # not an assumed target/debug/deps path.
+          printf 'AKULA_B1B4B1_TEST_BIN=%s\n' "$binary" >> "$GITHUB_ENV"
       - name: Real root-owned systemd witness with strict kernel peer UID
         shell: bash
         run: |

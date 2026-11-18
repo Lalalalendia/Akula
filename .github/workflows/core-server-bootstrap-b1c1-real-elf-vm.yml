@@ -39,7 +39,44 @@ jobs:
           cargo build --locked -p aquilum-core --features server-bootstrap-b1a-release-lab \
             --example akula_b1b2b_release_fixture
           cargo test --locked -p aquilum-core --features server-bootstrap-b1c0-fixed-node-lab \
-            --test server_bootstrap_b1c0 --no-run
+            --test server_bootstrap_b1c0 --no-run --message-format=json > "$RUNNER_TEMP/b1c1-cargo-test.jsonl"
+          # Resolve the true Cargo test executable from compiler artifact JSON.
+          # Cargo may place it in a build-script out/ dir, not debug/deps.
+          test_binary="$(python3 - "$RUNNER_TEMP/b1c1-cargo-test.jsonl" "$GITHUB_WORKSPACE/aquilum-app" "$GITHUB_WORKSPACE/.artifacts/cargo-native" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          log, workspace, build = sys.argv[1:]
+          base = Path(workspace).resolve(strict=True)
+          allowed = Path(build).resolve(strict=True)
+          found = []
+          with open(log, encoding="utf-8") as stream:
+              for line in stream:
+                  try:
+                      item = json.loads(line)
+                  except json.JSONDecodeError:
+                      continue
+                  target = item.get("target") or {}
+                  if (item.get("reason") != "compiler-artifact"
+                      or target.get("name") != "server_bootstrap_b1c0"
+                      or "test" not in target.get("kind", [])
+                      or not item.get("executable")):
+                      continue
+                  raw = Path(item["executable"])
+                  selected = (raw if raw.is_absolute() else base / raw).resolve(strict=True)
+                  if (not selected.is_relative_to(allowed)
+                      or not selected.name.startswith("server_bootstrap_b1c0-")
+                      or not selected.is_file() or not os.access(selected, os.X_OK)):
+                      raise SystemExit("HOLD: selected VM bridge test binary escaped Cargo build root")
+                  found.append(str(selected))
+          if len(found) != 1:
+              raise SystemExit(f"HOLD: expected one real VM bridge test executable, got {len(found)}")
+          print(found[0])
+          PY
+          )"
+          test -n "$test_binary"
+          printf 'AKULA_B1C1_COMMIT_TEST_BINARY=%s\n' "$test_binary" >> "$GITHUB_ENV"
           cargo check --locked -p aquilum-core --no-default-features
       - name: Actual GPG-pinned Ubuntu guest original B1a signed Node owner-CAS commit and DynamicUser launch
         shell: bash
