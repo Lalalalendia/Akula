@@ -65,10 +65,10 @@ impl App {
             &[("count", &selected.len().to_string())],
         )));
         entries.push((entries.len(), t("editor.table.studyChoiceStart")));
+        entries.push((entries.len(), t("editor.table.studyMatchStart")));
         let layer = self.study_menu(root, &t("editor.table.studyPracticeSelect"), &entries);
         self.popup = Some(Popup::StudyPicker { layer, choices, selected });
     }
-
     pub(in crate::app) fn on_study_picker(
         &mut self, root: &mut RenderRoot, layer: WidgetId,
         choices: Vec<(String, String)>, mut selected: BTreeSet<String>,
@@ -85,7 +85,7 @@ impl App {
             return;
         };
         root.remove_layer(layer);
-        if *index == choices.len() || *index == choices.len() + 1 {
+        if *index >= choices.len() && *index <= choices.len() + 2 {
             if selected.is_empty() {
                 self.study_notice(root, &t("editor.table.studyPracticeSelectOne"));
                 return;
@@ -93,7 +93,8 @@ impl App {
             let ids: Vec<String> = selected.into_iter().collect();
             match self.load_study_deck(&ids) {
                 Ok(deck) if !deck.deck.cards.is_empty() => {
-                    if *index == choices.len() + 1 { self.show_study_choice(root, Box::new(deck), 0, Default::default()); }
+                    if *index == choices.len() + 2 { self.start_study_matching(root, Box::new(deck)); }
+                    else if *index == choices.len() + 1 { self.show_study_choice(root, Box::new(deck), 0, Default::default()); }
                     else { self.show_study_card(root, Box::new(deck), 0, false); }
                 }
                 Ok(_) => self.study_notice(root, &t("editor.table.studyPracticeNoCards")),
@@ -104,7 +105,6 @@ impl App {
             self.show_study_picker(root, choices, selected);
         }
     }
-
     fn show_study_card(
         &mut self, root: &mut RenderRoot,
         snapshot: Box<StudyDeckSnapshot>, index: usize, revealed: bool,
