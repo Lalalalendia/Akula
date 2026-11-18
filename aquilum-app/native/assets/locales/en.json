@@ -97,6 +97,8 @@
     "copyCode": "Copy code",
     "insertFrontmatter": "Insert metadata",
     "annotation": {
+      "viewExplanation": "View highlight explanation",
+      "emptyExplanation": "No explanation has been added to this highlight.",
       "explain": "Edit highlight explanation…",
       "explainTitle": "Highlight explanation",
       "explainHint": "Add a brief explanation (optional)",
