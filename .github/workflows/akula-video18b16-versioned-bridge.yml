@@ -10,7 +10,7 @@ on:
       - 'scripts/windows-video18c02b02b02b-distinct-signed-generations.ps1'
       - '.github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs'
       - 'docs/release/video18c02b02b02b-distinct-installed-signed-generations.md'
-      - '.github/scripts/video18c02b02b02a-distinct-native.test.cjs .github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs'
+      - '.github/scripts/video18c02b02b02a-distinct-native.test.cjs'
       - 'docs/release/video18c02b02b02a-distinct-source-built-pe.md'
       - 'labs/video-lite/video18c02b_real_gui_ack.rs'
       - 'labs/video-lite/video18c02b02b-signed-gui/Cargo.toml'
@@ -44,7 +44,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Validate source and five EXE custody release boundary
-        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs .github/scripts/video18c02b02b02a-distinct-native.test.cjs
+        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs .github/scripts/video18c02b02b02a-distinct-native.test.cjs .github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs
 
   preflight:
     name: Compile actual Windows GUI ACK supervisor (no installer)
