@@ -63,18 +63,18 @@ pub(in crate::app) struct PendingAnnotation {
     selection: Range<usize>,
 }
 
-struct AuthorizedEditor {
-    path: PathBuf,
-    document: DocumentIdentity,
-    baseline_hash: String,
-    body: String,
-    selection: Range<usize>,
+pub(in crate::app) struct AuthorizedEditor {
+    pub(in crate::app) path: PathBuf,
+    pub(in crate::app) document: DocumentIdentity,
+    pub(in crate::app) baseline_hash: String,
+    pub(in crate::app) body: String,
+    pub(in crate::app) selection: Range<usize>,
 }
 
 impl App {
     /// Returns only the active registered Markdown document. A saved
     /// annotation ID/sidecar locator never grants permission to open a note.
-    fn authorized_annotation_editor(&self, root: &RenderRoot) -> Option<AuthorizedEditor> {
+    pub(in crate::app) fn authorized_annotation_editor(&self, root: &RenderRoot) -> Option<AuthorizedEditor> {
         let session = self.session.as_ref()?;
         let note = self.note.as_ref()?;
         if self.tabs.active().path.as_deref() != Some(note.path.as_path()) {
