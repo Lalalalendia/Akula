@@ -11,7 +11,7 @@ use super::annotation_explain::matching_record;
 use super::annotation_ui::AuthorizedEditor;
 use crate::i18n::t;
 
-fn trusted_explanation<'a>(
+pub(in crate::app) fn trusted_explanation<'a>(
     records: &'a [AnnotationRecord],
     active: &AuthorizedEditor,
 ) -> Option<Option<&'a str>> {
