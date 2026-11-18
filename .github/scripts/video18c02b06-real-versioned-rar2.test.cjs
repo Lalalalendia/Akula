@@ -70,6 +70,17 @@ function gate(a){
     'VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS',
     '.github/scripts/video18c02b06-real-versioned-rar2.test.cjs'
   ])hold(a.workflow.includes(required),'Windows version+rar2 gate lost '+required);
+  // The last negative PE verifier deliberately exits nonzero. This expected
+  // refusal must not fail GitHub's PowerShell wrapper after all checks pass.
+  // Never permit a reset before (or instead of) the three fail-closed refusals.
+  const nativeGate=a.workflow.split('      - name: Bind real 0.3.21 PE identity to strict 0.3.20 version floor before signing')[1]
+    ?.split('      - name: Compile historical pinned Akula GUI independently from real source')[0];
+  const reject=nativeGate?.indexOf("if($code -eq 0 -or !(($no | Out-String).Contains('VIDEO18C02B04_HOLD:");
+  const passed=nativeGate?.indexOf("Write-Host 'VIDEO18C02B06_REAL_NATIVE_FLOOR_PASS");
+  const reset=nativeGate?.indexOf('$global:LASTEXITCODE=0');
+  hold(!!nativeGate && reject>=0 && passed>reject && reset>passed &&
+    nativeGate.split('$global:LASTEXITCODE=0').length===2,
+    'expected nonzero native rejection cleared once, only after all denials and success');
   for(const required of ['GetFileVersionInfoW','VerQueryValueW',
     'only exact source-built native EXE admitted','embedded<=installed'])
     hold(a.verifier.includes(required),'not genuine PE version verification '+required);
@@ -102,6 +113,12 @@ test('Mutations cannot bypass source custody, native PE, signed manifest and rar
     ['signed','& $mini -Vm $manifest -x $signature -p $pub -Q','Write-Host fake-signature'],
     ['workflow','node scripts/akula-version.cjs check','echo fake-source'],
     ['workflow','VIDEO18C02B06_REAL_NATIVE_FLOOR_PASS','SKIPPED_NATIVE_FLOOR'],
+    ['workflow','$global:LASTEXITCODE=0','// stale negative exit status'],
+    ['workflow',`Write-Host 'VIDEO18C02B06_REAL_NATIVE_FLOOR_PASS old_source=0.3.20 new_source=0.3.21 pe_verified=1 negatives=3 nonrelease=1'
+          # GitHub's pwsh wrapper`,
+     `$global:LASTEXITCODE=0
+          Write-Host 'VIDEO18C02B06_REAL_NATIVE_FLOOR_PASS old_source=0.3.20 new_source=0.3.21 pe_verified=1 negatives=3 nonrelease=1'
+          # GitHub's pwsh wrapper`],
     ['workflow',"'0.3.21' '0.3.20' '0.3.21'","'0.3.21' '0.3.21' '0.3.21'"],
     ['workflow','VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS','SKIPPED_RAR2'],
     ['rar2','engine.confirm_candidate()','// no confirmation'],
