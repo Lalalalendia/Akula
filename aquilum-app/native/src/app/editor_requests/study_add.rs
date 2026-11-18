@@ -29,7 +29,7 @@ fn group_choices(store: &StudyStore) -> Result<Vec<(String, String)>, StateError
     for group in store.load()?.state.registry.collections {
         if group.id != "common" { choices.push((group.id, group.name)); }
     }
-    choices.push((String::new(), t("editor.table.studyNew")));
+    choices.push((String::new(), t("editor.table.studyNew"))); choices.push(("__manage__".into(), t("editor.table.studyManage")));
     Ok(choices)
 }
 
@@ -126,7 +126,7 @@ impl App {
         };
         root.remove_layer(layer);
         let Some((id, name)) = choices.get(*index) else { return };
-        if id.is_empty() { self.open_study_new_collection(root, pending); return; }
+        if id.is_empty() { self.open_study_new_collection(root, pending); return; } if id == "__manage__" { self.open_study_manage(root); return; }
         match self.bind_live_table(root, &pending, id, name) {
             Ok(()) => self.study_add_notice(root, &t_with("editor.table.studySaved", &[("name", name)]), true),
             Err(StateError::DuplicateTable | StateError::NeedsRebind) =>

@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/src/app/tests/learning.rs'
+      - 'aquilum-app/native/src/app/tests/learning_manage.rs'
       - 'aquilum-app/native/src/app/tests/mod.rs'
       - 'aquilum-app/native/src/app/editor_requests/study_create.rs'
       - '.github/workflows/akula-language-native-ui.yml'
@@ -39,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-native --bin aquilum-native \
-            lang02_named_collection_native_gui_persists_without_mutating_markdown \
+            lang02_ \
             -- --nocapture --test-threads=1 2>&1 | tee ../lang02-native-windows.log
           grep -F 'AKULA_LANG02_NATIVE_JOURNEY_PASS=' ../lang02-native-windows.log >> "$GITHUB_STEP_SUMMARY"
       - name: Save synthetic test transcript
