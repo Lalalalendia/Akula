@@ -11,6 +11,7 @@ pub mod store;
 pub mod editor_snapshot;
 pub mod table_anchors;
 pub mod anchor_store;
+pub mod activation;
 use std::collections::BTreeSet;
 
 /// Explicit column roles chosen for each source table.
@@ -140,7 +141,6 @@ mod tests {
     fn table(rows: &[&[&str]]) -> Vec<Vec<String>> {
         rows.iter().map(|row| row.iter().map(|cell| (*cell).to_owned()).collect()).collect()
     }
-
     #[test]
     fn explicit_roles_support_alternative_translations_without_splitting() {
         let rows = table(&[
