@@ -1,0 +1,154 @@
+# VIDEO-18c-02b-02b-02a: distinct source-built runnable PE generations.
+# Windows hosted pull_request only, no installer, no update or release.
+#requires -Version 7.2
+param(
+  [Parameter(Mandatory=$true)][string]$OldAppPath,
+  [Parameter(Mandatory=$true)][string]$NewAppPath
+)
+Set-StrictMode -Version Latest
+$ErrorActionPreference='Stop'
+$oldCommit='ec6d6d48a78e60fca7a6f810b825418500bad64b'
+if($env:GITHUB_ACTIONS -cne 'true' -or
+   $env:RUNNER_OS -cne 'Windows' -or
+   $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
+   $env:GITHUB_EVENT_NAME -cne 'pull_request' -or
+   !$env:EXPECTED_HEAD_SHA -or
+   (git rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA) {
+  throw 'VIDEO18C02B02B02A_HOLD: exact-head hosted Windows PR only'
+}
+$repo=[IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
+$temp=[IO.Path]::GetFullPath($env:RUNNER_TEMP)
+$oldTree=Join-Path $repo '_akula-historical'
+$oldApp=[IO.Path]::GetFullPath($OldAppPath)
+$newApp=[IO.Path]::GetFullPath($NewAppPath)
+if($oldApp -cne $OldAppPath -or $newApp -cne $NewAppPath -or
+   !$oldApp.StartsWith(($temp.TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase) -or
+   !$newApp.StartsWith(($repo.TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase) -or
+   (git -C $oldTree rev-parse HEAD).Trim() -cne $oldCommit -or
+   (git -C $repo rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA) {
+  throw 'VIDEO18C02B02B02A_HOLD: stale or wrong-source PE generation'
+}
+function Assert-RealFile([string]$file) {
+  $item=Get-Item -LiteralPath $file -Force -ErrorAction Stop
+  if($item.PSIsContainer -or
+     ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+     $item.Length -lt 512) {
+    throw "VIDEO18C02B02B02A_HOLD: not a genuine non-reparse PE $file"
+  }
+  $stream=[IO.File]::OpenRead($file)
+  try {
+    if($stream.ReadByte() -ne 77 -or $stream.ReadByte() -ne 90) {
+      throw "VIDEO18C02B02B02A_HOLD: non-PE source $file"
+    }
+  } finally {$stream.Dispose()}
+}
+Assert-RealFile $oldApp
+Assert-RealFile $newApp
+$oldSource=Join-Path $oldTree 'aquilum-app/native/src/updater/windows_first_gui_ack.rs'
+$newSource=Join-Path $repo 'aquilum-app/native/src/updater/windows_first_gui_ack.rs'
+if((Test-Path -LiteralPath $oldSource) -or !(Test-Path -LiteralPath $newSource -PathType Leaf)) {
+  throw 'VIDEO18C02B02B02A_HOLD: claimed old/new source identity not verified'
+}
+$oldCargo=Join-Path $oldTree 'aquilum-app/native/Cargo.toml'
+$newCargo=Join-Path $repo 'aquilum-app/native/Cargo.toml'
+$oldLock=Join-Path $oldTree 'aquilum-app/Cargo.lock'
+$newLock=Join-Path $repo 'aquilum-app/Cargo.lock'
+foreach($file in @($oldCargo,$newCargo,$oldLock,$newLock)){Assert-RealFile $file}
+$oldCargoBlob=(git -C $oldTree rev-parse HEAD:aquilum-app/native/Cargo.toml).Trim()
+$newCargoBlob=(git -C $repo rev-parse HEAD:aquilum-app/native/Cargo.toml).Trim()
+$oldLockBlob=(git -C $oldTree rev-parse HEAD:aquilum-app/Cargo.lock).Trim()
+$newLockBlob=(git -C $repo rev-parse HEAD:aquilum-app/Cargo.lock).Trim()
+if($oldCargoBlob -cne $newCargoBlob -or $oldLockBlob -cne $newLockBlob -or
+   (Get-FileHash -LiteralPath $oldCargo -Algorithm SHA256).Hash -cne
+   (Get-FileHash -LiteralPath $newCargo -Algorithm SHA256).Hash -or
+   (Get-FileHash -LiteralPath $oldLock -Algorithm SHA256).Hash -cne
+   (Get-FileHash -LiteralPath $newLock -Algorithm SHA256).Hash) {
+  throw 'VIDEO18C02B02B02A_HOLD: pinned dependency source graph diverged'
+}
+foreach($cargo in @($oldCargo,$newCargo)){
+  $raw=Get-Content -LiteralPath $cargo -Raw
+  if($raw -notmatch '(?ms)^\[package\].*?^name = "aquilum-native"\r?\nversion = "0\.3\.20"'){
+    throw 'VIDEO18C02B02B02A_HOLD: app package version misrepresented'
+  }
+}
+$oldHash=(Get-FileHash -LiteralPath $oldApp -Algorithm SHA256).Hash.ToLowerInvariant()
+$newHash=(Get-FileHash -LiteralPath $newApp -Algorithm SHA256).Hash.ToLowerInvariant()
+if($oldHash -ceq $newHash) {
+  throw 'VIDEO18C02B02B02A_HOLD: no distinct source-built Akula PE'
+}
+Write-Host "VIDEO18C02B02B02A_DISTINCT_SOURCE_PE_PASS old_source=$oldCommit new_source=$env:EXPECTED_HEAD_SHA different_sha=1 app_version_both_0.3.20=1 no_mutated_pe=1 release=0"
+$tag=[guid]::NewGuid().ToString('N')
+$profile=Join-Path $temp ('Video18c02b02b02aOldGui-'+$tag)
+if(Test-Path -LiteralPath $profile) {
+  throw 'VIDEO18C02B02B02A_HOLD: old GUI profile reused'
+}
+New-Item -ItemType Directory -Path $profile -ErrorAction Stop | Out-Null
+$vault=Join-Path $profile 'vault'
+$data=Join-Path $profile 'data'
+New-Item -ItemType Directory -Path $vault -ErrorAction Stop | Out-Null
+New-Item -ItemType Directory -Path $data -ErrorAction Stop | Out-Null
+$note=Join-Path $vault 'Historical Akula Window.md'
+[IO.File]::WriteAllText($note,
+  ('# Historical Akula GUI test'+[Environment]::NewLine+'Local data, not an update.'+[Environment]::NewLine),
+  [Text.UTF8Encoding]::new($false))
+$noteHash=(Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
+$start=[System.Diagnostics.ProcessStartInfo]::new()
+$start.FileName=$oldApp
+$start.WorkingDirectory=[IO.Path]::GetDirectoryName($oldApp)
+$start.UseShellExecute=$false
+foreach($arg in @('--vault',$vault,'--data-dir',$data,'--open',$note,'--focus')){
+  [void]$start.ArgumentList.Add($arg)
+}
+foreach($name in @($start.Environment.Keys)){
+  if($name.StartsWith('AKULA_VIDEO18C_',[StringComparison]::OrdinalIgnoreCase)){
+    [void]$start.Environment.Remove($name)
+  }
+}
+$process=[System.Diagnostics.Process]::new()
+$process.StartInfo=$start
+$ok=$false
+try {
+  if(!$process.Start()) {
+    throw 'VIDEO18C02B02B02A_HOLD: old GUI process did not start'
+  }
+  $pidPinned=$process.Id
+  if($pidPinned -le 1 -or $pidPinned -eq $PID) {
+    throw 'VIDEO18C02B02B02A_HOLD: invalid pinned old GUI OS PID'
+  }
+  $started=$process.StartTime.ToUniversalTime()
+  for($i=0;$i -lt 100;$i++){
+    $process.Refresh()
+    if($process.HasExited){
+      throw 'VIDEO18C02B02B02A_HOLD: old GUI exited before first visible window'
+    }
+    if($process.MainWindowHandle -ne [IntPtr]::Zero -and
+       $process.MainWindowTitle.Contains('Akula')) {
+      $pinned=[System.Diagnostics.Process]::GetProcessById($pidPinned)
+      try {
+        if($pinned.StartTime.ToUniversalTime() -ne $started -or
+           $pinned.MainWindowHandle -ne $process.MainWindowHandle){
+          throw 'VIDEO18C02B02B02A_HOLD: old GUI window/PID attribution mismatch'
+        }
+      } finally {$pinned.Dispose()}
+      $ok=$true
+      break
+    }
+    Start-Sleep -Milliseconds 200
+  }
+  if(!$ok){throw 'VIDEO18C02B02B02A_HOLD: no visible historical GUI within deadline'}
+  if(!$process.CloseMainWindow() -or !$process.WaitForExit(20000)){
+    throw 'VIDEO18C02B02B02A_HOLD: old GUI did not close cleanly'
+  }
+  if((Get-FileHash -LiteralPath $oldApp -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldHash -or
+     (Get-FileHash -LiteralPath $newApp -Algorithm SHA256).Hash.ToLowerInvariant() -cne $newHash -or
+     (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $noteHash) {
+    throw 'VIDEO18C02B02B02A_HOLD: PE or user note changed after old GUI launch'
+  }
+  Write-Host 'VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS old_process=1 pinned_pid=1 visible_window=1 clean_exit=1 note_preserved=1 new_signed_ack_separate=1 no_update=1 release=0'
+} finally {
+  if(!$process.HasExited){
+    $process.Kill($true)
+    [void]$process.WaitForExit(5000)
+  }
+  $process.Dispose()
+}
