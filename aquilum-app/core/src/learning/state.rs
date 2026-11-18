@@ -19,6 +19,7 @@ use super::table_anchors::{
 const VERSION: i64 = 1;
 const MAX_PAYLOAD: usize = 1024 * 1024;
 
+mod manage;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StudyState {
