@@ -361,7 +361,7 @@ mod tests {
         assert_eq!(saved.state.anchors[0].tables.len(), 1);
         assert_eq!(saved.state.registry.tables.len(), 1);
         let bytes = std::fs::read(&path).unwrap();
-        assert!(!bytes.windows(b"бежать".len()).any(|w| w == "бежать".as_bytes()));
+        assert!(!bytes.windows("бежать".len()).any(|w| w == "бежать".as_bytes()));
     }
 
     #[test]
