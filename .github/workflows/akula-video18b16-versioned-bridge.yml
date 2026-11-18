@@ -6,6 +6,9 @@ on:
     paths:
       - 'scripts/video18b16-protected-versioned-bridge.nsi'
       - 'scripts/windows-video18b16-protected-versioned-bridge.ps1'
+      - 'scripts/windows-video18c02b02b02a-distinct-native.ps1'
+      - '.github/scripts/video18c02b02b02a-distinct-native.test.cjs'
+      - 'docs/release/video18c02b02b02a-distinct-source-built-pe.md'
       - 'labs/video-lite/video18c02b_real_gui_ack.rs'
       - 'labs/video-lite/video18c02b02b-signed-gui/Cargo.toml'
       - 'labs/video-lite/video18c02b02b-signed-gui/src/main.rs'
@@ -38,7 +41,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Validate source and five EXE custody release boundary
-        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs
+        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs .github/scripts/video18c02b02b02a-distinct-native.test.cjs
 
   preflight:
     name: Compile actual Windows GUI ACK supervisor (no installer)
@@ -76,6 +79,12 @@ jobs:
             cargo build --locked --manifest-path $manifest
             if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B02B_HOLD: signed GUI witness fails Windows compile'}
             Write-Host 'VIDEO18C02B02B_WINDOWS_SIGNED_GUI_COMPILE_PASS nonrelease=1'
+          $tokens=$null; $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-video18c02b02b02a-distinct-native.ps1'),
+            [ref]$tokens,[ref]$errors) | Out-Null
+          if($errors.Count -ne 0){throw 'VIDEO18C02B02B02A_HOLD: historical GUI script parser errors'}
+          Write-Host 'VIDEO18C02B02B02A_POWERSHELL_PREFLIGHT_PASS nonrelease=1'
           } finally {
             Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
           }
@@ -89,6 +98,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/Akula
+          ref: ec6d6d48a78e60fca7a6f810b825418500bad64b
+          path: _akula-historical
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -182,6 +197,48 @@ jobs:
           $app=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release/aquilum-native.exe'
           if(!(Test-Path -LiteralPath $app -PathType Leaf)){throw 'Video Akula binary missing'}
           Add-Content -Path $env:GITHUB_ENV -Value "VIDEO18B04_APP=$app"
+      - name: Compile historical pinned Akula GUI independently from real source
+        shell: pwsh
+        working-directory: _akula-historical/aquilum-app
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $old='ec6d6d48a78e60fca7a6f810b825418500bad64b'
+          if($env:GITHUB_EVENT_NAME -cne 'pull_request' -or
+              $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
+              (git rev-parse HEAD).Trim() -cne $old -or
+              (git -C ../.. rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA){
+            throw 'VIDEO18C02B02B02A_HOLD: wrong old/new source commit'
+          }
+          if((git rev-parse HEAD:aquilum-app/Cargo.lock).Trim() -cne
+              (git -C ../.. rev-parse HEAD:aquilum-app/Cargo.lock).Trim()){
+            throw 'VIDEO18C02B02B02A_HOLD: historical dependency lock differs from current'
+          }
+          $target=Join-Path $env:RUNNER_TEMP 'video18c02b02b02a-old-native'
+          if(Test-Path -LiteralPath $target){throw 'VIDEO18C02B02B02A_HOLD: historical build target reused'}
+          $env:CARGO_TARGET_DIR=$target
+          cargo build --release --locked -p aquilum-native --features installed,video-rust-bundle,video-ui-e2e
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B02B02A_HOLD: pinned old native GUI failed compilation'}
+          $oldApp=Join-Path $target 'release/aquilum-native.exe'
+          if(!(Test-Path -LiteralPath $oldApp -PathType Leaf)){
+            throw 'VIDEO18C02B02B02A_HOLD: old GUI PE not produced'
+          }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "VIDEO18C02B02B02A_OLD_APP=$oldApp"
+          Write-Host 'VIDEO18C02B02B02A_SOURCE_COMMIT_PIN_PASS old_commit=1 tracked_lock=1 cargo_locked=1 no_mutated_pe=1 nonrelease=1'
+      - name: Attest two distinct source-built PE and launch genuine historical GUI
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          # A PowerShell script is not a native executable: a previous native exit code can be stale.
+          # ErrorActionPreference=Stop propagates a terminating script error.
+          $proof=@(./scripts/windows-video18c02b02b02a-distinct-native.ps1 -OldAppPath $env:VIDEO18C02B02B02A_OLD_APP -NewAppPath $env:VIDEO18B04_APP 2>&1)
+          $proof | Out-Host
+          if(!(($proof | Out-String).Contains('VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS'))){
+            throw 'VIDEO18C02B02B02A_HOLD: distinct real source-built old GUI witness failed'
+          }
       - name: Attest exact real five EXEs, reject mutation and preserve license HOLD
         shell: pwsh
         env:
