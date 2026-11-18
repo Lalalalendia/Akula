@@ -14,7 +14,7 @@ pub mod state;
 #[cfg(test)]
 mod strict_tests;
 pub mod validation;
-
+mod document_lookup;
 pub use service::UiStateService;
 
 #[cfg(test)]
