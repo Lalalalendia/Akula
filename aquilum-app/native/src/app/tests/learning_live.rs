@@ -33,7 +33,7 @@ fn lang05_live_editor_edit_invalidates_card_before_answer_reveal() {
     assert_eq!(before.deck.cards.len(), 2);
     assert!(before.active.is_some());
     h.app.commit_text(&mut h.root, crop::Rope::from(
-        format!("{}\n\nA new unsaved paragraph", h.app.text),
+        format!("{}\n\nA new unsaved paragraph", h.app.text.to_string()),
     ));
     assert!(!h.app.revalidate_study_deck(&before),
         "a question cannot reveal an answer from the prior editor buffer");
@@ -53,7 +53,7 @@ fn lang05_inactive_open_tab_stays_unavailable_while_active_tab_uses_memory() {
     assert_eq!(snapshot.unavailable_notes.len(), 1);
     assert!(snapshot.active.is_some());
 
-    let (a, _) = (h.vault.path().join("a.md"), h.vault.path().join("b.md"));
+    let a = h.vault.path().join("a.md");
     assert!(h.app.open(&mut h.root, a));
     assert!(!h.app.revalidate_study_deck(&snapshot),
         "switching editor tabs invalidates the previous in-memory authority");
@@ -71,4 +71,22 @@ fn lang05_conflicted_active_editor_stays_unavailable_and_never_reads_stale_disk(
     assert_eq!(snapshot.deck.cards.len(), 1);
     assert_eq!(snapshot.deck.cards[0].question, "read");
     assert!(b.is_file());
+}
+
+#[test]
+fn lang05_external_change_to_active_backing_file_invalidates_memory_cards() {
+    let mut h = Harness::new();
+    let (a, _) = bind_fixture(&mut h);
+    assert!(h.app.open(&mut h.root, a.clone()));
+    let snapshot = h.app.load_study_deck(&["english".into()]).unwrap();
+    assert_eq!(snapshot.deck.cards.len(), 2);
+    assert!(snapshot.active.is_some());
+    std::fs::write(&a, "| Q | A |\n| --- | --- |\n| eat | другой |\n").unwrap();
+    assert!(!h.app.revalidate_study_deck(&snapshot),
+        "externally rewritten active file must not reveal old editor answers");
+    let updated = h.app.load_study_deck(&["english".into()]).unwrap();
+    assert!(updated.active.is_none(), "no fallback to stale disk or editor text");
+    assert!(updated.deck.cards.is_empty());
+    assert_eq!(updated.unavailable_notes.len(), 1);
+    eprintln!("AKULA_LANG05_LIVE_DISK_STALE_PASS=hash_mismatch,no_old_cards");
 }
