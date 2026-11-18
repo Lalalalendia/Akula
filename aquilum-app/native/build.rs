@@ -783,9 +783,52 @@ fn icon() {
         group.extend_from_slice(&(i as u16 + 1).to_le_bytes());
     }
     entry(&mut res, 14, 1, 0x1030, &group);
+    // RT_VERSION is embedded into the REAL Windows native EXE by the same
+    // tracked Cargo package that builds it. This does not authorize a release.
+    let package_version = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
+    entry(&mut res, 16, 1, 0x1030, &win32_fixed_version_info(&package_version));
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("icon.res");
     std::fs::write(&out, res).expect("icon.res");
     println!("cargo:rustc-link-arg-bins={}", out.display());
+}
+
+// A minimal VS_VERSIONINFO resource containing a VS_FIXEDFILEINFO value.
+// This is read back from the linked native PE with the Windows version.dll
+// APIs. A signed MANIFEST label is not allowed to replace this build identity.
+fn win32_fixed_version_info(version: &str) -> Vec<u8> {
+    let parts: Vec<_> = version.split('.').collect();
+    assert!(parts.len() == 3, "Windows PE version requires major.minor.patch");
+    let value: Vec<u16> = parts
+        .iter()
+        .map(|part| {
+            assert!(!part.is_empty() && (part.len() == 1 || !part.starts_with('0'))
+                && part.bytes().all(|b| b.is_ascii_digit()),
+                "Windows PE version requires canonical numeric parts");
+            part.parse::<u16>().expect("Windows PE version component exceeds u16")
+        })
+        .collect();
+    let mut data = vec![0u8; 6];
+    for character in "VS_VERSION_INFO\0".encode_utf16() {
+        data.extend_from_slice(&character.to_le_bytes());
+    }
+    while data.len() % 4 != 0 {
+        data.push(0);
+    }
+    // VS_FIXEDFILEINFO: signature, struct version, FILEVERSION, PRODUCTVERSION,
+    // flags mask, flags, Windows NT OS, application type, subtype, timestamp.
+    let ms = (u32::from(value[0]) << 16) | u32::from(value[1]);
+    let ls = u32::from(value[2]) << 16;
+    for word in [
+        0xFEEF04BDu32, 0x0001_0000, ms, ls, ms, ls,
+        0x0000_003F, 0, 0x0004_0004, 1, 0, 0, 0,
+    ] {
+        data.extend_from_slice(&word.to_le_bytes());
+    }
+    let total = u16::try_from(data.len()).expect("Windows version resource overflow");
+    data[0..2].copy_from_slice(&total.to_le_bytes());
+    data[2..4].copy_from_slice(&52u16.to_le_bytes());
+    data[4..6].copy_from_slice(&0u16.to_le_bytes());
+    data
 }
 
 fn entry(res: &mut Vec<u8>, kind: u16, name: u16, flags: u16, data: &[u8]) {
