@@ -347,7 +347,8 @@ try {
       Assert-RealFile $lab
       $proof=@(& $lab $root $newStage $manifests.new.manifest $manifests.new.signature $pub 2>&1)
       $code=$LASTEXITCODE
-      $proof | Out-Host
+      # Forward authenticated native stdout to the enclosing workflow guard.
+      $proof | Write-Output
       if($code -ne 0 -or !(($proof|Out-String).Contains('VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS'))){
         throw 'VIDEO18C02B03_HOLD: distinct signed GUI ACK did not authorize rar2 positive commit'
       }
