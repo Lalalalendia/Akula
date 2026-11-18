@@ -37,18 +37,22 @@ fn lang05_typed_native_correct_wrong_and_no_persistent_grades_or_md_writes() {
     let before_a = std::fs::read(&a).unwrap();
     let before_b = std::fs::read(&b).unwrap();
     start_typed(&mut h);
-    let (field, layer) = match &h.app.popup {
+    let (field, layer, expected_answer) = match &h.app.popup {
         Some(Popup::StudyTypedEntry {
             field, dialog, snapshot, index, progress, ..
         }) => {
             assert_eq!(*index, 0);
             assert_eq!(snapshot.deck.cards.len(), 3);
             assert_eq!(progress.answered, 0);
-            (field.id(), dialog.layer)
+            // Source identities are UUIDs, not a stable exercise ordering.
+            // Grade the actual first card rather than assuming "eat" is first.
+            let answer = snapshot.deck.cards[*index].accepted_answers[0].clone();
+            assert!(["есть", "ел", "читать"].contains(&answer.as_str()));
+            (field.id(), dialog.layer, answer)
         }
         _ => panic!("native input dialog must open"),
     };
-    h.act(field, TextAction::Changed("есть".into()));
+    h.act(field, TextAction::Changed(expected_answer));
     h.act(layer, DialogAnswer::Confirm);
     let layer = match &h.app.popup {
         Some(Popup::StudyTypedResult { dialog, progress, .. }) => {
@@ -59,13 +63,15 @@ fn lang05_typed_native_correct_wrong_and_no_persistent_grades_or_md_writes() {
     };
     h.act(layer, DialogAnswer::Confirm);
     let (field, layer) = match &h.app.popup {
-        Some(Popup::StudyTypedEntry { field, dialog, index, .. }) => {
+        Some(Popup::StudyTypedEntry { field, dialog, index, snapshot, .. }) => {
             assert_eq!(*index, 1);
+            assert!(!snapshot.deck.cards[*index].accepted_answers.iter()
+                .any(|s| s == "definitely-not-a-translation"));
             (field.id(), dialog.layer)
         }
         _ => panic!("second typed card must open"),
     };
-    h.act(field, TextAction::Changed("ошибка".into()));
+    h.act(field, TextAction::Changed("definitely-not-a-translation".into()));
     h.act(layer, DialogAnswer::Confirm);
     match &h.app.popup {
         Some(Popup::StudyTypedResult { progress, .. }) => {
