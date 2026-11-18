@@ -80,6 +80,12 @@ function verify(x) {
     'VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS',
     'release=0'
   ]) hold(ps.includes(token), 'real protected three-file Windows proof missing '+token);
+  hold(ps.includes("$env:EXPECTED_HEAD_SHA -notmatch") &&
+    ps.includes("$actualHead -cne $env:EXPECTED_HEAD_SHA"),
+    'exact-head guard must both validate and compare the PR revision');
+  hold(ps.includes("Set-Content -LiteralPath (Join-Path $root 'unrelated-private-note.md')") &&
+    ps.includes("Test-Path -LiteralPath (Join-Path $root 'unrelated-private-note.md')"),
+    'uninstall proof must both create and verify independent private note');
   hold(!/gh release create|Publish-Module|Upload-Artifact|workflow_dispatch/.test(ps),
     'no release or publishing is permitted in PR-only lab');
   for (const name of three) hold(ps.includes("'"+name+"'"),'runner missing '+name);
@@ -132,6 +138,6 @@ test('negative mutations fail on identity, signing HOLD, Windows gate and protec
   for(const [name,from,to] of mutations) {
     const changed=base[name].replace(from,to);
     hold(changed!==base[name], 'mutation missed '+name+': '+from);
-    assert.throws(()=>verify({...base,[name]:changed}),/VIDEO_TOOLS_01A_HOLD/);
+    assert.throws(()=>verify({...base,[name]:changed}),/VIDEO_TOOLS_01A_HOLD/, name+': '+from);
   }
 });
