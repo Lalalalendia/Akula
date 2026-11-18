@@ -4,7 +4,7 @@ use aquilum_core::learning::table_anchors::NoteKey;
 use aquilum_core::learning::state::StudyStore;
 use crate::ui::editor::TextEditor;
 
-fn bind_fixture(h: &mut Harness) -> (std::path::PathBuf, std::path::PathBuf) {
+pub(super) fn bind_fixture(h: &mut Harness) -> (std::path::PathBuf, std::path::PathBuf) {
     let a = h.vault.path().join("a.md");
     let b = h.vault.path().join("b.md");
     std::fs::write(&a, "| Q | A |\n| --- | --- |\n| eat | есть |\n\n| Q | A |\n| --- | --- |\n| ate | ел |").unwrap();
