@@ -44,8 +44,14 @@ fn lang05_live_editor_edit_invalidates_card_before_answer_reveal() {
 fn lang05_inactive_open_tab_stays_unavailable_while_active_tab_uses_memory() {
     let mut h = Harness::new();
     let (a, b) = bind_fixture(&mut h);
-    assert!(h.app.open(&mut h.root, a));
-    assert!(h.app.open(&mut h.root, b));
+    // Regular open() reuses the active tab; open both files as distinct tabs
+    // to actually exercise the inactive-editor exclusion contract.
+    assert!(h.app.open_in(&mut h.root, a.clone(), true));
+    assert!(h.app.open_in(&mut h.root, b.clone(), true));
+    let a_tab = h.app.tabs.tabs().iter()
+        .find(|tab| tab.path.as_deref() == Some(a.as_path()))
+        .expect("first file remains open in an inactive tab").id;
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(b.as_path()));
     let snapshot = h.app.load_study_deck(&["english".into(), "verbs".into()]).unwrap();
     assert_eq!(snapshot.deck.cards.len(), 1, "inactive tab is not read from disk");
     assert_eq!(snapshot.deck.cards[0].question, "read");
@@ -53,8 +59,10 @@ fn lang05_inactive_open_tab_stays_unavailable_while_active_tab_uses_memory() {
     assert_eq!(snapshot.unavailable_notes.len(), 1);
     assert!(snapshot.active.is_some());
 
-    let a = h.vault.path().join("a.md");
-    assert!(h.app.open(&mut h.root, a));
+    h.app.on_titlebar(&mut h.root,
+        &crate::ui::titlebar::TitlebarAction::Select(a_tab),
+        masonry::kurbo::Size::new(f64::from(W), f64::from(H)));
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(a.as_path()));
     assert!(!h.app.revalidate_study_deck(&snapshot),
         "switching editor tabs invalidates the previous in-memory authority");
 }
