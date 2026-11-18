@@ -209,7 +209,7 @@ mod lab {
             ("RUNNER_OS", "Windows"),
             ("RUNNER_ENVIRONMENT", "github-hosted"),
         ] {
-            if std::env::var(key).as_deref() != Ok(expected) {
+            if !matches!(std::env::var(key), Ok(got) if got == expected) {
                 return Err(format!("not a disposable hosted Windows PR: {key}"));
             }
         }
