@@ -164,12 +164,7 @@ impl AnnotationStore {
     /// Must receive an app-owned data path, never a user note or vault path.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         let mut connection = Connection::open(path).map_err(|_| StoreError::Storage)?;
-        connection.execute_batch(
-            "PRAGMA foreign_keys=ON;
-             PRAGMA journal_mode=WAL;
-             PRAGMA synchronous=FULL;
-             PRAGMA busy_timeout=3000;",
-        ).map_err(|_| StoreError::Storage)?;
+        // Reject an unrelated database before changing its journal mode.
         let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(|_| StoreError::Storage)?;
         if version == 0 {
@@ -181,6 +176,16 @@ impl AnnotationStore {
             if existing != 0 {
                 return Err(StoreError::UnsupportedVersion);
             }
+        } else if version != VERSION {
+            return Err(StoreError::UnsupportedVersion);
+        }
+        connection.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=FULL;
+             PRAGMA busy_timeout=3000;",
+        ).map_err(|_| StoreError::Storage)?;
+        if version == 0 {
             let initial = encode(&[])?;
             let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| StoreError::Storage)?;
@@ -198,8 +203,6 @@ impl AnnotationStore {
             tx.execute_batch("PRAGMA user_version=1;")
                 .map_err(|_| StoreError::Storage)?;
             tx.commit().map_err(|_| StoreError::Storage)?;
-        } else if version != VERSION {
-            return Err(StoreError::UnsupportedVersion);
         }
         let store = Self { connection };
         store.load()?;
