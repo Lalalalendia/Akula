@@ -26,7 +26,7 @@ function verify(files){
     'gui_launcher::lab::guarded_pr()', 'gui_launcher::lab::validate_app',
     'gui_launcher::lab::case(&app, digest, "good", Some(&verify))?',
     'gui_launcher::lab::case(&app, digest, "wrong-nonce", Some(&verify))?',
-    'gui_launcher::lab::case(&app, &wrong_sha, "good", Some(&verify))?',
+    'gui_launcher::lab::case(&app, &wrong_sha, "wrong-generation", Some(&verify))?',
     'if wrong_generation { return Err(', 'pinned_under_runner(', 'limited(&manifest, 8192)',
     'read_to_end(', 'fs::symlink_metadata(', 'file_attributes() & 0x400',
     'VIDEO18C02B02B_SIGNED_RUNNABLE_GUI_ACK_PASS',
@@ -42,7 +42,11 @@ function verify(files){
     'check(&receipt, &random, pi.pid)',
     'let valid=receipt==expected.as_bytes()',
     'Ok(valid && signed_bound)',
-    'creation_time(child.0.0)?==first_creation'
+    'creation_time(child.0.0)?==first_creation',
+    'let prefix = if signed_check.is_some()',
+    '"Video18c02b02bSignedFrame"', '"Video18c02bFrame"',
+    'if folder.exists() {return Err("reused laboratory profile".into());}',
+    'if !matches!(mode, "good" | "wrong-nonce" | "wrong-generation")'
   ])assert.ok(launcher.includes(x),'VIDEO18C02B02B_HOLD: OS/process witness lost '+x);
   assert.ok(cargo.includes('publish = false')&&cargo.includes('[workspace]')&&
     cargo.includes('lab-only-signature')&&cargo.includes('base64 = "0.22"'),
@@ -91,6 +95,9 @@ test('Negative: signed manifest admission, five-file bytes, OS identity and dige
     ['rust','if wrong_generation { return Err(','if false { return Err('],
     ['launcher','Ok(valid && signed_bound)','Ok(valid)'],
     ['launcher','creation_time(child.0.0)?==first_creation','true'],
+    ['launcher','"Video18c02b02bSignedFrame"','"Video18c02bFrame"'],
+    ['launcher','if folder.exists() {return Err("reused laboratory profile".into());}','if false {return Err("reused laboratory profile".into());}'],
+    ['launcher','if !matches!(mode, "good" | "wrong-nonce" | "wrong-generation")','if false'],
     ['script','& $mini -Vm','& $mini -NO-VERIFY'],
     ['script','$sha -cne $expected[$name]','false'],
     ['workflow','needs: [contract, preflight]','needs: contract'],
