@@ -254,6 +254,115 @@ try {
   Copy-Item -LiteralPath (Join-Path $stage 'akula-quickjs.exe') -Destination (Join-Path $current 'akula-quickjs.exe') -ErrorAction Stop
   Assert-Five $current
   Write-Host 'VIDEO18B16_TORN_CURRENT_REJECTED_PASS old_fallback=5 restored_current=5'
+  # VIDEO-18c-02b-01: actual current/Akula GUI first-frame receipt. This
+  # external rustc test binary never opens rar2, confirms or modifies an update.
+  $ackSource=Join-Path $repo 'labs/video-lite/video18c02b_real_gui_ack.rs'
+  $ackLab=Join-Path $temp ('Video18c02bRealGui-'+$tag+'.exe')
+  Assert-RealFile $ackSource
+  if(Test-Path -LiteralPath $ackLab){ throw 'VIDEO18C02B_HOLD: stale supervisor binary' }
+  try {
+    & rustc --edition=2024 -C opt-level=1 $ackSource -o $ackLab
+    if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $ackLab -PathType Leaf)){
+      throw 'VIDEO18C02B_HOLD: independent Windows GUI supervisor did not compile'
+    }
+    $ackOutput=@(& $ackLab (Join-Path $current 'akula-app.exe') $expected['akula-app'] 2>&1)
+    $ackExit=$LASTEXITCODE
+    $ackOutput | Out-Host
+    if($ackExit -ne 0 -or !(($ackOutput | Out-String).Contains('VIDEO18C02B_REAL_GUI_ACK_PASS'))){
+      throw 'VIDEO18C02B_HOLD: real protected current GUI frame ACK or wrong-nonce denial failed'
+    }
+  } finally {
+    if(Test-Path -LiteralPath $ackLab -PathType Leaf){
+      Remove-Item -LiteralPath $ackLab -Force -ErrorAction Stop
+    }
+  }
+  Assert-Five $current
+  Assert-Flat $root
+  Write-Host 'VIDEO18C02B_PROTECTED_CURRENT_GUI_INTACT_PASS old=5 current=5 nonrelease=1'
+  # VIDEO-18c-02b-02b-01: ONE outside-current process authenticates a
+  # real ephemeral Minisign five-PE manifest and witnesses a genuine GUI ACK.
+  # This is a signed transport witness only. Legacy and current still have
+  # identical EXE bytes: no candidate activation or update confirmation.
+  $trust=Join-Path $stage 'video18c02b02b-trust'
+  $manifestCrate=Join-Path $repo 'labs/video-lite/video18c02b02b-signed-gui/Cargo.toml'
+  $manifestLock=Join-Path $repo 'labs/video-lite/video18c02b02b-signed-gui/Cargo.lock'
+  if((Test-Path -LiteralPath $trust) -or
+      (Test-Path -LiteralPath $manifestLock) -or
+      !(Test-Path -LiteralPath $manifestCrate -PathType Leaf)){
+    throw 'VIDEO18C02B02B_HOLD: fixture reused, committed lock or missing test-only crate'
+  }
+  New-Item -ItemType Directory -Path $trust -ErrorAction Stop | Out-Null
+  $records=@()
+  foreach($name in $names){
+    $file=Join-Path $current ($name+'.exe')
+    Assert-RealFile $file
+    $sha=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+    if($sha -cne $expected[$name]){
+      throw 'VIDEO18C02B02B_HOLD: unsigned executable differs from accepted installed PE'
+    }
+    $records+=([ordered]@{filename=($name+'.exe');sha256=$sha;size=(Get-Item -LiteralPath $file).Length})
+  }
+  if($records.Count -ne 5){throw 'VIDEO18C02B02B_HOLD: not exactly five real PE records'}
+  $lockSha=(Get-FileHash -LiteralPath (Join-Path $repo 'aquilum-app/Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant()
+  $signed=[ordered]@{
+    schema=1
+    product='Akula'
+    platform='windows-x86_64'
+    purpose='protected-video-five-exe'
+    version='0.3.21'
+    source_commit=$env:EXPECTED_HEAD_SHA
+    cargo_lock_sha256=$lockSha
+    components=$records
+  }
+  $manifestFile=Join-Path $trust 'five-manifest.json'
+  [IO.File]::WriteAllText($manifestFile,
+    ($signed | ConvertTo-Json -Depth 8 -Compress)+[Environment]::NewLine,
+    [Text.UTF8Encoding]::new($false))
+  $mini=(Get-Command minisign.exe -CommandType Application -ErrorAction Stop).Source
+  Assert-RealFile $mini
+  $key=Join-Path $trust 'test-publisher.key'
+  $pub=Join-Path $trust 'test-publisher.pub'
+  $sig=Join-Path $trust 'five-manifest.minisig'
+  & $mini -G -W -s $key -p $pub
+  if($LASTEXITCODE -ne 0){ throw 'VIDEO18C02B02B_HOLD: ephemeral keygen failed' }
+  & $mini -S -s $key -m $manifestFile -x $sig -c 'VIDEO18C02B02B NONRELEASE' -t 'Ephemeral only'
+  if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B02B_HOLD: signing real five PEs failed'}
+  & $mini -Vm $manifestFile -x $sig -p $pub -Q
+  if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B02B_HOLD: independent signature failed'}
+  Write-Host 'VIDEO18C02B02B_SIGNED_REAL_PE_MANIFEST_PASS installed=5 ephemeral=1 distinct_old_new=0 release=0'
+  $priorTarget=$env:CARGO_TARGET_DIR
+  $build=Join-Path $temp ('Video18c02b02bBuild-'+$tag)
+  if(Test-Path -LiteralPath $build){throw 'VIDEO18C02B02B_HOLD: test compiler build not fresh'}
+  $env:CARGO_TARGET_DIR=$build
+  try {
+    cargo generate-lockfile --manifest-path $manifestCrate
+    if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $manifestLock -PathType Leaf)){
+      throw 'VIDEO18C02B02B_HOLD: ephemeral dependency resolution failed'
+    }
+    Write-Host 'VIDEO18C02B02B_EPHEMERAL_LOCK_NOT_RELEASE'
+    cargo build --release --locked --manifest-path $manifestCrate
+    if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B02B_HOLD: signed GUI lab Rust build failed'}
+    $bin=Join-Path $build 'release/akula-video18c02b02b-signed-gui-lab.exe'
+    Assert-RealFile $bin
+    $proof=@(& $bin (Join-Path $current 'akula-app.exe') $manifestFile $sig $pub 2>&1)
+    $code=$LASTEXITCODE
+    $proof | Out-Host
+    if($code -ne 0 -or !(($proof | Out-String).Contains('VIDEO18C02B02B_SIGNED_RUNNABLE_GUI_ACK_PASS'))){
+      throw 'VIDEO18C02B02B_HOLD: genuine GUI rejected or false positive signed manifest witness'
+    }
+  } finally {
+    if($priorTarget){$env:CARGO_TARGET_DIR=$priorTarget}
+    else {Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue}
+    if(Test-Path -LiteralPath $manifestLock -PathType Leaf){
+      Remove-Item -LiteralPath $manifestLock -Force -ErrorAction Stop
+    }
+    if(Test-Path -LiteralPath $build){
+      Remove-Item -LiteralPath $build -Recurse -Force -ErrorAction Stop
+    }
+  }
+  Assert-Five $current
+  Assert-Flat $root
+  Write-Host 'VIDEO18C02B02B_PROTECTED_FIVE_UNCHANGED_PASS current=5 legacy=5 release=0'
   & icacls.exe $media '/inheritance:r' '/grant:r' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)M' | Out-Host
   if ($LASTEXITCODE -ne 0) { throw 'VIDEO18B16_HOLD: cannot provision isolated local media ACL' }
   $secure=ConvertTo-SecureString -String $password -AsPlainText -Force

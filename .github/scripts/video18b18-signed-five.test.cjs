@@ -40,6 +40,12 @@ function verify(rust,wf,fixture,toml){
     'version: String,',
     'semver3(&manifest.version)? <= semver3(installed_floor)?',
     'Sha256::digest(raw)',
+    'pub fn verify_first_presented_frame_ack(',
+    'self.generation_sha256()',
+    'if !lowercase_hex(expected_nonce, 32) || pinned_os_child_pid <= 1',
+    'if receipt != expected.as_bytes()',
+    'first-frame receipt not bound to signed five-PE generation',
+    'first_frame_ack_is_bound_to_authenticated_five_pe_manifest_not_gui_exe_hash',
     'fn verify_stage(&self, current: &Path)',
     'fs::symlink_metadata',
     'meta.file_attributes() & 0x400',
@@ -96,6 +102,8 @@ test('VIDEO18B18 negative rejects enabling video channel or moving signature gat
     s.replace('verify(raw, signature, trusted_key)','no_verify(raw, signature, trusted_key)'),
     s.replace('"akula-quickjs.exe",','"untrusted.exe",'),
     s.replace('meta.file_attributes() & 0x400', 'meta.file_attributes() & 0x0'),
+    s.replace('self.generation_sha256()', '"0000000000000000000000000000000000000000000000000000000000000000"'),
+    s.replace('if receipt != expected.as_bytes()', 'if false'),
   ];
   for(const changed of cases){
     assert.notEqual(changed,s);

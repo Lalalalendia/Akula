@@ -9,6 +9,9 @@ on:
       - 'aquilum-app/native/src/updater/windows_first_gui_ack.rs'
       - '.github/scripts/video18b18c-first-frame.test.cjs'
       - 'docs/release/video18b18c-first-frame-windows.md'
+      - 'labs/video-lite/video18c02_windows_child_ipc.rs'
+      - '.github/scripts/video18c02-windows-child-ipc.test.cjs'
+      - 'docs/release/video18c02-real-child-ipc.md'
       - 'scripts/windows-video18b14-protected-gui.ps1'
       - 'labs/video-lite/video18b14/gui_acceptance.py'
       - '.github/scripts/video18b14-protected-gui.test.cjs'
@@ -32,7 +35,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Validate source and five EXE custody release boundary
-        run: node --test .github/scripts/video18b18c-first-frame.test.cjs .github/scripts/video18b14-protected-gui.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs
+        run: node --test .github/scripts/video18c02-windows-child-ipc.test.cjs .github/scripts/video18b18c-first-frame.test.cjs .github/scripts/video18b14-protected-gui.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs
 
   fixture:
     name: Generate synthetic localhost DASH for protected NSIS GUI
@@ -213,6 +216,32 @@ jobs:
           cargo test --release --locked -p aquilum-native --features installed,video-rust-bundle,video-ui-e2e updater::frame_ack::windows_first_gui_ack::tests -- --nocapture
           if($LASTEXITCODE -ne 0){ throw 'VIDEO18C_HOLD: inherited-ACK Windows unit witness failed' }
           Write-Host 'VIDEO18C_WIN_INHERITED_PIPE_TRANSPORT_PASS release=0 commit=0'
+      - name: Windows real child process allowlisted pipe lab (no commit)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
+              $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
+              $env:GITHUB_EVENT_NAME -cne 'pull_request' -or
+              (git rev-parse HEAD).Trim() -cne '${{ github.event.pull_request.head.sha }}'){
+            throw 'VIDEO18C02_HOLD: only exact HEAD hosted Windows pull_request'
+          }
+          $bin=Join-Path $env:RUNNER_TEMP 'video18c02-child-ipc.exe'
+          try {
+            rustc --edition=2024 -C opt-level=1 labs/video-lite/video18c02_windows_child_ipc.rs -o $bin
+            if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $bin -PathType Leaf)){
+              throw 'VIDEO18C02_HOLD: Windows parent/child IPC lab did not compile'
+            }
+            $lines = & $bin 2>&1
+            $rc = $LASTEXITCODE
+            $lines | Out-Host
+            if($rc -ne 0 -or !(($lines | Out-String).Contains('VIDEO18C02_REAL_PARENT_CHILD_PIPE_PASS'))){
+              throw 'VIDEO18C02_HOLD: OS child process IPC proof failed or missing witness'
+            }
+            Write-Host 'VIDEO18C02_CHILD_PROCESS_LAB_CI_PASS signed=0 gui=0 confirm=0 release=0'
+          } finally {
+            Remove-Item -LiteralPath $bin -Force -ErrorAction SilentlyContinue
+          }
       - name: Install protected real five PE NSIS, click actual GUI, restart, decode and uninstall
         shell: pwsh
         env:

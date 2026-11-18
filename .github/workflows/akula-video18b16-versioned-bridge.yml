@@ -6,6 +6,13 @@ on:
     paths:
       - 'scripts/video18b16-protected-versioned-bridge.nsi'
       - 'scripts/windows-video18b16-protected-versioned-bridge.ps1'
+      - 'labs/video-lite/video18c02b_real_gui_ack.rs'
+      - 'labs/video-lite/video18c02b02b-signed-gui/Cargo.toml'
+      - 'labs/video-lite/video18c02b02b-signed-gui/src/main.rs'
+      - '.github/scripts/video18c02b02b-signed-gui.test.cjs'
+      - 'docs/release/video18c02b02b-signed-current-gui.md'
+      - '.github/scripts/video18c02b-real-gui-ack.test.cjs'
+      - 'docs/release/video18c02b-real-current-gui-ack.md'
       - '.github/scripts/video18b16-versioned-bridge.test.cjs'
       - '.github/workflows/akula-video18b16-versioned-bridge.yml'
       - 'docs/release/video18b16-protected-generation-layout.md'
@@ -31,11 +38,51 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Validate source and five EXE custody release boundary
-        run: node --test .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs
+        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs
+
+  preflight:
+    name: Compile actual Windows GUI ACK supervisor (no installer)
+    needs: contract
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile isolated Windows rustc lab before expensive five-PE build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:GITHUB_ACTIONS -cne 'true' -or $env:GITHUB_EVENT_NAME -cne 'pull_request' -or
+              $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows' -or
+              (git rev-parse HEAD).Trim() -cne '${{ github.event.pull_request.head.sha }}'){
+            throw 'VIDEO18C02B_HOLD: exact-head hosted Windows PR only'
+          }
+          $bin=Join-Path $env:RUNNER_TEMP 'video18c02b-preflight.exe'
+          & rustc --edition=2024 -C opt-level=1 labs/video-lite/video18c02b_real_gui_ack.rs -o $bin
+          if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $bin -PathType Leaf)){
+            throw 'VIDEO18C02B_HOLD: Windows GUI ACK controller failed rustc preflight'
+          }
+          Remove-Item -LiteralPath $bin -Force -ErrorAction Stop
+          Write-Host 'VIDEO18C02B_WINDOWS_RUSTC_PREFLIGHT_PASS nonrelease=1'
+          $manifest='labs/video-lite/video18c02b02b-signed-gui/Cargo.toml'
+          $lock='labs/video-lite/video18c02b02b-signed-gui/Cargo.lock'
+          if(Test-Path -LiteralPath $lock){throw 'VIDEO18C02B02B_HOLD: committed unreviewed Cargo.lock forbidden'}
+          try {
+            cargo generate-lockfile --manifest-path $manifest
+            if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B02B_HOLD: standalone test graph resolution failed'}
+            cargo build --locked --manifest-path $manifest
+            if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B02B_HOLD: signed GUI witness fails Windows compile'}
+            Write-Host 'VIDEO18C02B02B_WINDOWS_SIGNED_GUI_COMPILE_PASS nonrelease=1'
+          } finally {
+            Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+          }
 
   real-five:
     name: Compile five real EXEs and prove protected flat-to-current lab bridge
-    needs: contract
+    needs: [contract, preflight]
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -153,6 +200,29 @@ jobs:
             [ref]$tokens,[ref]$errors) | Out-Null
           if($errors.Count -ne 0){ throw "VIDEO18B16_HOLD: PowerShell parser rejected bridge: $($errors | Out-String)" }
           Write-Host 'VIDEO18B16_POWERSHELL_PARSE_PASS'
+      - name: Install SHA-pinned Minisign 0.12 for ephemeral five-PE GUI witness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip'
+          $sha='37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479'
+          $archive=Join-Path $env:RUNNER_TEMP 'video18c02b02b-minisign-0.12.zip'
+          $dir=Join-Path $env:RUNNER_TEMP 'video18c02b02b-minisign-0.12'
+          Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+          if((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $sha){
+            throw 'VIDEO18C02B02B_HOLD: Minisign 0.12 archive SHA mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $dir -ErrorAction Stop
+          $binaryDir=Join-Path $dir 'minisign-win64/x86_64'
+          $mini=Join-Path $binaryDir 'minisign.exe'
+          if(!(Test-Path -LiteralPath $mini -PathType Leaf)){
+            throw 'VIDEO18C02B02B_HOLD: pinned Minisign missing'
+          }
+          & $mini -v
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B02B_HOLD: Minisign does not start'}
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $binaryDir
+          Write-Host 'VIDEO18C02B02B_MINISIGN_PINNED_PASS ephemeral=1 release=0'
+
       - name: Two real protected NSIS installers, legacy/current five-file bridge, ten ACL denials, complete uninstall
         shell: pwsh
         env:
