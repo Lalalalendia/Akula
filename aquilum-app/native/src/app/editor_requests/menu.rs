@@ -21,8 +21,8 @@ pub enum EditorCommand {
 
 impl App {
     pub(in crate::app) fn open_table_menu(&mut self, root: &mut RenderRoot, at: Point, commands: Vec<(TableCommand, bool)>) {
-        let labels: Vec<String> = commands.iter().map(|(c, _)| t(c.label_key())).collect();
-        let entries: Vec<Entry<'_>> = commands.iter().zip(&labels).map(|((c, enabled), label)| Entry { label, icon: Some(c.icon()), disabled: !enabled }).collect();
+        let mut labels: Vec<String> = commands.iter().map(|(c, _)| t(c.label_key())).collect(); labels.push(t("editor.table.studyPreview")); labels.push(t("editor.table.studyAdd"));
+        let mut entries: Vec<Entry<'_>> = commands.iter().zip(&labels).map(|((c, enabled), label)| Entry { label, icon: Some(c.icon()), disabled: !enabled }).collect(); entries.push(Entry { label: &labels[labels.len() - 2], icon: Some(icons::BOOK_OPEN), disabled: false }); entries.push(Entry { label: labels.last().expect("study add label"), icon: Some(icons::TABLE), disabled: false });
         let menu = Menu::entries(&t("editor.table.menuAria"), &entries);
         let commands: Vec<TableCommand> = commands.into_iter().map(|(c, _)| c).collect();
         let layer = menu.id();
@@ -38,6 +38,7 @@ impl App {
         };
         let MenuChoice::Item(item) = choice else { return };
         root.remove_layer(layer);
+        if *item == commands.len() { self.open_study_from_active_table(root); return; } if *item == commands.len() + 1 { self.open_study_add(root); return; }
         let Some(&command) = commands.get(*item) else { return };
         if let Some(ids) = &self.note_ids {
             let body = ids.body.id();
@@ -45,7 +46,6 @@ impl App {
             ids.body.edit(root, |mut editor| TextEditor::table_command(&mut editor, command));
         }
     }
-
     pub(in crate::app) fn open_editor_context_menu(&mut self, root: &mut RenderRoot, at: Point, has_selection: bool, code: Option<(WidgetId, usize)>) {
         let has_frontmatter = frontmatter::end_of(&self.text).is_some();
         let mut commands = vec![EditorCommand::Copy];

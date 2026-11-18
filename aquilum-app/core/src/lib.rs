@@ -5,6 +5,7 @@ pub mod app_core;
 pub mod documents;
 pub mod files;
 pub mod history;
+pub mod learning;
 pub mod link_title;
 pub mod markdown;
 #[cfg(feature = "messaging-core-lab")]
@@ -27,7 +28,6 @@ pub mod server_bootstrap_lab;
 pub mod server_bootstrap_ssh_lab;
 #[cfg(all(target_os = "windows", feature = "server-bootstrap-b0-openssh-lab"))]
 pub mod server_bootstrap_ssh_windows_lab;
-
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b-custody-lab"))]
 pub mod server_staging_lab;
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b1-floor-lab"))]

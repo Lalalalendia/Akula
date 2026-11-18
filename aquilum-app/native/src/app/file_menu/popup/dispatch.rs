@@ -91,7 +91,7 @@ impl App {
                 None => self.popup = Some(Popup::Delete { dialog, targets }),
             },
             Some(Popup::VersionMenu { layer, index, commands }) => self.on_version_menu(root, layer, index, commands, action),
-            Some(Popup::TableMenu { layer, commands }) => self.on_table_menu(root, layer, commands, action),
+            Some(Popup::TableMenu { layer, commands }) => self.on_table_menu(root, layer, commands, action), Some(Popup::StudyQuestion { layer, snapshot }) => self.on_study_question(root, layer, snapshot, action), Some(Popup::StudyAnswer { layer, snapshot, question }) => self.on_study_answer(root, layer, snapshot, question, action), Some(Popup::StudyPreview { dialog, copy }) => self.on_study_preview(root, id, dialog, copy, action), Some(Popup::StudyAddQuestion { layer, pending }) => self.on_study_add_question(root, layer, pending, action), Some(Popup::StudyAddAnswer { layer, pending, question }) => self.on_study_add_answer(root, layer, pending, question, action), Some(Popup::StudyAddCollection { layer, pending, choices }) => self.on_study_add_collection(root, layer, pending, choices, action),
             Some(Popup::EditorMenu { layer, commands }) => self.on_editor_menu(root, layer, commands, action),
             Some(Popup::NoteActionsMenu { layer }) => return self.on_note_actions_menu(root, layer, action),
             Some(Popup::SortMenu { layer, button }) => match self.dropdown_answer(root, layer, button, id, action) {
