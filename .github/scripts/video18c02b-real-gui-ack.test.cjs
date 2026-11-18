@@ -57,6 +57,11 @@ function verify(controller,script,workflow,sender,frame){
     'VIDEO18C02B_HOLD: no real protected current GUI IPC witness');
   assert.ok(workflow.includes('node --test .github/scripts/video18c02b-real-gui-ack.test.cjs'),
     'VIDEO18C02B_HOLD: negative source contract absent');
+  assert.ok(workflow.includes('name: Compile actual Windows GUI ACK supervisor (no installer)') &&
+    workflow.includes('needs: [contract, preflight]') &&
+    workflow.includes('VIDEO18C02B_WINDOWS_RUSTC_PREFLIGHT_PASS') &&
+    workflow.includes('rustc --edition=2024'),
+    'VIDEO18C02B_HOLD: missing fast actual Windows rustc preflight');
   assert.ok(workflow.includes('cargo build --release --locked -p aquilum-native --features installed,video-rust-bundle,video-ui-e2e'),
     'VIDEO18C02B_HOLD: wrong app features');
   assert.ok(!workflow.includes('workflow_dispatch:')&&!/contents:\s*write/.test(workflow),
@@ -95,6 +100,8 @@ test('Negative: modified workflow may not skip physical child or permit release'
     wf.replace('cargo build --release --locked -p aquilum-native --features installed,video-rust-bundle,video-ui-e2e',
       'cargo build --release -p aquilum-native --features installed'),
     wf+'\nworkflow_dispatch:\n',
+    wf.replace('needs: [contract, preflight]','needs: contract'),
+    wf.replace('VIDEO18C02B_WINDOWS_RUSTC_PREFLIGHT_PASS','VIDEO18C02B_PRETEND_PASS'),
   ];
   for(const changed of variants){
     assert.notEqual(changed,wf);
