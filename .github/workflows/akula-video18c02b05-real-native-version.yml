@@ -1,0 +1,120 @@
+name: Akula VIDEO-18c-02b-05 genuine native candidate version (non-release)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/native/packaging/akula-windows.json'
+      - 'aquilum-app/native/packaging/akula-windows-video17-lab.json'
+      - '.github/workflows/akula-video17-nsis-installed-video.yml'
+      - 'aquilum-app/Cargo.lock'
+      - 'aquilum-app/native/build.rs'
+      - 'labs/video-lite/video18c02b04-native-pe-version.rs'
+      - '.github/workflows/akula-video18c02b05-real-native-version.yml'
+      - '.github/scripts/video18c02b05-real-native-version.test.cjs'
+      - 'docs/release/video18c02b05-real-native-version.md'
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - run: node --test .github/scripts/video18c02b05-real-native-version.test.cjs
+      - run: node scripts/akula-version.cjs check
+  windows:
+    needs: contract
+    runs-on: windows-2022
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-video18c05-native-v1
+          save-if: false
+      - name: Verify immutable hosted PR context and real version reader
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:GITHUB_ACTIONS -cne 'true' -or $env:GITHUB_EVENT_NAME -cne 'pull_request' -or
+             $env:RUNNER_OS -cne 'Windows' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
+             (git rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA){
+            throw 'VIDEO18C02B05_HOLD: hosted Windows PR exact HEAD only'
+          }
+          $unit=Join-Path $env:RUNNER_TEMP 'video18c02b05-unit.exe'
+          rustc --edition=2024 --test labs/video-lite/video18c02b04-native-pe-version.rs -o $unit
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B05_HOLD: version verifier unit compilation failed'}
+          & $unit
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B05_HOLD: version verifier unit test failed'}
+          Remove-Item -LiteralPath $unit -Force -ErrorAction Stop
+          Write-Host 'VIDEO18C02B05_PREBUILD_WITNESS_PASS nonrelease=1'
+      - name: Build tracked genuine native candidate PE from Cargo.lock
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo build --release --locked -p aquilum-native --features installed,video-rust-bundle,video-ui-e2e
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B05_HOLD: native candidate compilation failed'}
+          $app=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release/aquilum-native.exe'
+          if(!(Test-Path -LiteralPath $app -PathType Leaf) -or (Get-Item -LiteralPath $app).Length -lt 512){
+            throw 'VIDEO18C02B05_HOLD: real native candidate missing'
+          }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "VIDEO18C02B05_APP=$app"
+      - name: Accept real native 0.3.21 over 0.3.20; deny forged/nonincreasing claims
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA){
+            throw 'VIDEO18C02B05_HOLD: git HEAD changed'
+          }
+          $meta=@(cargo metadata --locked --no-deps --format-version 1 --manifest-path aquilum-app/Cargo.toml 2>&1)
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B05_HOLD: source version metadata unavailable'}
+          $info=$meta | Out-String | ConvertFrom-Json
+          $packages=@($info.packages | Where-Object {$_.name -ceq 'aquilum-native'})
+          if($packages.Count -ne 1){throw 'VIDEO18C02B05_HOLD: native package ambiguous'}
+          $sourceVersion=[string]$packages[0].version
+          if($sourceVersion -cne '0.3.21'){throw 'VIDEO18C02B05_HOLD: actual source version drift'}
+          $exe=Join-Path $env:RUNNER_TEMP 'video18c02b05-verify.exe'
+          rustc --edition=2024 labs/video-lite/video18c02b04-native-pe-version.rs -o $exe
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B05_HOLD: PE version verifier did not compile'}
+          $identity=@(& $exe --identify $env:VIDEO18C02B05_APP $sourceVersion 2>&1)
+          $identityCode=$LASTEXITCODE
+          $identity | Out-Host
+          if($identityCode -ne 0 -or !(($identity|Out-String).Contains('VIDEO18C02B04_NATIVE_PE_IDENTITY_PASS'))){
+            throw 'VIDEO18C02B05_HOLD: actual PE version differs from tracked Cargo'
+          }
+          $positive=@(& $exe --admit $env:VIDEO18C02B05_APP $sourceVersion 0.3.20 0.3.21 2>&1)
+          $positiveCode=$LASTEXITCODE
+          $positive | Out-Host
+          if($positiveCode -ne 0 -or !(($positive|Out-String).Contains('VIDEO18C02B04_STRICT_VERSION_FLOOR_PASS'))){
+            throw 'VIDEO18C02B05_HOLD: real higher native version was rejected'
+          }
+          foreach($bad in @(@('0.3.20','0.3.20'),@('0.3.20','0.3.22'),@('0.3.21','0.3.21'))){
+            $negative=@(& $exe --admit $env:VIDEO18C02B05_APP $sourceVersion $bad[0] $bad[1] 2>&1)
+            $negativeCode=$LASTEXITCODE
+            $negative | Out-Host
+            if($negativeCode -eq 0 -or !(($negative|Out-String).Contains('VIDEO18C02B04_HOLD: signed label is not a genuine newer native PE version'))){
+              throw 'VIDEO18C02B05_HOLD: forged or nonincreasing candidate claim accepted'
+            }
+            $global:LASTEXITCODE=0
+          }
+          Write-Host 'VIDEO18C02B05_GENUINE_PE_RAISE_PASS source=0.3.21 pe=0.3.21 previous=0.3.20 negatives=3 release=0'
+          Remove-Item -LiteralPath $exe -Force -ErrorAction Stop

@@ -250,7 +250,7 @@ test('Windows beta NSIS apply only accepts signed typed candidate and remains ga
   assert.doesNotMatch(updater, /Some\(candidate.into_bytes\(\)\);\s*Ok\(\(\)\)/,
     'unsealing an authenticated Windows candidate before apply is prohibited');
   assert.match(release, /pub\(super\) const PUBLIC_KEY: &str = "[^"]*"/);
-  assert.match(release, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(target_os = "windows", feature = "installed"\)\)\s*\}/);
+  assert.match(release, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(\s*target_os = "windows",\s*feature = "installed",\s*not\(feature = "video-rust-bundle"\)\s*\)\)\s*\}/);
 });
 
 test('installed large-note replacement uses an isolated, PID-bound Win32 shortcut helper', () => {
