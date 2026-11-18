@@ -51,6 +51,7 @@ mod pointer;
 pub use paste::Smart;
 mod select;
 mod selection_highlight;
+pub use selection_highlight::AnnotationPaintSpan;
 mod state;
 pub use state::TextEditor;
 mod suggest;
