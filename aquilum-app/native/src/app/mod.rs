@@ -61,7 +61,7 @@ enum Popup {
     Delete { dialog: DialogIds, targets: Vec<PathBuf> },
     Settings { dialog: SettingsDialog, menu: Option<settings::OpenMenu> },
     VersionMenu { layer: WidgetId, index: usize, commands: Vec<history::VersionCommand> },
-    TableMenu { layer: WidgetId, commands: Vec<crate::ui::editor::TableCommand> },
+    TableMenu { layer: WidgetId, commands: Vec<crate::ui::editor::TableCommand> }, StudyQuestion { layer: WidgetId, snapshot: aquilum_core::learning::editor_snapshot::EditorTableSnapshot }, StudyAnswer { layer: WidgetId, snapshot: aquilum_core::learning::editor_snapshot::EditorTableSnapshot, question: usize }, StudyPreview { dialog: DialogIds, copy: Option<String> },
     EditorMenu { layer: WidgetId, commands: Vec<editor_requests::EditorCommand> },
     NoteActionsMenu { layer: WidgetId },
     SortMenu { layer: WidgetId, button: WidgetId },

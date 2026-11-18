@@ -1,6 +1,6 @@
 pub mod menu;
 pub mod suggest;
-mod video;
+mod video; mod study; mod study_entry;
 pub use menu::EditorCommand;
 use std::sync::Arc;
 
