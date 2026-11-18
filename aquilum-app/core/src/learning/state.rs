@@ -1,6 +1,5 @@
 //! One atomic app-data registry for language collections AND table anchors.
 //!
-//! This supersedes the two experimental stores for new user-facing writes.
 //! It stores no Markdown cells; all source IDs and live tables are supplied
 //! by the trusted host after opening the current authorized native note.
 //! A hash or saved source string is never permission to read another note.
