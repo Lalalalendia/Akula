@@ -67,7 +67,7 @@ impl TextEditor {
                 {
                     return;
                 }
-                if state.modifiers.alt() {
+                if state.count == 1 && !state.modifiers.shift() && !state.modifiers.alt() && !state.modifiers.ctrl() && !state.modifiers.meta() && self.open_annotation_hit(ctx, point) { return; } if state.modifiers.alt() {
                     let (offset, _) = self.hit(point);
                     self.add_cursor_at(offset);
                 } else if !state.modifiers.shift() {
