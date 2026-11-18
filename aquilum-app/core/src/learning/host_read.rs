@@ -220,7 +220,7 @@ mod tests {
     fn open_editor_blocks_closed_source_read_instead_of_leaking_stale_disk() {
         let case = fixture();
         let editor = case.core.documents.open(&case.core, &case.path, 0).unwrap();
-        assert_eq!(editor.version, 0);
+        assert!(editor.text.contains("eat | есть"), "the editor must actually be open");
         let reader = HostStudyReader::open(&case.core, case.vault.path(), case.workspace).unwrap();
         let output = reader.read_selected(&case.state, &["words".into()]).unwrap();
         assert!(output.available.is_empty());
