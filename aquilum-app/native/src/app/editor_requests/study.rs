@@ -24,7 +24,7 @@ fn compact(value: &str) -> String {
     visible
 }
 
-fn labels(snapshot: &EditorTableSnapshot, skip: Option<usize>) -> Vec<(usize, String)> {
+pub(super) fn labels(snapshot: &EditorTableSnapshot, skip: Option<usize>) -> Vec<(usize, String)> {
     snapshot.cells[0].iter().enumerate().filter_map(|(index, header)| {
         if skip == Some(index) {
             return None;
@@ -69,7 +69,7 @@ fn preview_text(
 }
 
 impl App {
-    fn study_menu(&mut self, root: &mut RenderRoot, title: &str, entries: &[(usize, String)]) -> WidgetId {
+    pub(super) fn study_menu(&mut self, root: &mut RenderRoot, title: &str, entries: &[(usize, String)]) -> WidgetId {
         let labels = entries.iter().map(|(_, label)| label.as_str()).collect::<Vec<_>>();
         let center = self.window.width * 0.5;
         let top = (self.window.height * 0.25).max(16.0);

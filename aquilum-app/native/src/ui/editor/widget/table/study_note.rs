@@ -6,7 +6,7 @@
 use super::*;
 use crate::ui::editor::markdown::{Block, State};
 use crate::ui::editor::table;
-use aquilum_core::learning::editor_snapshot::{CaptureError, EditorTableSnapshot};
+use aquilum_core::learning::editor_snapshot::EditorTableSnapshot;
 
 const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TABLES: usize = 256;
