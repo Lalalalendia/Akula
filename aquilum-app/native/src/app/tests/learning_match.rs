@@ -27,7 +27,6 @@ fn start_matching(h: &mut Harness) {
     };
     h.act(layer, MenuChoice::Item(4)); // 2 collections + flashcards + choice + matching
 }
-
 #[test]
 fn lang05_matching_native_correct_wrong_and_unchanged_markdown() {
     let mut h = Harness::new();
@@ -88,7 +87,6 @@ fn lang05_matching_native_correct_wrong_and_unchanged_markdown() {
     assert_eq!(std::fs::read(b).unwrap(), before_b);
     eprintln!("AKULA_LANG05_MATCH_PASS=unique_pairs,correct,wrong,no_markdown_writes");
 }
-
 #[test]
 fn lang05_matching_external_edit_aborts_before_grading() {
     let mut h = Harness::new();
@@ -111,13 +109,15 @@ fn lang05_matching_external_edit_aborts_before_grading() {
 }
 
 #[test]
-fn lang05_matching_refuses_insufficient_distinct_pairs_after_open_tab_exclusion() {
+fn lang05_matching_accepts_current_active_editor_without_closed_disk_read() {
     let mut h = Harness::new();
     let (a, _) = bind_fixture(&mut h);
     assert!(h.app.open(&mut h.root, a));
     start_matching(&mut h);
-    assert!(matches!(h.app.popup, Some(Popup::StudyPreview { .. })),
-        "open active editor must not be read from stale disk or faked into matches");
+    assert!(matches!(&h.app.popup,
+        Some(Popup::StudyMatchQuestion { state, .. })
+            if state.pairs.len() == 3 && state.snapshot.active.is_some()),
+        "matching must use the current active editor buffer, not stale disk");
 }
 
 #[test]

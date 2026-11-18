@@ -1,10 +1,8 @@
-//! LANG-02k: in-memory, fail-closed first-party study deck from registered
-//! *closed* notes. No persisted cell copies, direct path read or plugin grant.
+//! LANG-02: a fail-closed study deck from closed notes and the active editor.
+//! No persisted cells, direct path reads or plugin grants.
 //!
-//! Live editor notes are intentionally unavailable in this first slice; the
-//! future active-editor adapter must use its unsaved buffer + revision, not
-//! the closed-file reader. The caller must revalidate before presenting a
-//! card or following the row link, and handle an unavailable set explicitly.
+//! The active editor uses its in-memory revision; inactive tabs stay unavailable.
+//! Revalidate before presenting a card or answer.
 
 use std::collections::BTreeSet;
 use aquilum_core::learning::activation::LiveNote;
@@ -15,6 +13,7 @@ use aquilum_core::learning::state::{StateError, StudyStore};
 use aquilum_core::learning::table_anchors::NoteKey;
 use super::super::App;
 use crate::ui::editor::TextEditor;
+use super::study_live::LiveEditorStamp;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum StudyLoadError {
@@ -33,17 +32,15 @@ pub(crate) struct StudyDeckSnapshot {
     /// durable review history. Raw text is dropped before this result returns.
     pub sources: Vec<(NoteKey, String)>,
     pub unavailable_notes: Vec<NoteKey>,
+    pub active: Option<LiveEditorStamp>,
 }
-
-/// The native TextEditor is not a DocumentHub session. Refuse *every* open
-/// tab before any Core file read, including inactive tabs with cached text.
+/// Exclude all native tabs before admitting the selected active memory buffer.
 fn open_editor_sources(
     app: &App,
     session: &crate::session::Session,
     state: &aquilum_core::learning::state::StudyState,
 ) -> BTreeSet<NoteKey> {
-    // Resolve already indexed table IDs to CURRENT registered physical paths,
-    // never use Session::document here: it creates an ID for unseen files.
+    // Resolve only indexed paths; Session::document would create unseen IDs.
     let mut open_paths = app.tabs.tabs().iter()
         .filter_map(|tab| tab.path.as_ref())
         .filter_map(|path| std::fs::canonicalize(path).ok())
@@ -70,7 +67,6 @@ fn open_editor_sources(
     }
     excluded
 }
-
 impl App {
     /// Construct a temporary combined set across selected collections. All
     /// source text is verified against the exact same atomic metadata revision
@@ -89,7 +85,6 @@ impl App {
         let excluded = open_editor_sources(self, session, &stored.state);
         let batch = reader.read_selected_excluding(&stored.state, collection_ids, &excluded)
             .map_err(StudyLoadError::Read)?;
-
         let mut parsed = Vec::<(NoteKey, Vec<Vec<Vec<String>>>)>::new();
         let mut source_stamps = Vec::new();
         for source in &batch.available {
@@ -100,6 +95,9 @@ impl App {
                 parsed.push((source.note.clone(), tables));
             }
         }
+        let mut unavailable_notes = batch.unavailable;
+        let active = self.append_study_editor(session, &stored.state, collection_ids,
+            &mut parsed, &mut unavailable_notes);
         let live = parsed.iter().map(|(note, tables)| LiveNote {
             note,
             tables,
@@ -113,7 +111,8 @@ impl App {
             collection_ids: collection_ids.to_vec(),
             revision: stored.revision,
             sources: source_stamps,
-            unavailable_notes: batch.unavailable,
+            unavailable_notes,
+            active,
         };
         // New external writes or deleted/renamed sources cannot turn the
         // just-produced deck into an apparently current session.
@@ -122,7 +121,6 @@ impl App {
         }
         Ok(snapshot)
     }
-
     /// Must be called immediately before presenting/using a card. Does not
     /// allow a stale fingerprint or stored path to reopen a revoked document.
     pub(crate) fn revalidate_study_deck(&self, snapshot: &StudyDeckSnapshot) -> bool {
@@ -141,7 +139,9 @@ impl App {
         let Ok(current) = reader.read_selected_excluding(
             &saved.state, &snapshot.collection_ids, &excluded,
         ) else { return false };
-        if current.unavailable != snapshot.unavailable_notes {
+        let mut unavailable = current.unavailable;
+        if !self.validate_study_editor(session, &saved.state, &snapshot.collection_ids,
+            &snapshot.active, &mut unavailable) || unavailable != snapshot.unavailable_notes {
             return false;
         }
         let now = current.available.iter().map(|source| {

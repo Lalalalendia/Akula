@@ -66,14 +66,14 @@ fn lang02_two_closed_markdown_notes_merge_without_copy_and_stale_files_are_held(
 }
 
 #[test]
-fn lang02_native_app_does_not_read_open_editor_document_for_study() {
+fn lang02_native_app_uses_only_active_memory_and_never_closed_disk() {
     let mut h = Harness::new();
     let (a, _) = bind_fixture(&mut h);
     assert!(h.app.open(&mut h.root, a));
     let deck = h.app.load_study_deck(&["english".into()]).unwrap();
-    assert!(deck.deck.cards.is_empty());
-    assert_eq!(deck.unavailable_notes.len(), 1);
-    assert!(!deck.deck.unavailable.is_empty());
+    assert_eq!((deck.deck.cards.len(), deck.sources.len(), deck.unavailable_notes.len()), (2, 0, 0));
+    assert!(deck.active.is_some());
+    assert!(h.app.revalidate_study_deck(&deck));
 }
 
 #[test]
