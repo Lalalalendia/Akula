@@ -6,9 +6,11 @@ on:
     paths:
       - 'aquilum-app/native/src/app/tests/learning_cards.rs'
       - 'aquilum-app/native/src/app/tests/learning_global.rs'
+      - 'aquilum-app/native/src/app/tests/learning_choice.rs'
       - 'aquilum-app/native/src/app/tests/learning_multi.rs'
       - 'aquilum-app/native/src/app/tests/mod.rs'
       - 'aquilum-app/native/src/app/editor_requests/study_cards.rs'
+      - 'aquilum-app/native/src/app/editor_requests/study_choice.rs'
       - 'aquilum-app/native/assets/locales/en.json'
       - 'aquilum-app/native/assets/locales/ru.json'
       - '.github/workflows/akula-language-flashcards-native-ui.yml'

@@ -58,14 +58,13 @@ impl App {
         selected: BTreeSet<String>,
     ) {
         let mut entries: Vec<(usize, String)> = choices.iter().enumerate()
-            .map(|(i, (id, name))| {
-                let mark = if selected.contains(id) { "☑" } else { "☐" };
-                (i, format!("{mark} {name}"))
-            }).collect();
+            .map(|(i, (id, name))| (i, format!("{} {name}",
+                if selected.contains(id) { "☑" } else { "☐" }))).collect();
         entries.push((entries.len(), t_with(
             "editor.table.studyPracticeStart",
             &[("count", &selected.len().to_string())],
         )));
+        entries.push((entries.len(), t("editor.table.studyChoiceStart")));
         let layer = self.study_menu(root, &t("editor.table.studyPracticeSelect"), &entries);
         self.popup = Some(Popup::StudyPicker { layer, choices, selected });
     }
@@ -86,7 +85,7 @@ impl App {
             return;
         };
         root.remove_layer(layer);
-        if *index == choices.len() {
+        if *index == choices.len() || *index == choices.len() + 1 {
             if selected.is_empty() {
                 self.study_notice(root, &t("editor.table.studyPracticeSelectOne"));
                 return;
@@ -94,7 +93,8 @@ impl App {
             let ids: Vec<String> = selected.into_iter().collect();
             match self.load_study_deck(&ids) {
                 Ok(deck) if !deck.deck.cards.is_empty() => {
-                    self.show_study_card(root, Box::new(deck), 0, false);
+                    if *index == choices.len() + 1 { self.show_study_choice(root, Box::new(deck), 0, Default::default()); }
+                    else { self.show_study_card(root, Box::new(deck), 0, false); }
                 }
                 Ok(_) => self.study_notice(root, &t("editor.table.studyPracticeNoCards")),
                 Err(_) => self.study_notice(root, &t("editor.table.studyPracticeChanged")),
