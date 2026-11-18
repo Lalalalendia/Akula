@@ -36,7 +36,7 @@ pub(in crate::app) struct PendingExplanation {
 
 const MAX_EXPLANATION_BYTES: usize = 4096;
 
-fn matching_record<'a>(
+pub(in crate::app) fn matching_record<'a>(
     records: &'a [AnnotationRecord], current: &AuthorizedEditor,
 ) -> Option<&'a AnnotationRecord> {
     let mut valid = records.iter().filter(|record| {
