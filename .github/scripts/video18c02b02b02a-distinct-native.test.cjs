@@ -58,6 +58,15 @@ function check(script,workflow,doc){
     '.github/scripts/video18c02b02b02a-distinct-native.test.cjs',
     'needs: [contract, preflight]'
   ]) assert.ok(workflow.includes(marker),'VIDEO18C02B02B02A_HOLD: missing CI requirement '+marker);
+  // A PowerShell script's verified output must not be invalidated by a
+  // stale native-process LASTEXITCODE. Preserve fail-closed marker checking.
+  const oldGuiJob=workflow.split('      - name: Attest two distinct source-built PE and launch genuine historical GUI\n')[1]
+    ?.split('      - name: Attest exact real five EXEs, reject mutation and preserve license HOLD\n')[0];
+  assert.ok(oldGuiJob && oldGuiJob.includes("$ErrorActionPreference='Stop'") &&
+    oldGuiJob.includes('$proof=@(./scripts/windows-video18c02b02b02a-distinct-native.ps1') &&
+    oldGuiJob.includes("if(!(($proof | Out-String).Contains('VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS')))") &&
+    !oldGuiJob.includes('$LASTEXITCODE'),
+    'VIDEO18C02B02B02A_HOLD: PowerShell witness must not trust stale native LASTEXITCODE');
   assert.match(workflow,
     /run: node --test [^\r\n]*\.github\/scripts\/video18c02b02b02a-distinct-native\.test\.cjs/,
     'VIDEO18C02B02B02A_HOLD: Node negative contract not executed');
@@ -84,6 +93,7 @@ test('Negative: weakened old-source pin, PE comparison, OS witness or source cus
     ['workflow','ref: ec6d6d48a78e60fca7a6f810b825418500bad64b','ref: main'],
     ['workflow','path: _akula-historical','path: fake'],
     ['workflow','VIDEO18C02B02B02A_SOURCE_COMMIT_PIN_PASS','VIDEO18C02B02B02A_PRETEND_PASS'],
+    ['workflow',"if(!(($proof | Out-String).Contains('VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS')))","if($LASTEXITCODE -ne 0 || $true)"],
     ['workflow','needs: [contract, preflight]','needs: contract'],
   ]){
     const old=field==='script'?script:w;

@@ -232,10 +232,11 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           $ErrorActionPreference='Stop'
+          # A PowerShell script is not a native executable: LASTEXITCODE can be stale.
+          # ErrorActionPreference=Stop propagates a terminating script error.
           $proof=@(./scripts/windows-video18c02b02b02a-distinct-native.ps1 -OldAppPath $env:VIDEO18C02B02B02A_OLD_APP -NewAppPath $env:VIDEO18B04_APP 2>&1)
-          $code=$LASTEXITCODE
           $proof | Out-Host
-          if($code -ne 0 -or !(($proof | Out-String).Contains('VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS'))){
+          if(!(($proof | Out-String).Contains('VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS'))){
             throw 'VIDEO18C02B02B02A_HOLD: distinct real source-built old GUI witness failed'
           }
       - name: Attest exact real five EXEs, reject mutation and preserve license HOLD
