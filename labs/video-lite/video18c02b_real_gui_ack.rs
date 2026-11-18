@@ -286,7 +286,18 @@ pub(crate) mod lab {
             .ok_or("missing RUNNER_TEMP")?).map_err(|e|e.to_string())?;
         let tag=app.parent().unwrap().parent().unwrap().file_name().unwrap()
             .to_string_lossy();
-        let folder=root.join(format!("Video18c02bFrame-{tag}-{mode}"));
+        // Two independently invoked labs share the same protected installation,
+        // but must NEVER share a GUI vault/data profile. Keep fail-closed
+        // no-reuse checks *within* each case, including negative trials.
+        if !matches!(mode, "good" | "wrong-nonce" | "wrong-generation") {
+            return Err("unknown real GUI ACK trial mode".into());
+        }
+        let prefix = if signed_check.is_some() {
+            "Video18c02b02bSignedFrame"
+        } else {
+            "Video18c02bFrame"
+        };
+        let folder=root.join(format!("{prefix}-{tag}-{mode}"));
         if folder.exists() {return Err("reused laboratory profile".into());}
         fs::create_dir(&folder).map_err(|e|e.to_string())?;
         let vault=folder.join("vault");
