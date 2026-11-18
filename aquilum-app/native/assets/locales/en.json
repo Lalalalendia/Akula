@@ -118,6 +118,8 @@
       "studyTruncated": "This preview uses a limited number of rows. It does not modify the source table.",
       "studyTemporary": "This is a preview, not a saved study collection.",
       "studyCopy": "Copy pairs",
+      "studyClose": "Close",
+      "studyOk": "OK",
       "columnAria": "Column {{label}}",
       "rowAria": "Row {{label}}",
       "cellAria": "Table cell",

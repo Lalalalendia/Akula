@@ -142,9 +142,9 @@ impl App {
     }
 
     fn study_dialog(&mut self, root: &mut RenderRoot, message: &str, copy: Option<String>) {
-        let copy_label = if copy.is_some() { t("editor.table.studyCopy") } else { t("common.ok") };
+        let copy_label = if copy.is_some() { t("editor.table.studyCopy") } else { t("editor.table.studyOk") };
         let (widget, dialog) = ConfirmDialog::new(
-            &t("editor.table.studyTitle"), message, &t("common.close"), &copy_label,
+            &t("editor.table.studyTitle"), message, &t("editor.table.studyClose"), &copy_label,
         );
         root.add_layer(widget, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
