@@ -58,7 +58,7 @@ mod table;
 #[cfg(test)]
 mod pair_window_tests;
 #[cfg(test)]
-mod testing;
+mod testing; #[cfg(test)] mod annotation_probe;
 mod widget_events;
 mod widget_impl;
 mod widget_layout;
