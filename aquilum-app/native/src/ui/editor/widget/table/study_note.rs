@@ -4,12 +4,9 @@
 //! (not disk bytes) with Akula's own table and Markdown block classifiers.
 
 use super::*;
-use crate::ui::editor::markdown::{Block, State};
-use crate::ui::editor::table;
 use aquilum_core::learning::editor_snapshot::EditorTableSnapshot;
 
 const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
-const MAX_TABLES: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoteScanError {
@@ -34,52 +31,14 @@ fn collect(
     source: &str,
     selected: &EditorTableSnapshot,
 ) -> Result<(usize, Vec<Vec<Vec<String>>>), NoteScanError> {
-    if source.len() > MAX_NOTE_BYTES {
-        return Err(NoteScanError::TooLarge);
+    let scanned = super::study_scan::scan_tables(source)?;
+    let (index, match_table) = scanned.iter().enumerate()
+        .find(|(_, table)| table.range.start == selected.table_range.start)
+        .ok_or(NoteScanError::SelectionChanged)?;
+    if match_table.range != selected.table_range || match_table.cells != selected.cells {
+        return Err(NoteScanError::SelectionChanged);
     }
-    let lines: Vec<&str> = source.split('\n').collect();
-    let mut offsets = Vec::with_capacity(lines.len());
-    let mut at = 0usize;
-    for line in &lines {
-        offsets.push(at);
-        at = at.saturating_add(line.len() + 1);
-    }
-
-    let mut state = State::default();
-    let mut first = None;
-    let mut selected_index = None;
-    let mut tables = Vec::new();
-    for (line_index, line) in lines.iter().enumerate() {
-        let next = lines.get(line_index + 1).copied();
-        let block = state.step(line, next);
-        if matches!(block, Block::Table { first: true, .. }) {
-            first = Some(line_index);
-        }
-        if matches!(block, Block::Table { last: true, .. }) {
-            let start = first.take().ok_or(NoteScanError::BadTable)?;
-            let parsed = table::parse_with(&lines[start..=line_index], None)
-                .ok_or(NoteScanError::BadTable)?;
-            if !parsed.merges.is_empty() {
-                return Err(NoteScanError::ComplexTable);
-            }
-            if tables.len() >= MAX_TABLES {
-                return Err(NoteScanError::TooManyTables);
-            }
-            let begin = offsets[start];
-            let end = offsets[line_index] + lines[line_index].len();
-            // The selected table's start is a TEMPORARY UI locator only.
-            // The complete cell content must match the current table model.
-            if begin == selected.table_range.start {
-                if end != selected.table_range.end || parsed.cells != selected.cells {
-                    return Err(NoteScanError::SelectionChanged);
-                }
-                selected_index = Some(tables.len());
-            }
-            tables.push(parsed.cells);
-        }
-    }
-    let index = selected_index.ok_or(NoteScanError::SelectionChanged)?;
-    Ok((index, tables))
+    Ok((index, scanned.into_iter().map(|table| table.cells).collect()))
 }
 
 impl TextEditor {
