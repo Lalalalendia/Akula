@@ -1,6 +1,6 @@
 pub mod menu;
 pub mod suggest;
-mod video; mod study; mod study_entry; pub(super) mod study_add; mod study_create; mod study_manage; mod study_load;
+mod video; mod study; mod study_entry; pub(super) mod study_add; mod study_create; mod study_manage; pub(in crate::app) mod study_load; mod study_cards;
 pub use menu::EditorCommand;
 use std::sync::Arc;
 

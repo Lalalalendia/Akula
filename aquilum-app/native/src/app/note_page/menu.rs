@@ -17,16 +17,16 @@ enum NoteCommand {
     CopyPath,
     Duplicate,
     Delete,
-    Close,
+    Close, Study,
 }
 
-const NOTE_COMMANDS: [NoteCommand; 7] = [NoteCommand::Wide, NoteCommand::ExportPdf, NoteCommand::Reveal, NoteCommand::CopyPath, NoteCommand::Duplicate, NoteCommand::Delete, NoteCommand::Close];
+const NOTE_COMMANDS: [NoteCommand; 8] = [NoteCommand::Wide, NoteCommand::ExportPdf, NoteCommand::Reveal, NoteCommand::CopyPath, NoteCommand::Duplicate, NoteCommand::Delete, NoteCommand::Close, NoteCommand::Study];
 
 impl NoteCommand {
     fn entry(self, wide: bool) -> (String, icons::Icon) {
         match self {
             NoteCommand::Wide => (t(if wide { "editor.normalWidth" } else { "editor.wideMode" }), icons::MOVE_HORIZONTAL),
-            NoteCommand::ExportPdf => (t("editor.exportPdf"), icons::FILE_TEXT),
+            NoteCommand::ExportPdf => (t("editor.exportPdf"), icons::FILE_TEXT), NoteCommand::Study => (t("editor.table.studyPracticeTitle"), icons::BOOK_OPEN),
             NoteCommand::Reveal => (t("editor.revealFile"), icons::FOLDER),
             NoteCommand::CopyPath => (t("editor.copyPath"), icons::CLIPBOARD),
             NoteCommand::Duplicate => (t("common.duplicate"), icons::COPY),
@@ -61,7 +61,7 @@ impl App {
         let path = self.note.as_ref().map(|note| note.path.clone());
         match (NOTE_COMMANDS.get(*item), path) {
             (Some(NoteCommand::Wide), _) => self.toggle_wide_mode(root),
-            (Some(NoteCommand::ExportPdf), _) => self.export_pdf(root),
+            (Some(NoteCommand::ExportPdf), _) => self.export_pdf(root), (Some(NoteCommand::Study), _) => self.open_study_picker(root),
             (Some(NoteCommand::Reveal), Some(path)) => crate::system::reveal(&path),
             (Some(NoteCommand::CopyPath), Some(path)) => {
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
