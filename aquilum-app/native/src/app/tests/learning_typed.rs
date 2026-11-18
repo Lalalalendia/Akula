@@ -100,3 +100,32 @@ fn lang05_typed_disallows_stale_answer_after_external_source_change() {
         "external file change must abort rather than grade an old response");
     eprintln!("AKULA_LANG05_TYPED_STALE_PASS=changed_source_refuses_grading");
 }
+
+#[test]
+fn lang05_typed_escape_clears_dialog_state_without_leaving_a_ghost_popup() {
+    let mut h = Harness::new();
+    bind_fixture(&mut h);
+    start_typed(&mut h);
+    let layer = match &h.app.popup {
+        Some(Popup::StudyTypedEntry { dialog, .. }) => dialog.layer,
+        _ => panic!("typed entry must open"),
+    };
+    h.act(layer, DialogAnswer::Closed);
+    assert!(h.app.popup.is_none(), "Escape must clear typed entry popup state");
+
+    start_typed(&mut h);
+    let (field, layer, answer) = match &h.app.popup {
+        Some(Popup::StudyTypedEntry { field, dialog, snapshot, index, .. }) => (
+            field.id(), dialog.layer, snapshot.deck.cards[*index].accepted_answers[0].clone(),
+        ),
+        _ => panic!("typed entry must reopen after Escape"),
+    };
+    h.act(field, TextAction::Changed(answer));
+    h.act(layer, DialogAnswer::Confirm);
+    let layer = match &h.app.popup {
+        Some(Popup::StudyTypedResult { dialog, .. }) => dialog.layer,
+        _ => panic!("result feedback must open"),
+    };
+    h.act(layer, DialogAnswer::Closed);
+    assert!(h.app.popup.is_none(), "Escape must clear typed result popup state");
+}
