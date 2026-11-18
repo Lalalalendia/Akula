@@ -26,7 +26,7 @@ function check(script,workflow,doc){
     '[IO.FileAttributes]::ReparsePoint',
     "aquilum-app/native/src/updater/windows_first_gui_ack.rs",
     "HEAD:aquilum-app/native/Cargo.toml", 'HEAD:aquilum-app/Cargo.lock',
-    "'0\\.3\\.20'", '$oldHash -ceq $newHash',
+    'version = "0\\.3\\.20"', '$oldHash -ceq $newHash',
     "VIDEO18C02B02B02A_DISTINCT_SOURCE_PE_PASS",
     '[System.Diagnostics.ProcessStartInfo]::new()',
     '$start.UseShellExecute=$false', '$process.StartTime.ToUniversalTime()',
