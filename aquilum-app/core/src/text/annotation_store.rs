@@ -167,16 +167,16 @@ impl AnnotationStore {
         // Reject an unrelated database before changing its journal mode.
         let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(|_| StoreError::Storage)?;
-        if version == 0 {
-            let existing: i64 = connection.query_row(
-                "SELECT COUNT(*) FROM sqlite_master
-                 WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-                [], |row| row.get(0),
-            ).map_err(|_| StoreError::Storage)?;
-            if existing != 0 {
-                return Err(StoreError::UnsupportedVersion);
-            }
-        } else if version != VERSION {
+        let (existing, expected_table): (i64, i64) = connection.query_row(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(CASE WHEN name='text_annotation_state' THEN 1 ELSE 0 END), 0)
+             FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).map_err(|_| StoreError::Storage)?;
+        if (version == 0 && existing != 0)
+            || (version == VERSION && (existing != 1 || expected_table != 1))
+            || (version != 0 && version != VERSION)
+        {
             return Err(StoreError::UnsupportedVersion);
         }
         connection.execute_batch(
@@ -355,8 +355,21 @@ mod tests {
         let other = Connection::open(&db).unwrap();
         other.execute_batch("CREATE TABLE stranger(id INTEGER);").unwrap();
         drop(other);
+        let untouched = std::fs::read(&db).unwrap();
         assert!(matches!(AnnotationStore::open(&db),
             Err(StoreError::UnsupportedVersion)));
+        assert_eq!(std::fs::read(&db).unwrap(), untouched);
+
+        let future = dir.path().join("other-version.sqlite");
+        let other = Connection::open(&future).unwrap();
+        other.execute_batch(
+            "CREATE TABLE stranger(id INTEGER); PRAGMA user_version=1;"
+        ).unwrap();
+        drop(other);
+        let untouched = std::fs::read(&future).unwrap();
+        assert!(matches!(AnnotationStore::open(&future),
+            Err(StoreError::UnsupportedVersion)));
+        assert_eq!(std::fs::read(&future).unwrap(), untouched);
 
         let db = dir.path().join("another.sqlite");
         let mut store = AnnotationStore::open(&db).unwrap();
