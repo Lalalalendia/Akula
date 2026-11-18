@@ -6,6 +6,7 @@
 //! snapshot locator, NEVER a durable key for review history.
 
 pub mod identity;
+pub mod collections;
 
 use std::collections::BTreeSet;
 
@@ -116,7 +117,6 @@ pub fn preview_table(
             skipped.push(SkippedRow { source_row, problem: RowProblem::EmptyAnswer });
             continue;
         }
-
         let context = mapping.context.and_then(|column| {
             let value = cells[column].trim();
             (!value.is_empty()).then(|| value.to_owned())
