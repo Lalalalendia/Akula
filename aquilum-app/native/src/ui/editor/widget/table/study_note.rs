@@ -135,7 +135,6 @@ mod tests {
         snap.cells[1][1] = "неверно".into();
         assert_eq!(collect(source, &snap).err(), Some(NoteScanError::SelectionChanged));
     }
-
     #[test]
     fn byte_budget_applies_before_table_parsing() {
         let source = "x".repeat(MAX_NOTE_BYTES + 1);
