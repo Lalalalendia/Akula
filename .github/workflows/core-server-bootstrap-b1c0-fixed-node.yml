@@ -46,14 +46,8 @@ jobs:
         run: |
           set -euo pipefail
           test ! -e /run/akula-b1c0-one-shot-ci
-          found=0
-          for candidate in .artifacts/cargo-native/debug/deps/server_bootstrap_b1c0-*; do
-            if [[ -f "$candidate" && -x "$candidate" && "$candidate" != *.d ]]; then
-              sudo -n env GITHUB_ACTIONS=true RUNNER_OS=Linux \
-                "$PWD/$candidate" --test-threads=1 --nocapture
-              found=$((found + 1))
-            fi
-          done
-          test "$found" -eq 1
+          binary=$(python3 scripts/ci/resolve_cargo_root_test.py server_bootstrap_b1c0 server-bootstrap-b1c0-fixed-node-lab)
+          sudo -n env GITHUB_ACTIONS=true RUNNER_OS=Linux \
+            "$binary" --test-threads=1 --nocapture
           test ! -e /run/akula-b1c0-one-shot-ci
           echo "B1C0_ROOT_SIGNED_CAS_FIXED_NODE_FILE_PASS"
