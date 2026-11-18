@@ -98,7 +98,7 @@ test('Negative: modified workflow may not skip physical child or permit release'
   const [c,s,wf,emitter,frame]=['controller','script','workflow','sender','frame'].map(x=>read(files[x]));
   const variants=[
     wf.replace("      - '"+files.controller+"'\n",''),
-    wf.replace('cargo build --release --locked -p aquilum-native --features installed,video-rust-bundle,video-ui-e2e',
+    wf.replaceAll('cargo build --release --locked -p aquilum-native --features installed,video-rust-bundle,video-ui-e2e',
       'cargo build --release -p aquilum-native --features installed'),
     wf+'\nworkflow_dispatch:\n',
     wf.replace('needs: [contract, preflight]','needs: contract'),
