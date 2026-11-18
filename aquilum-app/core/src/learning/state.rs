@@ -1,6 +1,5 @@
 //! One atomic app-data registry for language collections AND table anchors.
 //!
-//! This supersedes the two experimental stores for new user-facing writes.
 //! It stores no Markdown cells; all source IDs and live tables are supplied
 //! by the trusted host after opening the current authorized native note.
 //! A hash or saved source string is never permission to read another note.
@@ -19,6 +18,7 @@ use super::table_anchors::{
 const VERSION: i64 = 1;
 const MAX_PAYLOAD: usize = 1024 * 1024;
 
+pub mod manage;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StudyState {
