@@ -1,6 +1,6 @@
 pub mod menu;
 pub mod suggest;
-mod video; mod study; mod study_entry; pub(super) mod study_add; mod study_create; mod study_manage; pub(in crate::app) mod study_load; mod study_live; mod study_cards; pub(in crate::app) mod study_choice; pub(in crate::app) mod study_match; pub(in crate::app) mod study_typed; pub(in crate::app) mod annotation_ui; pub(in crate::app) mod annotation_explain;
+mod video; mod study; mod study_entry; pub(super) mod study_add; mod study_create; mod study_manage; pub(in crate::app) mod study_load; mod study_live; mod study_cards; pub(in crate::app) mod study_choice; pub(in crate::app) mod study_match; pub(in crate::app) mod study_typed; pub(in crate::app) mod annotation_ui; pub(in crate::app) mod annotation_explain; pub(in crate::app) mod annotation_preview;
 pub use menu::EditorCommand;
 use std::sync::Arc;
 
