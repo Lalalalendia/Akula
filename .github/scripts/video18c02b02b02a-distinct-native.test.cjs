@@ -52,9 +52,12 @@ function check(script,workflow,doc){
     'VIDEO18C02B02B02A_OLD_APP',
     'scripts/windows-video18c02b02b02a-distinct-native.ps1',
     'VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS',
-    'node --test .github/scripts/video18c02b02b02a-distinct-native.test.cjs',
+    '.github/scripts/video18c02b02b02a-distinct-native.test.cjs',
     'needs: [contract, preflight]'
   ]) assert.ok(workflow.includes(marker),'VIDEO18C02B02B02A_HOLD: missing CI requirement '+marker);
+  assert.match(workflow,
+    /run: node --test [^\r\n]*\.github\/scripts\/video18c02b02b02a-distinct-native\.test\.cjs/,
+    'VIDEO18C02B02B02A_HOLD: Node negative contract not executed');
   assert.ok(!/workflow_dispatch:|contents:\s*write|gh release create/.test(workflow),
     'VIDEO18C02B02B02A_HOLD: no release/privileged workflow');
   assert.ok(!/confirm_candidate\s*\(|publish_beta|Remove-Item.+-Recurse/.test(script),
