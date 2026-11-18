@@ -46,7 +46,7 @@ function verify(files){
     'let prefix = if signed_check.is_some()',
     '"Video18c02b02bSignedFrame"', '"Video18c02bFrame"',
     'if folder.exists() {return Err("reused laboratory profile".into());}',
-    'if !matches!(mode, "good" | "wrong-nonce" | "wrong-generation")'
+    'if !matches!(mode, "good" | "wrong-nonce" | "wrong-generation" | "crash-preconfirm")'
   ])assert.ok(launcher.includes(x),'VIDEO18C02B02B_HOLD: OS/process witness lost '+x);
   assert.ok(cargo.includes('publish = false')&&cargo.includes('[workspace]')&&
     cargo.includes('lab-only-signature')&&cargo.includes('base64 = "0.22"'),
@@ -97,7 +97,7 @@ test('Negative: signed manifest admission, five-file bytes, OS identity and dige
     ['launcher','creation_time(child.0.0)?==first_creation','true'],
     ['launcher','"Video18c02b02bSignedFrame"','"Video18c02bFrame"'],
     ['launcher','if folder.exists() {return Err("reused laboratory profile".into());}','if false {return Err("reused laboratory profile".into());}'],
-    ['launcher','if !matches!(mode, "good" | "wrong-nonce" | "wrong-generation")','if false'],
+    ['launcher','if !matches!(mode, "good" | "wrong-nonce" | "wrong-generation" | "crash-preconfirm")','if false'],
     ['script','& $mini -Vm','& $mini -NO-VERIFY'],
     ['script','$sha -cne $expected[$name]','false'],
     ['workflow','needs: [contract, preflight]','needs: contract'],

@@ -377,8 +377,10 @@ try {
       $code=$LASTEXITCODE
       # Forward authenticated native stdout to the enclosing workflow guard.
       $proof | Write-Output
-      if($code -ne 0 -or !(($proof|Out-String).Contains('VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS'))){
-        throw 'VIDEO18C02B03_HOLD: distinct signed GUI ACK did not authorize rar2 positive commit'
+      if($code -ne 0 -or
+         !(($proof|Out-String).Contains('VIDEO18C02B07_PROCESS_CRASH_MATRIX_PASS')) -or
+         !(($proof|Out-String).Contains('VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS'))){
+        throw 'VIDEO18C02B07_HOLD: forced real process kill/recovery or signed GUI positive proof missing'
       }
     } finally {
       if(Test-Path -LiteralPath $positiveLock -PathType Leaf){

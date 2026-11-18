@@ -28,6 +28,9 @@ mod lab {
         "akula-yt-dlp.exe", "akula-quickjs.exe",
     ];
     const PREFIX: &str = "AkulaVideo18bRealNsisLab-";
+    mod process_crash {
+        include!("../../video18c02b07_process_crash.rs");
+    }
     fn err<T: ToString>(e: T) -> String { e.to_string() }
     fn need(ok: bool, reason: &str) -> Result<(), String> {
         if ok { Ok(()) } else { Err(format!("VIDEO18C02B03_HOLD: {reason}")) }
@@ -151,6 +154,9 @@ mod lab {
     pub fn run()->Result<(),String> {
         super::gui_launcher::lab::guarded_pr()?;
         let args:Vec<String>=env::args().collect();
+        if args.len()==8 && args[1]=="--crash-child" {
+            return process_crash::child(&args);
+        }
         need(args.len()==6, "expected root, stage, manifest, signature and test pubkey")?;
         let expected=env::var("EXPECTED_HEAD_SHA").map_err(err)?;
         need(expected.len()==40 && expected.bytes().all(|c|c.is_ascii_hexdigit()),
@@ -209,6 +215,11 @@ mod lab {
         need(five(&stage)? != old,"old and new real five-PE sets identical")?;
         need(signed.verify_stage(&root.join("current")).is_err(),
             "old generation accepted under new signature")?;
+        // A real separate controller process is forcibly terminated at four
+        // durable rar2 phases; it never confirms merely because GUI ACK arrived.
+        // The following existing positive/negative GUI tests run only AFTER
+        // all four independent lock-reacquired recoveries restore old five PE.
+        process_crash::matrix(&root,&stage,&manifest,&signature,&pubkey,&signed,&old)?;
         let oslock=InstallLock::try_acquire(&root).map_err(err)?;
         need(matches!(
             InstallLock::try_acquire(&root),Err(OrchestrationError::LockBusy)

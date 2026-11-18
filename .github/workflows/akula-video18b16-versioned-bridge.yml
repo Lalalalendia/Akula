@@ -16,6 +16,9 @@ on:
       - 'docs/release/video18c02b06-real-versioned-rar2.md'
       - 'labs/video-lite/video18c02b03-rar2-gui/Cargo.toml'
       - 'labs/video-lite/video18c02b03-rar2-gui/src/main.rs'
+      - 'labs/video-lite/video18c02b07_process_crash.rs'
+      - '.github/scripts/video18c02b07-process-crash.test.cjs'
+      - 'docs/release/video18c02b07-process-crash.md'
       - '.github/scripts/video18c02b03-rar2-commit.test.cjs'
       - 'docs/release/video18c02b03-positive-rar2-ack-confirm.md'
       - '.github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs'
@@ -54,7 +57,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Validate source and five EXE custody release boundary
-        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs .github/scripts/video18c02b02b02a-distinct-native.test.cjs .github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs .github/scripts/video18c02b03-rar2-commit.test.cjs .github/scripts/video18c02b06-real-versioned-rar2.test.cjs
+        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs .github/scripts/video18c02b02b02a-distinct-native.test.cjs .github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs .github/scripts/video18c02b03-rar2-commit.test.cjs .github/scripts/video18c02b06-real-versioned-rar2.test.cjs .github/scripts/video18c02b07-process-crash.test.cjs
 
   preflight:
     name: Compile actual Windows GUI ACK supervisor (no installer)
@@ -401,8 +404,9 @@ jobs:
           $ErrorActionPreference='Stop'
           $proof=@(./scripts/windows-video18c02b02b02b-distinct-signed-generations.ps1 -Rar2Positive -OldAppPath $env:VIDEO18C02B02B02A_OLD_APP -NewAppPath $env:VIDEO18B04_APP -ShivaPath $env:VIDEO18B04_SHIVA -MuxPath $env:VIDEO18B04_MUX -YtDlpPath $env:VIDEO18B04_YT -QuickJsPath $env:VIDEO18B04_JS 2>&1)
           $proof | Out-Host
-          if(!(($proof | Out-String).Contains('VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS'))){
-            throw 'VIDEO18C02B03_HOLD: real signed five-PE GUI receipt did not authorize rar2 confirm/rollback'
+          if(!(($proof | Out-String).Contains('VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS')) -or
+             !(($proof | Out-String).Contains('VIDEO18C02B07_PROCESS_CRASH_MATRIX_PASS'))){
+            throw 'VIDEO18C02B07_HOLD: real signed GUI update or forced-process crash matrix not accepted'
           }
       - name: Retain only unsigned custody JSON for one day, no executables
         uses: actions/upload-artifact@v4
