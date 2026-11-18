@@ -23,6 +23,12 @@
 
 `VIDEO_FIVE_CHANNEL_READY=false`. Не затрагивать штатный two-EXE updater, пользовательские установки, релизный канал, продуктивные данные и миграции. Ключи одноразовые, находятся только на ephemeral runner и удаляются вместе с тестовым staging.
 
+## Исправление реальной Windows-приёмки
+
+На исходном HEAD `be8bf72e` [Windows CI #44272021388](https://github.com/Lalalalendia/Akula/actions/runs/44272021388) остановился **после успешной подписи Minisign и release-сборки Rust-контроллера**, но **до GUI ACK** с `VIDEO18C02B02B_HOLD: reused laboratory profile`. В ранее принятом транспортном лабе 02b-01 уже создавался профиль `Video18c02bFrame-{GUID}-good`. Новый подписанный лаб повторно запустил `case("good")` с тем же профилем. Это был конфликт изоляции тестов, не криптографическая ошибка.
+
+В исправлении строго разделены профили `Video18c02bFrame-{GUID}-{mode}` (прежний unsigned transport witness) и `Video18c02b02bSignedFrame-{GUID}-{mode}` (signed-generation witness). Подписанный тест использует три **разных** режима `good`, `wrong-nonce`, `wrong-generation`. Проверка `folder.exists() => Err("reused laboratory profile")` не ослаблена; неизвестные режимы отклоняются. Negative/source-тесты блокируют объединение пространств имён, обход защиты от reuse и подмену режима отрицательной проверки. Только полный повторный Windows CI вправе подтвердить устранение ошибки.
+
 ## Приёмка
 
 - [ ] На точном HEAD source/negative tests SUCCESS.
