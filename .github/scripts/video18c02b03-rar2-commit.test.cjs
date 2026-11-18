@@ -81,10 +81,11 @@ test('Negative mutations fail closed for signed identity, Windows ACK, OS lock a
     ['workflow','VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS','SKIP_REAL_RAR2'],
     ['workflow','needs: [contract, preflight]','needs: contract']
   ]){
-    const before=field==='rust'?rust:workflow;
+    const before=field==='rust'?rust:field==='script'?script:workflow;
     const changed=before.replaceAll(needle,replacement);
     assert.notEqual(before,changed,'VIDEO18C02B03_HOLD: mutation not applied: '+needle);
-    assert.throws(()=>check(field==='rust'?changed:rust,cargo,script,
+    assert.throws(()=>check(field==='rust'?changed:rust,cargo,
+      field==='script'?changed:script,
       field==='workflow'?changed:workflow,doc),/VIDEO18C02B03_HOLD/);
   }
 });
