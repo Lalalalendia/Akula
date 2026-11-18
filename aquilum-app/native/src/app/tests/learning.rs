@@ -20,6 +20,18 @@ fn lang02_named_collection_native_gui_persists_without_mutating_markdown() {
     body.edit(&mut h.root, |mut editor| {
         crate::ui::editor::TextEditor::select_byte_range(&mut editor, inside_table, inside_table);
     });
+    // A source-caret selection does NOT open the native table session.
+    // In production that session is established by an actual pointer press.
+    h.settle();
+    let (x, y) = {
+        let widget = body.get(&h.root).unwrap();
+        let rect = widget.ctx().bounding_box();
+        let table_top = widget.inner().top_of(0).expect("table must be laid out");
+        (rect.x0 + 70.0, rect.y0 + table_top + 45.0)
+    };
+    h.click(x, y);
+    let snapshot = body.get(&h.root).unwrap().inner().study_table_snapshot();
+    assert!(snapshot.is_ok(), "native pointer must activate a table, got {snapshot:?}");
 
     h.app.open_study_add(&mut h.root);
     let question = match &h.app.popup {
