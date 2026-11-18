@@ -185,14 +185,14 @@ impl AnnotationStore {
             let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| StoreError::Storage)?;
             tx.execute_batch(
-                "CREATE TABLE language_annotation_state (
+                "CREATE TABLE text_annotation_state (
                    id INTEGER PRIMARY KEY CHECK(id=1),
                    revision INTEGER NOT NULL CHECK(revision>=0),
                    payload BLOB NOT NULL
                  );",
             ).map_err(|_| StoreError::Storage)?;
             tx.execute(
-                "INSERT INTO language_annotation_state(id,revision,payload) VALUES(1,0,?1)",
+                "INSERT INTO text_annotation_state(id,revision,payload) VALUES(1,0,?1)",
                 params![initial],
             ).map_err(|_| StoreError::Storage)?;
             tx.execute_batch("PRAGMA user_version=1;")
@@ -208,7 +208,7 @@ impl AnnotationStore {
 
     pub fn load(&self) -> Result<Snapshot, StoreError> {
         let (rev, bytes): (i64, Vec<u8>) = self.connection.query_row(
-            "SELECT revision,payload FROM language_annotation_state WHERE id=1",
+            "SELECT revision,payload FROM text_annotation_state WHERE id=1",
             [], |r| Ok((r.get(0)?, r.get(1)?)),
         ).map_err(|_| StoreError::Corrupt)?;
         Ok(Snapshot {
@@ -226,7 +226,7 @@ impl AnnotationStore {
         let tx = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| StoreError::Storage)?;
         let (rev, previous): (i64, Vec<u8>) = tx.query_row(
-            "SELECT revision,payload FROM language_annotation_state WHERE id=1",
+            "SELECT revision,payload FROM text_annotation_state WHERE id=1",
             [], |r| Ok((r.get(0)?, r.get(1)?)),
         ).map_err(|_| StoreError::Corrupt)?;
         let prior = decode(&previous)?;
@@ -234,12 +234,12 @@ impl AnnotationStore {
         if expected != expected_revision {
             return Err(StoreError::RevisionConflict);
         }
-        if prior == records {
+        if prior.as_slice() == records {
             return Ok(expected);
         }
         let next = rev.checked_add(1).ok_or(StoreError::RevisionExhausted)?;
         let changed = tx.execute(
-            "UPDATE language_annotation_state SET revision=?1,payload=?2
+            "UPDATE text_annotation_state SET revision=?1,payload=?2
              WHERE id=1 AND revision=?3",
             params![next, updated, rev],
         ).map_err(|_| StoreError::Storage)?;
@@ -358,7 +358,7 @@ mod tests {
         let db = dir.path().join("another.sqlite");
         let mut store = AnnotationStore::open(&db).unwrap();
         store.connection.execute(
-            "UPDATE language_annotation_state SET payload=?1 WHERE id=1",
+            "UPDATE text_annotation_state SET payload=?1 WHERE id=1",
             params![&b"not json"[..]],
         ).unwrap();
         assert_eq!(store.load(), Err(StoreError::Corrupt));
