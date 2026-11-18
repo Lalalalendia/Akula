@@ -40,7 +40,7 @@ impl UiStateService {
         set_aside
     }
 
-    fn with_database<T>(
+    pub(super) fn with_database<T>(
         &self,
         operation: impl FnOnce(&mut UiStateDatabase) -> Result<T, UiStateError>,
     ) -> Result<T, UiStateError> {
