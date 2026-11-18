@@ -284,8 +284,7 @@ try {
     if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B02B02B_HOLD: signed GUI Rust lab build failed'}
     $bin=Join-Path $target 'release/akula-video18c02b02b-signed-gui-lab.exe'
     Assert-RealFile $bin
-    $receipt=@(& $bin (Join-Path $current 'akula-app.exe') $manifests.new.manifest
-      $manifests.new.signature $pub 2>&1)
+    $receipt=@(& $bin (Join-Path $current 'akula-app.exe') $manifests.new.manifest $manifests.new.signature $pub 2>&1)
     $exit=$LASTEXITCODE
     $receipt | Out-Host
     if($exit -ne 0 -or !(($receipt|Out-String).Contains('VIDEO18C02B02B_SIGNED_RUNNABLE_GUI_ACK_PASS'))){
