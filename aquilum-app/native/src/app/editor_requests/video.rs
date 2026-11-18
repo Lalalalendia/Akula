@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use super::App;
-
 impl App {
     pub(super) fn download_video(&mut self, root: &mut masonry::app::RenderRoot, url: &str) {
         #[cfg(all(windows, feature = "video-ui-e2e"))]
