@@ -9,7 +9,7 @@ use aquilum_core::search::paths::is_markdown;
 use super::Session;
 use aquilum_core::Core;
 
-impl Session {
+impl Session { pub(crate) fn study_root(&self) -> &Path { &self.root }
     /// Find the current, existing Markdown path belonging to a document ID
     /// in THIS workspace. No file contents are read. The caller must still
     /// obtain a fresh authorized read and revision from the trusted host.
