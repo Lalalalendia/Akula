@@ -54,7 +54,7 @@ test('Fail closed when version, Windows identity, HEAD or false-label refusal is
     ['build','entry(&mut res, 16, 1, 0x1030, &win32_fixed_version_info(&package_version))','// no RT_VERSION'],
     ['rust','signed!=embedded || embedded<=installed','signed==embedded && embedded>installed'],
     ['rust','embedded!=source','embedded==source'],
-    ['rust','GetFileVersionInfoW','NoGetFileVersionInfoW'],
+    ['rust','GetFileVersionInfoW','FakeVersionQuery'],
     ['rust','RUNNER_ENVIRONMENT','NO_RUNNER_GUARD'],
     ['rust','only exact source-built native EXE admitted','allow any path'],
     ['workflow','VIDEO18C02B04_FALSE_VERSION_DENIED_PASS','PHANTOM_VERSION_ALLOWED'],
@@ -64,6 +64,7 @@ test('Fail closed when version, Windows identity, HEAD or false-label refusal is
     const changed=before.replaceAll(from,to);
     assert.notEqual(changed,before,'VIDEO18C02B04_HOLD: negative mutation absent');
     assert.throws(()=>gate(file==='build'?changed:b,file==='rust'?changed:r,
-      file==='workflow'?changed:w,d),/VIDEO18C02B04_HOLD/);
+      file==='workflow'?changed:w,d),/VIDEO18C02B04_HOLD/,
+      'mutation must fail closed: '+file+' '+from);
   }
 });
