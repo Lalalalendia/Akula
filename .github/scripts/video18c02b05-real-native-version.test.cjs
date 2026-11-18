@@ -13,9 +13,9 @@ function gate(a){
     'VIDEO18C02B05_HOLD: Cargo source candidate version mismatch');
   assert.ok(a.lock.includes('name = "aquilum-native"\nversion = "0.3.21"\n'),
     'VIDEO18C02B05_HOLD: locked native version mismatch');
-  assert.match(a.core,/\\[package\\]\\s+name = "aquilum-core"\\s+version = "0\\.3\\.21"/,
+  assert.match(a.core,/\[package\]\s+name = "aquilum-core"\s+version = "0\.3\.21"/,
     'VIDEO18C02B05_HOLD: core version differs from native');
-  assert.ok(a.lock.includes('name = "aquilum-core"\\nversion = "0.3.21"\\n'),
+  assert.ok(a.lock.includes('name = "aquilum-core"\nversion = "0.3.21"\n'),
     'VIDEO18C02B05_HOLD: core locked package version differs');
   assert.equal(JSON.parse(a.windows).version,'0.3.21',
     'VIDEO18C02B05_HOLD: Windows packager version differs');
@@ -49,7 +49,7 @@ test('Negative mutations cannot bypass version, signing boundary or CI proof',()
     ['cargo','version = "0.3.21"','version = "0.3.20"'],
     ['core','version = "0.3.21"','version = "0.3.20"'],
     ['windows','"version": "0.3.21"','"version": "0.3.20"'],
-    ['lock','name = "aquilum-core"\\nversion = "0.3.21"','name = "aquilum-core"\\nversion = "0.3.20"'],
+    ['lock','name = "aquilum-core"\nversion = "0.3.21"','name = "aquilum-core"\nversion = "0.3.20"'],
     ['lock','name = "aquilum-native"\nversion = "0.3.21"','name = "aquilum-native"\nversion = "0.3.20"'],
     ['build','CARGO_PKG_VERSION','FAKE_VERSION'],
     ['verifier','signed!=embedded || embedded<=installed','signed==embedded && embedded>installed'],
