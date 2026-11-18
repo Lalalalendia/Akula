@@ -65,7 +65,7 @@ test('Negative: lose source pin, separate signed sets, fallback or receipt => re
     ['workflow',"needs: [contract, preflight]","needs: contract"],
   ]){
     const original=field==='script'?ps:wf;
-    const mutated=original.replace(needle,replacement);
+    const mutated=original.replaceAll(needle,replacement);
     assert.notEqual(mutated,original,'VIDEO18C02B02B02B_HOLD: mutation skipped '+needle);
     assert.throws(()=>guard(field==='script'?mutated:ps,field==='workflow'?mutated:wf,doc),
       /VIDEO18C02B02B02B_HOLD/);
