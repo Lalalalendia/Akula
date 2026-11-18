@@ -65,25 +65,35 @@ $oldCargoBlob=(git -C $oldTree rev-parse HEAD:aquilum-app/native/Cargo.toml).Tri
 $newCargoBlob=(git -C $repo rev-parse HEAD:aquilum-app/native/Cargo.toml).Trim()
 $oldLockBlob=(git -C $oldTree rev-parse HEAD:aquilum-app/Cargo.lock).Trim()
 $newLockBlob=(git -C $repo rev-parse HEAD:aquilum-app/Cargo.lock).Trim()
-if($oldCargoBlob -cne $newCargoBlob -or $oldLockBlob -cne $newLockBlob -or
-   (Get-FileHash -LiteralPath $oldCargo -Algorithm SHA256).Hash -cne
-   (Get-FileHash -LiteralPath $newCargo -Algorithm SHA256).Hash -or
-   (Get-FileHash -LiteralPath $oldLock -Algorithm SHA256).Hash -cne
-   (Get-FileHash -LiteralPath $newLock -Algorithm SHA256).Hash) {
-  throw 'VIDEO18C02B02B02A_HOLD: pinned dependency source graph diverged'
+# A real 0.3.20 -> 0.3.21 upgrade MUST have different source/lock blobs.
+# Compare every checkout against its own tracked Git blob, never against the other generation.
+$oldCargoWorktree=(git -C $oldTree hash-object aquilum-app/native/Cargo.toml).Trim()
+$newCargoWorktree=(git -C $repo hash-object aquilum-app/native/Cargo.toml).Trim()
+$oldLockWorktree=(git -C $oldTree hash-object aquilum-app/Cargo.lock).Trim()
+$newLockWorktree=(git -C $repo hash-object aquilum-app/Cargo.lock).Trim()
+if($oldCargoBlob -cne $oldCargoWorktree -or $newCargoBlob -cne $newCargoWorktree -or
+   $oldLockBlob -cne $oldLockWorktree -or $newLockBlob -cne $newLockWorktree -or
+   $oldCargoBlob -ceq $newCargoBlob -or $oldLockBlob -ceq $newLockBlob) {
+  throw 'VIDEO18C02B02B02A_HOLD: untracked or same-generation source/lock substituted'
 }
-foreach($cargo in @($oldCargo,$newCargo)){
-  $raw=Get-Content -LiteralPath $cargo -Raw
-  if($raw -notmatch '(?ms)^\[package\].*?^name = "aquilum-native"\r?\nversion = "0\.3\.20"'){
-    throw 'VIDEO18C02B02B02A_HOLD: app package version misrepresented'
-  }
+$oldCargoText=Get-Content -LiteralPath $oldCargo -Raw
+$newCargoText=Get-Content -LiteralPath $newCargo -Raw
+$oldLockText=Get-Content -LiteralPath $oldLock -Raw
+$newLockText=Get-Content -LiteralPath $newLock -Raw
+if($oldCargoText -notmatch '(?ms)^\[package\]\s+name = "aquilum-native"\s+version = "0\.3\.20"' -or
+   $newCargoText -notmatch '(?ms)^\[package\]\s+name = "aquilum-native"\s+version = "0\.3\.21"' -or
+   $oldLockText -notmatch '(?m)^\[\[package\]\]\r?\nname = "aquilum-native"\r?\nversion = "0\.3\.20"' -or
+   $newLockText -notmatch '(?m)^\[\[package\]\]\r?\nname = "aquilum-native"\r?\nversion = "0\.3\.21"' -or
+   $oldLockText -notmatch '(?m)^\[\[package\]\]\r?\nname = "aquilum-core"\r?\nversion = "0\.3\.20"' -or
+   $newLockText -notmatch '(?m)^\[\[package\]\]\r?\nname = "aquilum-core"\r?\nversion = "0\.3\.21"') {
+  throw 'VIDEO18C02B02B02A_HOLD: real old/new source or locked package versions misrepresented'
 }
 $oldHash=(Get-FileHash -LiteralPath $oldApp -Algorithm SHA256).Hash.ToLowerInvariant()
 $newHash=(Get-FileHash -LiteralPath $newApp -Algorithm SHA256).Hash.ToLowerInvariant()
 if($oldHash -ceq $newHash) {
   throw 'VIDEO18C02B02B02A_HOLD: no distinct source-built Akula PE'
 }
-Write-Host "VIDEO18C02B02B02A_DISTINCT_SOURCE_PE_PASS old_source=$oldCommit new_source=$env:EXPECTED_HEAD_SHA different_sha=1 app_version_both_0.3.20=1 no_mutated_pe=1 release=0"
+Write-Host "VIDEO18C02B02B02A_DISTINCT_SOURCE_PE_PASS old_source=$oldCommit new_source=$env:EXPECTED_HEAD_SHA different_sha=1 app_versions_0.3.20_to_0.3.21=1 no_mutated_pe=1 release=0"
 $tag=[guid]::NewGuid().ToString('N')
 $profile=Join-Path $temp ('Video18c02b02b02aOldGui-'+$tag)
 if(Test-Path -LiteralPath $profile) {

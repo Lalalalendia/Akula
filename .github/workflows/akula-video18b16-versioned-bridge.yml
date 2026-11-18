@@ -8,6 +8,12 @@ on:
       - 'scripts/windows-video18b16-protected-versioned-bridge.ps1'
       - 'scripts/windows-video18c02b02b02a-distinct-native.ps1'
       - 'scripts/windows-video18c02b02b02b-distinct-signed-generations.ps1'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
+      - 'labs/video-lite/video18c02b04-native-pe-version.rs'
+      - '.github/scripts/video18c02b06-real-versioned-rar2.test.cjs'
+      - 'docs/release/video18c02b06-real-versioned-rar2.md'
       - 'labs/video-lite/video18c02b03-rar2-gui/Cargo.toml'
       - 'labs/video-lite/video18c02b03-rar2-gui/src/main.rs'
       - '.github/scripts/video18c02b03-rar2-commit.test.cjs'
@@ -48,7 +54,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Validate source and five EXE custody release boundary
-        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs .github/scripts/video18c02b02b02a-distinct-native.test.cjs .github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs .github/scripts/video18c02b03-rar2-commit.test.cjs
+        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs .github/scripts/video18c02b02b02a-distinct-native.test.cjs .github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs .github/scripts/video18c02b03-rar2-commit.test.cjs .github/scripts/video18c02b06-real-versioned-rar2.test.cjs
 
   preflight:
     name: Compile actual Windows GUI ACK supervisor (no installer)
@@ -236,6 +242,51 @@ jobs:
           $app=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release/aquilum-native.exe'
           if(!(Test-Path -LiteralPath $app -PathType Leaf)){throw 'Video Akula binary missing'}
           Add-Content -Path $env:GITHUB_ENV -Value "VIDEO18B04_APP=$app"
+      - name: Bind real 0.3.21 PE identity to strict 0.3.20 version floor before signing
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:GITHUB_EVENT_NAME -cne 'pull_request' -or
+             $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
+             $env:RUNNER_OS -cne 'Windows' -or
+             (git rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA) {
+            throw 'VIDEO18C02B06_HOLD: exact-head hosted Windows PR only'
+          }
+          node scripts/akula-version.cjs check
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B06_HOLD: source version mirror mismatch'}
+          $metadata=@(cargo metadata --locked --no-deps --format-version 1 --manifest-path aquilum-app/Cargo.toml 2>&1)
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B06_HOLD: source metadata unavailable'}
+          $packages=@(($metadata -join [Environment]::NewLine | ConvertFrom-Json).packages |
+            Where-Object { $_.name -ceq 'aquilum-native' })
+          if($packages.Count -ne 1 -or [string]$packages[0].version -cne '0.3.21'){
+            throw 'VIDEO18C02B06_HOLD: current native source is not genuine 0.3.21'
+          }
+          $witness=Join-Path $env:RUNNER_TEMP 'video18c02b06-native-pe-verifier.exe'
+          rustc --edition=2024 labs/video-lite/video18c02b04-native-pe-version.rs -o $witness
+          if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $witness -PathType Leaf)){
+            throw 'VIDEO18C02B06_HOLD: independent native version reader unavailable'
+          }
+          $pass=@(& $witness --admit $env:VIDEO18B04_APP '0.3.21' '0.3.20' '0.3.21' 2>&1)
+          $code=$LASTEXITCODE
+          $pass | Out-Host
+          if($code -ne 0 -or !(($pass | Out-String).Contains('VIDEO18C02B04_STRICT_VERSION_FLOOR_PASS'))){
+            throw 'VIDEO18C02B06_HOLD: real native PE does not attest a raised version'
+          }
+          foreach($forged in @(@('0.3.20','0.3.20'),@('0.3.20','0.3.22'),@('0.3.21','0.3.21'))){
+            $no=@(& $witness --admit $env:VIDEO18B04_APP '0.3.21' $forged[0] $forged[1] 2>&1)
+            $code=$LASTEXITCODE
+            if($code -eq 0 -or !(($no | Out-String).Contains('VIDEO18C02B04_HOLD: signed label is not a genuine newer native PE version'))){
+              throw 'VIDEO18C02B06_HOLD: forged/nonincreasing version admitted'
+            }
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO18C02B06_VERSION_WITNESS=$witness"
+          Write-Host 'VIDEO18C02B06_REAL_NATIVE_FLOOR_PASS old_source=0.3.20 new_source=0.3.21 pe_verified=1 negatives=3 nonrelease=1'
+          # GitHub's pwsh wrapper returns the last native exit code on successful scripts.
+          # All three negative cases MUST fail, and leave a stale nonzero $LASTEXITCODE.
+          # Reset only AFTER every explicit refusal was verified and the success marker emitted.
+          $global:LASTEXITCODE=0
       - name: Compile historical pinned Akula GUI independently from real source
         shell: pwsh
         working-directory: _akula-historical/aquilum-app
@@ -250,9 +301,14 @@ jobs:
               (git -C ../.. rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA){
             throw 'VIDEO18C02B02B02A_HOLD: wrong old/new source commit'
           }
-          if((git rev-parse HEAD:aquilum-app/Cargo.lock).Trim() -cne
-              (git -C ../.. rev-parse HEAD:aquilum-app/Cargo.lock).Trim()){
-            throw 'VIDEO18C02B02B02A_HOLD: historical dependency lock differs from current'
+          # Real source versions differ: verify each pinned checkout independently.
+          $oldLock=(git rev-parse HEAD:aquilum-app/Cargo.lock).Trim()
+          $newLock=(git -C ../.. rev-parse HEAD:aquilum-app/Cargo.lock).Trim()
+          $oldCheckoutLock=(git hash-object Cargo.lock).Trim()
+          $newCheckoutLock=(git -C ../.. hash-object aquilum-app/Cargo.lock).Trim()
+          if($oldLock -cne $oldCheckoutLock -or $newLock -cne $newCheckoutLock -or
+             $oldLock -ceq $newLock){
+            throw 'VIDEO18C02B06_HOLD: historical/current dependency locks not separately pinned'
           }
           $target=Join-Path $env:RUNNER_TEMP 'video18c02b02b02a-old-native'
           if(Test-Path -LiteralPath $target){throw 'VIDEO18C02B02B02A_HOLD: historical build target reused'}
