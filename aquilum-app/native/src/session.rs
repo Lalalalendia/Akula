@@ -8,7 +8,7 @@ use crate::tabs::{Tab, Tabs};
 
 const WINDOW_ID: &str = "main";
 const PANE_ID: &str = "main";
-
+mod learning;
 pub struct Session {
     root: PathBuf,
     pub(crate) workspace_id: Uuid,
