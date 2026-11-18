@@ -9,6 +9,7 @@ pub mod identity;
 pub mod collections;
 pub mod store;
 pub mod editor_snapshot;
+pub mod table_anchors;
 use std::collections::BTreeSet;
 
 /// Explicit column roles chosen for each source table.
@@ -132,7 +133,6 @@ pub fn preview_table(
     }
     Ok(TablePreview { items, skipped, truncated: data_rows > max_rows })
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
