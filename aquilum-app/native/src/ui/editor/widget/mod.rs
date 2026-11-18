@@ -50,7 +50,7 @@ mod paste;
 mod pointer;
 pub use paste::Smart;
 mod select;
-mod selection_highlight; mod annotation_overlay; pub use annotation_overlay::AnnotationPaintSpan;
+mod selection_highlight; mod annotation_overlay; mod annotation_click; pub use annotation_overlay::AnnotationPaintSpan;
 mod state;
 pub use state::TextEditor;
 mod suggest;
