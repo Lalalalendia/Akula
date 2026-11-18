@@ -79,6 +79,12 @@ jobs:
             cargo build --locked --manifest-path $manifest
             if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B02B_HOLD: signed GUI witness fails Windows compile'}
             Write-Host 'VIDEO18C02B02B_WINDOWS_SIGNED_GUI_COMPILE_PASS nonrelease=1'
+          $tokens=$null; $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-video18c02b02b02a-distinct-native.ps1'),
+            [ref]$tokens,[ref]$errors) | Out-Null
+          if($errors.Count -ne 0){throw 'VIDEO18C02B02B02A_HOLD: historical GUI script parser errors'}
+          Write-Host 'VIDEO18C02B02B02A_POWERSHELL_PREFLIGHT_PASS nonrelease=1'
           } finally {
             Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
           }
@@ -226,8 +232,10 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          ./scripts/windows-video18c02b02b02a-distinct-native.ps1 -OldAppPath $env:VIDEO18C02B02B02A_OLD_APP -NewAppPath $env:VIDEO18B04_APP
-          if($LASTEXITCODE -ne 0){
+          $proof=@(./scripts/windows-video18c02b02b02a-distinct-native.ps1 -OldAppPath $env:VIDEO18C02B02B02A_OLD_APP -NewAppPath $env:VIDEO18B04_APP 2>&1)
+          $code=$LASTEXITCODE
+          $proof | Out-Host
+          if($code -ne 0 -or !(($proof | Out-String).Contains('VIDEO18C02B02B02A_OLD_GUI_VISIBLE_PASS'))){
             throw 'VIDEO18C02B02B02A_HOLD: distinct real source-built old GUI witness failed'
           }
       - name: Attest exact real five EXEs, reject mutation and preserve license HOLD
