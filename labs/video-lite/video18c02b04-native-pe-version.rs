@@ -58,7 +58,9 @@ mod win {
         let wide=utf16(path.as_os_str());
         let mut h=0u32;
         let size=unsafe { GetFileVersionInfoSizeW(wide.as_ptr(), &mut h) };
-        if !(128..=256*1024).contains(&size) {
+        // A minimal VS_VERSIONINFO is 6-byte header, UTF-16 key/padding
+        // (34 bytes), and exactly 52 bytes of VS_FIXEDFILEINFO = 92 bytes.
+        if !(92..=256*1024).contains(&size) {
             return Err(hold("missing/oversized Windows RT_VERSION; never infer from filename"));
         }
         let mut bytes=vec![0u8;size as usize];
