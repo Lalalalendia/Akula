@@ -77,7 +77,7 @@ test('Actual current/Akula GUI receives only private inherited ACK after first p
 test('Negative: missing private handle, pinned OS process and deadline are rejected',()=>{
   const [controller,script,wf,sender,frame]=['controller','script','workflow','sender','frame'].map(x=>read(files[x]));
   for(const changed of [
-    controller.replace('PROC_THREAD_ATTRIBUTE_HANDLE_LIST','PROC_THREAD_ATTRIBUTE_ANY'),
+    controller.replaceAll('PROC_THREAD_ATTRIBUTE_HANDLE_LIST','PROC_THREAD_ATTRIBUTE_ANY'),
     controller.replace('creation_time(child.0.0)?==first_creation','true'),
     controller.replace('MAX_RECEIPT: usize = 256','MAX_RECEIPT: usize = 65535'),
     controller.replace('while Instant::now()<deadline','while true'),
