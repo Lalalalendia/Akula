@@ -70,6 +70,8 @@ impl TextEditor {
         let widget = &mut *this.widget;
         widget.videos.stop();
         widget.doc.set_rope(text);
+        // A reset changes the source document; no byte offset may cross it.
+        widget.annotation_overlay.clear();
         widget.history.clear();
         widget.refind(&[]);
         widget.table_scrolls.clear();
