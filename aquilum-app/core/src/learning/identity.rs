@@ -8,7 +8,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Source {
     pub vault_id: String,
     pub note_id: String,
@@ -158,7 +159,6 @@ pub fn reconcile(previous: &Previous, current: Current<'_>) -> Result<ResultRows
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn source() -> Source {
         Source { vault_id: "vault-1".into(), note_id: "note-1".into(), table_id: "table-1".into() }
     }

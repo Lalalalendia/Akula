@@ -7,11 +7,13 @@
 
 pub mod identity;
 pub mod collections;
+pub mod store;
 
 use std::collections::BTreeSet;
 
 /// Explicit column roles chosen for each source table.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ColumnMapping {
     pub question: usize,
     /// Columns containing independent accepted answer variants.
@@ -134,7 +136,6 @@ pub fn preview_table(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn table(rows: &[&[&str]]) -> Vec<Vec<String>> {
         rows.iter().map(|row| row.iter().map(|cell| (*cell).to_owned()).collect()).collect()
     }
@@ -158,7 +159,6 @@ mod tests {
         assert!(!preview.truncated);
         assert_eq!(rows, original, "preview must never modify the source");
     }
-
     #[test]
     fn repeated_spelling_with_distinct_contexts_remains_separate() {
         let rows = table(&[
@@ -173,7 +173,6 @@ mod tests {
         assert_eq!(preview.items[2].source_row, 3);
         assert_eq!(preview.items[2].context.as_deref(), Some("run a company"));
     }
-
     #[test]
     fn arbitrary_term_definition_table_uses_explicit_columns() {
         let rows = table(&[&["Определение", "Термин"], &["Синтез белка", "Рибосома"]]);

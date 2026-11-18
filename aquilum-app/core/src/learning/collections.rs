@@ -12,7 +12,8 @@ use super::identity::Source;
 use super::{preview_table, ColumnMapping, MappingError, TablePreview};
 
 /// User-named group of source table IDs. One table can join multiple groups.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Collection {
     pub id: String,
     pub name: String,
@@ -20,14 +21,16 @@ pub struct Collection {
 }
 
 /// Mapping belongs to the source, not to each collection membership.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConfiguredTable {
     pub source: Source,
     pub columns: ColumnMapping,
 }
 
 /// Only metadata: never store word/translation/cell contents here.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Registry {
     pub collections: Vec<Collection>,
     pub tables: Vec<ConfiguredTable>,
@@ -194,7 +197,6 @@ pub fn assemble(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn source(note: &str, table: &str) -> Source {
         Source {
             vault_id: "vault-1".into(),
@@ -217,7 +219,6 @@ mod tests {
     fn limits() -> Limits {
         Limits { max_tables: 100, max_rows_per_table: 50 }
     }
-
     #[test]
     fn four_tables_three_notes_two_collections_one_shared_source() {
         let a = source("lesson", "a");
@@ -253,7 +254,6 @@ mod tests {
         assert!(set.unavailable.is_empty());
         assert_eq!(registry.collections[0].members.len(), 3);
     }
-
     #[test]
     fn changed_source_cell_is_visible_without_registry_duplication() {
         let key = source("lesson", "a");
