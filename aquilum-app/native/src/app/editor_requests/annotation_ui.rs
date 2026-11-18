@@ -43,7 +43,7 @@ fn label(color: PaletteColor) -> &'static str {
     }
 }
 
-fn paint(color: PaletteColor) -> Color {
+pub(in crate::app) fn paint(color: PaletteColor) -> Color {
     let (r, g, b) = match color {
         PaletteColor::Yellow => (255, 212, 72),
         PaletteColor::Green => (83, 184, 126),
