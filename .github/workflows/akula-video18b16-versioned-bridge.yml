@@ -6,6 +6,9 @@ on:
     paths:
       - 'scripts/video18b16-protected-versioned-bridge.nsi'
       - 'scripts/windows-video18b16-protected-versioned-bridge.ps1'
+      - 'labs/video-lite/video18c02b_real_gui_ack.rs'
+      - '.github/scripts/video18c02b-real-gui-ack.test.cjs'
+      - 'docs/release/video18c02b-real-current-gui-ack.md'
       - '.github/scripts/video18b16-versioned-bridge.test.cjs'
       - '.github/workflows/akula-video18b16-versioned-bridge.yml'
       - 'docs/release/video18b16-protected-generation-layout.md'
@@ -31,7 +34,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Validate source and five EXE custody release boundary
-        run: node --test .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs
+        run: node --test .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs
 
   real-five:
     name: Compile five real EXEs and prove protected flat-to-current lab bridge
