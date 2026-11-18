@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/native/packaging/akula-windows.json'
       - 'aquilum-app/Cargo.lock'
       - 'aquilum-app/native/build.rs'
       - 'labs/video-lite/video18c02b04-native-pe-version.rs'
@@ -25,6 +27,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - run: node --test .github/scripts/video18c02b05-real-native-version.test.cjs
+      - run: node scripts/akula-version.cjs check
   windows:
     needs: contract
     runs-on: windows-2022
