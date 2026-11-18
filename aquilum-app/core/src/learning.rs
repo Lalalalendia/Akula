@@ -8,7 +8,7 @@
 pub mod identity;
 pub mod collections;
 pub mod store;
-
+pub mod editor_snapshot;
 use std::collections::BTreeSet;
 
 /// Explicit column roles chosen for each source table.
