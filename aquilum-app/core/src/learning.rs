@@ -10,6 +10,7 @@ pub mod collections;
 pub mod store;
 pub mod editor_snapshot;
 pub mod table_anchors;
+pub mod anchor_store;
 use std::collections::BTreeSet;
 
 /// Explicit column roles chosen for each source table.
@@ -181,7 +182,6 @@ mod tests {
         assert_eq!(preview.items[0].question, "Рибосома");
         assert_eq!(preview.items[0].accepted_answers[0], "Синтез белка");
     }
-
     #[test]
     fn invalid_rows_are_reported_not_made_into_questions() {
         let rows = table(&[
