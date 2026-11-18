@@ -7,7 +7,6 @@ on:
       - 'aquilum-app/native/src/app/tests/learning.rs'
       - 'aquilum-app/native/src/app/tests/mod.rs'
       - 'aquilum-app/native/src/app/editor_requests/study_create.rs'
-      - 'aquilum-app/native/src/app/editor_requests/study_add.rs'
       - '.github/workflows/akula-language-native-ui.yml'
   workflow_dispatch:
 
