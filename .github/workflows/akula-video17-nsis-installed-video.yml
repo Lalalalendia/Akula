@@ -255,14 +255,16 @@ jobs:
           if($setups[0].Name.StartsWith('akula-app_')){
             Rename-Item -LiteralPath $setups[0].FullName -NewName ($setups[0].Name -replace '^akula-app_', 'Akula_')
           }
-          $candidate=Join-Path $dist 'Akula_0.3.20_x64-setup.exe'
+          $cfg=Get-Content -LiteralPath 'native/packaging/akula-windows-video17-lab.json' -Raw | ConvertFrom-Json
+          $candidate=Join-Path $dist ("Akula_{0}_x64-setup.exe" -f $cfg.version)
           if(!(Test-Path -LiteralPath $candidate -PathType Leaf)){throw 'Genuine NSIS identity missing'}
-          Write-Host 'VIDEO17_NSIS_BUILT_NONRELEASE_PASS signer=none main_version=0.3.20 binaries=5'
+          Write-Host "VIDEO17_NSIS_BUILT_NONRELEASE_PASS signer=none main_version=$($cfg.version) binaries=5"
       - name: Install real NSIS, verify exact five EXEs and run VIDEO-16 physical GUI
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $setup=Join-Path $env:GITHUB_WORKSPACE 'dist/Akula_0.3.20_x64-setup.exe'
+          $cfg=Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'aquilum-app/native/packaging/akula-windows-video17-lab.json') -Raw | ConvertFrom-Json
+          $setup=Join-Path $env:GITHUB_WORKSPACE ("dist/Akula_{0}_x64-setup.exe" -f $cfg.version)
           $stage=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
           $fixture=Join-Path $env:GITHUB_WORKSPACE 'video16-fixture'
           ./scripts/windows-video17-installed-nsis.ps1 -SetupPath $setup -StageDir $stage -FixtureDir $fixture

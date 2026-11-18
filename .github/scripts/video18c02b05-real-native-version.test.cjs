@@ -8,6 +8,7 @@ const paths={cargo:'aquilum-app/native/Cargo.toml',core:'aquilum-app/core/Cargo.
   lock:'aquilum-app/Cargo.lock',
   build:'aquilum-app/native/build.rs',verifier:'labs/video-lite/video18c02b04-native-pe-version.rs',
   workflow:'.github/workflows/akula-video18c02b05-real-native-version.yml',
+  nsis:'.github/workflows/akula-video17-nsis-installed-video.yml',
   doc:'docs/release/video18c02b05-real-native-version.md'};
 const read=k=>fs.readFileSync(path.join(root,paths[k]),'utf8');
 function gate(a){
@@ -23,6 +24,12 @@ function gate(a){
     'VIDEO18C02B05_HOLD: Windows packager version differs');
   assert.equal(JSON.parse(a.lab).version,'0.3.21',
     'VIDEO18C02B05_HOLD: isolated five-PE lab packager version differs');
+  for(const token of [
+    '$candidate=Join-Path $dist ("Akula_{0}_x64-setup.exe" -f $cfg.version)',
+    '$setup=Join-Path $env:GITHUB_WORKSPACE ("dist/Akula_{0}_x64-setup.exe" -f $cfg.version)'
+  ])assert.ok(a.nsis.includes(token),'VIDEO18C02B05_HOLD: NSIS installer filename version drift');
+  assert.doesNotMatch(a.nsis,/Akula_0\\.3\\.20_x64-setup\\.exe/,
+    'VIDEO18C02B05_HOLD: old installer version hardcoded');
   for(const s of ['CARGO_PKG_VERSION','win32_fixed_version_info(&package_version)'])
     assert.ok(a.build.includes(s),'VIDEO18C02B05_HOLD: native PE version resource bypass');
   for(const s of ['GetFileVersionInfoW','VerQueryValueW',
@@ -54,6 +61,8 @@ test('Negative mutations cannot bypass version, signing boundary or CI proof',()
     ['core','version = "0.3.21"','version = "0.3.20"'],
     ['windows','"version": "0.3.21"','"version": "0.3.20"'],
     ['lab','"version": "0.3.21"','"version": "0.3.20"'],
+    ['nsis','$candidate=Join-Path $dist ("Akula_{0}_x64-setup.exe" -f $cfg.version)','$candidate=Join-Path $dist "Akula_0.3.20_x64-setup.exe"'],
+    ['nsis','$setup=Join-Path $env:GITHUB_WORKSPACE ("dist/Akula_{0}_x64-setup.exe" -f $cfg.version)','$setup=Join-Path $env:GITHUB_WORKSPACE "dist/Akula_0.3.20_x64-setup.exe"'],
     ['lock','name = "aquilum-core"\nversion = "0.3.21"','name = "aquilum-core"\nversion = "0.3.20"'],
     ['lock','name = "aquilum-native"\nversion = "0.3.21"','name = "aquilum-native"\nversion = "0.3.20"'],
     ['build','CARGO_PKG_VERSION','FAKE_VERSION'],
