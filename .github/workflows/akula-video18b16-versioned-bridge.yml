@@ -92,7 +92,7 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile(
             (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-video18c02b02b02b-distinct-signed-generations.ps1'),
             [ref]$tokens,[ref]$errors) | Out-Null
-          if($errors.Count -ne 0){throw 'VIDEO18C02B02B02B_HOLD: distinct generations PowerShell parser error'}
+          if($errors.Count -ne 0){throw "VIDEO18C02B02B02B_HOLD: distinct generations PowerShell parser errors: $($errors | Out-String)"}
           Write-Host 'VIDEO18C02B02B02B_POWERSHELL_PREFLIGHT_PASS nonrelease=1'
           } finally {
             Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
