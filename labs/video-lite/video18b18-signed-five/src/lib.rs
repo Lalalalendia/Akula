@@ -103,7 +103,7 @@ impl SignedFive {
         // admitted SignedFive object. Exact byte comparison rejects CRLF,
         // duplicate/trailing receipts, wrong field order or alternate encodings.
         let expected = format!(
-            "AKULA-WIN-FIRST-PRESENTED-V1\\t{expected_nonce}\\t{}\\t{}\\t{pinned_os_child_pid}\\n",
+            "AKULA-WIN-FIRST-PRESENTED-V1\t{expected_nonce}\t{}\t{}\t{pinned_os_child_pid}\n",
             self.version(),
             self.generation_sha256(),
         );
@@ -399,7 +399,7 @@ mod tests {
         let nonce = "0123456789abcdef0123456789abcdef";
         let pid = 4567u32;
         let exact = format!(
-            "AKULA-WIN-FIRST-PRESENTED-V1\\t{nonce}\\t{}\\t{}\\t{pid}\\n",
+            "AKULA-WIN-FIRST-PRESENTED-V1\t{nonce}\t{}\t{}\t{pid}\n",
             admitted.version(), admitted.generation_sha256(),
         );
         admitted.verify_first_presented_frame_ack(exact.as_bytes(), nonce, pid).unwrap();
@@ -414,11 +414,11 @@ mod tests {
 
         for mutated in [
             exact.replace(nonce, "00000000000000000000000000000000"),
-            exact.replace("\\t0.3.21\\t", "\\t0.3.22\\t"),
+            exact.replace("\t0.3.21\t", "\t0.3.22\t"),
             exact.replace(&pid.to_string(), "4568"),
             exact.replace(admitted.generation_sha256(), &"f".repeat(64)),
-            exact.replace("\\t", " "),
-            exact.replace("\\n", "\\r\\n"),
+            exact.replace("\t", " "),
+            exact.replace("\n", "\r\n"),
             format!("{exact}{exact}"),
             format!("{exact}trailing"),
         ] {
@@ -435,7 +435,7 @@ mod tests {
             &[b'x'; 257], nonce, pid,
         ).is_err());
         for invalid_nonce in ["", "0", "A123456789abcdef0123456789abcdef",
-            "0123456789abcdef0123456789abcde\\n",
+            "0123456789abcdef0123456789abcde\n",
             "0123456789abcdef0123456789abcde_"] {
             assert!(admitted.verify_first_presented_frame_ack(
                 exact.as_bytes(), invalid_nonce, pid,
