@@ -69,7 +69,7 @@ impl TextEditor {
         this.widget.access_code_window_size = None;
         let widget = &mut *this.widget;
         widget.videos.stop();
-        widget.doc.set_rope(text);
+        widget.doc.set_rope(text); widget.annotation_overlay.clear();
         widget.history.clear();
         widget.refind(&[]);
         widget.table_scrolls.clear();

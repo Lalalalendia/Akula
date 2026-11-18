@@ -78,7 +78,7 @@ impl TextEditor {
                 self.paint_backdrop(painter, i);
             }
         }
-        let range = self.selection();
+        for span in &self.annotation_overlay { self.paint_range(painter, shown.clone(), span.bytes.clone(), span.color.multiply_alpha(0.28)); } let range = self.selection();
         if !range.is_empty() && ctx.is_window_focused() {
             let sel_color = props.get::<SelectionColor>(ctx.property_cache()).color;
             self.paint_range(painter, shown.clone(), range.clone(), sel_color);
