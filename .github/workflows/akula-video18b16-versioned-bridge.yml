@@ -36,9 +36,37 @@ jobs:
       - name: Validate source and five EXE custody release boundary
         run: node --test .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs
 
+  preflight:
+    name: Compile actual Windows GUI ACK supervisor (no installer)
+    needs: contract
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile isolated Windows rustc lab before expensive five-PE build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:GITHUB_ACTIONS -cne 'true' -or $env:GITHUB_EVENT_NAME -cne 'pull_request' -or
+              $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows' -or
+              (git rev-parse HEAD).Trim() -cne '${{ github.event.pull_request.head.sha }}'){
+            throw 'VIDEO18C02B_HOLD: exact-head hosted Windows PR only'
+          }
+          $bin=Join-Path $env:RUNNER_TEMP 'video18c02b-preflight.exe'
+          & rustc --edition=2024 -C opt-level=1 labs/video-lite/video18c02b_real_gui_ack.rs -o $bin
+          if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $bin -PathType Leaf)){
+            throw 'VIDEO18C02B_HOLD: Windows GUI ACK controller failed rustc preflight'
+          }
+          Remove-Item -LiteralPath $bin -Force -ErrorAction Stop
+          Write-Host 'VIDEO18C02B_WINDOWS_RUSTC_PREFLIGHT_PASS nonrelease=1'
+
   real-five:
     name: Compile five real EXEs and prove protected flat-to-current lab bridge
-    needs: contract
+    needs: [contract, preflight]
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
