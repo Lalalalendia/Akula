@@ -7,7 +7,8 @@ param(
   [Parameter(Mandatory=$true)][string]$ShivaPath,
   [Parameter(Mandatory=$true)][string]$MuxPath,
   [Parameter(Mandatory=$true)][string]$YtDlpPath,
-  [Parameter(Mandatory=$true)][string]$QuickJsPath
+  [Parameter(Mandatory=$true)][string]$QuickJsPath,
+  [switch]$Rar2Positive
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -273,6 +274,7 @@ try {
   Copy-Item -LiteralPath (Join-Path $newStage 'akula-quickjs.exe') -Destination (Join-Path $current 'akula-quickjs.exe') -ErrorAction Stop
   Assert-Set $current $newHashes $false
   Write-Host 'VIDEO18C02B02B02B_TORN_NEW_REJECTED_PASS old_fallback_intact=1 restored_current=1'
+  if(!$Rar2Positive){
   $target=Join-Path $work 'signed-gui-build'
   $env:CARGO_TARGET_DIR=$target
   try{
@@ -303,6 +305,64 @@ try {
     throw 'VIDEO18C02B02B02B_HOLD: private data changed after signed GUI ACK'
   }
   Write-Host 'VIDEO18C02B02B02B_NEW_SIGNED_GUI_ACK_PASS distinct_old_new=1 current_signed=1 old_fallback_intact=1 no_rar2_commit=1'
+  } else {
+    # The original distinct-generation scenario proved signed GUI delivery
+    # without rerunning rar2. This separately gated PR-only mode starts with
+    # an OLD current/, then executes real signed rar2 activation and ACK commit.
+    $pinned='32a803e67244836d2794f9bbbdf9b24deab63d7e'
+    $engineTree=Join-Path $repo '_rar2-pinned'
+    if(!(Test-Path -LiteralPath $engineTree -PathType Container) -or
+       (git -C $engineTree rev-parse HEAD).Trim() -cne $pinned){
+      throw 'VIDEO18C02B03_HOLD: original pinned rar2 source not checked out'
+    }
+    $positiveManifest=Join-Path $repo 'labs/video-lite/video18c02b03-rar2-gui/Cargo.toml'
+    $positiveLock=Join-Path $repo 'labs/video-lite/video18c02b03-rar2-gui/Cargo.lock'
+    if(!(Test-Path -LiteralPath $positiveManifest -PathType Leaf) -or
+       (Test-Path -LiteralPath $positiveLock)){
+      throw 'VIDEO18C02B03_HOLD: test Rust crate missing or stale lock'
+    }
+    Assert-Set $current $newHashes $false
+    foreach($name in $names){
+      $oldInstalled=Join-Path $root ($name+'.exe')
+      Assert-RealFile $oldInstalled
+      if((File-Sha $oldInstalled) -cne $oldHashes[$name]){
+        throw 'VIDEO18C02B03_HOLD: old protected fallback altered before rar2'
+      }
+      Copy-Item -LiteralPath $oldInstalled -Destination (Join-Path $current ($name+'.exe')) -Force -ErrorAction Stop
+    }
+    Assert-Set $root $oldHashes $true
+    Assert-Set $current $oldHashes $false
+    $target=Join-Path $work 'rar2-ack-positive-build'
+    $env:CARGO_TARGET_DIR=$target
+    try {
+      cargo generate-lockfile --manifest-path $positiveManifest
+      if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $positiveLock -PathType Leaf)){
+        throw 'VIDEO18C02B03_HOLD: isolated Rust manifest lock failed'
+      }
+      cargo build --release --locked --manifest-path $positiveManifest
+      if($LASTEXITCODE -ne 0){
+        throw 'VIDEO18C02B03_HOLD: signed rar2 GUI lab build failed'
+      }
+      $lab=Join-Path $target 'release/akula-video18c02b03-rar2-positive-lab.exe'
+      Assert-RealFile $lab
+      $proof=@(& $lab $root $newStage $manifests.new.manifest $manifests.new.signature $pub 2>&1)
+      $code=$LASTEXITCODE
+      # Forward authenticated native stdout to the enclosing workflow guard.
+      $proof | Write-Output
+      if($code -ne 0 -or !(($proof|Out-String).Contains('VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS'))){
+        throw 'VIDEO18C02B03_HOLD: distinct signed GUI ACK did not authorize rar2 positive commit'
+      }
+    } finally {
+      if(Test-Path -LiteralPath $positiveLock -PathType Leaf){
+        Remove-Item -LiteralPath $positiveLock -Force -ErrorAction Stop
+      }
+      if($priorTarget){$env:CARGO_TARGET_DIR=$priorTarget}
+      else {Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue}
+    }
+    Assert-Set $root $oldHashes $true
+    Assert-Set $current $newHashes $false
+    Write-Host 'VIDEO18C02B03_POSITIVE_INSTALLED_FIVE_PASS old_flat=5 new_current=5 release=0'
+  }
   $uninstaller=Join-Path $root 'uninstall.exe'
   Assert-RealFile $uninstaller
   $gone=Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru

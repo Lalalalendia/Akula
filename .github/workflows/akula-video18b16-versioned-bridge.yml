@@ -8,6 +8,10 @@ on:
       - 'scripts/windows-video18b16-protected-versioned-bridge.ps1'
       - 'scripts/windows-video18c02b02b02a-distinct-native.ps1'
       - 'scripts/windows-video18c02b02b02b-distinct-signed-generations.ps1'
+      - 'labs/video-lite/video18c02b03-rar2-gui/Cargo.toml'
+      - 'labs/video-lite/video18c02b03-rar2-gui/src/main.rs'
+      - '.github/scripts/video18c02b03-rar2-commit.test.cjs'
+      - 'docs/release/video18c02b03-positive-rar2-ack-confirm.md'
       - '.github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs'
       - 'docs/release/video18c02b02b02b-distinct-installed-signed-generations.md'
       - '.github/scripts/video18c02b02b02a-distinct-native.test.cjs'
@@ -44,7 +48,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Validate source and five EXE custody release boundary
-        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs .github/scripts/video18c02b02b02a-distinct-native.test.cjs .github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs
+        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs .github/scripts/video18c02b02b02a-distinct-native.test.cjs .github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs .github/scripts/video18c02b03-rar2-commit.test.cjs
 
   preflight:
     name: Compile actual Windows GUI ACK supervisor (no installer)
@@ -55,6 +59,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/rar2
+          ref: 32a803e67244836d2794f9bbbdf9b24deab63d7e
+          path: _rar2-pinned
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - name: Compile isolated Windows rustc lab before expensive five-PE build
@@ -73,6 +83,9 @@ jobs:
           }
           Remove-Item -LiteralPath $bin -Force -ErrorAction Stop
           Write-Host 'VIDEO18C02B_WINDOWS_RUSTC_PREFLIGHT_PASS nonrelease=1'
+          $positiveManifest='labs/video-lite/video18c02b03-rar2-gui/Cargo.toml'
+          $positiveLock='labs/video-lite/video18c02b03-rar2-gui/Cargo.lock'
+          if(Test-Path -LiteralPath $positiveLock){throw 'VIDEO18C02B03_HOLD: unreviewed test Cargo.lock reused'}
           $manifest='labs/video-lite/video18c02b02b-signed-gui/Cargo.toml'
           $lock='labs/video-lite/video18c02b02b-signed-gui/Cargo.lock'
           if(Test-Path -LiteralPath $lock){throw 'VIDEO18C02B02B_HOLD: committed unreviewed Cargo.lock forbidden'}
@@ -94,8 +107,19 @@ jobs:
             [ref]$tokens,[ref]$errors) | Out-Null
           if($errors.Count -ne 0){throw "VIDEO18C02B02B02B_HOLD: distinct generations PowerShell parser errors: $($errors | Out-String)"}
           Write-Host 'VIDEO18C02B02B02B_POWERSHELL_PREFLIGHT_PASS nonrelease=1'
+          if((git -C _rar2-pinned rev-parse HEAD).Trim() -cne '32a803e67244836d2794f9bbbdf9b24deab63d7e'){
+            throw 'VIDEO18C02B03_HOLD: pinned rar2 source drift'
+          }
+          cargo generate-lockfile --manifest-path $positiveManifest
+          if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $positiveLock -PathType Leaf)){
+            throw 'VIDEO18C02B03_HOLD: disposable pinned Rust graph not resolved'
+          }
+          cargo check --locked --manifest-path $positiveManifest
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B03_HOLD: signed rar2 GUI controller does not compile'}
+          Write-Host 'VIDEO18C02B03_WINDOWS_CONTROLLER_PREFLIGHT_PASS nonrelease=1'
           } finally {
             Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $positiveLock -Force -ErrorAction SilentlyContinue
           }
 
   real-five:
@@ -119,6 +143,12 @@ jobs:
           repository: Lalalalendia/shiva
           ref: cb542d30d2c18a18b1ee457f5158d5b0f551757e
           path: _shiva-preview
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/rar2
+          ref: 32a803e67244836d2794f9bbbdf9b24deab63d7e
+          path: _rar2-pinned
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -306,6 +336,17 @@ jobs:
           $proof | Out-Host
           if(!(($proof | Out-String).Contains('VIDEO18C02B02B02B_DISTINCT_SIGNED_GENERATIONS_PASS'))){
             throw 'VIDEO18C02B02B02B_HOLD: distinct protected signed generations failed'
+          }
+      - name: Real rar2 signed GUI ACK positive confirm and two negative five-PE rollbacks
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $proof=@(./scripts/windows-video18c02b02b02b-distinct-signed-generations.ps1 -Rar2Positive -OldAppPath $env:VIDEO18C02B02B02A_OLD_APP -NewAppPath $env:VIDEO18B04_APP -ShivaPath $env:VIDEO18B04_SHIVA -MuxPath $env:VIDEO18B04_MUX -YtDlpPath $env:VIDEO18B04_YT -QuickJsPath $env:VIDEO18B04_JS 2>&1)
+          $proof | Out-Host
+          if(!(($proof | Out-String).Contains('VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS'))){
+            throw 'VIDEO18C02B03_HOLD: real signed five-PE GUI receipt did not authorize rar2 confirm/rollback'
           }
       - name: Retain only unsigned custody JSON for one day, no executables
         uses: actions/upload-artifact@v4
