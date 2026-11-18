@@ -8,7 +8,7 @@ fn main() {
     std::process::exit(2);
 }
 #[cfg(windows)]
-mod lab {
+pub(crate) mod lab {
     use std::ffi::{c_void, OsStr};
     use std::fs::{self, File};
     use std::io::Read;
@@ -162,7 +162,7 @@ mod lab {
         { return Err(format!("reparse/missing/unexpected path: {}", path.display())); }
         Ok(())
     }
-    fn validate_app(raw: &str) -> Result<PathBuf, String> {
+    pub(crate) fn validate_app(raw: &str) -> Result<PathBuf, String> {
         let requested = PathBuf::from(raw);
         validate(&requested, false)?;
         let app = fs::canonicalize(&requested).map_err(|e| e.to_string())?;
@@ -202,7 +202,7 @@ mod lab {
         }
         Ok(app)
     }
-    fn guarded_pr() -> Result<(), String> {
+    pub(crate) fn guarded_pr() -> Result<(), String> {
         for (key, expected) in [
             ("GITHUB_ACTIONS", "true"),
             ("GITHUB_EVENT_NAME", "pull_request"),
@@ -276,12 +276,28 @@ mod lab {
         Ok(a)
     }
 
-    fn case(app: &Path, digest: &str, mode: &str) -> Result<bool,String> {
+    // Optional second verifier can enforce SignedFive manifest authentication
+    // without linking the existing standalone rustc transport test to Cargo.
+    pub(crate) fn case(
+        app: &Path, digest: &str, mode: &str,
+        signed_check: Option<&dyn Fn(&[u8], &str, u32) -> bool>,
+    ) -> Result<bool,String> {
         let root=fs::canonicalize(std::env::var_os("RUNNER_TEMP")
             .ok_or("missing RUNNER_TEMP")?).map_err(|e|e.to_string())?;
         let tag=app.parent().unwrap().parent().unwrap().file_name().unwrap()
             .to_string_lossy();
-        let folder=root.join(format!("Video18c02bFrame-{tag}-{mode}"));
+        // Two independently invoked labs share the same protected installation,
+        // but must NEVER share a GUI vault/data profile. Keep fail-closed
+        // no-reuse checks *within* each case, including negative trials.
+        if !matches!(mode, "good" | "wrong-nonce" | "wrong-generation") {
+            return Err("unknown real GUI ACK trial mode".into());
+        }
+        let prefix = if signed_check.is_some() {
+            "Video18c02b02bSignedFrame"
+        } else {
+            "Video18c02bFrame"
+        };
+        let folder=root.join(format!("{prefix}-{tag}-{mode}"));
         if folder.exists() {return Err("reused laboratory profile".into());}
         fs::create_dir(&folder).map_err(|e|e.to_string())?;
         let vault=folder.join("vault");
@@ -379,6 +395,10 @@ mod lab {
         // The exact bytes are compared with external state, not with child
         // asserted identity alone. A wrong-nonce trial must fail closed.
         let valid=receipt==expected.as_bytes() && creation_time(child.0.0)?==first_creation;
+        // The authenticated signer must independently agree that this exact
+        // receipt names its verified five-PE manifest, not merely a GUI hash.
+        let signed_bound = signed_check.map_or(true, |check|
+            check(&receipt, &random, pi.pid));
         std::thread::sleep(Duration::from_millis(250));
         let mut more=0u32;
         if unsafe {PeekNamedPipe(reader.0,null_mut(),0,null_mut(),&mut more,null_mut())}==0
@@ -389,7 +409,7 @@ mod lab {
         if unsafe {WaitForSingleObject(child.0.0,20_000)}!=WAIT_OBJECT_0 {
             return Err("Akula GUI did not close cleanly".into());
         }
-        Ok(valid)
+        Ok(valid && signed_bound)
     }
 
     pub fn main() {
@@ -400,9 +420,9 @@ mod lab {
                 return Err("expected protected current/akula-app.exe and verified lab SHA256".into());
             }
             let app=validate_app(&args[1])?;
-            let good=case(&app,&args[2],"good")?;
+            let good=case(&app,&args[2],"good",None)?;
             if !good {return Err("actual GUI failed nonce/PID/visible-window receipt".into());}
-            let denied=case(&app,&args[2],"wrong-nonce")?;
+            let denied=case(&app,&args[2],"wrong-nonce",None)?;
             if denied {return Err("malformed ACK accepted as a real frame".into());}
             println!(
                 "VIDEO18C02B_REAL_GUI_ACK_PASS current_gui=1 visible_os_window=1 \

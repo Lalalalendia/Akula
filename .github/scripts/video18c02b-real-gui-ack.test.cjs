@@ -55,7 +55,8 @@ function verify(controller,script,workflow,sender,frame){
     script.includes('Assert-Flat $root') &&
     script.includes('rustc --edition=2024'),
     'VIDEO18C02B_HOLD: no real protected current GUI IPC witness');
-  assert.ok(workflow.includes('node --test .github/scripts/video18c02b-real-gui-ack.test.cjs'),
+  assert.match(workflow,
+    /run: node --test [^\r\n]*\.github\/scripts\/video18c02b-real-gui-ack\.test\.cjs/,
     'VIDEO18C02B_HOLD: negative source contract absent');
   assert.ok(workflow.includes('name: Compile actual Windows GUI ACK supervisor (no installer)') &&
     workflow.includes('needs: [contract, preflight]') &&
