@@ -13,7 +13,7 @@ mod tests;
 
 pub use table::Command as TableCommand;
 pub use embed::media::media_line;
-pub use widget::{Search, Smart, Status, TextEditor};
+pub use widget::{AnnotationPaintSpan, Search, Smart, Status, TextEditor};
 #[cfg(test)]
 pub(crate) use document::take_document_build_profile;
 #[cfg(test)]
