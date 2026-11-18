@@ -289,7 +289,7 @@ pub(crate) mod lab {
         // Two independently invoked labs share the same protected installation,
         // but must NEVER share a GUI vault/data profile. Keep fail-closed
         // no-reuse checks *within* each case, including negative trials.
-        if !matches!(mode, "good" | "wrong-nonce" | "wrong-generation") {
+        if !matches!(mode, "good" | "wrong-nonce" | "wrong-generation" | "crash-preconfirm") {
             return Err("unknown real GUI ACK trial mode".into());
         }
         let prefix = if signed_check.is_some() {
