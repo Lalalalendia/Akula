@@ -283,6 +283,10 @@ jobs:
           }
           Add-Content -Path $env:GITHUB_ENV -Value "VIDEO18C02B06_VERSION_WITNESS=$witness"
           Write-Host 'VIDEO18C02B06_REAL_NATIVE_FLOOR_PASS old_source=0.3.20 new_source=0.3.21 pe_verified=1 negatives=3 nonrelease=1'
+          # GitHub's pwsh wrapper returns the last native exit code on successful scripts.
+          # All three negative cases MUST fail, and leave a stale nonzero $LASTEXITCODE.
+          # Reset only AFTER every explicit refusal was verified and the success marker emitted.
+          $global:LASTEXITCODE=0
       - name: Compile historical pinned Akula GUI independently from real source
         shell: pwsh
         working-directory: _akula-historical/aquilum-app
