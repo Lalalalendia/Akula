@@ -92,18 +92,18 @@ fn lang05_stale_file_invalidates_the_visible_card_before_answer_reveal() {
 }
 
 #[test]
-fn lang05_open_native_editor_tab_is_excluded_without_disabling_other_notes() {
+fn lang05_active_editor_and_closed_note_share_verified_deck() {
     let mut h = Harness::new();
     let (a, _) = bind_fixture(&mut h);
     assert!(h.app.open(&mut h.root, a));
     select_two(&mut h);
     match &h.app.popup {
         Some(Popup::StudyCard { snapshot, .. }) => {
-            assert_eq!(snapshot.unavailable_notes.len(), 1);
-            assert_eq!(snapshot.deck.cards.len(), 1);
-            assert_eq!(snapshot.deck.cards[0].question, "read");
+            assert!(snapshot.unavailable_notes.is_empty());
+            assert_eq!(snapshot.deck.cards.len(), 3);
+            assert!(snapshot.active.is_some());
         }
-        _ => panic!("closed source remains usable when another source is open"),
+        _ => panic!("active buffer and closed source must both be usable"),
     }
 }
 
