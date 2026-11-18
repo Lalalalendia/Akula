@@ -7,6 +7,9 @@ on:
       - 'scripts/video18b16-protected-versioned-bridge.nsi'
       - 'scripts/windows-video18b16-protected-versioned-bridge.ps1'
       - 'scripts/windows-video18c02b02b02a-distinct-native.ps1'
+      - 'scripts/windows-video18c02b02b02b-distinct-signed-generations.ps1'
+      - '.github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs'
+      - 'docs/release/video18c02b02b02b-distinct-installed-signed-generations.md'
       - '.github/scripts/video18c02b02b02a-distinct-native.test.cjs'
       - 'docs/release/video18c02b02b02a-distinct-source-built-pe.md'
       - 'labs/video-lite/video18c02b_real_gui_ack.rs'
@@ -41,7 +44,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Validate source and five EXE custody release boundary
-        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs .github/scripts/video18c02b02b02a-distinct-native.test.cjs
+        run: node --test .github/scripts/video18c02b02b-signed-gui.test.cjs .github/scripts/video18c02b-real-gui-ack.test.cjs .github/scripts/video18b16-versioned-bridge.test.cjs .github/scripts/video18b11-protected-real-nsis.test.cjs .github/scripts/video18b04-real-five-custody.test.cjs .github/scripts/video18c02b02b02a-distinct-native.test.cjs .github/scripts/video18c02b02b02b-distinct-signed-generations.test.cjs
 
   preflight:
     name: Compile actual Windows GUI ACK supervisor (no installer)
@@ -85,6 +88,12 @@ jobs:
             [ref]$tokens,[ref]$errors) | Out-Null
           if($errors.Count -ne 0){throw 'VIDEO18C02B02B02A_HOLD: historical GUI script parser errors'}
           Write-Host 'VIDEO18C02B02B02A_POWERSHELL_PREFLIGHT_PASS nonrelease=1'
+          $tokens=$null; $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-video18c02b02b02b-distinct-signed-generations.ps1'),
+            [ref]$tokens,[ref]$errors) | Out-Null
+          if($errors.Count -ne 0){throw "VIDEO18C02B02B02B_HOLD: distinct generations PowerShell parser errors: $($errors | Out-String)"}
+          Write-Host 'VIDEO18C02B02B02B_POWERSHELL_PREFLIGHT_PASS nonrelease=1'
           } finally {
             Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
           }
@@ -287,6 +296,17 @@ jobs:
         run: |
           ./scripts/windows-video18b16-protected-versioned-bridge.ps1 -AppPath $env:VIDEO18B04_APP -ShivaPath $env:VIDEO18B04_SHIVA -MuxPath $env:VIDEO18B04_MUX -YtDlpPath $env:VIDEO18B04_YT -QuickJsPath $env:VIDEO18B04_JS
           if($LASTEXITCODE -ne 0){ throw 'VIDEO18B16_HOLD: protected NSIS versioned bridge acceptance failed' }
+      - name: Prove distinct protected old/new signed five-PE generations and runnable fallback
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $proof=@(./scripts/windows-video18c02b02b02b-distinct-signed-generations.ps1 -OldAppPath $env:VIDEO18C02B02B02A_OLD_APP -NewAppPath $env:VIDEO18B04_APP -ShivaPath $env:VIDEO18B04_SHIVA -MuxPath $env:VIDEO18B04_MUX -YtDlpPath $env:VIDEO18B04_YT -QuickJsPath $env:VIDEO18B04_JS 2>&1)
+          $proof | Out-Host
+          if(!(($proof | Out-String).Contains('VIDEO18C02B02B02B_DISTINCT_SIGNED_GENERATIONS_PASS'))){
+            throw 'VIDEO18C02B02B02B_HOLD: distinct protected signed generations failed'
+          }
       - name: Retain only unsigned custody JSON for one day, no executables
         uses: actions/upload-artifact@v4
         with:
