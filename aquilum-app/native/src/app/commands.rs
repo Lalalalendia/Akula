@@ -1,5 +1,4 @@
 use masonry::app::RenderRoot;
-
 use super::{App, Outcome};
 use crate::ui::keymap::Command;
 
@@ -22,6 +21,7 @@ impl App {
                 self.open_search(root);
                 done
             }
+            Command::StudyFlashcards => { self.open_study_picker(root); done },
             Command::Templates => {
                 self.open_templates(root);
                 done

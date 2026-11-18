@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/src/app/tests/learning_cards.rs'
+      - 'aquilum-app/native/src/app/tests/learning_global.rs'
       - 'aquilum-app/native/src/app/tests/learning_multi.rs'
       - 'aquilum-app/native/src/app/tests/mod.rs'
       - 'aquilum-app/native/src/app/editor_requests/study_cards.rs'
