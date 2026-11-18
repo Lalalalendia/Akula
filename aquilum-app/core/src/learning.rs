@@ -12,8 +12,8 @@ pub mod editor_snapshot;
 pub mod table_anchors;
 pub mod anchor_store;
 pub mod activation;
+pub mod state;
 use std::collections::BTreeSet;
-
 /// Explicit column roles chosen for each source table.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
