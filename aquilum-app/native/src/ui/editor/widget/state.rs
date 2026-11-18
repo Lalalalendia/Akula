@@ -47,6 +47,8 @@ pub struct TextEditor {
     pub(super) smart: Smart,
     pub(super) suggest_shown: Option<crate::ui::editor::resolve::Suggestions>,
     pub(super) hover_terms: Vec<String>,
+    // Visual-only, host-verified annotation spans; invalidated by every source edit.
+    pub(super) annotation_overlay: Vec<super::selection_highlight::AnnotationPaintSpan>,
     pub(super) external_reveal: Option<(Range<usize>, std::time::Instant)>,
     pub(super) extra_cursors: Vec<(usize, usize)>,
     pub(super) wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
