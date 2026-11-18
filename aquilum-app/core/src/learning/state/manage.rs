@@ -191,8 +191,9 @@ mod tests {
         let mut store = StudyStore::open(&dir.path().join("study.sqlite")).unwrap();
         let rev = seed(&mut store, 0, "verbs", "Глаголы");
         let rev = seed(&mut store, rev, "nouns", "Существительные");
+        let too_long = "я".repeat(65);
         for invalid in ["", "  ", "a\nb", "a\u{202e}b", "a\u{200b}b",
-                        "a\u{feff}b", "я".repeat(65).as_str()] {
+                        "a\u{feff}b", too_long.as_str()] {
             assert_eq!(store.rename_collection(rev, "verbs", invalid),
                 Err(CollectionEditError::InvalidName));
         }
