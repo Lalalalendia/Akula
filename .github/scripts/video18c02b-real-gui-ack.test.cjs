@@ -24,7 +24,7 @@ function verify(controller,script,workflow,sender,frame){
   for(const term of [
     'guarded_pr()', 'validate_app(', 'AkulaVideo18bRealNsisLab-',
     'if !lower_hex(tag, 32)', 'ProgramFiles', 'current',
-    'REQUIRED: [&str; 5]', 'std::fs::canonicalize', 'fs::symlink_metadata',
+    'REQUIRED: [&str; 5]', 'fs::canonicalize', 'fs::symlink_metadata',
     'CreatePipe(', 'SetHandleInformation(', 'HANDLE_FLAG_INHERIT',
     'PROC_THREAD_ATTRIBUTE_HANDLE_LIST', 'UpdateProcThreadAttribute(',
     'CreateProcessW(', 'CREATE_UNICODE_ENVIRONMENT',
