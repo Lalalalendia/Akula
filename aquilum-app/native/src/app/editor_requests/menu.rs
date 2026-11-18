@@ -11,7 +11,7 @@ use crate::ui::menu::{Entry, Menu, MenuChoice};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EditorCommand {
-    Copy,
+    Copy, Highlight, ShowAnnotations, HideAnnotations,
     CopyCode { editor: WidgetId, opener: usize },
     Paste,
     InsertBook,
@@ -48,7 +48,7 @@ impl App {
     }
     pub(in crate::app) fn open_editor_context_menu(&mut self, root: &mut RenderRoot, at: Point, has_selection: bool, code: Option<(WidgetId, usize)>) {
         let has_frontmatter = frontmatter::end_of(&self.text).is_some();
-        let mut commands = vec![EditorCommand::Copy];
+        let mut commands = vec![EditorCommand::Copy]; if has_selection { commands.push(EditorCommand::Highlight); } commands.extend([EditorCommand::ShowAnnotations, EditorCommand::HideAnnotations]);
         if let Some((editor, opener)) = code {
             commands.push(EditorCommand::CopyCode { editor, opener });
         }
@@ -59,7 +59,7 @@ impl App {
             EditorCommand::InsertFrontmatter,
         ]);
         let labels: Vec<String> = commands.iter().map(|command| t(match command {
-            EditorCommand::Copy => "common.copy",
+            EditorCommand::Copy => "common.copy", EditorCommand::Highlight => "editor.annotation.highlight", EditorCommand::ShowAnnotations => "editor.annotation.show", EditorCommand::HideAnnotations => "editor.annotation.hide",
             EditorCommand::CopyCode { .. } => "editor.copyCode",
             EditorCommand::Paste => "common.paste",
             EditorCommand::InsertBook => "editor.insertBook",
@@ -68,7 +68,7 @@ impl App {
         })).collect();
         let entries: Vec<Entry<'_>> = commands.iter().zip(&labels).map(|(command, label)| {
             let (icon, disabled) = match command {
-                EditorCommand::Copy => (icons::COPY, !has_selection),
+                EditorCommand::Copy => (icons::COPY, !has_selection), EditorCommand::Highlight => (icons::TAG, false), EditorCommand::ShowAnnotations | EditorCommand::HideAnnotations => (icons::TAG, false),
                 EditorCommand::CopyCode { .. } => (icons::COPY, false),
                 EditorCommand::Paste => (icons::CLIPBOARD, false),
                 EditorCommand::InsertBook => (icons::BOOK_OPEN, false),
@@ -95,7 +95,7 @@ impl App {
         let Some(ids) = &self.note_ids else { return };
         let body = ids.body;
         root.focus_on(Some(body.id()));
-        match command {
+        match command { EditorCommand::Highlight => self.open_annotation_colors(root), EditorCommand::ShowAnnotations => self.refresh_annotation_overlay(root), EditorCommand::HideAnnotations => self.hide_annotation_overlay(root),
             EditorCommand::Copy => {
                 let selected = body.get(root).and_then(|e| e.inner().selected_text());
                 if let Some(text) = selected

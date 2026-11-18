@@ -94,6 +94,22 @@
     "insertTable": "Insert table",
     "copyCode": "Copy code",
     "insertFrontmatter": "Insert metadata",
+    "annotation": {
+      "highlight": "Highlight selection…",
+      "show": "Show saved highlights",
+      "hide": "Hide highlights",
+      "chooseColor": "Choose highlight color",
+      "yellow": "Yellow",
+      "green": "Green",
+      "violet": "Violet",
+      "blue": "Blue",
+      "orange": "Orange",
+      "pink": "Pink",
+      "selectText": "Select a word or phrase first.",
+      "changed": "The note or selection changed. Highlight was not saved.",
+      "unavailable": "Only a current, clean, registered Markdown note can be annotated.",
+      "saveFailed": "Could not safely save the highlight. No note content was changed."
+    },
     "table": {
       "menuAria": "Table actions",
       "copy": "Copy table",
