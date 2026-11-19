@@ -192,8 +192,17 @@ impl App {
             self.pending_annotation_rebind = None;
             return;
         }
-        if note.clean_cache_hash().is_none() {
+        let Some(clean_hash) = note.clean_cache_hash() else {
             return; // save still queued; no SQLite write
+        };
+        // A clean hash must describe the actual current full note bytes, not
+        // merely an unchanged disk revision from before a held/aborted edit.
+        let current_full_hash = aquilum_core::files::document::hash_bytes(
+            self.text.to_string().as_bytes(),
+        );
+        if current_full_hash != clean_hash {
+            self.pending_annotation_rebind = None;
+            return;
         }
         let authorized = self.authorized_annotation_editor(root);
         let pending = self.pending_annotation_rebind.take().expect("pending checked");
