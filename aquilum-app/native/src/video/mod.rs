@@ -3,6 +3,9 @@ pub(crate) mod library;
 pub(crate) mod light;
 pub(crate) mod queue;
 pub(crate) mod youtube;
+#[cfg(any(test, all(windows, feature = "installed")))]
+#[allow(dead_code)]
+mod tools_package;
 #[cfg(all(windows, feature = "video-ui-e2e"))]
 pub(crate) mod ui_acceptance;
 #[cfg(target_os = "linux")]
