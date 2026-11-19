@@ -73,7 +73,7 @@ function validate(x){
     'GetLastWin32Error()',
     'ERROR_SHARING_VIOLATION=32','0x40000000','0x00010000',
     'video-tools-01g-ready','video-tools-01g-release',
-    'positive control','Write-Output',
+    'Positive control','Write-Output',
     'VIDEO_TOOLS_01G_PIN_RACE_PASS','bytes_unchanged=1 release=0'
   ])hold(lab.includes(token),'real elevated process-race test missing '+token);
   for(const token of [
@@ -114,7 +114,7 @@ test('negative source mutations reject missing pin, signature check, OS race or 
     ['package','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "active";'],
     ['lab','GetLastWin32Error()','GetLastFriendlyError()'],
     ['lab','ERROR_SHARING_VIOLATION=32','any_error'],
-    ['lab','positive control','missing positive control'],
+    ['lab','Positive control','missing Positive control'],
     ['runner','VIDEO_TOOLS_01G_PIN_RACE_PASS','FAKE_PASS'],
     ['workflow','node --test .github/scripts/video-tools-01g-pin-race.test.cjs','echo skip'],
     ['workflow','permissions:\n  contents: read','permissions:\n  contents: write']
