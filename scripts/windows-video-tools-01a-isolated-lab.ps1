@@ -29,7 +29,7 @@ if ([Environment]::OSVersion.Version.Major -lt 10) {
 }
 $repo = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
 $runner = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
-; VIDEO-TOOLS-01c: OS-known x64 Program Files, never ambient env:ProgramFiles.
+# VIDEO-TOOLS-01c: OS-known x64 Program Files, never ambient env:ProgramFiles.
 . (Join-Path $repo 'scripts/video-tools-01c-os-known-root.ps1')
 $program = Get-AkulaVideoToolsOsProgramFiles
 $expectedMux = Join-Path $repo 'labs/video-lite/target/release/dash.exe'
