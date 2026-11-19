@@ -80,7 +80,7 @@ function verify(x) {
     'VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS',
     'release=0'
   ]) hold(ps.includes(token), 'real protected three-file Windows proof missing '+token);
-  hold((ps.match(/Get-FileHash -LiteralPath \\$source -Algorithm SHA256/g) || []).length === 2,
+  hold((ps.match(/Get-FileHash -LiteralPath \$source -Algorithm SHA256/g) || []).length === 2,
     'both independent upstream pin verification and source digest witness are required');
   hold(ps.includes("$env:EXPECTED_HEAD_SHA -notmatch") &&
     ps.includes("$actualHead -cne $env:EXPECTED_HEAD_SHA"),
