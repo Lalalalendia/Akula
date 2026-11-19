@@ -6,7 +6,7 @@ use super::tools_package::{
 };
 
 #[path = "tools_package_windows.rs"]
-mod windows_discovery;
+pub(super) mod windows_discovery;
 
 /// Native Video Tools discovery is diagnostics only. Not executable admission.
 #[derive(Debug, PartialEq, Eq)]
