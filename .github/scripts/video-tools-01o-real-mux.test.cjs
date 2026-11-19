@@ -38,6 +38,8 @@ function check(s){
   ])hold(s.verify.includes(t),'signed independent floor preflight missing '+t);
   for(const t of [
     '--features lab_mux_020','--locked --release',
+    "foreach($upstream in @{'akula-yt-dlp.exe'=$YtDlpPath;'akula-quickjs.exe'=$QuickJsPath}.GetEnumerator())",
+    'Where-Object {$_.name -ceq $upstream.Key}',
     "Assert-Identity (Join-Path $three['old'] 'akula-video-mux.exe') '0.1.0'",
     "Assert-Identity (Join-Path $three['new'] 'akula-video-mux.exe') '0.2.0'",
     'if($oldSha -ceq $newSha)',
@@ -93,6 +95,7 @@ test('source mutations break the contract',()=>{
   const s=load();
   for(const [k,from,to] of [
     ['identity','const VERSION: &str = "0.2.0";','const VERSION: &str = "0.1.0";'],
+    ['runner','Where-Object {$_.name -ceq $upstream.Key}','Where-Object {$_.name -ceq $input.Key}'],
     ['runner','if($oldSha -ceq $newSha)','if($false)'],
     ['runner',"$five['old'] $root $pub $signer 'DENY'","$five['old'] $root $pub $signer 'ALLOW'"],
     ['runner','if($direct.ExitCode -ne 77)','if($false)'],
