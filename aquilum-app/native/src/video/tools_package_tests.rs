@@ -99,6 +99,11 @@ fn ephemeral_minisign_authenticates_exact_three_component_bytes() {
         .unwrap_err().contains("disk metadata differs"));
     fs::write(package.join("manifest.json"), raw.clone()).unwrap();
 
+    fs::write(package.join("manifest.json"), vec![b'X'; MAX_MANIFEST + 1]).unwrap();
+    assert!(verify_signed(&package, &raw, &sig, &key)
+        .unwrap_err().contains("oversized"));
+    fs::write(package.join("manifest.json"), raw.clone()).unwrap();
+
     assert!(verify_signed(&package, &raw, &sig, &key).is_ok());
     println!("VIDEO_TOOLS_01B_REAL_MINISIGN_PASS signed_manifest=1 wrong_key=0 tampered_manifest=0 altered_exe=0 fourth_exe=0 release=0");
 }
