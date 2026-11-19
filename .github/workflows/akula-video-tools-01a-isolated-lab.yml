@@ -146,33 +146,43 @@ jobs:
           Invoke-WebRequest 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' -OutFile $js -UseBasicParsing
           Add-Content -Path $env:GITHUB_ENV -Value "VIDEO_TOOLS_01A_YT=$yt"
           Add-Content -Path $env:GITHUB_ENV -Value "VIDEO_TOOLS_01A_JS=$js"
-      - name: Install SHA256-pinned official NSIS 3.11 on disposable Windows runner
+      - name: Set up upstream NSIS 3.11 (pinned official action)
+        uses: nsis-dev/setup-nsis@8d0428ec39fab53ad3ded22435983e70cd7e599e
+        with:
+          version: "3.11"
+      - name: Verify upstream NSIS archive when freshly downloaded, install compiler for protected lab
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $expected='38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a'
-          $url='https://download.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-setup.exe'
-          $setup=Join-Path $env:RUNNER_TEMP 'nsis-3.11-setup.exe'
-          if(Test-Path -LiteralPath $setup){throw 'VIDEO_TOOLS_01O_HOLD: official NSIS setup already exists'}
-          try {
-            Invoke-WebRequest -Uri $url -OutFile $setup -MaximumRedirection 8 -TimeoutSec 120 -ErrorAction Stop
-            $actual=(Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
-            if($actual -cne $expected){throw 'VIDEO_TOOLS_01O_HOLD: official NSIS SHA256 differs'}
-            $process=Start-Process -FilePath $setup -ArgumentList '/S' -PassThru -Wait
-            if($process.ExitCode -ne 0){throw 'VIDEO_TOOLS_01O_HOLD: official NSIS silent install failed'}
-            $exe=Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'NSIS/makensis.exe'
-            if(!(Test-Path -LiteralPath $exe -PathType Leaf)){
-              throw 'VIDEO_TOOLS_01O_HOLD: installed protected NSIS compiler absent'
-            }
-            $version=@(& $exe /VERSION 2>&1) | Out-String
-            if($LASTEXITCODE -ne 0 -or
-               ($version.Trim() -cne 'v3.11' -and $version.Trim() -cne '3.11' -and $version.Trim() -cne 'v3.11.0')){
-              throw 'VIDEO_TOOLS_01O_HOLD: installed NSIS version differs from pinned source'
-            }
-            Write-Output 'VIDEO_TOOLS_01O_NSIS_OFFICIAL_PIN_PASS version=3.11 sha256=1 release=0'
-          } finally {
-            if(Test-Path -LiteralPath $setup){Remove-Item -LiteralPath $setup -Force -ErrorAction Stop}
+          $expected='c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1'
+          $archive=Join-Path $env:RUNNER_TEMP 'nsis-3.11.zip'
+          if(Test-Path -LiteralPath $archive -PathType Leaf) {
+            $actual=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if($actual -cne $expected){throw 'VIDEO_TOOLS_01O_HOLD: upstream NSIS ZIP SHA256 differs'}
+            Write-Output 'VIDEO_TOOLS_01O_NSIS_ZIP_SHA256_PASS version=3.11 sha256=1 release=0'
+          } else {
+            # Pinned action restored an upstream SourceForge-MD5-checked build
+            # from GitHub cache. Do not misrepresent this as fresh SHA256 proof.
+            Write-Output 'VIDEO_TOOLS_01O_NSIS_CACHE_HIT version=3.11 sha256_not_rechecked=1 release=0'
           }
+          $source=[IO.Path]::GetFullPath($env:NSISDIR)
+          $target=Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'NSIS'
+          if(!(Test-Path -LiteralPath $source -PathType Container) -or
+             (Test-Path -LiteralPath $target)){
+            throw 'VIDEO_TOOLS_01O_HOLD: verified compiler source missing or destination already occupied'
+          }
+          New-Item -ItemType Directory -Path $target -ErrorAction Stop | Out-Null
+          Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force -ErrorAction Stop
+          $exe=Join-Path $target 'makensis.exe'
+          if(!(Test-Path -LiteralPath $exe -PathType Leaf)){
+            throw 'VIDEO_TOOLS_01O_HOLD: protected compiler absent'
+          }
+          $version=@(& $exe /VERSION 2>&1) | Out-String
+          if($LASTEXITCODE -ne 0 -or
+             ($version.Trim() -cne 'v3.11' -and $version.Trim() -cne '3.11' -and $version.Trim() -cne 'v3.11.0')){
+            throw 'VIDEO_TOOLS_01O_HOLD: installed compiler does not match pinned 3.11'
+          }
+          Write-Output 'VIDEO_TOOLS_01O_NSIS_UPSTREAM_ACTION_PASS version=3.11 pinned_action=1 release=0'
       - name: Real protected three-PE NSIS, source/pin and ACL proof; no release
         shell: pwsh
         env:
