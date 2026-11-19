@@ -459,10 +459,17 @@ records=payload["records"]
 if len(records)>1:
     raise ValueError("Unexpected second synthetic annotation")
 record=records[0] if records else None
+digest=None
+if record is not None:
+    values=record["anchor"]["selected_digest"]
+    if (not isinstance(values,list) or len(values)!=32 or
+        any(type(value) is not int or value<0 or value>255 for value in values)):
+        raise ValueError("Invalid serialized 32-byte selected_digest")
+    digest=bytes(values).hex()
 print(json.dumps({"revision":int(row[0]),"record_count":len(records),
     "status":record["status"] if record else None,
     "annotation_id":record["anchor"]["annotation_id"] if record else None,
-    "selected_digest":record["anchor"]["selected_digest"] if record else None,
+    "selected_digest":digest,
     "color":record["color"] if record else None}))
 '@
   $out=($reader | & python - $Path | Out-String).Trim()
@@ -623,11 +630,25 @@ try {
   }
   if(!$backupReady){throw 'LANG-08b real Save dialog did not create synthetic backup'}
   $backupJson=[IO.File]::ReadAllText($backup,[Text.Encoding]::UTF8)|ConvertFrom-Json
+  # Rust serde serializes TextAnchor.selected_digest as an array of 32
+  # byte values. Compare stable lowercase hex, never PS array identity.
+  $backupDigestValues=@($backupJson.records[0].anchor.selected_digest)
+  if($backupDigestValues.Count -ne 32){throw 'LANG-08b invalid backup digest length'}
+  $backupDigestBytes=New-Object byte[] 32
+  for($i=0;$i -lt 32;$i++){
+    if($backupDigestValues[$i] -is [bool] -or
+       $backupDigestValues[$i] -isnot [int] -or
+       $backupDigestValues[$i] -lt 0 -or $backupDigestValues[$i] -gt 255){
+      throw 'LANG-08b invalid backup digest byte'
+    }
+    $backupDigestBytes[$i]=[byte]$backupDigestValues[$i]
+  }
+  $backupDigest=[BitConverter]::ToString($backupDigestBytes).Replace('-','').ToLowerInvariant()
   if($backupJson.format -cne 'akula-text-annotations' -or $backupJson.version -ne 1 -or
      @($backupJson.records).Count -ne 1 -or
      $backupJson.records[0].status -cne 'current' -or
      $backupJson.records[0].anchor.annotation_id -cne $original.annotation_id -or
-     $backupJson.records[0].anchor.selected_digest -cne $original.selected_digest -or
+     $backupDigest -cne $original.selected_digest -or
      ([IO.File]::ReadAllText($backup)).Contains('alpha eat omega')){
     throw 'LANG-08b saved backup has invalid metadata scope or leaked Markdown'
   }
