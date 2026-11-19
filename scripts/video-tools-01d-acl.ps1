@@ -24,15 +24,14 @@ function Assert-AkulaVideoToolsInstalledAcl {
     'S-1-5-32-544',  # BUILTIN\Administrators
     'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464' # TrustedInstaller
   )
-  $rights = [Security.AccessControl.FileSystemRights]
-  $writeMask = [int]$rights::WriteData -bor
-               [int]$rights::AppendData -bor
-               [int]$rights::WriteAttributes -bor
-               [int]$rights::WriteExtendedAttributes -bor
-               [int]$rights::Delete -bor
-               [int]$rights::DeleteSubdirectoriesAndFiles -bor
-               [int]$rights::ChangePermissions -bor
-               [int]$rights::TakeOwnership
+  $writeMask = [int][Security.AccessControl.FileSystemRights]::WriteData -bor
+               [int][Security.AccessControl.FileSystemRights]::AppendData -bor
+               [int][Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+               [int][Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+               [int][Security.AccessControl.FileSystemRights]::Delete -bor
+               [int][Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+               [int][Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+               [int][Security.AccessControl.FileSystemRights]::TakeOwnership
   foreach ($name in (@('') + $names)) {
     $target = if ($name -ceq '') { $Path } else { Join-Path $Path $name }
     $item = Get-Item -LiteralPath $target -Force -ErrorAction Stop
