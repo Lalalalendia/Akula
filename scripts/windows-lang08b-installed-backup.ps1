@@ -637,12 +637,16 @@ try {
   if($backupDigestValues.Count -ne 32){throw 'LANG-08b invalid backup digest length'}
   $backupDigestBytes=New-Object byte[] 32
   for($i=0;$i -lt 32;$i++){
-    if($backupDigestValues[$i] -is [bool] -or
-       $backupDigestValues[$i] -isnot [int] -or
-       $backupDigestValues[$i] -lt 0 -or $backupDigestValues[$i] -gt 255){
+    # Windows PowerShell ConvertFrom-Json can represent JSON integers as
+    # Int64 rather than Int32. Accept either native integer representation,
+    # but refuse booleans, floating point values and out-of-range bytes.
+    $value=$backupDigestValues[$i]
+    if($value -is [bool] -or
+       !($value -is [int] -or $value -is [long]) -or
+       $value -lt 0 -or $value -gt 255){
       throw 'LANG-08b invalid backup digest byte'
     }
-    $backupDigestBytes[$i]=[byte]$backupDigestValues[$i]
+    $backupDigestBytes[$i]=[byte]$value
   }
   $backupDigest=[BitConverter]::ToString($backupDigestBytes).Replace('-','').ToLowerInvariant()
   if($backupJson.format -cne 'akula-text-annotations' -or $backupJson.version -ne 1 -or
