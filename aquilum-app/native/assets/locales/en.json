@@ -46,6 +46,8 @@
     "localIdentityCopyFail": "Could not copy the public device ID."
   },
   "editor": {
+    "videoDownloadUnavailableTitle": "YouTube download needs a separate tool",
+    "videoDownloadUnavailable": "This signed Akula installation does not include yt-dlp or a bundled video downloader. Install a trusted yt-dlp separately to enable downloads, or use preview and already saved local video. The protected five-file video build is not released.",
     "resetUiStateWarning": "The reset forgets open tabs, the list of knowledge bases, home pages and book reading positions; notes, history and settings stay.",
     "restart": "Restart",
     "stateUnavailable": "Open tabs and positions in notes are not being saved right now: {{reason}}",

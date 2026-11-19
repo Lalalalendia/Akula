@@ -1,0 +1,103 @@
+name: Akula VIDEO-TOOLS-01a protected three-PE identity lab (non-release)
+# github-hosted Windows PR-only; no artifact uploads, signing or publisher environment.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/video-tools-01a-isolated-lab.nsi'
+      - 'scripts/windows-video-tools-01a-isolated-lab.ps1'
+      - '.github/scripts/video-tools-01a-isolated-nsis.test.cjs'
+      - '.github/workflows/akula-video-tools-01a-isolated-lab.yml'
+      - 'aquilum-app/native/packaging/akula-windows.json'
+      - 'docs/release/video18b04-five-exe-allowlist.json'
+      - 'labs/video-lite/Cargo.toml'
+      - 'labs/video-lite/Cargo.lock'
+      - 'labs/video-lite/src/'
+      - 'docs/release/video-optin-package-v1.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Real three-PE identity and mutation source contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Prove stock signed installer remains two EXE and new tools are lab-only
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/video-tools-01a-isolated-nsis.test.cjs
+          echo 'VIDEO_TOOLS_01A_SOURCE_CONTRACT_PASS release=0'
+
+  windows-real:
+    name: Genuine protected Program Files three-PE NSIS install and uninstall (non-release)
+    needs: contract
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            labs/video-lite
+          shared-key: akula-video-tools-01a-mux-v1
+          save-if: false
+      - name: Parse PowerShell syntax before any executable staging
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-video-tools-01a-isolated-lab.ps1'),
+            [ref]$tokens,[ref]$errors) | Out-Null
+          if($errors.Count -ne 0){ throw "VIDEO_TOOLS_01A_HOLD: PowerShell parse: $($errors | Out-String)" }
+      - name: Build and test the pinned Rust H264/AAC mux from source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo test --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if($LASTEXITCODE -ne 0){ throw 'VIDEO_TOOLS_01A_HOLD: mux test failed' }
+          cargo build --release --locked --manifest-path labs/video-lite/Cargo.toml --bin dash
+          if($LASTEXITCODE -ne 0){ throw 'VIDEO_TOOLS_01A_HOLD: mux build failed' }
+          $mux=(Resolve-Path labs/video-lite/target/release/dash.exe).Path
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO_TOOLS_01A_MUX=$mux"
+      - name: Retrieve strictly pinned official yt-dlp and QuickJS PE for ephemeral test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out=Join-Path $env:RUNNER_TEMP 'video-tools-01a-upstream'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $yt=Join-Path $out 'yt-dlp.exe'
+          $js=Join-Path $out 'qjs.exe'
+          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' -OutFile $yt -UseBasicParsing
+          Invoke-WebRequest 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' -OutFile $js -UseBasicParsing
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO_TOOLS_01A_YT=$yt"
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO_TOOLS_01A_JS=$js"
+      - name: Install pinned NSIS 3.11.0 on disposable Windows runner
+        shell: pwsh
+        run: |
+          choco install nsis --version=3.11.0 --yes --no-progress
+          if($LASTEXITCODE -ne 0){ throw 'VIDEO_TOOLS_01A_HOLD: NSIS unavailable' }
+      - name: Real protected three-PE NSIS, source/pin and ACL proof; no release
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $proof=@(& ./scripts/windows-video-tools-01a-isolated-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS 2>&1)
+          $proof | Out-Host
+          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS'))){
+            throw 'VIDEO_TOOLS_01A_HOLD: genuine protected install/uninstall proof missing'
+          }
