@@ -48,12 +48,14 @@ fn hex(value: &str, len: usize) -> bool {
 }
 fn version(value: &str) -> bool {
     let parts: Vec<&str> = value.split('.').collect();
-    parts.len() == 3 && parts.iter().all(|part| {
+    if parts.len() != 3 || !parts.iter().all(|part| {
         !part.is_empty() && part.len() <= 10
         && !(part.len() > 1 && part.starts_with('0'))
         && part.bytes().all(|b| b.is_ascii_digit())
         && part.parse::<u32>().is_ok()
-    })
+    }) { return false; }
+    let value: Vec<u32> = parts.iter().map(|part| part.parse().unwrap()).collect();
+    value.as_slice() >= [0, 1, 0].as_slice()
 }
 fn regular(path: &Path, dir: bool) -> Result<(), String> {
     let meta = fs::symlink_metadata(path).map_err(|_| hold("package path is unavailable"))?;
@@ -163,7 +165,7 @@ fn verify_signed(root: &Path, raw: &[u8], signed: &str, trusted_key: &str)
 // A separate owner-key, protected-root ACL and actual signed install gate
 // must be accepted before any caller can use these file digests for execution.
 pub(super) fn shipping_admission_enabled() -> bool {
-    !APPROVED_VIDEO_TOOLS_KEY.is_empty() && false
+    false // a future, separately reviewed release gate must replace this constant
 }
 
 #[cfg(test)]
