@@ -5,6 +5,9 @@ edition = "2021"
 license = "AGPL-3.0-only"
 publish = false
 
+[features]
+lab_mux_020 = []
+
 [dependencies]
 mp4 = "=0.14.0"
 # Bounded fMP4 reader with tfhd/trex default-size handling (VIDEO-06 only).
