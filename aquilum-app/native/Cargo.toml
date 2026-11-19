@@ -31,6 +31,8 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 video-rust-bundle = []
 # Explicitly non-shipping real Windows GUI test: guarded localhost MPD only.
 video-ui-e2e = ["video-rust-bundle"]
+# VIDEO-TOOLS-01l: hosted Windows GUI observation only; no mux/runtime allowance.
+video-tools-gui-e2e = []
 # Public install includes read-only Dropbox authorization; cloud writes remain disabled.
 installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
 messaging-w4-pilot = []

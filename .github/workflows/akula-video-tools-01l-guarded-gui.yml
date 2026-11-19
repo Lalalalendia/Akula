@@ -1,0 +1,130 @@
+name: Akula VIDEO-TOOLS-01l real Windows GUI guarded Download (non-release)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/windows-video-tools-01l-guarded-gui.ps1'
+      - 'scripts/video-tools-01l-child-sentinel.rs'
+      - '.github/scripts/video-tools-01l-guarded-gui.test.cjs'
+      - 'docs/release/video-tools-01l-guarded-gui.md'
+      - '.github/workflows/akula-video-tools-01l-guarded-gui.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: No-release source contracts and hostile mutation checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify normal installed download remains forbidden
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/video-tools-01l-guarded-gui.test.cjs
+          echo 'VIDEO_TOOLS_01L_SOURCE_CONTRACT_PASS release=0'
+
+  windows-real:
+    name: Genuine foreground Windows GUI Download denial in three states
+    needs: contract
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-video-tools-01l-native-hosted-gui-v1
+          save-if: false
+      - name: Parse Windows PowerShell 5.1 source before staging
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-video-tools-01l-guarded-gui.ps1'),
+            [ref]$tokens,[ref]$errors) | Out-Null
+          if($errors.Count -ne 0){
+            throw "VIDEO_TOOLS_01L_HOLD: invalid PowerShell: $($errors | Out-String)"
+          }
+      - name: Installed Windows native queue and localized state tests
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo test --locked -p aquilum-native --manifest-path Cargo.toml --features installed,video-tools-gui-e2e --bin aquilum-native -- video::queue::installed_tests::installed_download_refusal_creates_no_job_or_local_bytes --exact --nocapture
+          if($LASTEXITCODE -ne 0){
+            throw 'VIDEO_TOOLS_01L_HOLD: installed queue can launch unapproved downloader'
+          }
+          cargo test --locked -p aquilum-native --manifest-path Cargo.toml --features installed,video-tools-gui-e2e --bin aquilum-native -- app::editor_requests::video_stock_admission::tests::all_five_native_states_show_distinct_russian_and_english_status --exact --nocapture
+          if($LASTEXITCODE -ne 0){
+            throw 'VIDEO_TOOLS_01L_HOLD: localized UI state tests failed'
+          }
+      - name: Build and stage the ordinary installed-flavor Windows GUI candidate
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo build --release --locked -p aquilum-native --manifest-path Cargo.toml --features installed,video-tools-gui-e2e
+          if($LASTEXITCODE -ne 0){
+            throw 'VIDEO_TOOLS_01L_HOLD: installed Windows GUI compile failed'
+          }
+          $build=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release/aquilum-native.exe'
+          $stage=Join-Path $env:RUNNER_TEMP 'video-tools-01l-exes'
+          if(!(Test-Path -LiteralPath $build -PathType Leaf) -or
+             (Test-Path -LiteralPath $stage)){
+            throw 'VIDEO_TOOLS_01L_HOLD: missing candidate or dirty stage'
+          }
+          New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
+          $app=Join-Path $stage 'akula-app.exe'
+          $sentinel=Join-Path $stage 'yt-dlp.exe'
+          Copy-Item -LiteralPath $build -Destination $app -ErrorAction Stop
+          rustc --edition=2024 -O (Join-Path $env:GITHUB_WORKSPACE 'scripts/video-tools-01l-child-sentinel.rs') -o $sentinel
+          if($LASTEXITCODE -ne 0){throw 'VIDEO_TOOLS_01L_HOLD: sentinel compilation failed'}
+          foreach($file in @($app,$sentinel)){
+            $stream=[IO.File]::OpenRead($file)
+            try{
+              if($stream.Length -lt 512 -or $stream.ReadByte() -ne 77 -or
+                 $stream.ReadByte() -ne 90){
+                throw "VIDEO_TOOLS_01L_HOLD: malformed Windows PE: $file"
+              }
+            } finally {$stream.Dispose()}
+          }
+          if((Get-FileHash -LiteralPath $app -Algorithm SHA256).Hash -cne
+             (Get-FileHash -LiteralPath $build -Algorithm SHA256).Hash){
+            throw 'VIDEO_TOOLS_01L_HOLD: staging changed compiled Akula'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO_TOOLS_01L_APP=$app"
+          Add-Content -Path $env:GITHUB_ENV -Value "VIDEO_TOOLS_01L_SENTINEL=$sentinel"
+          Write-Output 'VIDEO_TOOLS_01L_STAGED_PASS installed=1 observation_only=1 release=0'
+      - name: Actual SendInput, UI Automation AlertDialog and no yt-dlp process
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $output=@(& powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File scripts/windows-video-tools-01l-guarded-gui.ps1 -ExePath $env:VIDEO_TOOLS_01L_APP -SentinelPath $env:VIDEO_TOOLS_01L_SENTINEL 2>&1)
+          $exit=$LASTEXITCODE
+          $output | Out-Host
+          if($exit -ne 0 -or
+             !(($output | Out-String).Contains('VIDEO_TOOLS_01L_REAL_GUI_PASS real_pointer=3 uia_warning=3 no_ytdlp_child=1 no_media=1 release=0'))){
+            throw 'VIDEO_TOOLS_01L_HOLD: real Windows GUI acceptance incomplete'
+          }
+          foreach($state in @('missing','publisher-not-approved','unsafe')){
+            if(!(($output | Out-String).Contains("VIDEO_TOOLS_01L_GUI_STATE_PASS state=$state os_pointer=1 uia_dialog=1 queue_blocked=1 yt_dlp_child=0"))){
+              throw "VIDEO_TOOLS_01L_HOLD: missing GUI proof for $state"
+            }
+          }
+          Write-Output 'VIDEO_TOOLS_01L_WINDOWS_ACCEPTED_NONRELEASE'

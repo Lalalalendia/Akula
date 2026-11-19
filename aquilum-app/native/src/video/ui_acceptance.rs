@@ -83,7 +83,7 @@ fn record(event: &'static str, center_delta: Option<(f64, f64)>,
         "HOVER_DOWNLOAD" | "CLICK_DOWNLOAD" | "HOVER_LOCAL_PLAY" |
         "CLICK_LOCAL_PLAY_ATTEMPT" | "CLICK_LOCAL_PLAY" | "DECODED_FRAME" |
         "WINDOW_POINTER_DOWN" | "PRESS_DOWNLOAD" | "PRESS_OTHER" | "PRESS_NONE" |
-        "CENTER_DOWNLOAD_READY" | "CENTER_LOCAL_PLAY_READY")
+        "CENTER_DOWNLOAD_READY" | "CENTER_LOCAL_PLAY_READY" | "NOTICE_BLOCKED")
     {
         return;
     }

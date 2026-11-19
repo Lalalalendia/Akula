@@ -4,7 +4,7 @@ use crate::ui::editor::resolve::{Fetch, Media};
 pub(super) fn preview(inner: &Inner, source: &str, wiki: bool) -> Option<Fetch<Media>> {
     let id = (!wiki).then(|| crate::video::youtube::video_id(source)).flatten()?;
     if let Some(offline) = super::offline_video::existing(inner, id) { return Some(offline); }
-    #[cfg(all(windows, feature = "video-ui-e2e"))]
+    #[cfg(all(windows, any(feature = "video-ui-e2e", feature = "video-tools-gui-e2e")))]
     return Some(crate::video::ui_acceptance::blank_preview());
     let picture = crate::video::youtube::thumbnail_url(id)
         .and_then(|url| media::download(inner, &url))
