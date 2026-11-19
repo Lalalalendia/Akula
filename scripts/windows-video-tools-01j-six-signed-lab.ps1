@@ -185,7 +185,12 @@ try {
   $savedSig=[IO.File]::ReadAllBytes($installedSig)
   try {
     $changed=[byte[]]$savedSig.Clone()
-    $changed[12] = $changed[12] -bxor 1
+    # Modify the signed base64 payload, never the unauthenticated comment.
+    $firstLineBreak=[Array]::IndexOf($changed,[byte]10)
+    if($firstLineBreak -lt 0 -or $firstLineBreak+1 -ge $changed.Length){
+      throw 'VIDEO_TOOLS_01J_HOLD: Minisign signature has no signed payload'
+    }
+    $changed[$firstLineBreak+1] = $changed[$firstLineBreak+1] -bxor 1
     [IO.File]::WriteAllBytes($installedSig,$changed)
     Run-Native -Mode 'tamper-signature' -Public $public
   } finally { [IO.File]::WriteAllBytes($installedSig,$savedSig) }
