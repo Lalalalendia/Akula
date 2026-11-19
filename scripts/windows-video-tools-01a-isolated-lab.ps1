@@ -182,6 +182,14 @@ try {
     throw 'VIDEO_TOOLS_01F_HOLD: genuine standard-user Windows denial missing'
   }
   Write-Output 'VIDEO_TOOLS_01F_NONADMIN_PASS release=0'
+  # VIDEO-TOOLS-01g: hold the real installed binaries while elevated
+  # Win32 write/delete attempts run; no video tool is executed.
+  $pinProof=@(& (Join-Path $repo 'scripts/windows-video-tools-01g-pin-race.ps1') -Root $root -LabId $tag -Stage $stage -Work $work 2>&1)
+  $pinProof | Out-Host
+  if (!(($pinProof | Out-String).Contains('VIDEO_TOOLS_01G_PIN_RACE_PASS'))) {
+    throw 'VIDEO_TOOLS_01G_HOLD: real native held-handle race proof missing'
+  }
+  Write-Output 'VIDEO_TOOLS_01G_PIN_RACE_PASS release=0'
   # A foreign file must survive explicit uninstall, rather than Delete /r.
   Set-Content -LiteralPath (Join-Path $root 'unrelated-private-note.md') -Value 'preserve-me' -NoNewline
   $uninstaller = Join-Path $root 'uninstall.exe'
