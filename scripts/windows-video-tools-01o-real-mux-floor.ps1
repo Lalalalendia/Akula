@@ -101,14 +101,14 @@ try {
   $newSha=(Get-FileHash -LiteralPath (Join-Path $three['new'] 'akula-video-mux.exe') -Algorithm SHA256).Hash
   if($oldSha -ceq $newSha){throw 'VIDEO_TOOLS_01O_HOLD: two real PE SHA256 digests are identical'}
   foreach($v in @('old','new')){
-    foreach($input in @{'akula-yt-dlp.exe'=$YtDlpPath;'akula-quickjs.exe'=$QuickJsPath}.GetEnumerator()){
-      $source=[IO.Path]::GetFullPath($input.Value)
-      $ref=@($pinned.components | Where-Object {$_.name -ceq $input.Key})
+    foreach($upstream in @{'akula-yt-dlp.exe'=$YtDlpPath;'akula-quickjs.exe'=$QuickJsPath}.GetEnumerator()){
+      $source=[IO.Path]::GetFullPath($upstream.Value)
+      $ref=@($pinned.components | Where-Object {$_.name -ceq $upstream.Key})
       if($ref.Count -ne 1 -or
          (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -cne $ref[0].sha256){
         throw 'VIDEO_TOOLS_01O_HOLD: upstream PE does not match pinned release'
       }
-      Copy-Item -LiteralPath $source -Destination (Join-Path $three[$v] $input.Key)
+      Copy-Item -LiteralPath $source -Destination (Join-Path $three[$v] $upstream.Key)
     }
     & node (Join-Path $repo 'scripts/video-tools-01i-unsigned-custody.cjs') $three[$v] $unsigned[$v] | Out-Host
     if($LASTEXITCODE -ne 0){throw 'VIDEO_TOOLS_01O_HOLD: real PE unsigned custody failure'}
