@@ -33,7 +33,7 @@ function check(x){
     'akula_video_tools_acl_witness',
     'VIDEO_TOOLS_01E_NATIVE_ACL_PASS'
   ])hold(rust.includes(token),'native OS/ACL gate missing '+token);
-  hold(!/std::env::var(?:_os)?\\(("|')ProgramFiles|GetEnvironmentVariable\\(("|')ProgramFiles/.test(rust),
+  hold(!/std::env::var(?:_os)?\(("|')ProgramFiles|GetEnvironmentVariable\(("|')ProgramFiles/.test(rust),
     'native discovery must not trust ambient ProgramFiles');
   for(const token of [
     '#[cfg(windows)]','tools_package_windows.rs','windows_discovery::installed_root()',
@@ -71,7 +71,7 @@ function check(x){
     'VIDEO_TOOLS_01E_NATIVE_WIN32_PASS','needs: contract',
     'runs-on: windows-2025','permissions:\n  contents: read','persist-credentials: false'
   ])hold(workflow.includes(token),'CI release isolation/native proof missing '+token);
-  hold(!/workflow_dispatch:|^\\s+push:|contents:\\s*write|gh release create|publish_beta/m.test(workflow),
+  hold(!/workflow_dispatch:|^\s+push:|contents:\s*write|gh release create|publish_beta/m.test(workflow),
     'nonrelease workflow cannot gain publishing authority');
 }
 test('OS known folder, real Win32 owner/DACL, and signed read-only boundary remain enforced',()=>{
