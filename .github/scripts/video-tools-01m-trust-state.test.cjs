@@ -7,6 +7,7 @@ const {test} = require('node:test');
 const root = path.resolve(__dirname, '../..');
 const files = {
   probe: 'aquilum-app/native/src/video/tools_package_probe.rs',
+  version: 'aquilum-app/native/src/video/tools_package_probe_version.rs',
   signed: 'aquilum-app/native/src/video/tools_package.rs',
   queue: 'aquilum-app/native/src/video/queue.rs',
   native: 'labs/video-tools-01j/src/main.rs',
@@ -27,8 +28,8 @@ function verify(s) {
   hold(s.probe.includes('Ok(attested) => classify_authenticated_version(&attested.version)') &&
        s.probe.includes('match verify_signed(&root, &raw, signed, APPROVED_VIDEO_TOOLS_KEY)'),
        'only Minisign-authenticated manifest may be classified');
-  hold(s.probe.includes('"0.1.0" => ToolsDiscovery::ReadOnlyAttested') &&
-       s.probe.includes('_ => ToolsDiscovery::IncompatibleVersion'),
+  hold(s.version.includes('"0.1.0" => ToolsDiscovery::ReadOnlyAttested') &&
+       s.version.includes('_ => ToolsDiscovery::IncompatibleVersion'),
        'exact version classifier missing');
   hold(s.signed.includes('pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";') &&
        s.signed.includes('false // a future, separately reviewed release gate must replace this constant'),
@@ -90,6 +91,7 @@ test('mutating signer, classification, publisher gate or proof makes CI fail',()
   const files=read();
   const changes=[
     ['probe','Ok(attested) => classify_authenticated_version(&attested.version)','Ok(_) => ToolsDiscovery::ReadOnlyAttested'],
+    ['version','"0.1.0" => ToolsDiscovery::ReadOnlyAttested','"0.1.0" => ToolsDiscovery::IncompatibleVersion'],
     ['probe','check_installed_acl(&root, &files)','Ok(())'],
     ['signed','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "CI";'],
     ['queue','if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))','if false'],
