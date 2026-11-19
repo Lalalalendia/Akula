@@ -97,7 +97,7 @@ fn run() -> Result<(), String> {
         return Err(hold("exact-head hosted Windows pull request only"));
     }
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 4 || !matches!(args[1].as_str(), "missing"|"valid"|"wrong-key"|"tamper-manifest"|"tamper-pe"|"seventh-file") {
+    if args.len() != 4 || !matches!(args[1].as_str(), "missing"|"valid"|"wrong-key"|"tamper-manifest"|"tamper-signature"|"tamper-pe"|"seventh-file") {
         return Err(hold("expected mode, known-root and isolated ephemeral public key"));
     }
     let expected = PathBuf::from(&args[2]);
@@ -111,7 +111,17 @@ fn run() -> Result<(), String> {
     }
     let root = root.ok_or_else(|| hold("separate protected six-file product missing"))?;
     if root != expected { return Err(hold("environment-selected root differs from OS-known product")); }
-    if probe_installed_video_tools() != ToolsDiscovery::PublisherNotApproved {
+    let production_status = probe_installed_video_tools();
+    if args[1] == "seventh-file" {
+        if production_status != ToolsDiscovery::Unsafe
+            || os_root::check_installed_acl(&root, &tools_package_pin_windows::SIGNED_NAMES).is_ok()
+        {
+            return Err(hold("seventh installed object was not rejected"));
+        }
+        println!("VIDEO_TOOLS_01J_NATIVE_REJECT_PASS case=seventh-file release=0");
+        return Ok(());
+    }
+    if production_status != ToolsDiscovery::PublisherNotApproved {
         return Err(hold("production native discovery accepted unapproved CI signer"));
     }
     let temp = PathBuf::from(std::env::var_os("RUNNER_TEMP")
