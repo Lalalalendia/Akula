@@ -311,8 +311,13 @@ jobs:
         if: needs.classify.outputs.mode == 'workspace' || needs.classify.outputs.mode == 'native'
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+          # Preserve APT signature checks while forcing bounded mirror failover.
+          # Default retries can exhaust the 25-minute native gate on HTTP 503s.
+          sudo apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 -o Acquire::ForceIPv4=true update
+          sudo apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 -o Acquire::ForceIPv4=true install -y \
+            libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
       - name: Run Core tests in both modes (sync-only changes)
@@ -646,8 +651,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+          # Preserve APT signature checks while forcing bounded mirror failover.
+          # Default retries can exhaust the 25-minute native gate on HTTP 503s.
+          sudo apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 -o Acquire::ForceIPv4=true update
+          sudo apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 -o Acquire::ForceIPv4=true install -y \
+            libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - name: Run all frame-fidelity tests (required, not just informational)
         shell: bash
@@ -784,8 +794,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+          # Preserve APT signature checks while forcing bounded mirror failover.
+          # Default retries can exhaust the 25-minute native gate on HTTP 503s.
+          sudo apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 -o Acquire::ForceIPv4=true update
+          sudo apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 -o Acquire::ForceIPv4=true install -y \
+            libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - name: Compile cached tests without running them
         if: steps.cache.outputs.cache-hit != 'true'
