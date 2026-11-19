@@ -174,7 +174,7 @@ try {
   Remove-Item -LiteralPath (Join-Path $root 'unrelated-private-note.md')
   Remove-Item -LiteralPath $root
   $installed = $false
-  Write-Host 'VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS protected=1 old_app_excluded=1 exact_three=1 sha256=3 manual_uninstall=1 private_notes_preserved=1 release=0'
+  Write-Output 'VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS protected=1 old_app_excluded=1 exact_three=1 sha256=3 manual_uninstall=1 private_notes_preserved=1 release=0'
 } finally {
   if ($installed -and (Test-Path -LiteralPath (Join-Path $root 'uninstall.exe') -PathType Leaf)) {
     Start-Process -FilePath (Join-Path $root 'uninstall.exe') -ArgumentList '/S' -Wait | Out-Null
