@@ -70,7 +70,7 @@ function verify(x){
     "Await-Witness -Marker '01h-pinned'",
     "Await-Witness -Marker '01h-launched'",
     "01h-child-started","01h-child-exited",
-    'positive', 'if($createdRoot)',
+    'Assert-WriteAvailable', 'if($createdRoot)',
     'refusing unsafe cleanup of unknown protected files',
     'VIDEO_TOOLS_01H_HANDOFF_PASS',
     'write_after_drop=1 hashes=4 release=0'
