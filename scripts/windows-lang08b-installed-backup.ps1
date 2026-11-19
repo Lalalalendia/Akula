@@ -352,7 +352,7 @@ public static class AkulaLang08DialogKeys {
 }
 '@
 function Wait-FileDialog {
-  param([Diagnostics.Process]$Process)
+  param([Diagnostics.Process]$Process,[IntPtr]$AppWindowHandle)
   $desktop=[Windows.Automation.AutomationElement]::RootElement
   $windowType=[Windows.Automation.PropertyCondition]::new(
     [Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -366,7 +366,7 @@ function Wait-FileDialog {
         $w=$windows.Item($i);$s=$w.Current
         if($s.ProcessId -eq $Process.Id -and !$s.IsOffscreen -and $s.IsEnabled -and
            $s.NativeWindowHandle -ne 0 -and
-           [long]$s.NativeWindowHandle -ne $Process.MainWindowHandle.ToInt64() -and
+           [long]$s.NativeWindowHandle -ne $AppWindowHandle.ToInt64() -and
            $s.ClassName -ceq '#32770' -and !$s.BoundingRectangle.IsEmpty){
           return $w
         }
@@ -388,14 +388,14 @@ function Wait-FileDialog {
   throw 'LANG-08b genuine native Akula file-picker window was not observable'
 }
 function Choose-FileThroughNativeDialog {
-  param([Diagnostics.Process]$Process,[string]$Path)
+  param([Diagnostics.Process]$Process,[string]$Path,[IntPtr]$AppWindowHandle)
   $target=[IO.Path]::GetFullPath($Path)
   if(!$target.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -or
      [IO.Path]::GetExtension($target) -cne '.json' -or
      [IO.Path]::GetFileName($target) -cne 'lang08b-disposable.annotations.json'){
     throw 'LANG-08b refuses any file-picker destination other than its synthetic JSON'
   }
-  $dialog=Wait-FileDialog -Process $Process
+  $dialog=Wait-FileDialog -Process $Process -AppWindowHandle $AppWindowHandle
   $hwnd=[IntPtr]$dialog.Current.NativeWindowHandle
   [AkulaBetaGuiInput]::ShowWindow($hwnd,9)|Out-Null
   for($n=0;$n -lt 25;$n++){
@@ -619,8 +619,9 @@ try {
   $actions=Wait-Visible -Root $window -Names $labels.actions -Type ([Windows.Automation.ControlType]::Button)
   Click-Visible -Target $actions -Window $window -Process $proc
   $export=Wait-Visible -Root $window -Names $labels.backupExport -Type ([Windows.Automation.ControlType]::MenuItem)
+  $appWindowHandle=[IntPtr]$proc.MainWindowHandle
   Click-Visible -Target $export -Window $window -Process $proc
-  Choose-FileThroughNativeDialog -Process $proc -Path $backup
+  Choose-FileThroughNativeDialog -Process $proc -Path $backup -AppWindowHandle $appWindowHandle
   $backupReady=$false
   for($i=0;$i -lt 90;$i++){
     Start-Sleep -Milliseconds 200
@@ -699,8 +700,9 @@ if result is None or result[0]!=0:
   $actions=Wait-Visible -Root $window -Names $labels.actions -Type ([Windows.Automation.ControlType]::Button)
   Click-Visible -Target $actions -Window $window -Process $proc
   $import=Wait-Visible -Root $window -Names $labels.backupImport -Type ([Windows.Automation.ControlType]::MenuItem)
+  $appWindowHandle=[IntPtr]$proc.MainWindowHandle
   Click-Visible -Target $import -Window $window -Process $proc
-  Choose-FileThroughNativeDialog -Process $proc -Path $backup
+  Choose-FileThroughNativeDialog -Process $proc -Path $backup -AppWindowHandle $appWindowHandle
   $held=$null
   for($i=0;$i -lt 90;$i++){
     Start-Sleep -Milliseconds 200
