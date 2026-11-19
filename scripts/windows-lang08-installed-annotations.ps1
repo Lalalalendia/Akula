@@ -238,8 +238,22 @@ function Readback-Selected {
 # of physical database bytes, while still requiring a genuine SQLite file.
 function Read-AnnotationState {
   param([string]$Path)
-  $py='import hashlib,pathlib,sqlite3,sys; con=sqlite3.connect(pathlib.Path(sys.argv[1]).resolve().as_uri()+"?mode=ro",uri=True); row=con.execute("SELECT revision,payload FROM text_annotation_state WHERE id=1").fetchone(); assert row is not None and row[0]>=0; print(str(row[0])+":"+hashlib.sha256(row[1]).hexdigest()); con.close()'
-  $result=(& python -c $py $Path | Out-String).Trim()
+  # Windows PowerShell 5.1 can strip quotes from python -c arguments.
+  # Feed the fixed, ASCII-only script via stdin instead; SQL and data paths
+  # stay separate arguments, and no transient Python file is created.
+  $py=@'
+import hashlib
+import pathlib
+import sqlite3
+import sys
+db = pathlib.Path(sys.argv[1]).resolve()
+with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as con:
+    row = con.execute("SELECT revision, payload FROM text_annotation_state WHERE id=1").fetchone()
+if row is None or row[0] < 0 or not isinstance(row[1], bytes):
+    raise ValueError("Invalid annotation snapshot")
+print(str(row[0]) + ":" + hashlib.sha256(row[1]).hexdigest())
+'@
+  $result=($py | & python - $Path | Out-String).Trim()
   if($LASTEXITCODE -ne 0 -or $result -notmatch '^[0-9]+:[a-f0-9]{64}$'){
     throw 'LANG-08 could not read a valid SQLite annotation snapshot'
   }
