@@ -218,6 +218,17 @@ function Readback-Selected {
     throw 'LANG-08 installed editor failed exact OS Ctrl+A/C clipboard readback'
   }
 }
+# SQLite WAL may checkpoint without changing records: compare snapshot instead
+# of physical database bytes, while still requiring a genuine SQLite file.
+function Read-AnnotationState {
+  param([string]$Path)
+  $py='import hashlib,pathlib,sqlite3,sys; con=sqlite3.connect(pathlib.Path(sys.argv[1]).resolve().as_uri()+"?mode=ro",uri=True); row=con.execute("SELECT revision,payload FROM text_annotation_state WHERE id=1").fetchone(); assert row is not None and row[0]>=0; print(str(row[0])+":"+hashlib.sha256(row[1]).hexdigest()); con.close()'
+  $result=(& python -c $py $Path | Out-String).Trim()
+  if($LASTEXITCODE -ne 0 -or $result -notmatch '^[0-9]+:[a-f0-9]{64}$'){
+    throw 'LANG-08 could not read a valid SQLite annotation snapshot'
+  }
+  return $result
+}
 function Open-Note {
   param([string]$Note,[string]$Vault,[string]$Data)
   $arguments='--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $Vault,$Data,$Note
@@ -234,7 +245,7 @@ $installed=$false
 $proc=$null
 $note=$null
 $beforeHash=$null
-$dbHash=$null
+$dbState=$null
 New-Item -ItemType Directory -Path $vault,$data -ErrorAction Stop|Out-Null
 New-Item -ItemType Directory -Path $upstream,$updata -ErrorAction Stop|Out-Null
 [IO.File]::WriteAllText((Join-Path $upstream 'sentinel.txt'),'AKULA_LANG08_UPSTREAM')
@@ -316,7 +327,10 @@ try {
   [void](Wait-Visible -Root $window -Names $labels.backupImport -Type ([Windows.Automation.ControlType]::MenuItem))
   Write-Host 'AKULA_LANG08_INSTALLED_BACKUP_MENU_PASS genuine_nsis=1 export_visible=1 import_visible=1'
   Close-Note -Process $proc;$proc=$null
-  $dbHash=(Get-FileHash -LiteralPath $db -Algorithm SHA256).Hash
+  $dbState=Read-AnnotationState -Path $db
+  if($dbState -notmatch '^[1-9][0-9]*:[a-f0-9]{64}$'){
+    throw 'LANG-08 installed highlight missing positive SQLite revision and payload digest'
+  }
 
   $proc=Open-Note -Note $note -Vault $vault -Data $data
   Wait-Window -Process $proc -Needle 'LANG08 Annotation'
@@ -326,7 +340,7 @@ try {
   Readback-Selected -Process $proc -Expected $text
   Close-Note -Process $proc;$proc=$null
   if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash -or
-     (Get-FileHash -LiteralPath $db -Algorithm SHA256).Hash -cne $dbHash){
+     (Read-AnnotationState -Path $db) -cne $dbState){
     throw 'LANG-08 restart modified Markdown or saved annotation SQLite'
   }
   Assert-Upstream
