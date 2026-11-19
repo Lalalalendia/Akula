@@ -49,8 +49,9 @@ function check(x){
  hold(x.preview.includes('blank_preview()'),'GUI test can request YouTube thumbnail CDN');
  for(const token of [
     'RUNNER_ENVIRONMENT','EXPECTED_HEAD_SHA','Administrator',
-    'Akula Video Tools','ProgramFiles=$spoof','Icacls @($root',
+    'Akula Video Tools','ProgramFiles=$spoof','Icacls -Arguments @($root',
     'S-1-5-32-544','S-1-5-32-545:M','Remove-Item -LiteralPath $root',
+    '[string[]]$Arguments','@Arguments','Arguments.Count -lt 2',
     'video16-events.log','VideoTools01lPointer','SendInput(1,down',
     'GetWindowThreadProcessId','Editor-Bounds','UIAutomationClient',
     'FindAll([Windows.Automation.TreeScope]::Descendants',
@@ -101,7 +102,8 @@ test('negative mutations of click, protected root and CI proof are blocked',()=>
    ['queue','if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))','if false'],
    ['trust','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "ci";'],
    ['ps','SendInput(1,down','SendInput(0,down'],
-   ['ps','Icacls @($root','Write-Output fake-acl @($root'],
+   ['ps','Icacls -Arguments @($root','Write-Output fake-acl @($root'],
+   ['ps','[string[]]$Arguments','[string[]]$Args'],
    ['ps','Assert-No-Launch','Skip-No-Launch'],
    ['ps','Assert-Dialog','Skip-Dialog'],
    ['ps','RUNNER_ENVIRONMENT','FAKE_ENVIRONMENT'],
