@@ -37,7 +37,7 @@ fn sha_of_held(file: &mut fs::File) -> Result<String, String> {
     }
     Ok(hash.finalize().iter().map(|v| format!("{v:02x}")).collect())
 }
-fn exact_installed(root: &Path, key: &str) -> Result<(), String> {
+fn exact_installed(root: &Path, key: &str) -> Result<String, String> {
     os_root::check_installed_acl(root, &tools_package_pin_windows::SIGNED_NAMES)?;
     let mut held = tools_package_pin_windows::PinnedPackage::open(
         root, &tools_package_pin_windows::SIGNED_NAMES,
@@ -49,7 +49,6 @@ fn exact_installed(root: &Path, key: &str) -> Result<(), String> {
     let signed = std::str::from_utf8(&signature)
         .map_err(|_| hold("test signature not UTF-8"))?;
     let attested = tools_package::verify_signed(root, &raw, signed, key)?;
-    if attested.version != "0.1.0" { return Err(hold("unexpected separate tools version")); }
     held.inspect(|name, file| {
         if name == "manifest.json" || name == "manifest.minisig" {
             let expected: &[u8] = if name == "manifest.json" { &raw } else { &signature };
@@ -81,7 +80,7 @@ fn exact_installed(root: &Path, key: &str) -> Result<(), String> {
     {
         return Err(hold("ephemeral CI signer escalated into shipping authority"));
     }
-    Ok(())
+    Ok(attested.version)
 }
 fn main() {
     if let Err(err) = run() {
@@ -97,7 +96,7 @@ fn run() -> Result<(), String> {
         return Err(hold("exact-head hosted Windows pull request only"));
     }
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 4 || !matches!(args[1].as_str(), "missing"|"valid"|"wrong-key"|"tamper-manifest"|"tamper-signature"|"tamper-pe"|"seventh-file") {
+    if args.len() != 4 || !matches!(args[1].as_str(), "missing"|"valid"|"wrong-key"|"tamper-manifest"|"tamper-signature"|"tamper-pe"|"seventh-file"|"status-attested"|"status-incompatible") {
         return Err(hold("expected mode, known-root and isolated ephemeral public key"));
     }
     let expected = PathBuf::from(&args[2]);
@@ -132,11 +131,33 @@ fn run() -> Result<(), String> {
         .map_err(|_| hold("ephemeral CI public key unreadable"))?;
     let result = exact_installed(&root, &key);
     if args[1] == "valid" {
-        result?;
+        if result? != "0.1.0" { return Err(hold("unexpected separate tools version")); }
         println!("VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS six_files=6 native_acl=1 real_minisign=1 held_sha256=3 production_admission=0 release=0");
+    } else if args[1] == "status-attested" || args[1] == "status-incompatible" {
+        // The real installed package's six files were validated through
+        // exact source modules, genuine Minisign and held read-only handles.
+        // The ephemeral test key is NEVER passed to production discovery.
+        let authenticated_version = result?;
+        let state = tools_package_probe::classify_authenticated_version(&authenticated_version);
+        let expected = if args[1] == "status-attested" {
+            ToolsDiscovery::ReadOnlyAttested
+        } else {
+            ToolsDiscovery::IncompatibleVersion
+        };
+        if state != expected
+            || (expected == ToolsDiscovery::ReadOnlyAttested && authenticated_version != "0.1.0")
+            || (expected == ToolsDiscovery::IncompatibleVersion && authenticated_version != "0.2.0")
+            || probe_installed_video_tools() != ToolsDiscovery::PublisherNotApproved
+        {
+            return Err(hold("signed version, real installed state or production HOLD differs"));
+        }
+        let label = if state == ToolsDiscovery::ReadOnlyAttested {
+            "read-only-attested"
+        } else { "incompatible-version" };
+        println!("VIDEO_TOOLS_01M_NATIVE_STATE_PASS state={label} real_signature=1 os_acl=1 pinned_six=1 publisher_unapproved=1 release=0");
     } else {
         match result {
-            Ok(()) => return Err(hold("negative case was falsely accepted")),
+            Ok(_) => return Err(hold("negative case was falsely accepted")),
             Err(reason) => {
                 if !reason.contains("HOLD") { return Err(hold("unexpected unsafe error classification")); }
                 println!("VIDEO_TOOLS_01J_NATIVE_REJECT_PASS case={} release=0",args[1]);
