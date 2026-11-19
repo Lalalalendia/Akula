@@ -80,7 +80,7 @@ test('negative mutations reject env-path spoof, deleted junction gate or missing
   const mutations=[
     ['guard','SHGetKnownFolderPath(ref Guid id','GetEnvironmentVariable(ref Guid id'],
     ['guard','6D809377-6AF0-444B-8957-A3773F02200E','00000000-0000-0000-0000-000000000000'],
-    ['guard','Is64BitProcess','Is64BitProcessDisabled'],
+    ['guard','Is64BitProcess','REMOVED_BITNESS_GUARD'],
     ['guard','[IO.FileAttributes]::ReparsePoint','[IO.FileAttributes]::Normal'],
     ['guard','Marshal.FreeCoTaskMem(ptr)','// leaked pointer'],
     ['guard','outside exact OS-known product root','let the user choose root'],
@@ -94,7 +94,7 @@ test('negative mutations reject env-path spoof, deleted junction gate or missing
     ['workflow','VIDEO_TOOLS_01C_OS_ROOT_PASS','NOT_A_PROOF']
   ];
   for(const [name,from,to] of mutations){
-    const changed=a[name].replace(from,to);
+    const changed=a[name].replaceAll(from,to);
     hold(changed!==a[name],'mutation not applied '+name+': '+from);
     assert.throws(()=>check({...a,[name]:changed}),/VIDEO_TOOLS_01C_HOLD/);
   }
