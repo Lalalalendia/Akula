@@ -209,6 +209,48 @@ function Select-EditorBody {
   $body.SetFocus()
   return $body
 }
+# A top-level title can appear before Masonry exposes the Markdown editor
+# in the Windows UIA tree. Re-acquire the real installed HWND on each attempt,
+# require an enabled, visible, focusable Edit/Document control, and fail closed.
+function Wait-EditorBody {
+  param([Diagnostics.Process]$Process,[string]$Needle)
+  $lastWindow=$null
+  for($attempt=0;$attempt -lt 90;$attempt++){
+    $Process.Refresh()
+    if($Process.HasExited){throw 'LANG-08 installed Akula exited while opening the Markdown editor'}
+    if($Process.MainWindowHandle -ne [IntPtr]::Zero -and
+       $Process.MainWindowTitle.Contains('Akula') -and
+       $Process.MainWindowTitle.Contains($Needle)){
+      try {
+        $lastWindow=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Process.MainWindowHandle)
+        if($null -ne $lastWindow){
+          $editor=Select-EditorBody -Root $lastWindow
+          return @{ Window=$lastWindow; Editor=$editor }
+        }
+      } catch {
+        # Only the known transient no-editor state is retried.
+        if($_.Exception.Message -cne 'LANG-08 missing visible installed Markdown editor'){throw}
+      }
+    }
+    Start-Sleep -Milliseconds 200
+  }
+  $visible=@()
+  if($null -ne $lastWindow){
+    try {
+      $all=$lastWindow.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
+      for($i=0;$i -lt $all.Count -and $visible.Count -lt 35;$i++){
+        try {
+          $node=$all.Item($i).Current
+          if(!$node.IsOffscreen){
+            $visible+=("$($node.ControlType.ProgrammaticName):$($node.Name)")
+          }
+        } catch [Windows.Automation.ElementNotAvailableException] {}
+      }
+    } catch {}
+  }
+  Write-Host ("LANG-08 restart UIA visible controls: "+($visible -join ' | '))
+  throw 'LANG-08 installed editor did not become visible and focusable after restart'
+}
 function Readback-Selected {
   param([Diagnostics.Process]$Process,[string]$Expected)
   $hwnd=[IntPtr]$Process.MainWindowHandle
@@ -375,8 +417,9 @@ try {
   $proc=Open-Note -Note $note -Vault $vault -Data $data
   Wait-Window -Process $proc -Needle 'LANG08 Annotation'
   Focus-Akula -Process $proc
-  $window=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]$proc.MainWindowHandle)
-  [void](Select-EditorBody -Root $window)
+  $reopened=Wait-EditorBody -Process $proc -Needle 'LANG08 Annotation'
+  $window=$reopened.Window
+  if($null -eq $reopened.Editor){throw 'LANG-08 restart returned no editor'}
   Readback-Selected -Process $proc -Expected $text
   Close-Note -Process $proc;$proc=$null
   if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash -or
