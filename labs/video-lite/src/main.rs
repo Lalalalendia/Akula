@@ -1,4 +1,6 @@
-//! Nonshipping MP4 split/remux: copies encoded samples; no decode, network or workspace.
+//! Isolated FFmpeg-free MP4 split/remux lab, not an Akula product feature.
+//! Copies encoded samples only. Does not decode/re-encode, fetch network content,
+//! use a workspace directory, or claim compatibility with arbitrary YouTube media.
 use mp4::{
     AacConfig, AvcConfig, MediaType, Mp4Config, Mp4Reader, Mp4Sample, Mp4Track,
     Mp4Writer, TrackConfig,
@@ -7,11 +9,10 @@ use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
-#[path = "version_01o.rs"]
-mod version_01o;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type Reader = Mp4Reader<BufReader<File>>;
+
 fn reader(path: &Path) -> Result<Reader> {
     let file = File::open(path)?;
     let bytes = file.metadata()?.len();
@@ -26,6 +27,7 @@ fn track(reader: &Reader, codec: MediaType) -> Result<(u32, TrackConfig, u32)> {
     }
     Err(format!("required codec {codec:?} is absent").into())
 }
+
 fn track_config(t: &Mp4Track, codec: MediaType) -> Result<TrackConfig> {
     let mut config = match codec {
         MediaType::H264 => TrackConfig::from(AvcConfig {
@@ -57,6 +59,7 @@ fn writer(path: &Path) -> Result<Mp4Writer<File>> {
     };
     Ok(Mp4Writer::write_start(File::create(path)?, &config)?)
 }
+
 fn isolate(source: &Path, target: &Path, codec: MediaType) -> Result<()> {
     let mut input = reader(source)?;
     let (id, config, count) = track(&input, codec)?;
@@ -169,9 +172,6 @@ fn run() -> Result<()> {
 }
 
 fn main() {
-    if version_01o::probe_identity() {
-        return;
-    }
     if let Err(err) = run() {
         eprintln!("RUST_MP4_REMUX_FAILURE: {err}");
         std::process::exit(1);
