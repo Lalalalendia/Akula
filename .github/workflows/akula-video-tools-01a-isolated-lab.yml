@@ -8,6 +8,10 @@ on:
       - 'scripts/windows-video-tools-01a-isolated-lab.ps1'
       - 'scripts/video-tools-01c-os-known-root.ps1'
       - 'scripts/windows-video-tools-01c-root-lab.ps1'
+      - 'scripts/video-tools-01d-acl.ps1'
+      - 'scripts/windows-video-tools-01d-acl-negative.ps1'
+      - '.github/scripts/video-tools-01d-acl.test.cjs'
+      - 'docs/release/video-tools-01d-acl.md'
       - '.github/scripts/video-tools-01c-root.test.cjs'
       - '.github/scripts/video-tools-01a-isolated-nsis.test.cjs'
       - '.github/workflows/akula-video-tools-01a-isolated-lab.yml'
@@ -40,6 +44,7 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/video-tools-01a-isolated-nsis.test.cjs
           node --test .github/scripts/video-tools-01c-root.test.cjs
+          node --test .github/scripts/video-tools-01d-acl.test.cjs
           echo 'VIDEO_TOOLS_01A_SOURCE_CONTRACT_PASS release=0'
 
   windows-real:
@@ -59,10 +64,10 @@ jobs:
             labs/video-lite
           shared-key: akula-video-tools-01a-mux-v1
           save-if: false
-      - name: Parse all three PowerShell scripts before any executable staging
+      - name: Parse all five PowerShell scripts before any executable staging
         shell: pwsh
         run: |
-          foreach($path in @('scripts/windows-video-tools-01a-isolated-lab.ps1','scripts/windows-video-tools-01c-root-lab.ps1','scripts/video-tools-01c-os-known-root.ps1')){
+          foreach($path in @('scripts/windows-video-tools-01a-isolated-lab.ps1','scripts/windows-video-tools-01c-root-lab.ps1','scripts/video-tools-01c-os-known-root.ps1','scripts/video-tools-01d-acl.ps1','scripts/windows-video-tools-01d-acl-negative.ps1')){
             $tokens=$null; $errors=$null
             [System.Management.Automation.Language.Parser]::ParseFile(
               (Join-Path $env:GITHUB_WORKSPACE $path),
@@ -117,4 +122,7 @@ jobs:
           $proof | Out-Host
           if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS'))){
             throw 'VIDEO_TOOLS_01A_HOLD: genuine protected install/uninstall proof missing'
+          }
+          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01D_ACL_MUTATION_PASS'))){
+            throw 'VIDEO_TOOLS_01D_HOLD: real Windows ACL poison/restore witness missing'
           }
