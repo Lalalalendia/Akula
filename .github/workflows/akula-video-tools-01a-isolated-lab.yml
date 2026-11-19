@@ -177,8 +177,11 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $proof=@(& ./scripts/windows-video-tools-01j-six-signed-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS 2>&1)
-          $proof | Out-Host
+          # Stream Rust compiler and Minisign errors live; buffering an
+          # entire terminating PowerShell script hides the real error cause.
+          $proof=@()
+          & ./scripts/windows-video-tools-01j-six-signed-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS 2>&1 |
+            Tee-Object -Variable proof | Out-Host
           if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS'))){
             throw 'VIDEO_TOOLS_01J_HOLD: real Minisign signature was not admitted by native Rust test'
           }
