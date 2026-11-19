@@ -16,7 +16,7 @@ pub enum EditorCommand {
     Paste,
     InsertBook,
     InsertTable,
-    InsertFrontmatter,
+    InsertFrontmatter, RebindHeld,
 }
 
 impl App {
@@ -57,14 +57,14 @@ impl App {
             EditorCommand::InsertBook,
             EditorCommand::InsertTable,
             EditorCommand::InsertFrontmatter,
-        ]);
+        ]); if has_selection { commands.push(EditorCommand::RebindHeld); }
         let labels: Vec<String> = commands.iter().map(|command| t(match command {
             EditorCommand::Copy => "common.copy", EditorCommand::Highlight => "editor.annotation.highlight", EditorCommand::Explain => "editor.annotation.explain", EditorCommand::ViewExplanation => "editor.annotation.viewExplanation", EditorCommand::ShowAnnotations => "editor.annotation.show", EditorCommand::HideAnnotations => "editor.annotation.hide",
             EditorCommand::CopyCode { .. } => "editor.copyCode",
             EditorCommand::Paste => "common.paste",
             EditorCommand::InsertBook => "editor.insertBook",
             EditorCommand::InsertTable => "editor.insertTable",
-            EditorCommand::InsertFrontmatter => "editor.insertFrontmatter",
+            EditorCommand::InsertFrontmatter => "editor.insertFrontmatter", EditorCommand::RebindHeld => "editor.annotation.rebindHeld",
         })).collect();
         let entries: Vec<Entry<'_>> = commands.iter().zip(&labels).map(|(command, label)| {
             let (icon, disabled) = match command {
@@ -73,7 +73,7 @@ impl App {
                 EditorCommand::Paste => (icons::CLIPBOARD, false),
                 EditorCommand::InsertBook => (icons::BOOK_OPEN, false),
                 EditorCommand::InsertTable => (icons::TABLE, false),
-                EditorCommand::InsertFrontmatter => (icons::TAG, has_frontmatter),
+                EditorCommand::InsertFrontmatter => (icons::TAG, has_frontmatter), EditorCommand::RebindHeld => (icons::TAG, false),
             };
             Entry { label, icon: Some(icon), disabled }
         }).collect();
@@ -95,7 +95,7 @@ impl App {
         let Some(ids) = &self.note_ids else { return };
         let body = ids.body;
         root.focus_on(Some(body.id()));
-        match command { EditorCommand::Highlight => self.open_annotation_colors(root), EditorCommand::Explain => self.open_annotation_explanation(root), EditorCommand::ViewExplanation => self.preview_annotation_explanation(root), EditorCommand::ShowAnnotations => self.refresh_annotation_overlay(root), EditorCommand::HideAnnotations => self.hide_annotation_overlay(root),
+        match command { EditorCommand::Highlight => self.open_annotation_colors(root), EditorCommand::Explain => self.open_annotation_explanation(root), EditorCommand::ViewExplanation => self.preview_annotation_explanation(root), EditorCommand::ShowAnnotations => self.refresh_annotation_overlay(root), EditorCommand::HideAnnotations => self.hide_annotation_overlay(root), EditorCommand::RebindHeld => self.rebind_selected_annotation(root),
             EditorCommand::Copy => {
                 let selected = body.get(root).and_then(|e| e.inner().selected_text());
                 if let Some(text) = selected

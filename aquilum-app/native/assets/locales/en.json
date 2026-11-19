@@ -97,6 +97,10 @@
     "copyCode": "Copy code",
     "insertFrontmatter": "Insert metadata",
     "annotation": {
+      "rebindHeld": "Reattach saved highlight to this selection",
+      "rebindSaved": "Highlight reattached to the selected text.",
+      "rebindNoMatch": "No matching held highlight exists for this selection.",
+      "rebindAmbiguous": "Several held highlights match this selection. No highlight was changed.",
       "backupExport": "Export this note's highlight backup…",
       "backupImport": "Import this note's highlight backup…",
       "backupNoData": "This note has no saved highlights to back up.",

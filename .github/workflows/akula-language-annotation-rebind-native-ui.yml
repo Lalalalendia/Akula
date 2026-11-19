@@ -1,0 +1,61 @@
+name: Akula LANG-03 native held annotation recovery on Windows (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/app/editor_requests/annotation_manual_rebind_ui.rs'
+      - 'aquilum-app/native/src/app/tests/learning_annotation_manual_rebind.rs'
+      - 'aquilum-app/native/src/app/tests/mod.rs'
+      - '.github/workflows/akula-language-annotation-rebind-native-ui.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  windows-annotation-rebind:
+    name: Windows LANG-03 actual RenderRoot selection, HOLD CAS, unchanged Markdown
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: lang03-manual-hold-windows-v1
+          save-if: false
+      - name: Validate manual rebind CAS and fail-closed Core policy
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core annotation_manual_rebind -- --nocapture
+      - name: Exercise the actual native editor menu with disposable Markdown and SQLite
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --bin aquilum-native \
+            lang03_native_ -- --nocapture --test-threads=1 2>&1 | tee ../lang03-native-manual-windows.log
+          for marker in \
+            AKULA_LANG03_MANUAL_REBIND_PASS= \
+            AKULA_LANG03_MANUAL_REBIND_AMBIGUOUS= \
+            AKULA_LANG03_MANUAL_REBIND_STALE=; do
+            grep -F "$marker" ../lang03-native-manual-windows.log >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Preserve synthetic Windows native test transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lang03-native-manual-windows
+          path: lang03-native-manual-windows.log
+          retention-days: 10
+          if-no-files-found: warn
