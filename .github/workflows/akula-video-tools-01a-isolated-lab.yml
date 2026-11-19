@@ -1,5 +1,5 @@
 name: Akula VIDEO-TOOLS-01a protected three-PE identity lab (non-release)
-# github-hosted Windows PR-only; no artifact uploads, signing or publisher environment.
+# github-hosted Windows PR-only; ephemeral test signature, no publisher keys, releases or uploads.
 on:
   pull_request:
     branches: [main]
@@ -16,6 +16,11 @@ on:
       - 'scripts/video-tools-01i-unsigned-custody.cjs'
       - '.github/scripts/video-tools-01i-unsigned-custody.test.cjs'
       - 'docs/release/video-tools-01i-unsigned-custody.md'
+      - 'scripts/video-tools-01j-six-file-lab.nsi'
+      - 'scripts/windows-video-tools-01j-six-signed-lab.ps1'
+      - 'labs/video-tools-01j/'
+      - '.github/scripts/video-tools-01j-six-signed.test.cjs'
+      - 'docs/release/video-tools-01j-six-signed.md'
       - '.github/scripts/video-tools-01g-pin-race.test.cjs'
       - 'aquilum-app/native/src/video/tools_package_pin_windows.rs'
       - 'aquilum-app/native/src/video/tools_package_pin_admission.rs'
@@ -65,6 +70,7 @@ jobs:
           node --test .github/scripts/video-tools-01f-standard-user.test.cjs
           node --test .github/scripts/video-tools-01g-pin-race.test.cjs
           node --test .github/scripts/video-tools-01i-unsigned-custody.test.cjs
+          node --test .github/scripts/video-tools-01j-six-signed.test.cjs
           echo 'VIDEO_TOOLS_01A_SOURCE_CONTRACT_PASS release=0'
 
   windows-real:
@@ -84,10 +90,10 @@ jobs:
             labs/video-lite
           shared-key: akula-video-tools-01a-mux-v1
           save-if: false
-      - name: Parse all eight PowerShell scripts before any executable staging
+      - name: Parse all nine PowerShell scripts before any executable staging
         shell: pwsh
         run: |
-          foreach($path in @('scripts/windows-video-tools-01a-isolated-lab.ps1','scripts/windows-video-tools-01c-root-lab.ps1','scripts/video-tools-01c-os-known-root.ps1','scripts/video-tools-01d-acl.ps1','scripts/windows-video-tools-01d-acl-negative.ps1','scripts/windows-video-tools-01e-native-lab.ps1','scripts/windows-video-tools-01f-standard-user.ps1','scripts/windows-video-tools-01g-pin-race.ps1')){
+          foreach($path in @('scripts/windows-video-tools-01a-isolated-lab.ps1','scripts/windows-video-tools-01c-root-lab.ps1','scripts/video-tools-01c-os-known-root.ps1','scripts/video-tools-01d-acl.ps1','scripts/windows-video-tools-01d-acl-negative.ps1','scripts/windows-video-tools-01e-native-lab.ps1','scripts/windows-video-tools-01f-standard-user.ps1','scripts/windows-video-tools-01g-pin-race.ps1','scripts/windows-video-tools-01j-six-signed-lab.ps1')){
             $tokens=$null; $errors=$null
             [System.Management.Automation.Language.Parser]::ParseFile(
               (Join-Path $env:GITHUB_WORKSPACE $path),
@@ -157,4 +163,57 @@ jobs:
           }
           if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01I_UNSIGNED_CUSTODY_PASS'))){
             throw 'VIDEO_TOOLS_01I_HOLD: actual three pinned PE metadata was not built'
+          }
+      - name: Fetch sha256-pinned official Minisign 0.12 Windows x64 for ephemeral CI signing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'video-tools-01j-minisign-0.12'
+          if(Test-Path -LiteralPath $dir){
+            throw 'VIDEO_TOOLS_01J_HOLD: private Minisign tool stage already exists'
+          }
+          New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null
+          $archive=Join-Path $dir 'minisign-0.12-win64.zip'
+          Invoke-WebRequest 'https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip' -OutFile $archive -UseBasicParsing
+          $actual=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -cne '37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479'){
+            throw 'VIDEO_TOOLS_01J_HOLD: official Minisign archive SHA-256 mismatch'
+          }
+          $out=Join-Path $dir 'verified'
+          Expand-Archive -LiteralPath $archive -DestinationPath $out -ErrorAction Stop
+          $binary=Join-Path $out 'minisign-win64/x86_64/minisign.exe'
+          if(!(Test-Path -LiteralPath $binary -PathType Leaf)){
+            throw 'VIDEO_TOOLS_01J_HOLD: expected x64 Minisign executable missing'
+          }
+          if(((Get-Item -LiteralPath $binary -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+            throw 'VIDEO_TOOLS_01J_HOLD: Minisign executable is a link'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value ("VIDEO_TOOLS_01J_MINISIGN="+$binary)
+          Write-Output 'VIDEO_TOOLS_01J_MINISIGN_PIN_PASS version=0.12 sha256=1 release=0'
+      - name: Real six-file separate signed NSIS, native Akula read-only admission and negative cases
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          # Stream Rust compiler and Minisign errors live; buffering an
+          # entire terminating PowerShell script hides the real error cause.
+          $proofFile=Join-Path $env:RUNNER_TEMP ('akula-video-tools-01j-' + $env:EXPECTED_HEAD_SHA + '.proof')
+          if(Test-Path -LiteralPath $proofFile){
+            throw 'VIDEO_TOOLS_01J_HOLD: exact-head acceptance proof already exists'
+          }
+          try {
+            # Nested PowerShell stdout is informational only. The isolated
+            # test script writes its exact proof file ONLY after native
+            # signature checks, all negative cases and safe uninstall.
+            & ./scripts/windows-video-tools-01j-six-signed-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS -ProofFile $proofFile 2>&1 | Out-Host
+            $proof=Get-Content -LiteralPath $proofFile -Raw -ErrorAction Stop
+            $expected="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`n"
+            if($proof -cne $expected){
+              throw 'VIDEO_TOOLS_01J_HOLD: complete signed six-file acceptance proof is absent'
+            }
+          } finally {
+            if(Test-Path -LiteralPath $proofFile){
+              Remove-Item -LiteralPath $proofFile -Force -ErrorAction Stop
+            }
           }
