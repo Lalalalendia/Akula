@@ -1,0 +1,68 @@
+name: Akula VIDEO-TOOLS-01h benign CreateProcessW pinned-handle lab (non-release)
+# Exact-head PR-only, no signing, publishing or media runtime execution.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/video/tools_package_01h_process_boundary_windows.rs'
+      - 'scripts/video-tools-01h-benign-child.rs'
+      - 'scripts/windows-video-tools-01h-process-boundary.ps1'
+      - '.github/scripts/video-tools-01h-boundary.test.cjs'
+      - 'docs/release/video-tools-01h-process-boundary.md'
+      - '.github/workflows/akula-video-tools-01h-process-boundary.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Benign pinned process boundary and negative mutation source contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Prove Win32 handoff source, guard lifetime and release HOLD
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/video-tools-01h-boundary.test.cjs
+          echo 'VIDEO_TOOLS_01H_SOURCE_CONTRACT_PASS release=0'
+  windows-real:
+    name: Real benign CreateProcessW while protected verified file handles remain open
+    needs: contract
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Parse PowerShell script before creating any protected fixture
+        shell: pwsh
+        run: |
+          $tokens=$null; $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-video-tools-01h-process-boundary.ps1'),
+            [ref]$tokens,[ref]$errors) | Out-Null
+          if($errors.Count -ne 0) {
+            throw "VIDEO_TOOLS_01H_HOLD: syntax errors: $($errors | Out-String)"
+          }
+      - name: Real elevated Win32 race before and after benign CreateProcessW
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $output=@(& ./scripts/windows-video-tools-01h-process-boundary.ps1 2>&1)
+          $output | Out-Host
+          if(!(($output | Out-String).Contains('VIDEO_TOOLS_01H_HANDOFF_PASS'))) {
+            throw 'VIDEO_TOOLS_01H_HOLD: genuine process handoff proof missing'
+          }
+          echo 'VIDEO_TOOLS_01H_WINDOWSLAB_PASS release=0'
