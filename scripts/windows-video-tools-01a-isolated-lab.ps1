@@ -148,6 +148,9 @@ try {
       throw 'VIDEO_TOOLS_01A_HOLD: separate tools installer modified stock application'
     }
   }
+  # VIDEO-TOOLS-01d: check the exact root AND each installed object before any use.
+  . (Join-Path $repo 'scripts/video-tools-01d-acl.ps1')
+  Assert-AkulaVideoToolsInstalledAcl -Path $root -LabId $tag
   $acl = Get-Acl -LiteralPath $root
   foreach ($ace in $acl.Access) {
     $sid = try { $ace.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { '' }
@@ -158,6 +161,13 @@ try {
       throw 'VIDEO_TOOLS_01A_HOLD: ordinary users can replace protected media PE'
     }
   }
+  # Real negative DACL mutations on the disposable package, always restored.
+  $aclProof=@(& (Join-Path $repo 'scripts/windows-video-tools-01d-acl-negative.ps1') -Root $root -LabId $tag 2>&1)
+  $aclProof | Out-Host
+  if (!(($aclProof | Out-String).Contains('VIDEO_TOOLS_01D_ACL_MUTATION_PASS'))) {
+    throw 'VIDEO_TOOLS_01D_HOLD: genuine poisoned Windows ACL was not rejected'
+  }
+  Write-Output 'VIDEO_TOOLS_01D_ACL_MUTATION_PASS restored=1 release=0'
   # A foreign file must survive explicit uninstall, rather than Delete /r.
   Set-Content -LiteralPath (Join-Path $root 'unrelated-private-note.md') -Value 'preserve-me' -NoNewline
   $uninstaller = Join-Path $root 'uninstall.exe'
