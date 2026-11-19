@@ -110,18 +110,24 @@ impl PinnedPackage {
 
 #[cfg(any(test, akula_video_tools_01g_witness))]
 fn compare_reference(held: &mut File, reference: &mut File) -> Result<(), String> {
+    let size = held.metadata().map_err(|_| hold("held file metadata unavailable"))?.len();
+    if reference.metadata().map_err(|_| hold("staged metadata unavailable"))?.len() != size {
+        return Err(hold("held and staged file sizes differ"));
+    }
     let mut current = [0u8; 64 * 1024];
     let mut expected = [0u8; 64 * 1024];
-    loop {
-        let n = held.read(&mut current).map_err(|_| hold("held bytes unreadable"))?;
-        let m = reference.read(&mut expected).map_err(|_| hold("reference bytes unreadable"))?;
-        if n != m || current[..n] != expected[..m] {
+    let mut remaining = size;
+    while remaining > 0 {
+        let take = (remaining as usize).min(current.len());
+        held.read_exact(&mut current[..take]).map_err(|_| hold("held bytes unreadable"))?;
+        reference.read_exact(&mut expected[..take])
+            .map_err(|_| hold("reference bytes unreadable"))?;
+        if current[..take] != expected[..take] {
             return Err(hold("held installed bytes differ from pinned source"));
         }
-        if n == 0 {
-            return Ok(());
-        }
+        remaining -= take as u64;
     }
+    Ok(())
 }
 
 #[cfg(test)]
