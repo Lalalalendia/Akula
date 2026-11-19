@@ -164,13 +164,32 @@ jobs:
           if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01I_UNSIGNED_CUSTODY_PASS'))){
             throw 'VIDEO_TOOLS_01I_HOLD: actual three pinned PE metadata was not built'
           }
-      - name: Install pinned TEST-ONLY Minisign CLI on ephemeral Windows runner
+      - name: Fetch sha256-pinned official Minisign 0.12 Windows x64 for ephemeral CI signing
         shell: pwsh
         run: |
-          choco install minisign --version=0.8.0 --yes --no-progress
-          if($LASTEXITCODE -ne 0){ throw 'VIDEO_TOOLS_01J_HOLD: independent Minisign CLI unavailable' }
-          $found=Get-Command minisign -ErrorAction Stop
-          if(!$found){throw 'VIDEO_TOOLS_01J_HOLD: real Minisign tool missing'}
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'video-tools-01j-minisign-0.12'
+          if(Test-Path -LiteralPath $dir){
+            throw 'VIDEO_TOOLS_01J_HOLD: private Minisign tool stage already exists'
+          }
+          New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null
+          $archive=Join-Path $dir 'minisign-0.12-win64.zip'
+          Invoke-WebRequest 'https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip' -OutFile $archive -UseBasicParsing
+          $actual=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -cne '37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479'){
+            throw 'VIDEO_TOOLS_01J_HOLD: official Minisign archive SHA-256 mismatch'
+          }
+          $out=Join-Path $dir 'verified'
+          Expand-Archive -LiteralPath $archive -DestinationPath $out -ErrorAction Stop
+          $binary=Join-Path $out 'minisign-win64/x86_64/minisign.exe'
+          if(!(Test-Path -LiteralPath $binary -PathType Leaf)){
+            throw 'VIDEO_TOOLS_01J_HOLD: expected x64 Minisign executable missing'
+          }
+          if(((Get-Item -LiteralPath $binary -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+            throw 'VIDEO_TOOLS_01J_HOLD: Minisign executable is a link'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value ("VIDEO_TOOLS_01J_MINISIGN="+$binary)
+          Write-Output 'VIDEO_TOOLS_01J_MINISIGN_PIN_PASS version=0.12 sha256=1 release=0'
       - name: Real six-file separate signed NSIS, native Akula read-only admission and negative cases
         shell: pwsh
         env:

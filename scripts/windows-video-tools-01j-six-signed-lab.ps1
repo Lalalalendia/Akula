@@ -24,6 +24,17 @@ if (!$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
   throw 'VIDEO_TOOLS_01J_HOLD: protected separate install needs real administrator token'
 }
 $repo=[IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
+$signer=$env:VIDEO_TOOLS_01J_MINISIGN
+if([string]::IsNullOrWhiteSpace($signer)){
+  throw 'VIDEO_TOOLS_01J_HOLD: exact official test signer missing'
+}
+$signer=[IO.Path]::GetFullPath($signer)
+$runnerTemp=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')+'\'
+if(!$signer.StartsWith($runnerTemp,[StringComparison]::OrdinalIgnoreCase) -or
+   !(Test-Path -LiteralPath $signer -PathType Leaf) -or
+   ((Get-Item -LiteralPath $signer -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+  throw 'VIDEO_TOOLS_01J_HOLD: test Minisign executable escaped verified runner temp'
+}
 . (Join-Path $repo 'scripts/video-tools-01c-os-known-root.ps1')
 $program=Get-AkulaVideoToolsOsProgramFiles
 $root=Join-Path $program 'Akula Video Tools'
@@ -138,15 +149,15 @@ try {
   $public=Join-Path $keyDir 'CI-ONLY.pub'
   $otherPrivate=Join-Path $keyDir 'CI-ONLY-OTHER.key'
   $otherPublic=Join-Path $keyDir 'CI-ONLY-OTHER.pub'
-  & minisign -G -W -s $private -p $public | Out-Host
+  & $signer -G -W -s $private -p $public | Out-Host
   if ($LASTEXITCODE -ne 0) { throw 'VIDEO_TOOLS_01J_HOLD: ephemeral key generation failed' }
-  & minisign -G -W -s $otherPrivate -p $otherPublic | Out-Host
+  & $signer -G -W -s $otherPrivate -p $otherPublic | Out-Host
   if ($LASTEXITCODE -ne 0) { throw 'VIDEO_TOOLS_01J_HOLD: independent wrong key generation failed' }
-  & minisign -S -q -s $private -m $manifest -x $signature
+  & $signer -S -q -s $private -m $manifest -x $signature
   if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $signature)) {
     throw 'VIDEO_TOOLS_01J_HOLD: test-only Minisign signature creation failed'
   }
-  & minisign -Vm $manifest -x $signature -p $public -Q | Out-Host
+  & $signer -Vm $manifest -x $signature -p $public -Q | Out-Host
   if ($LASTEXITCODE -ne 0) { throw 'VIDEO_TOOLS_01J_HOLD: real Minisign self-verification failed' }
   # A manifest/metadata copy is installed; the private and public test key
   # remain OUTSIDE Program Files and are never passed to production Akula.
