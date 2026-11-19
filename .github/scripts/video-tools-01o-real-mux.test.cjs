@@ -6,7 +6,7 @@ const {test}=require('node:test');
 const root=path.resolve(__dirname,'../..');
 const floor=require(path.join(root,'scripts/video-tools-01o-signed-floor.cjs'));
 const paths={
-  rust:'labs/video-lite/src/main.rs',
+  rust:'labs/video-lite/src/bin/dash.rs',
   identity:'labs/video-lite/src/version_01o.rs',
   cargo:'labs/video-lite/Cargo.toml',
   runner:'scripts/windows-video-tools-01o-real-mux-floor.ps1',
