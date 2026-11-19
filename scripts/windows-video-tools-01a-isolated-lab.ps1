@@ -120,6 +120,47 @@ try {
   if ($staged.Count -ne 3 -or @($staged | Where-Object { $_.Name -cnotin @($inputs.Keys) }).Count -ne 0) {
     throw 'VIDEO_TOOLS_01A_HOLD: staging has unexpected bytes or sidecars'
   }
+  # VIDEO-TOOLS-01i: build deterministic UNSIGNED publisher-review manifest
+  # from the same three source-pinned real PEs. Output stays in runner temp,
+  # never in Program Files or an installable signed package.
+  $unsignedOutput=Join-Path $work 'unsigned-publisher-review'
+  $unsignedSource=Join-Path $repo 'scripts/video-tools-01i-unsigned-custody.cjs'
+  $unsignedProof=@(& node $unsignedSource $stage $unsignedOutput 2>&1)
+  $unsignedProof | Out-Host
+  if ($LASTEXITCODE -ne 0 -or
+      !(($unsignedProof | Out-String).Contains('VIDEO_TOOLS_01I_UNSIGNED_CUSTODY_PASS'))) {
+    throw 'VIDEO_TOOLS_01I_HOLD: unsigned manifest of real pinned PEs failed'
+  }
+  $unsignedManifest=Join-Path $unsignedOutput 'manifest.json'
+  $unsignedCustody=Join-Path $unsignedOutput 'custody-review.json'
+  if (!(Test-Path -LiteralPath $unsignedManifest -PathType Leaf) -or
+      !(Test-Path -LiteralPath $unsignedCustody -PathType Leaf) -or
+      (Test-Path -LiteralPath (Join-Path $unsignedOutput 'manifest.minisig'))) {
+    throw 'VIDEO_TOOLS_01I_HOLD: unsigned publisher-review evidence incomplete or secretly signed'
+  }
+  $data=Get-Content -LiteralPath $unsignedManifest -Raw | ConvertFrom-Json
+  $custody=Get-Content -LiteralPath $unsignedCustody -Raw | ConvertFrom-Json
+  $expectedLock=(Get-FileHash -LiteralPath (Join-Path $repo 'labs/video-lite/Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($data.product -cne 'Akula Video Tools' -or
+      $data.platform -cne 'windows-x86_64' -or
+      $data.version -cne '0.1.0' -or
+      $data.source_commit -cne $env:EXPECTED_HEAD_SHA -or
+      $data.cargo_lock_sha256 -cne $expectedLock -or
+      $custody.cargo_lock_sha256 -cne $expectedLock -or
+      $data.binaries.Count -ne 3 -or
+      $custody.release_admitted -ne $false -or
+      $custody.publisher_key_approved -ne $false -or
+      $custody.components.Count -ne 3) {
+    throw 'VIDEO_TOOLS_01I_HOLD: provenance mismatch or release-authority escalation'
+  }
+  foreach($component in $data.binaries) {
+    if ($component.name -cnotin @($inputs.Keys) -or
+        $component.sha256 -cne $digests[$component.name] -or
+        $component.size -ne (Get-Item -LiteralPath (Join-Path $stage $component.name)).Length) {
+      throw 'VIDEO_TOOLS_01I_HOLD: unsigned manifest differs from real staged PE bytes'
+    }
+  }
+  Write-Output 'VIDEO_TOOLS_01I_UNSIGNED_CUSTODY_PASS three_real_pe=3 release=0'
   & $makensis ("/DLAB_ID=" + $tag) ("/DLAB_STAGE=" + $stage) ("/DLAB_OUTPUT=" + $installer) (Join-Path $repo 'scripts/video-tools-01a-isolated-lab.nsi') | Out-Host
   if ($LASTEXITCODE -ne 0) { throw 'VIDEO_TOOLS_01A_HOLD: NSIS compilation failed' }
   Assert-RealFile $installer
