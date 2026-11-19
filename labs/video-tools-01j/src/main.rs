@@ -22,7 +22,7 @@ fn hold(msg: &str) -> String { format!("VIDEO_TOOLS_01J_HOLD: {msg}") }
 fn inside(path: &Path, root: &Path) -> Result<bool, String> {
     let object = fs::canonicalize(path).map_err(|_| hold("CI key file unavailable"))?;
     let base = fs::canonicalize(root).map_err(|_| hold("runner temp unavailable"))?;
-    Ok(object.starts_with(base) && object != base)
+    Ok(object.starts_with(&base) && object != base)
 }
 fn sha_of_held(file: &mut fs::File) -> Result<String, String> {
     let mut hash = Sha256::new();
