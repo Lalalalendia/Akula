@@ -193,6 +193,25 @@ try {
   $installed=$true
   Assert-Exact-Six
   Run-Native -Mode 'valid' -Public $public
+  # VIDEO-TOOLS-01n: manual updates may NEVER silently overwrite a live
+  # protected package, even when signed test components are fully valid.
+  $before01n=@{}
+  foreach($itemName in $names){
+    $before01n[$itemName]=(Get-FileHash -LiteralPath (Join-Path $root $itemName) -Algorithm SHA256).Hash
+  }
+  $attempt01n=Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
+  if($attempt01n.ExitCode -ne 77){
+    throw ('VIDEO_TOOLS_01N_HOLD: existing protected install was not explicitly refused, code='+$attempt01n.ExitCode)
+  }
+  Assert-Exact-Six
+  foreach($itemName in $names){
+    $after=(Get-FileHash -LiteralPath (Join-Path $root $itemName) -Algorithm SHA256).Hash
+    if($after -cne $before01n[$itemName]){
+      throw ('VIDEO_TOOLS_01N_HOLD: denied manual reinstall altered protected object '+$itemName)
+    }
+  }
+  Run-Native -Mode 'valid' -Public $public
+  Write-Output 'VIDEO_TOOLS_01N_REINSTALL_HOLD_PASS errorlevel=77 six_sha_unchanged=1 os_acl=1 ephemeral_signature=1 production_admission=0 release=0'
   Run-Native -Mode 'wrong-key' -Public $otherPublic
   # Negative mutation: exact signed on-disk manifest changed, no signature change.
   $installedManifest=Join-Path $root 'manifest.json'
@@ -286,11 +305,38 @@ try {
   if($remain.Count -ne 0){throw 'VIDEO_TOOLS_01J_HOLD: unexpected leftover protected content'}
   Remove-Item -LiteralPath $root
   Run-Native -Mode 'missing' -Public '-'
+  # Only an explicit preceding uninstall allows a fresh manual installation.
+  # This is same-version reinstall, NOT a genuine publisher update or rollback.
+  $reinstall01n=Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
+  $installed=(Test-Path -LiteralPath (Join-Path $root 'uninstall.exe') -PathType Leaf)
+  if($reinstall01n.ExitCode -ne 0 -or !$installed){
+    throw 'VIDEO_TOOLS_01N_HOLD: explicit fresh reinstall failed'
+  }
+  Assert-Exact-Six
+  Run-Native -Mode 'valid' -Public $public
+  $reuninstall01n=Start-Process -FilePath (Join-Path $root 'uninstall.exe') -ArgumentList '/S' -PassThru -Wait
+  if($reuninstall01n.ExitCode -ne 0){
+    throw 'VIDEO_TOOLS_01N_HOLD: explicit reinstall cleanup failed'
+  }
+  $installed=$false
+  foreach($itemName in $names){
+    if(Test-Path -LiteralPath (Join-Path $root $itemName)){
+      throw ('VIDEO_TOOLS_01N_HOLD: reinstall cleanup left '+$itemName)
+    }
+  }
+  if(Test-Path -LiteralPath $root){
+    if(@(Get-ChildItem -LiteralPath $root -Force).Count -ne 0){
+      throw 'VIDEO_TOOLS_01N_HOLD: reinstall cleanup left unknown files'
+    }
+    Remove-Item -LiteralPath $root
+  }
+  Run-Native -Mode 'missing' -Public '-'
+  Write-Output 'VIDEO_TOOLS_01N_MANUAL_REINSTALL_PASS denied_overwrite=1 explicit_uninstall=1 verified_reinstall=1 final_missing=1 ephemeral_key=1 release=0'
   Write-Output 'VIDEO_TOOLS_01J_SIX_SIGNED_PASS fixed_root=1 real_exes=3 files=6 ephemeral_minisign=1 native_discovery=1 hold=1 negative=5 uninstall=1 private_notes_preserved=1 release=0'
   # This file is the authoritative CI handoff. It is created ONLY after
   # both positive native Minisign verdicts, all five negative cases, and
   # uninstall + user data preservation have completed successfully.
-  $proofContent="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`nVIDEO_TOOLS_01M_REAL_SIGNED_STATES_PASS`n"
+  $proofContent="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`nVIDEO_TOOLS_01M_REAL_SIGNED_STATES_PASS`nVIDEO_TOOLS_01N_MANUAL_REINSTALL_PASS`n"
   [IO.File]::WriteAllText($ProofFile,$proofContent,[Text.UTF8Encoding]::new($false))
 } finally {
   if($installed -and (Test-Path -LiteralPath (Join-Path $root 'uninstall.exe') -PathType Leaf)) {

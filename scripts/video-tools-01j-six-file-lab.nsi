@@ -24,8 +24,11 @@ Function .onInit
     Abort "VIDEO_TOOLS_01J_HOLD: Windows 10 or later required"
   ${EndIf}
   StrCpy $INSTDIR "$PROGRAMFILES64\Akula Video Tools"
-  IfFileExists "$INSTDIR\*.*" 0 +2
-    Abort "VIDEO_TOOLS_01J_HOLD: protected Video Tools root already exists"
+  ; Explicit nonzero errorlevel for silent manual reinstall refusal.
+  ; Keep existing protected files byte-for-byte intact; never overwrite.
+  IfFileExists "$INSTDIR\*.*" 0 +3
+    SetErrorLevel 77
+    Abort "VIDEO_TOOLS_01N_HOLD: protected Video Tools already installed; close Akula and uninstall separately"
 FunctionEnd
 
 Section "Install only separate nonrelease Video Tools"
