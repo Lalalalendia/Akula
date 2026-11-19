@@ -1,5 +1,4 @@
-//! VIDEO-06 non-release: bounded pure-Rust remux of separate H264/AAC
-//! fragmented DASH MP4 tracks. FFmpeg is used by CI only to create fixtures.
+//! VIDEO-06: bounded nonrelease Rust DASH remux; FFmpeg only creates fixtures.
 use mp4_track::{
     Codec, Edit, Limits, Mp4Reader, Mp4Writer, Sample, SampleInput, Track, TrackConfig,
     TrackId, TrackKind, WriterConfig,
@@ -8,6 +7,8 @@ use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
+#[path = "../version_01o.rs"]
+mod version_01o;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type Reader = Mp4Reader<BufReader<File>>;
@@ -31,9 +32,7 @@ fn accepts(track: &Track, kind: TrackKind) -> bool {
         _ => false,
     }
 }
-
 const OUTPUT_MOVIE_TIMESCALE: u32 = 1000;
-
 // DASH initialization segments may contain a one-entry edit list with
 // segment_duration=0 even though the later moof/trun samples have a real
 // duration. Reusing that edit verbatim made mvhd/tkhd duration zero and
@@ -270,14 +269,15 @@ fn run() -> Result<()> {
     }
     Ok(())
 }
-
 fn main() {
+    if version_01o::probe_identity() {
+        return;
+    }
     if let Err(error) = run() {
         eprintln!("DASH_RUST_FAILURE: {error}");
         std::process::exit(1);
     }
 }
-
 
 #[cfg(test)]
 mod timing_tests {
