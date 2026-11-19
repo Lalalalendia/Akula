@@ -150,12 +150,10 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          # Official upstream 3.11 installer. Pin independently confirmed by
-          # SourceForge release listing and Chocolatey verification metadata.
           $expected='38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a'
           $url='https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download'
           $setup=Join-Path $env:RUNNER_TEMP 'nsis-3.11-setup.exe'
-          if(Test-Path -LiteralPath $setup){throw 'VIDEO_TOOLS_01O_HOLD: NSIS installer temp file already exists'}
+          if(Test-Path -LiteralPath $setup){throw 'VIDEO_TOOLS_01O_HOLD: official NSIS setup already exists'}
           try {
             Invoke-WebRequest -Uri $url -OutFile $setup -MaximumRedirection 8 -TimeoutSec 120 -ErrorAction Stop
             $actual=(Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -166,126 +164,9 @@ jobs:
             if(!(Test-Path -LiteralPath $exe -PathType Leaf)){
               throw 'VIDEO_TOOLS_01O_HOLD: installed protected NSIS compiler absent'
             }
-            $actualVersion=@(& $exe /VERSION 2>&1) | Out-String
-            if($LASTEXITCODE -ne 0 -or $actualVersion.Trim() -notmatch '^v?3\.11(\.0)?
-      - name: Real protected three-PE NSIS, source/pin and ACL proof; no release
-        shell: pwsh
-        env:
-          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          $ErrorActionPreference='Stop'
-          $proof=@(& ./scripts/windows-video-tools-01a-isolated-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS 2>&1)
-          $proof | Out-Host
-          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS'))){
-            throw 'VIDEO_TOOLS_01A_HOLD: genuine protected install/uninstall proof missing'
-          }
-          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01D_ACL_MUTATION_PASS'))){
-            throw 'VIDEO_TOOLS_01D_HOLD: real Windows ACL poison/restore witness missing'
-          }
-          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01E_NATIVE_WIN32_PASS'))){
-            throw 'VIDEO_TOOLS_01E_HOLD: native Windows OS security witness missing'
-          }
-          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01F_NONADMIN_PASS'))){
-            throw 'VIDEO_TOOLS_01F_HOLD: real Windows standard-user access refusal missing'
-          }
-          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01G_PIN_RACE_PASS'))){
-            throw 'VIDEO_TOOLS_01G_HOLD: real Windows held-handle sharing test missing'
-          }
-          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01I_UNSIGNED_CUSTODY_PASS'))){
-            throw 'VIDEO_TOOLS_01I_HOLD: actual three pinned PE metadata was not built'
-          }
-      - name: Fetch sha256-pinned official Minisign 0.12 Windows x64 for ephemeral CI signing
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $dir=Join-Path $env:RUNNER_TEMP 'video-tools-01j-minisign-0.12'
-          if(Test-Path -LiteralPath $dir){
-            throw 'VIDEO_TOOLS_01J_HOLD: private Minisign tool stage already exists'
-          }
-          New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null
-          $archive=Join-Path $dir 'minisign-0.12-win64.zip'
-          Invoke-WebRequest 'https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip' -OutFile $archive -UseBasicParsing
-          $actual=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($actual -cne '37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479'){
-            throw 'VIDEO_TOOLS_01J_HOLD: official Minisign archive SHA-256 mismatch'
-          }
-          $out=Join-Path $dir 'verified'
-          Expand-Archive -LiteralPath $archive -DestinationPath $out -ErrorAction Stop
-          $binary=Join-Path $out 'minisign-win64/x86_64/minisign.exe'
-          if(!(Test-Path -LiteralPath $binary -PathType Leaf)){
-            throw 'VIDEO_TOOLS_01J_HOLD: expected x64 Minisign executable missing'
-          }
-          if(((Get-Item -LiteralPath $binary -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
-            throw 'VIDEO_TOOLS_01J_HOLD: Minisign executable is a link'
-          }
-          Add-Content -Path $env:GITHUB_ENV -Value ("VIDEO_TOOLS_01J_MINISIGN="+$binary)
-          Write-Output 'VIDEO_TOOLS_01J_MINISIGN_PIN_PASS version=0.12 sha256=1 release=0'
-      - name: Real six-file separate signed NSIS, native Akula read-only admission and negative cases
-        shell: pwsh
-        env:
-          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          $ErrorActionPreference='Stop'
-          # Stream Rust compiler and Minisign errors live; buffering an
-          # entire terminating PowerShell script hides the real error cause.
-          $proofFile=Join-Path $env:RUNNER_TEMP ('akula-video-tools-01j-' + $env:EXPECTED_HEAD_SHA + '.proof')
-          if(Test-Path -LiteralPath $proofFile){
-            throw 'VIDEO_TOOLS_01J_HOLD: exact-head acceptance proof already exists'
-          }
-          try {
-            # Nested PowerShell stdout is informational only. The isolated
-            # test script writes its exact proof file ONLY after native
-            # signature checks, all negative cases and safe uninstall.
-            & ./scripts/windows-video-tools-01j-six-signed-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS -ProofFile $proofFile 2>&1 | Out-Host
-            $proof=Get-Content -LiteralPath $proofFile -Raw -ErrorAction Stop
-            $expected="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`nVIDEO_TOOLS_01M_REAL_SIGNED_STATES_PASS`nVIDEO_TOOLS_01N_MANUAL_REINSTALL_PASS`n"
-            if($proof -cne $expected){
-              throw 'VIDEO_TOOLS_01J_HOLD: complete signed six-file acceptance proof is absent'
-            }
-          } finally {
-            if(Test-Path -LiteralPath $proofFile){
-              Remove-Item -LiteralPath $proofFile -Force -ErrorAction Stop
-            }
-          }
-      - name: Two independently built mux PEs, signed NSIS installs and downgrade admission refusal (non-release)
-        shell: pwsh
-        env:
-          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          $ErrorActionPreference='Stop'
-          $psErr=$null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Join-Path $PWD 'scripts/windows-video-tools-01o-real-mux-floor.ps1'),
-            [ref]$null,[ref]$psErr)
-          if($psErr.Count -gt 0){throw ('VIDEO_TOOLS_01O_HOLD: invalid PowerShell test: '+($psErr|Out-String))}
-          $proof=Join-Path $env:RUNNER_TEMP ('akula-video-tools-01o-'+$env:EXPECTED_HEAD_SHA+'.proof')
-          if(Test-Path -LiteralPath $proof){throw 'VIDEO_TOOLS_01O_HOLD: proof already exists'}
-          try {
-            & ./scripts/windows-video-tools-01o-real-mux-floor.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS -ProofFile $proof 2>&1 | Out-Host
-            $actual=Get-Content -LiteralPath $proof -Raw -ErrorAction Stop
-            $expected='VIDEO_TOOLS_01O_REAL_MUX_FLOOR_PASS'+[Environment]::NewLine
-            if($actual -cne $expected){throw 'VIDEO_TOOLS_01O_HOLD: signed real PE floor acceptance absent'}
-          } finally {
-            if(Test-Path -LiteralPath $proof){Remove-Item -LiteralPath $proof -Force -ErrorAction Stop}
-          }
-      - name: Windows installed Akula Video Tools 01k UI and queue fail-closed compilation
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed
-          if($LASTEXITCODE -ne 0){
-            throw 'VIDEO_TOOLS_01K_HOLD: ordinary installed Windows Akula native UI failed to compile'
-          }
-          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --bin aquilum-native -- video::queue::installed_tests::installed_download_refusal_creates_no_job_or_local_bytes --exact --nocapture
-          if($LASTEXITCODE -ne 0){
-            throw 'VIDEO_TOOLS_01K_HOLD: Windows installed queue accepted an unapproved executable'
-          }
-          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --bin aquilum-native -- app::editor_requests::video_stock_admission::tests::all_five_native_states_show_distinct_russian_and_english_status --exact --nocapture
-          if($LASTEXITCODE -ne 0){
-            throw 'VIDEO_TOOLS_01K_HOLD: user-visible native Windows package status or locales incomplete'
-          }
-          Write-Output 'VIDEO_TOOLS_01K_INSTALLED_WINDOWS_PASS read_only_status=5 queue=closed untrusted_path=0 release=0'
-){
+            $version=@(& $exe /VERSION 2>&1) | Out-String
+            if($LASTEXITCODE -ne 0 -or
+               ($version.Trim() -cne 'v3.11' -and $version.Trim() -cne '3.11' -and $version.Trim() -cne 'v3.11.0')){
               throw 'VIDEO_TOOLS_01O_HOLD: installed NSIS version differs from pinned source'
             }
             Write-Output 'VIDEO_TOOLS_01O_NSIS_OFFICIAL_PIN_PASS version=3.11 sha256=1 release=0'
