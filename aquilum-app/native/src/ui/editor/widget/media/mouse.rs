@@ -5,7 +5,7 @@ use crate::ui::editor::resolve::Request;
 impl TextEditor {
     pub(in crate::ui::editor::widget) fn media_press(&mut self, ctx: &mut EventCtx<'_>, point: Point, count: u8) -> bool {
         let under = self.media_under(point);
-        #[cfg(all(windows, feature = "video-ui-e2e"))]
+        #[cfg(all(windows, any(feature = "video-ui-e2e", feature = "video-tools-gui-e2e")))]
         crate::video::ui_acceptance::press_hit(under.is_some_and(|(_, hit)| hit == MediaHit::Download), under.is_some());
         if self.media.crop.is_some_and(|(s, _)| under.is_none_or(|(u, _)| u != s)) {
             self.end_crop(false);
@@ -42,10 +42,10 @@ impl TextEditor {
             }
             MediaHit::Play | MediaHit::Toggle => {
                 if let Some(path) = path {
-                    #[cfg(all(windows, feature = "video-ui-e2e"))]
+                    #[cfg(all(windows, any(feature = "video-ui-e2e", feature = "video-tools-gui-e2e")))]
                     crate::video::ui_acceptance::mark("CLICK_LOCAL_PLAY_ATTEMPT");
                     if crate::video::toggle(&path) {
-                        #[cfg(all(windows, feature = "video-ui-e2e"))]
+                        #[cfg(all(windows, any(feature = "video-ui-e2e", feature = "video-tools-gui-e2e")))]
                         crate::video::ui_acceptance::mark("CLICK_LOCAL_PLAY");
                         self.videos.add(path);
                         ctx.request_anim_frame();
@@ -124,7 +124,7 @@ impl TextEditor {
             return true;
         }
         let hover = self.media_under(point);
-        #[cfg(all(windows, feature = "video-ui-e2e"))]
+        #[cfg(all(windows, any(feature = "video-ui-e2e", feature = "video-tools-gui-e2e")))]
         if let Some((start, hit)) = hover {
             let view = self.media_view(start);
             let center = view.and_then(|v| match hit {

@@ -54,7 +54,7 @@ impl TextEditor {
         match event {
             PointerEvent::Down(PointerButtonEvent { button: None | Some(PointerButton::Primary), state, .. }) => {
                 self.close_suggest();
-                #[cfg(all(windows, feature = "video-ui-e2e"))]
+                #[cfg(all(windows, any(feature = "video-ui-e2e", feature = "video-tools-gui-e2e")))]
                 crate::video::ui_acceptance::mark("WINDOW_POINTER_DOWN");
                 let point = ctx.local_position(state.position);
                 let new_tab = crate::ui::keymap::action(state.modifiers);
