@@ -111,7 +111,7 @@ pub struct App {
     transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,
     find: Option<crate::ui::find::FindBar>,
-    note: Option<Note>,
+    note: Option<Note>, pending_annotation_rebind: Option<editor_requests::annotation_save_bridge::PendingAnnotationRebind>,
     recovery: note_recovery::RecoveryUi,
     text: crop::Rope,
     // At most two clean, hash-verified Rope snapshots from inactive tabs.

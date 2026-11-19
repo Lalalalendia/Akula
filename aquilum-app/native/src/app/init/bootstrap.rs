@@ -31,7 +31,7 @@ impl App {
             transfer: transfer::TransferState::default(),
             suggest_layer: None,
             find: None,
-            note: None,
+            note: None, pending_annotation_rebind: None,
             recovery: note_recovery::RecoveryUi::default(),
             text: crop::Rope::from(initial_text),
             inactive_notes: Vec::new(),

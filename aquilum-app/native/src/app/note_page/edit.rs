@@ -7,7 +7,7 @@ use crate::file_ops;
 use crate::frontmatter;
 use crate::ui::widgets::Slot;
 impl App {
-    pub(super) fn body_edited(&mut self, root: &mut RenderRoot, _edits: &[crate::ui::editor::Edit]) {
+    pub(super) fn body_edited(&mut self, root: &mut RenderRoot, _edits: &[crate::ui::editor::Edit]) { self.capture_annotation_edits(root, _edits);
         let had = frontmatter::end_of(&self.text).is_some();
         // The widget already applied all edits (including multi-cursor changes).
         // Cloning its persistent rope avoids replaying every edit on a second

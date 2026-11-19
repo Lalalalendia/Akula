@@ -33,7 +33,7 @@ impl App {
     }
 
     pub(in crate::app) fn note_widget(&mut self) -> NewWidget<dyn Widget> {
-        let path = self.note.as_ref().map(|n| n.path.clone());
+        self.pending_annotation_rebind = None; let path = self.note.as_ref().map(|n| n.path.clone());
         let file_name = path.as_deref().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let title = path.as_deref().and_then(Path::file_stem).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         self.hidden = self.hidden_len();

@@ -29,6 +29,6 @@ impl App {
             self.set_text(root, text);
             self.refresh_save_error(root);
         }
-        self.poll_note_recovery(root);
+        self.finish_annotation_rebind_after_save(root); self.poll_note_recovery(root);
     }
 }
