@@ -255,9 +255,12 @@ function Scenario([string]$Label,[string]$Title){
     if($null -ne $app){Stop-Gui $app}
   }
 }
-function Icacls([string[]]$Args){
-  & "$env:WINDIR\System32\icacls.exe" @Args | Out-Host
-  if($LASTEXITCODE -ne 0){throw "VIDEO_TOOLS_01L_HOLD: icacls failed $($Args -join ' ')"}
+function Icacls([Parameter(Mandatory=$true)][string[]]$Arguments){
+  if($Arguments.Count -lt 2 -or [string]::IsNullOrWhiteSpace($Arguments[0])){
+    throw 'VIDEO_TOOLS_01L_HOLD: exact icacls argument list is missing'
+  }
+  & "$env:WINDIR\System32\icacls.exe" @Arguments | Out-Host
+  if($LASTEXITCODE -ne 0){throw "VIDEO_TOOLS_01L_HOLD: icacls failed $($Arguments -join ' ')"}
 }
 $created=$false
 try {
@@ -271,14 +274,14 @@ try {
     [IO.File]::WriteAllBytes((Join-Path $root $name),
       [byte[]](77,90,48,49,76,45,78,79,78,82,69,76,69,65,83,69))
   }
-  Icacls @($root,'/inheritance:r','/T','/C')
-  Icacls @($root,'/grant:r','*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F','/T','/C')
-  Icacls @($root,'/setowner','*S-1-5-32-544','/T','/C')
+  Icacls -Arguments @($root,'/inheritance:r','/T','/C')
+  Icacls -Arguments @($root,'/grant:r','*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F','/T','/C')
+  Icacls -Arguments @($root,'/setowner','*S-1-5-32-544','/T','/C')
   if(@(Get-ChildItem -LiteralPath $root -Force).Count -ne 6){
     throw 'VIDEO_TOOLS_01L_HOLD: protected fixture identity mismatch'
   }
   Scenario 'publisher-not-approved' 'Video Tools publisher is not yet approved'
-  Icacls @((Join-Path $root 'akula-yt-dlp.exe'),'/grant','*S-1-5-32-545:M')
+  Icacls -Arguments @((Join-Path $root 'akula-yt-dlp.exe'),'/grant','*S-1-5-32-545:M')
   Scenario 'unsafe' 'Video Tools installation did not pass verification'
   Write-Host 'VIDEO_TOOLS_01L_REAL_GUI_PASS real_pointer=3 uia_warning=3 no_ytdlp_child=1 no_media=1 release=0'
 } finally {
@@ -287,7 +290,7 @@ try {
     if($items.Count -ne 6 -or @($items|Where-Object{$_.Name -cnotin $names}).Count -ne 0){
       throw 'VIDEO_TOOLS_01L_HOLD: unexpected protected files; refusing unsafe cleanup'
     }
-    Icacls @($root,'/grant','*S-1-5-32-544:(OI)(CI)F','/T','/C')
+    Icacls -Arguments @($root,'/grant','*S-1-5-32-544:(OI)(CI)F','/T','/C')
     Remove-Item -LiteralPath $root -Force -Recurse -ErrorAction Stop
     if(Test-Path -LiteralPath $root){throw 'VIDEO_TOOLS_01L_HOLD: protected fixture remained'}
   }
