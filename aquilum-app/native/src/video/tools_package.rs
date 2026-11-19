@@ -38,8 +38,8 @@ struct Component {
 }
 #[derive(Debug)]
 pub(super) struct AttestedContents {
-    version: String,
-    digests: [String; 3],
+    pub(super) version: String,
+    pub(super) digests: [String; 3],
 }
 
 fn hold(message: &str) -> String { format!("VIDEO_TOOLS_01B_HOLD: {message}") }
