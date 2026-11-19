@@ -26,13 +26,13 @@ fn save_highlight(h: &mut Harness) -> std::path::PathBuf {
         TextEditor::select_byte_range(&mut editor, at, at + 3);
     });
     h.app.open_editor_context_menu(&mut h.root, Point::ORIGIN, true, None);
-    let layer = match h.app.popup {
-        Some(Popup::EditorMenu { layer, .. }) => layer,
+    let layer = match &h.app.popup {
+        Some(Popup::EditorMenu { layer, .. }) => *layer,
         _ => panic!("editor context menu missing"),
     };
     h.act(layer, MenuChoice::Item(1));
-    let layer = match h.app.popup {
-        Some(Popup::AnnotationColors { layer, .. }) => layer,
+    let layer = match &h.app.popup {
+        Some(Popup::AnnotationColors { layer, .. }) => *layer,
         _ => panic!("annotation palette missing"),
     };
     h.act(layer, MenuChoice::Item(0));
