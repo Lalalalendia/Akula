@@ -424,7 +424,7 @@ jobs:
       # Reuse the existing required Rust runner rather than queuing another job.
       # The test-only publisher key is ephemeral and never leaves RUNNER_TEMP.
       - name: Real ephemeral Minisign signature admitted by native Rust
-        if: needs.classify.outputs.mode == 'workspace' && (startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-CANDIDATE-') || startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-STAGING-') || startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-') || github.head_ref == 'feature/windows-signed-manifest-v1-matrix-20261021')
+        if: (needs.classify.outputs.mode == 'workspace' && (startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-CANDIDATE-') || startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-STAGING-') || startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-') || github.head_ref == 'feature/windows-signed-manifest-v1-matrix-20261021')) || ((needs.classify.outputs.mode == 'native' || needs.classify.outputs.mode == 'workspace') && startsWith(github.event.pull_request.title, 'VIDEO-TOOLS-01b'))
         working-directory: aquilum-app
         shell: bash
         run: |
@@ -482,6 +482,37 @@ jobs:
           grep -Fq 'AKULA_SIGNED_LINUX_ROLLBACK_PASS signed_candidate=1 v1_restored=1 v2_preserved_as_failed=1' "$RUNNER_TEMP/akula-native-minisign.log"
           echo 'AKULA_SIGNED_CANDIDATE_RUST_MINISIGN_PASS real_sign=1 wrong_key_refused=1' >> "$GITHUB_STEP_SUMMARY"
           echo 'AKULA_SIGNED_LINUX_STAGE_PASS signed_to_disk=1 native_inode_rehash=1' >> "$GITHUB_STEP_SUMMARY"
+          # VIDEO-TOOLS-01b: generate a completely independent ephemeral key,
+          # sign the exact three-file manifest, and test WRONG key/bytes/PE.
+          export AKULA_VIDEO_TOOLS_TEST_ROOT="$RUNNER_TEMP/akula-video-tools01b-native"
+          mkdir -m 700 -p "$AKULA_VIDEO_TOOLS_TEST_ROOT/package"
+          node <<'NODE'
+          const fs=require('node:fs');
+          const crypto=require('node:crypto');
+          const path=require('node:path');
+          const root=process.env.AKULA_VIDEO_TOOLS_TEST_ROOT;
+          if(!root) throw Error('VIDEO_TOOLS_01B_HOLD: missing isolated root');
+          const names=['akula-video-mux.exe','akula-yt-dlp.exe','akula-quickjs.exe'];
+          const binaries=names.map((name,i)=>{
+            const data=Buffer.alloc(256+i*16, 0x31+i);
+            data[0]=0x4d; data[1]=0x5a;
+            fs.writeFileSync(path.join(root,'package',name),data);
+            return {name,sha256:crypto.createHash('sha256').update(data).digest('hex'),size:data.length};
+          });
+          const manifest={
+            schema:1,product:'Akula Video Tools',platform:'windows-x86_64',
+            version:'0.1.0',source_commit:'a'.repeat(40),
+            cargo_lock_sha256:'b'.repeat(64),binaries
+          };
+          fs.writeFileSync(path.join(root,'package','manifest.json'),JSON.stringify(manifest));
+          NODE
+          minisign -G -W -s "$AKULA_VIDEO_TOOLS_TEST_ROOT/publisher.key" -p "$AKULA_VIDEO_TOOLS_TEST_ROOT/publisher.pub"
+          minisign -G -W -s "$AKULA_VIDEO_TOOLS_TEST_ROOT/other.key" -p "$AKULA_VIDEO_TOOLS_TEST_ROOT/other.pub"
+          minisign -S -q -s "$AKULA_VIDEO_TOOLS_TEST_ROOT/publisher.key" -m "$AKULA_VIDEO_TOOLS_TEST_ROOT/package/manifest.json" -x "$AKULA_VIDEO_TOOLS_TEST_ROOT/package/manifest.minisig"
+          cargo test --locked -p aquilum-native --bin aquilum-native video::tools_package::tests::ephemeral_minisign_authenticates_exact_three_component_bytes -- --exact --ignored --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-video-tools01b.log"
+          grep -Fq 'test video::tools_package::tests::ephemeral_minisign_authenticates_exact_three_component_bytes ... ok' "$RUNNER_TEMP/akula-video-tools01b.log"
+          grep -Fq 'VIDEO_TOOLS_01B_REAL_MINISIGN_PASS signed_manifest=1 wrong_key=0 tampered_manifest=0 altered_exe=0 fourth_exe=0 release=0' "$RUNNER_TEMP/akula-video-tools01b.log"
+          echo 'VIDEO_TOOLS_01B_REAL_MINISIGN_PASS separate_signer=1 exact_three=1 no_release=1' >> "$GITHUB_STEP_SUMMARY"
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" && ( "$GITHUB_HEAD_REF" == release/windows-nsis-self-update-01 || "$GITHUB_HEAD_REF" == feature/windows-signed-manifest-v1-matrix-20261021 || "$GITHUB_HEAD_REF" == release/akula-signed-metadata-discovery-01-20261021 ) ]]; then
             cargo test --locked -p aquilum-native --bin aquilum-native updater::release::signed_candidate::tests::ephemeral_minisign_windows_fixture_accepts_signed_exact_bytes -- --exact --ignored --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-native-windows-minisign.log"
             grep -Fq 'AKULA_WINDOWS_REAL_MINISIGN_ADMISSION_PASS correct_key=1 exact_nsis=1 wrong_key=0 downgrade=0' "$RUNNER_TEMP/akula-native-windows-minisign.log"
