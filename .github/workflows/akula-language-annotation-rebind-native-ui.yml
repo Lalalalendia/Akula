@@ -4,7 +4,6 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'aquilum-app/core/src/text/annotation_manual_rebind.rs'
       - 'aquilum-app/native/src/app/editor_requests/annotation_manual_rebind_ui.rs'
       - 'aquilum-app/native/src/app/tests/learning_annotation_manual_rebind.rs'
       - 'aquilum-app/native/src/app/tests/mod.rs'
