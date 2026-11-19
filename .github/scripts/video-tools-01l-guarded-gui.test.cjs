@@ -71,7 +71,9 @@ function check(x){
     'runs-on: windows-2025','persist-credentials: false',
     'permissions:\n  contents: read','video-tools-gui-e2e',
     'node --test .github/scripts/video-tools-01l-guarded-gui.test.cjs',
-    'cargo build --release --locked','powershell.exe -NoProfile -STA',
+    'cargo build --release --locked',
+    "rustc --edition=2024 -O (Join-Path $env:GITHUB_WORKSPACE 'scripts/video-tools-01l-child-sentinel.rs')",
+    'powershell.exe -NoProfile -STA',
     'VIDEO_TOOLS_01L_WINDOWS_ACCEPTED_NONRELEASE','EXPECTED_HEAD_SHA:'
  ])hold(x.flow.includes(token),'dedicated Windows acceptance missing '+token);
  const prFiles=x.flow.split('\n').filter(l=>l.startsWith("      - '")&&l.endsWith("'"))

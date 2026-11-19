@@ -91,7 +91,7 @@ jobs:
           $app=Join-Path $stage 'akula-app.exe'
           $sentinel=Join-Path $stage 'yt-dlp.exe'
           Copy-Item -LiteralPath $build -Destination $app -ErrorAction Stop
-          rustc --edition=2024 -O scripts/video-tools-01l-child-sentinel.rs -o $sentinel
+          rustc --edition=2024 -O (Join-Path $env:GITHUB_WORKSPACE 'scripts/video-tools-01l-child-sentinel.rs') -o $sentinel
           if($LASTEXITCODE -ne 0){throw 'VIDEO_TOOLS_01L_HOLD: sentinel compilation failed'}
           foreach($file in @($app,$sentinel)){
             $stream=[IO.File]::OpenRead($file)
