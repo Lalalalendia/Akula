@@ -107,3 +107,11 @@ fn ephemeral_minisign_authenticates_exact_three_component_bytes() {
     assert!(verify_signed(&package, &raw, &sig, &key).is_ok());
     println!("VIDEO_TOOLS_01B_REAL_MINISIGN_PASS signed_manifest=1 wrong_key=0 tampered_manifest=0 altered_exe=0 fourth_exe=0 release=0");
 }
+
+#[cfg(windows)]
+#[test]
+fn native_tools_discovery_never_authorizes_without_publisher() {
+    assert_ne!(probe_installed_video_tools(), ToolsDiscovery::ReadOnlyAttested);
+    assert!(!shipping_admission_enabled());
+    assert!(APPROVED_VIDEO_TOOLS_KEY.is_empty());
+}

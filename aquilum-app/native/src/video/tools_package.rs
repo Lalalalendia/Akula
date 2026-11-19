@@ -182,3 +182,58 @@ pub(super) fn shipping_admission_enabled() -> bool {
 #[cfg(test)]
 #[path = "tools_package_tests.rs"]
 mod tests;
+
+#[cfg(windows)]
+#[path = "tools_package_windows.rs"]
+mod windows_discovery;
+
+/// Native Video Tools discovery is diagnostics only. Not executable admission.
+#[cfg(windows)]
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ToolsDiscovery {
+    Missing,
+    Unsafe,
+    PublisherNotApproved,
+    ReadOnlyAttested,
+}
+
+#[cfg(windows)]
+pub(super) fn probe_installed_video_tools() -> ToolsDiscovery {
+    let root = match windows_discovery::installed_root() {
+        Ok(Some(root)) => root,
+        Ok(None) => return ToolsDiscovery::Missing,
+        Err(_) => return ToolsDiscovery::Unsafe,
+    };
+    // Exact publisher product contents: no environment-selected EXE fallback.
+    let files = [
+        "manifest.json",
+        "manifest.minisig",
+        "akula-video-mux.exe",
+        "akula-yt-dlp.exe",
+        "akula-quickjs.exe",
+        "uninstall.exe",
+    ];
+    if windows_discovery::check_installed_acl(&root, &files).is_err() {
+        return ToolsDiscovery::Unsafe;
+    }
+    // An ephemeral CI Minisign key must never enable production discovery.
+    if APPROVED_VIDEO_TOOLS_KEY.is_empty() || !shipping_admission_enabled() {
+        return ToolsDiscovery::PublisherNotApproved;
+    }
+    let raw = match bounded_metadata(&root.join("manifest.json"), MAX_MANIFEST) {
+        Ok(raw) => raw,
+        Err(_) => return ToolsDiscovery::Unsafe,
+    };
+    let signature = match bounded_metadata(&root.join("manifest.minisig"), MAX_SIGNATURE) {
+        Ok(bytes) => bytes,
+        Err(_) => return ToolsDiscovery::Unsafe,
+    };
+    let signed = match std::str::from_utf8(&signature) {
+        Ok(signed) => signed,
+        Err(_) => return ToolsDiscovery::Unsafe,
+    };
+    if verify_signed(&root, &raw, signed, APPROVED_VIDEO_TOOLS_KEY).is_err() {
+        return ToolsDiscovery::Unsafe;
+    }
+    ToolsDiscovery::ReadOnlyAttested
+}
