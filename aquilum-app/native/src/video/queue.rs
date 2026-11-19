@@ -40,6 +40,11 @@ pub fn enqueue(
     registered_roots: Vec<PathBuf>,
     changed: Arc<dyn Fn(bool, &str) + Send + Sync>,
 ) -> Result<bool, &'static str> {
+    // Video Tools release is not approved. Installed Windows may not turn
+    // a PATH entry, env-selected yt-dlp or CI signature into process rights.
+    if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e"))) {
+        return Err("Video Tools execution is not approved for installed Akula");
+    }
     let id = youtube::video_id(&url).ok_or("invalid single-video URL")?.to_owned();
     {
         let mut list = jobs().lock().unwrap_or_else(|e| e.into_inner());
@@ -82,6 +87,18 @@ pub fn enqueue(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
+    #[test]
+    fn installed_download_refusal_creates_no_job_or_local_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let url = "https://youtu.be/AbCdEfGhIJK";
+        let callback = Arc::new(|_: bool, _: &str| {});
+        assert_eq!(enqueue(url.into(), temp.path().to_path_buf(), vec![], callback),
+            Err("Video Tools execution is not approved for installed Akula"));
+        assert!(status(url).is_none());
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+    }
+
     #[test]
     fn untrusted_link_never_creates_a_download_job() {
         let dir = tempfile::tempdir().unwrap();

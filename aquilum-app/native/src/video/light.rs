@@ -321,6 +321,11 @@ pub(super) fn download_one_or_legacy(
     library: &Library, executable: &OsStr, url: &str,
     on_progress: impl FnMut(download::Progress),
 ) -> Result<PathBuf, String> {
+    // An internal caller cannot bypass the queue/UX to launch a legacy PATH
+    // downloader in an installed Windows build. The CI GUI lab is nonshipping.
+    if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e"))) {
+        return Err("VIDEO_TOOLS_01K_HOLD: publisher-approved process launch is unavailable".into());
+    }
     if std::env::var_os("AKULA_RUST_MUX_BIN").is_some() {
         return Err("AKULA_RUST_MUX_BIN is no longer supported: arbitrary mux executables are refused".into());
     }
