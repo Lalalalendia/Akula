@@ -1,6 +1,6 @@
-# LANG-08b: real NSIS-installed Akula, Windows file picker and manual HOLD restore.
+# LANG-08a: a genuine NSIS-installed Akula, Windows OS pointer and UIA.
 # Scope: cold-vault manual HOLD refusal, real highlight/color, note-actions
-# visibility, restart, native picker backup round-trip and explicit HOLD rebind.
+# visibility, restart and source-hash preservation. NOT full backup import E2E.
 param(
   [Parameter(Mandatory=$true)][string]$SetupPath,
   [Parameter(Mandatory=$true)][string]$ManifestPath
@@ -313,7 +313,6 @@ function Close-Note {
   }
   $Process.Dispose()
 }
-
 # LANG-08b uses native Windows file-picker UIA, not a mocked RFD response.
 # The dialog must belong to the exact installed Akula PID and own foreground.
 Add-Type -ErrorAction Stop -TypeDefinition @'
@@ -417,7 +416,69 @@ function Choose-FileThroughNativeDialog {
          !$s.IsEnabled -or $s.IsOffscreen -or $s.BoundingRectangle.IsEmpty){continue}
       $seen+=("$($s.AutomationId):$($s.Name)")
       if($s.AutomationId -ceq '1148' -or
-         $s.Name -match '^(File name|Имя файла)(:)?
+         $s.Name -match '^(File name|Имя файла)(:)?$'){
+        $filename=$e;break
+      }
+    }catch [Windows.Automation.ElementNotAvailableException] {}
+  }
+  if($null -eq $filename){
+    Write-Host ('LANG-08b file dialog visible Edit controls: '+($seen -join ' | '))
+    throw 'LANG-08b could not identify genuine File name edit'
+  }
+  $rect=$filename.Current.BoundingRectangle
+  $x=[int][Math]::Round($rect.Left+$rect.Width/2)
+  $y=[int][Math]::Round($rect.Top+$rect.Height/2)
+  [AkulaLang08Pointer]::Click($hwnd,$Process.Id,$x,$y,$false)
+  if([AkulaBetaGuiInput]::GetForegroundWindow() -ne $hwnd){
+    throw 'LANG-08b file picker lost verified foreground before input'
+  }
+  [Windows.Forms.Clipboard]::SetText($target)
+  if([Windows.Forms.Clipboard]::GetText() -cne $target){
+    throw 'LANG-08b synthetic clipboard filename did not round-trip'
+  }
+  [AkulaLang08DialogKeys]::Chord($hwnd,$Process.Id,[uint16]0x41)
+  [AkulaLang08DialogKeys]::Chord($hwnd,$Process.Id,[uint16]0x56)
+  Start-Sleep -Milliseconds 200
+  [AkulaBetaGuiInput]::SendNavigationKey($hwnd,$Process.Id,[uint16]0x0d,$false)
+}
+# This witness reads SQLite only. No bypass into the Akula application.
+function Get-AnnotationSnapshot {
+  param([string]$Path)
+  $reader=@'
+import json
+import pathlib
+import sqlite3
+import sys
+db=pathlib.Path(sys.argv[1]).resolve()
+with sqlite3.connect(db.as_uri()+"?mode=ro",uri=True) as conn:
+    row=conn.execute("SELECT revision,payload FROM text_annotation_state WHERE id=1").fetchone()
+if row is None or row[0]<0:
+    raise ValueError("Missing annotation revision")
+payload=json.loads(row[1])
+records=payload["records"]
+if len(records)>1:
+    raise ValueError("Unexpected second synthetic annotation")
+record=records[0] if records else None
+print(json.dumps({"revision":int(row[0]),"record_count":len(records),
+    "status":record["status"] if record else None,
+    "annotation_id":record["anchor"]["annotation_id"] if record else None,
+    "selected_digest":record["anchor"]["selected_digest"] if record else None,
+    "color":record["color"] if record else None}))
+'@
+  $out=($reader | & python - $Path | Out-String).Trim()
+  if($LASTEXITCODE -ne 0 -or !$out){throw 'LANG-08b could not read real annotation SQLite payload'}
+  return ($out | ConvertFrom-Json)
+}
+function Assert-SyntheticUnchanged {
+  param([string]$Markdown,[string]$ExpectedHash,[string]$Backup,[string]$BackupHash)
+  if((Get-FileHash -LiteralPath $Markdown -Algorithm SHA256).Hash -cne $ExpectedHash -or
+     (Get-FileHash -LiteralPath $Backup -Algorithm SHA256).Hash -cne $BackupHash){
+    throw 'LANG-08b modified synthetic source Markdown or exported JSON backup'
+  }
+}
+
+$installed=$false
+$proc=$null
 $note=$null
 $beforeHash=$null
 $dbState=$null
@@ -680,205 +741,6 @@ if result is None or result[0]!=0:
   Assert-SyntheticUnchanged -Markdown $note -ExpectedHash $beforeHash -Backup $backup -BackupHash $backupHash
   Assert-Upstream
   Write-Host 'AKULA_LANG08B_INSTALLED_RESTART_PASS reopened=1 restored_sqlite_stable=1 source_untouched=1'
-} finally {
-  if($null -ne $proc){
-    $proc.Refresh()
-    if(!$proc.HasExited){$proc.Kill();$proc.WaitForExit()}
-    $proc.Dispose()
-  }
-  if($installed){
-    $uninstaller=Join-Path $install 'uninstall.exe'
-    if(!(Test-Path -LiteralPath $uninstaller -PathType Leaf)){
-      throw 'LANG-08 genuine NSIS uninstaller missing'
-    }
-    $remove=Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
-    if($remove.ExitCode -ne 0 -or (Test-Path -LiteralPath $exe) -or (Test-Path -LiteralPath $key)){
-      throw 'LANG-08 NSIS uninstall failed or retained installed identity'
-    }
-    Assert-Upstream
-    if($null -ne $beforeHash -and
-       (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash){
-      throw 'LANG-08 uninstall changed synthetic Markdown'
-    }
-    Write-Host 'AKULA_LANG08_INSTALLED_UNINSTALL_PASS clean=1 upstream_untouched=1 data_preserved=1'
-  }
-}
-){
-        $filename=$e;break
-      }
-    }catch [Windows.Automation.ElementNotAvailableException] {}
-  }
-  if($null -eq $filename){
-    Write-Host ('LANG-08b file dialog visible Edit controls: '+($seen -join ' | '))
-    throw 'LANG-08b could not identify genuine File name edit'
-  }
-  $rect=$filename.Current.BoundingRectangle
-  $x=[int][Math]::Round($rect.Left+$rect.Width/2)
-  $y=[int][Math]::Round($rect.Top+$rect.Height/2)
-  [AkulaLang08Pointer]::Click($hwnd,$Process.Id,$x,$y,$false)
-  if([AkulaBetaGuiInput]::GetForegroundWindow() -ne $hwnd){
-    throw 'LANG-08b file picker lost verified foreground before input'
-  }
-  [Windows.Forms.Clipboard]::SetText($target)
-  if([Windows.Forms.Clipboard]::GetText() -cne $target){
-    throw 'LANG-08b synthetic clipboard filename did not round-trip'
-  }
-  [AkulaLang08DialogKeys]::Chord($hwnd,$Process.Id,[uint16]0x41)
-  [AkulaLang08DialogKeys]::Chord($hwnd,$Process.Id,[uint16]0x56)
-  Start-Sleep -Milliseconds 200
-  [AkulaBetaGuiInput]::SendNavigationKey($hwnd,$Process.Id,[uint16]0x0d,$false)
-}
-# This witness reads SQLite only. No bypass into the Akula application.
-function Get-AnnotationSnapshot {
-  param([string]$Path)
-  $reader=@'
-import json
-import pathlib
-import sqlite3
-import sys
-db=pathlib.Path(sys.argv[1]).resolve()
-with sqlite3.connect(db.as_uri()+"?mode=ro",uri=True) as conn:
-    row=conn.execute("SELECT revision,payload FROM text_annotation_state WHERE id=1").fetchone()
-if row is None or row[0]<0:
-    raise ValueError("Missing annotation revision")
-payload=json.loads(row[1])
-records=payload["records"]
-if len(records)>1:
-    raise ValueError("Unexpected second synthetic annotation")
-record=records[0] if records else None
-print(json.dumps({"revision":int(row[0]),"record_count":len(records),
-    "status":record["status"] if record else None,
-    "annotation_id":record["anchor"]["annotation_id"] if record else None,
-    "selected_digest":record["anchor"]["selected_digest"] if record else None,
-    "color":record["color"] if record else None}))
-'@
-  $out=($reader | & python - $Path | Out-String).Trim()
-  if($LASTEXITCODE -ne 0 -or !$out){throw 'LANG-08b could not read real annotation SQLite payload'}
-  return ($out | ConvertFrom-Json)
-}
-function Assert-SyntheticUnchanged {
-  param([string]$Markdown,[string]$ExpectedHash,[string]$Backup,[string]$BackupHash)
-  if((Get-FileHash -LiteralPath $Markdown -Algorithm SHA256).Hash -cne $ExpectedHash -or
-     (Get-FileHash -LiteralPath $Backup -Algorithm SHA256).Hash -cne $BackupHash){
-    throw 'LANG-08b modified synthetic source Markdown or exported JSON backup'
-  }
-}
-
-$installed=$false
-$proc=$null
-$note=$null
-$beforeHash=$null
-$dbState=$null
-New-Item -ItemType Directory -Path $vault,$data -ErrorAction Stop|Out-Null
-New-Item -ItemType Directory -Path $upstream,$updata -ErrorAction Stop|Out-Null
-[IO.File]::WriteAllText((Join-Path $upstream 'sentinel.txt'),'AKULA_LANG08_UPSTREAM')
-[IO.File]::WriteAllText((Join-Path $updata 'sentinel.txt'),'AKULA_LANG08_UPDATA')
-New-Item -Path $upkey -Force|Out-Null
-Set-ItemProperty -Path $upkey -Name DisplayName -Value 'Aquilum'
-function Assert-Upstream {
-  if([IO.File]::ReadAllText((Join-Path $upstream 'sentinel.txt')) -cne 'AKULA_LANG08_UPSTREAM' -or
-     [IO.File]::ReadAllText((Join-Path $updata 'sentinel.txt')) -cne 'AKULA_LANG08_UPDATA' -or
-     (Get-ItemProperty $upkey).DisplayName -cne 'Aquilum') {
-    throw 'LANG-08 installed Akula altered a simulated upstream Aquilum installation'
-  }
-}
-try {
-  $setupProc=Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
-  if($setupProc.ExitCode -ne 0){throw "LANG-08 NSIS setup failed ($($setupProc.ExitCode))"}
-  $installed=$true
-  $installedHash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
-  if(!(Test-Path -LiteralPath $key) -or
-     (Get-ItemProperty $key).DisplayName -cne 'Akula' -or
-     $installedHash -cne $manifest.compiled_executable_sha256) {
-    throw 'LANG-08 wrong installed NSIS identity or compiled EXE SHA256'
-  }
-  Assert-Upstream
-  $note=Join-Path $vault 'LANG08 Annotation.md'
-  $text='# LANG08 Annotation'+[char]10+[char]10+'alpha eat omega'+[char]10
-  [IO.File]::WriteAllText($note,$text,[Text.UTF8Encoding]::new($false))
-  $beforeHash=(Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
-  $db=Join-Path $data 'text-annotations.sqlite'
-  if(Test-Path -LiteralPath $db){throw 'LANG-08 cold sidecar was unexpectedly present'}
-  $proc=Open-Note -Note $note -Vault $vault -Data $data
-  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
-  Focus-Akula -Process $proc
-  $window=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]$proc.MainWindowHandle)
-  if($null -eq $window){throw 'LANG-08 installed window has no UIA tree'}
-  $body=Select-EditorBody -Root $window
-  Readback-Selected -Process $proc -Expected $text
-
-  # Negative: exact selection + real context menu + rebind with no sidecar.
-  Click-Visible -Target $body -Window $window -Process $proc -Right
-  $reb=Wait-Visible -Root $window -Names $labels.rebind -Type ([Windows.Automation.ControlType]::MenuItem)
-  Click-Visible -Target $reb -Window $window -Process $proc
-  if(Test-Path -LiteralPath $db){throw 'LANG-08 invalid HOLD rebind created a database'}
-  if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash){
-    throw 'LANG-08 invalid rebind modified Markdown'
-  }
-  # The failed rebind deliberately raises a *modal* study_notice (AlertDialog).
-  # Do not try to interact with the obscured editor until we close it through
-  # the actual installed Windows UI. This modal is part of the negative test.
-  $closeNotice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
-  Click-Visible -Target $closeNotice -Window $window -Process $proc
-  # UIAutomation can retain a stale exposed Close button after the native
-  # modal begins its fade-out. Presence of that label in the broad root tree
-  # is NOT evidence the dialog still owns focus. Verify real behavior instead:
-  # regain the editor, read back exact Markdown with physical Ctrl+A/C and
-  # prove that its actual context menu is openable through the OS mouse.
-  Start-Sleep -Milliseconds 400
-  Focus-Akula -Process $proc
-  $body=Select-EditorBody -Root $window
-  Readback-Selected -Process $proc -Expected $text
-  Click-Visible -Target $body -Window $window -Process $proc -Right
-  $highlight=Wait-Visible -Root $window -Names $labels.highlight -Type ([Windows.Automation.ControlType]::MenuItem)
-  Write-Host 'AKULA_LANG08_INSTALLED_REBIND_DENY_PASS genuine_nsis=1 os_mouse=1 sidecar_created=0 source_unchanged=1 editor_access_restored=1'
-  Click-Visible -Target $highlight -Window $window -Process $proc
-  $yellow=Wait-Visible -Root $window -Names $labels.yellow -Type ([Windows.Automation.ControlType]::MenuItem)
-  Click-Visible -Target $yellow -Window $window -Process $proc
-  $dbReady=$false
-  for($i=0;$i -lt 80;$i++){
-    Start-Sleep -Milliseconds 150
-    if(Test-Path -LiteralPath $db -PathType Leaf){
-      $info=Get-Item -LiteralPath $db
-      if($info.Length -gt 512){$dbReady=$true;break}
-    }
-  }
-  if(!$dbReady){throw 'LANG-08 real OS highlight never persisted SQLite'}
-  $header=[IO.File]::ReadAllBytes($db)
-  if([Text.Encoding]::ASCII.GetString($header,0,15) -cne 'SQLite format 3'){
-    throw 'LANG-08 native annotation sidecar is not a SQLite database'
-  }
-  if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash){
-    throw 'LANG-08 highlight modified source Markdown'
-  }
-  Write-Host 'AKULA_LANG08_INSTALLED_HIGHLIGHT_PASS genuine_nsis=1 real_color_menu=1 sqlite=1 source_unchanged=1'
-
-  Focus-Akula -Process $proc
-  $actions=Wait-Visible -Root $window -Names $labels.actions -Type ([Windows.Automation.ControlType]::Button)
-  Click-Visible -Target $actions -Window $window -Process $proc
-  [void](Wait-Visible -Root $window -Names $labels.backupExport -Type ([Windows.Automation.ControlType]::MenuItem))
-  [void](Wait-Visible -Root $window -Names $labels.backupImport -Type ([Windows.Automation.ControlType]::MenuItem))
-  Write-Host 'AKULA_LANG08_INSTALLED_BACKUP_MENU_PASS genuine_nsis=1 export_visible=1 import_visible=1'
-  Close-Note -Process $proc;$proc=$null
-  $dbState=Read-AnnotationState -Path $db
-  if($dbState -notmatch '^[1-9][0-9]*:[a-f0-9]{64}$'){
-    throw 'LANG-08 installed highlight missing positive SQLite revision and payload digest'
-  }
-
-  $proc=Open-Note -Note $note -Vault $vault -Data $data
-  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
-  Focus-Akula -Process $proc
-  $reopened=Wait-EditorBody -Process $proc -Needle 'LANG08 Annotation'
-  $window=$reopened.Window
-  if($null -eq $reopened.Editor){throw 'LANG-08 restart returned no editor'}
-  Readback-Selected -Process $proc -Expected $text
-  Close-Note -Process $proc;$proc=$null
-  if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash -or
-     (Read-AnnotationState -Path $db) -cne $dbState){
-    throw 'LANG-08 restart modified Markdown or saved annotation SQLite'
-  }
-  Assert-Upstream
-  Write-Host 'AKULA_LANG08_INSTALLED_RESTART_PASS genuine_nsis=1 reopened=1 sqlite_unchanged=1 markdown_sha256=1'
 } finally {
   if($null -ne $proc){
     $proc.Refresh()
