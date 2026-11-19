@@ -25,6 +25,10 @@ on:
       - 'docs/release/video-tools-01m-trust-state.md'
       - '.github/scripts/video-tools-01n-manual-reinstall.test.cjs'
       - 'docs/release/video-tools-01n-owner-and-manual-hold.md'
+      - 'scripts/windows-video-tools-01o-real-mux-floor.ps1'
+      - 'scripts/video-tools-01o-signed-floor.cjs'
+      - '.github/scripts/video-tools-01o-real-mux.test.cjs'
+      - 'docs/release/video-tools-01o-real-mux-floor.md'
       - '.github/scripts/video-tools-01g-pin-race.test.cjs'
       - 'aquilum-app/native/src/video/tools_package_pin_windows.rs'
       - 'aquilum-app/native/src/video/tools_package_pin_admission.rs'
@@ -78,6 +82,7 @@ jobs:
           node --test .github/scripts/video-tools-01j-six-signed.test.cjs
           node --test .github/scripts/video-tools-01m-trust-state.test.cjs
           node --test .github/scripts/video-tools-01n-manual-reinstall.test.cjs
+          node --test .github/scripts/video-tools-01o-real-mux.test.cjs
           node --test .github/scripts/video-tools-01k-guarded-ui.test.cjs
           echo 'VIDEO_TOOLS_01A_SOURCE_CONTRACT_PASS release=0'
 
@@ -224,6 +229,27 @@ jobs:
             if(Test-Path -LiteralPath $proofFile){
               Remove-Item -LiteralPath $proofFile -Force -ErrorAction Stop
             }
+          }
+      - name: Two independently built mux PEs, signed NSIS installs and downgrade admission refusal (non-release)
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $psErr=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'scripts/windows-video-tools-01o-real-mux-floor.ps1'),
+            [ref]$null,[ref]$psErr)
+          if($psErr.Count -gt 0){throw ('VIDEO_TOOLS_01O_HOLD: invalid PowerShell test: '+($psErr|Out-String))}
+          $proof=Join-Path $env:RUNNER_TEMP ('akula-video-tools-01o-'+$env:EXPECTED_HEAD_SHA+'.proof')
+          if(Test-Path -LiteralPath $proof){throw 'VIDEO_TOOLS_01O_HOLD: proof already exists'}
+          try {
+            & ./scripts/windows-video-tools-01o-real-mux-floor.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS -ProofFile $proof 2>&1 | Out-Host
+            $actual=Get-Content -LiteralPath $proof -Raw -ErrorAction Stop
+            $expected='VIDEO_TOOLS_01O_REAL_MUX_FLOOR_PASS'+[Environment]::NewLine
+            if($actual -cne $expected){throw 'VIDEO_TOOLS_01O_HOLD: signed real PE floor acceptance absent'}
+          } finally {
+            if(Test-Path -LiteralPath $proof){Remove-Item -LiteralPath $proof -Force -ErrorAction Stop}
           }
       - name: Windows installed Akula Video Tools 01k UI and queue fail-closed compilation
         shell: pwsh
