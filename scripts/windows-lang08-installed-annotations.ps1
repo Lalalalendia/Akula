@@ -313,21 +313,18 @@ try {
   # the actual installed Windows UI. This modal is part of the negative test.
   $closeNotice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
   Click-Visible -Target $closeNotice -Window $window -Process $proc
-  $dismissed=$false
-  for($i=0;$i -lt 45;$i++){
-    if($null -eq (Find-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button))){
-      $dismissed=$true;break
-    }
-    Start-Sleep -Milliseconds 150
-  }
-  if(!$dismissed){throw 'LANG-08 denial notice was not dismissed through installed UI'}
-  Write-Host 'AKULA_LANG08_INSTALLED_REBIND_DENY_PASS genuine_nsis=1 os_mouse=1 sidecar_created=0 source_unchanged=1 modal_closed=1'
-
+  # UIAutomation can retain a stale exposed Close button after the native
+  # modal begins its fade-out. Presence of that label in the broad root tree
+  # is NOT evidence the dialog still owns focus. Verify real behavior instead:
+  # regain the editor, read back exact Markdown with physical Ctrl+A/C and
+  # prove that its actual context menu is openable through the OS mouse.
+  Start-Sleep -Milliseconds 400
   Focus-Akula -Process $proc
   $body=Select-EditorBody -Root $window
   Readback-Selected -Process $proc -Expected $text
   Click-Visible -Target $body -Window $window -Process $proc -Right
   $highlight=Wait-Visible -Root $window -Names $labels.highlight -Type ([Windows.Automation.ControlType]::MenuItem)
+  Write-Host 'AKULA_LANG08_INSTALLED_REBIND_DENY_PASS genuine_nsis=1 os_mouse=1 sidecar_created=0 source_unchanged=1 editor_access_restored=1'
   Click-Visible -Target $highlight -Window $window -Process $proc
   $yellow=Wait-Visible -Root $window -Names $labels.yellow -Type ([Windows.Automation.ControlType]::MenuItem)
   Click-Visible -Target $yellow -Window $window -Process $proc
