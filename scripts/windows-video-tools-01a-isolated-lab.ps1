@@ -29,7 +29,9 @@ if ([Environment]::OSVersion.Version.Major -lt 10) {
 }
 $repo = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
 $runner = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
-$program = [IO.Path]::GetFullPath($env:ProgramFiles)
+; VIDEO-TOOLS-01c: OS-known x64 Program Files, never ambient env:ProgramFiles.
+. (Join-Path $repo 'scripts/video-tools-01c-os-known-root.ps1')
+$program = Get-AkulaVideoToolsOsProgramFiles
 $expectedMux = Join-Path $repo 'labs/video-lite/target/release/dash.exe'
 if ([IO.Path]::GetFullPath($MuxPath) -cne $expectedMux) {
   throw 'VIDEO_TOOLS_01A_HOLD: mux must be source-built from this exact checkout'
@@ -93,6 +95,7 @@ foreach ($name in $inputs.Keys) {
 $tag = [guid]::NewGuid().ToString('N')
 $work = Join-Path $runner ('video-tools-01a-' + $tag)
 $root = Join-Path $program ('AkulaVideoToolsLab-' + $tag)
+Assert-AkulaVideoToolsLabRoot -Path $root -LabId $tag
 $stage = Join-Path $work 'stage'
 $installer = Join-Path $work 'three-tools-unsigned-nonrelease.exe'
 $note = Join-Path $runner ('akula-video-tools-private-note-' + $tag + '.md')
@@ -126,6 +129,7 @@ try {
   if (!(Test-Path -LiteralPath $root -PathType Container)) {
     throw 'VIDEO_TOOLS_01A_HOLD: protected installation root missing'
   }
+  Assert-AkulaVideoToolsLabRoot -Path $root -LabId $tag -RequireExists
   $installedItems = @(Get-ChildItem -LiteralPath $root -Force)
   $exact = @($inputs.Keys) + @('uninstall.exe')
   if ($installedItems.Count -ne 4 -or
@@ -177,9 +181,11 @@ try {
   Write-Output 'VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS protected=1 old_app_excluded=1 exact_three=1 sha256=3 manual_uninstall=1 private_notes_preserved=1 release=0'
 } finally {
   if ($installed -and (Test-Path -LiteralPath (Join-Path $root 'uninstall.exe') -PathType Leaf)) {
+    Assert-AkulaVideoToolsLabRoot -Path $root -LabId $tag -RequireExists
     Start-Process -FilePath (Join-Path $root 'uninstall.exe') -ArgumentList '/S' -Wait | Out-Null
   }
   if (Test-Path -LiteralPath $root) {
+    Assert-AkulaVideoToolsLabRoot -Path $root -LabId $tag -RequireExists
     # Refuse recursive deletion of unknown protected/user files.
     $remaining = @(Get-ChildItem -LiteralPath $root -Force)
     if ($remaining.Count -eq 0) { Remove-Item -LiteralPath $root }
