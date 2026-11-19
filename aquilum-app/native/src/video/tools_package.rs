@@ -143,6 +143,19 @@ fn verify_signed(root: &Path, raw: &[u8], signed: &str, trusted_key: &str)
     let signature = Signature::decode(signed).map_err(|_| hold("signature malformed"))?;
     key.verify(raw, &signature, true)
         .map_err(|_| hold("publisher signature failed"))?;
+    // Authenticate the actual installed manifest, not caller-selected bytes
+    // from another directory. Never follow a symlink or reparse alias.
+    let manifest_path = root.join("manifest.json");
+    let signature_path = root.join("manifest.minisig");
+    regular(&manifest_path, false)?;
+    regular(&signature_path, false)?;
+    let disk_manifest = fs::read(&manifest_path)
+        .map_err(|_| hold("cannot read installed manifest"))?;
+    let disk_signature = fs::read_to_string(&signature_path)
+        .map_err(|_| hold("cannot read installed signature"))?;
+    if disk_manifest != raw || disk_signature != signed {
+        return Err(hold("disk metadata differs from verified signed bytes"));
+    }
     inspect_authenticated(root, raw)
 }
 
