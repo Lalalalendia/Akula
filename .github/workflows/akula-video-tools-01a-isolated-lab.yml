@@ -6,6 +6,9 @@ on:
     paths:
       - 'scripts/video-tools-01a-isolated-lab.nsi'
       - 'scripts/windows-video-tools-01a-isolated-lab.ps1'
+      - 'scripts/video-tools-01c-os-known-root.ps1'
+      - 'scripts/windows-video-tools-01c-root-lab.ps1'
+      - '.github/scripts/video-tools-01c-root.test.cjs'
       - '.github/scripts/video-tools-01a-isolated-nsis.test.cjs'
       - '.github/workflows/akula-video-tools-01a-isolated-lab.yml'
       - 'aquilum-app/native/packaging/akula-windows.json'
@@ -36,6 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test .github/scripts/video-tools-01a-isolated-nsis.test.cjs
+          node --test .github/scripts/video-tools-01c-root.test.cjs
           echo 'VIDEO_TOOLS_01A_SOURCE_CONTRACT_PASS release=0'
 
   windows-real:
@@ -55,14 +59,27 @@ jobs:
             labs/video-lite
           shared-key: akula-video-tools-01a-mux-v1
           save-if: false
-      - name: Parse PowerShell syntax before any executable staging
+      - name: Parse all three PowerShell scripts before any executable staging
         shell: pwsh
         run: |
-          $tokens=$null; $errors=$null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-video-tools-01a-isolated-lab.ps1'),
-            [ref]$tokens,[ref]$errors) | Out-Null
-          if($errors.Count -ne 0){ throw "VIDEO_TOOLS_01A_HOLD: PowerShell parse: $($errors | Out-String)" }
+          foreach($path in @('scripts/windows-video-tools-01a-isolated-lab.ps1','scripts/windows-video-tools-01c-root-lab.ps1','scripts/video-tools-01c-os-known-root.ps1')){
+            $tokens=$null; $errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $env:GITHUB_WORKSPACE $path),
+              [ref]$tokens,[ref]$errors) | Out-Null
+            if($errors.Count -ne 0){ throw "VIDEO_TOOLS_01C_HOLD: PowerShell parse $path : $($errors | Out-String)" }
+          }
+      - name: OS-known Program Files root rejects environment spoof and junction (non-release)
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $proof=@(& ./scripts/windows-video-tools-01c-root-lab.ps1 2>&1)
+          $proof | Out-Host
+          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01C_OS_ROOT_PASS'))){
+            throw 'VIDEO_TOOLS_01C_HOLD: genuine Windows OS root/spoof/junction proof missing'
+          }
       - name: Build and test the pinned Rust H264/AAC mux from source
         shell: pwsh
         run: |
