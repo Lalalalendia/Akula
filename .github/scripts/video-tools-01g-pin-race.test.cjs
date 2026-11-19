@@ -114,7 +114,7 @@ test('negative source mutations reject missing pin, signature check, OS race or 
     ['package','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "active";'],
     ['lab','GetLastWin32Error()','GetLastFriendlyError()'],
     ['lab','ERROR_SHARING_VIOLATION=32','any_error'],
-    ['lab','Positive control','missing Positive control'],
+    ['lab','Positive control','control omitted entirely'],
     ['runner','VIDEO_TOOLS_01G_PIN_RACE_PASS','FAKE_PASS'],
     ['workflow','node --test .github/scripts/video-tools-01g-pin-race.test.cjs','echo skip'],
     ['workflow','permissions:\n  contents: read','permissions:\n  contents: write']
