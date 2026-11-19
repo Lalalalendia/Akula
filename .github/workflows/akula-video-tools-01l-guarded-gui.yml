@@ -61,21 +61,23 @@ jobs:
           }
       - name: Installed Windows native queue and localized state tests
         shell: pwsh
+        working-directory: aquilum-app
         run: |
           $ErrorActionPreference='Stop'
-          cargo test --locked -p aquilum-native --manifest-path aquilum-app/Cargo.toml --features installed,video-tools-gui-e2e --bin aquilum-native -- video::queue::installed_tests::installed_download_refusal_creates_no_job_or_local_bytes --exact --nocapture
+          cargo test --locked -p aquilum-native --manifest-path Cargo.toml --features installed,video-tools-gui-e2e --bin aquilum-native -- video::queue::installed_tests::installed_download_refusal_creates_no_job_or_local_bytes --exact --nocapture
           if($LASTEXITCODE -ne 0){
             throw 'VIDEO_TOOLS_01L_HOLD: installed queue can launch unapproved downloader'
           }
-          cargo test --locked -p aquilum-native --manifest-path aquilum-app/Cargo.toml --features installed,video-tools-gui-e2e --bin aquilum-native -- app::editor_requests::video_stock_admission::tests::all_five_native_states_show_distinct_russian_and_english_status --exact --nocapture
+          cargo test --locked -p aquilum-native --manifest-path Cargo.toml --features installed,video-tools-gui-e2e --bin aquilum-native -- app::editor_requests::video_stock_admission::tests::all_five_native_states_show_distinct_russian_and_english_status --exact --nocapture
           if($LASTEXITCODE -ne 0){
             throw 'VIDEO_TOOLS_01L_HOLD: localized UI state tests failed'
           }
       - name: Build and stage the ordinary installed-flavor Windows GUI candidate
         shell: pwsh
+        working-directory: aquilum-app
         run: |
           $ErrorActionPreference='Stop'
-          cargo build --release --locked -p aquilum-native --manifest-path aquilum-app/Cargo.toml --features installed,video-tools-gui-e2e
+          cargo build --release --locked -p aquilum-native --manifest-path Cargo.toml --features installed,video-tools-gui-e2e
           if($LASTEXITCODE -ne 0){
             throw 'VIDEO_TOOLS_01L_HOLD: installed Windows GUI compile failed'
           }
