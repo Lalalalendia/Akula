@@ -20,7 +20,7 @@ enum NoteCommand {
     Close, Study,
 }
 
-const NOTE_COMMANDS: [NoteCommand; 10] = [NoteCommand::Wide, NoteCommand::ExportPdf, NoteCommand::ExportAnnotations, NoteCommand::ImportAnnotations, NoteCommand::Reveal, NoteCommand::CopyPath, NoteCommand::Duplicate, NoteCommand::Delete, NoteCommand::Close, NoteCommand::Study];
+const NOTE_COMMANDS: [NoteCommand; 10] = [NoteCommand::Wide, NoteCommand::ExportPdf, NoteCommand::Reveal, NoteCommand::CopyPath, NoteCommand::Duplicate, NoteCommand::Delete, NoteCommand::Close, NoteCommand::Study, NoteCommand::ExportAnnotations, NoteCommand::ImportAnnotations];
 
 impl NoteCommand {
     fn entry(self, wide: bool) -> (String, icons::Icon) {
