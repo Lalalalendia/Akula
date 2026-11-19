@@ -39,7 +39,7 @@ function check(x){
     'windows_discovery::installed_root()','windows_discovery::check_installed_acl',
     'APPROVED_VIDEO_TOOLS_KEY.is_empty() || !shipping_admission_enabled()',
     'verify_signed(&root, &raw, signed, APPROVED_VIDEO_TOOLS_KEY)',
-    'attested.version == "0.1.0"'
+    '"0.1.0" => ToolsDiscovery::ReadOnlyAttested'
   ])ensure(probe.includes(token),'native signed status incomplete: '+token);
   const variants=['Missing','Unsafe','PublisherNotApproved','IncompatibleVersion','ReadOnlyAttested'];
   const localeKeys=[];
@@ -58,7 +58,8 @@ function check(x){
     }
   }
   for(const token of [
-    'if self.optional_video_tools_notice(root) { return; }',
+    'if self.optional_video_tools_notice(root) {',
+    'mark("NOTICE_BLOCKED"); return; }',
     'crate::video::queue::enqueue('
   ])ensure(click.includes(token),'click-to-notice-to-queue order incomplete');
   ensure(click.indexOf('optional_video_tools_notice')<click.indexOf('queue::enqueue'),
@@ -115,11 +116,11 @@ test('mutations of UI/native guard, locales, or Windows acceptance cannot silent
     ['ui','probe_installed_video_tools()','TrustPATH()'],
     ['ui','ToolsDiscovery::PublisherNotApproved => (','ToolsDiscovery::PublisherNotApproved /* fake */ => ('],
     ['ui','return true;','return false;'],
-    ['click','if self.optional_video_tools_notice(root) { return; }','if false { return; }'],
+    ['click','if self.optional_video_tools_notice(root) {','if false {'],
     ['queue','if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))','if false'],
     ['queueTests','assert!(status(url).is_none())','assert!(true)'],
     ['leaf','VIDEO_TOOLS_01K_HOLD: publisher-approved process launch is unavailable','allow execution'],
-    ['probe','attested.version == "0.1.0"','false'],
+    ['probe','"0.1.0" => ToolsDiscovery::ReadOnlyAttested','"0.1.0" => ToolsDiscovery::IncompatibleVersion'],
     ['trust','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "ci";'],
     ['ru','"videoToolsMissingTitle"', '"missingRussianTitle"'],
     ['en','"videoToolsUnapprovedTitle"', '"missingEnglishTitle"'],
