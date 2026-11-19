@@ -72,6 +72,18 @@ fn regular(path: &Path, dir: bool) -> Result<(), String> {
     }
     Ok(())
 }
+fn bounded_metadata(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
+    regular(path, false)?;
+    let file = File::open(path).map_err(|_| hold("cannot read package metadata"))?;
+    let mut bounded = file.take(limit as u64 + 1);
+    let mut bytes = Vec::new();
+    bounded.read_to_end(&mut bytes).map_err(|_| hold("cannot read package metadata"))?;
+    if bytes.is_empty() || bytes.len() > limit {
+        return Err(hold("installed metadata empty or oversized"));
+    }
+    regular(path, false)?;
+    Ok(bytes)
+}
 fn hash_file(path: &Path, size: u64, expected: &str) -> Result<(), String> {
     regular(path, false)?;
     let mut file = File::open(path).map_err(|_| hold("cannot open component"))?;
@@ -123,7 +135,10 @@ fn inspect_authenticated(root: &Path, raw: &[u8]) -> Result<AttestedContents, St
         NAMES[0], NAMES[1], NAMES[2],
         "manifest.json", "manifest.minisig", "uninstall.exe",
     ];
+    let mut entry_count = 0usize;
     for entry in fs::read_dir(root).map_err(|_| hold("cannot enumerate package"))? {
+        entry_count += 1;
+        if entry_count > allowed.len() { return Err(hold("too many package entries")); }
         let entry = entry.map_err(|_| hold("cannot enumerate package item"))?;
         let name = entry.file_name();
         let name = name.to_str().ok_or_else(|| hold("non-UTF8 package entry"))?;
@@ -149,13 +164,9 @@ fn verify_signed(root: &Path, raw: &[u8], signed: &str, trusted_key: &str)
     // from another directory. Never follow a symlink or reparse alias.
     let manifest_path = root.join("manifest.json");
     let signature_path = root.join("manifest.minisig");
-    regular(&manifest_path, false)?;
-    regular(&signature_path, false)?;
-    let disk_manifest = fs::read(&manifest_path)
-        .map_err(|_| hold("cannot read installed manifest"))?;
-    let disk_signature = fs::read_to_string(&signature_path)
-        .map_err(|_| hold("cannot read installed signature"))?;
-    if disk_manifest != raw || disk_signature != signed {
+    let disk_manifest = bounded_metadata(&manifest_path, MAX_MANIFEST)?;
+    let disk_signature = bounded_metadata(&signature_path, MAX_SIGNATURE)?;
+    if disk_manifest != raw || disk_signature.as_slice() != signed.as_bytes() {
         return Err(hold("disk metadata differs from verified signed bytes"));
     }
     inspect_authenticated(root, raw)
