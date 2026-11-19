@@ -38,7 +38,7 @@ fn exact_names_version_and_manifest_schema_reject_ambiguous_payloads() {
         document["binaries"][0]["name"] = json!(changed);
         let error = inspect_authenticated(root.path(), &serde_json::to_vec(&document).unwrap())
             .unwrap_err();
-        assert!(error.contains("identity"), "{changed}: {error}");
+        assert!(error.contains("wrong signed component name"), "{changed}: {error}");
     }
     let mut document = raw();
     document["unexpected"] = json!(true);
