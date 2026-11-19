@@ -185,7 +185,8 @@ mod tests {
 
     #[test]
     fn scoped_export_never_copies_markdown_or_another_notes_metadata() {
-        let a = doc("a"), b = doc("b");
+        let a = doc("a");
+        let b = doc("b");
         let one = row(&a, "annotation-a");
         let two = row(&b, "annotation-b");
         let backup = export_document(&Snapshot {
@@ -203,7 +204,8 @@ mod tests {
 
     #[test]
     fn restores_metadata_as_hold_and_preserves_unrelated_documents() {
-        let a = doc("a"), b = doc("b");
+        let a = doc("a");
+        let b = doc("b");
         let backup = export_document(&Snapshot {
             revision: 1, records: vec![row(&a, "annotation-a")],
         }, &a).unwrap();
@@ -223,7 +225,8 @@ mod tests {
 
     #[test]
     fn rejects_foreign_document_and_mixed_vault_payloads_without_writing() {
-        let a = doc("a"), b = doc("b");
+        let a = doc("a");
+        let b = doc("b");
         let original = row(&a, "annotation-a");
         let backup = export_document(&Snapshot {
             revision: 1, records: vec![original.clone()],
