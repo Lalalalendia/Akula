@@ -44,6 +44,7 @@ fn exact_names_version_and_manifest_schema_reject_ambiguous_payloads() {
     document["unexpected"] = json!(true);
     assert!(inspect_authenticated(root.path(), &serde_json::to_vec(&document).unwrap())
         .unwrap_err().contains("unknown-field"));
+    assert!(!version("0.0.9")); // stale standalone package below the approved floor
     assert!(!version("1.2"));
     assert!(!version("1.2.3.4"));
     assert!(!version("1.2.-3"));
