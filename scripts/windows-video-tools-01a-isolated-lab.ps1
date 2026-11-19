@@ -140,10 +140,13 @@ try {
   }
   $data=Get-Content -LiteralPath $unsignedManifest -Raw | ConvertFrom-Json
   $custody=Get-Content -LiteralPath $unsignedCustody -Raw | ConvertFrom-Json
+  $expectedLock=(Get-FileHash -LiteralPath (Join-Path $repo 'labs/video-lite/Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($data.product -cne 'Akula Video Tools' -or
       $data.platform -cne 'windows-x86_64' -or
       $data.version -cne '0.1.0' -or
       $data.source_commit -cne $env:EXPECTED_HEAD_SHA -or
+      $data.cargo_lock_sha256 -cne $expectedLock -or
+      $custody.cargo_lock_sha256 -cne $expectedLock -or
       $data.binaries.Count -ne 3 -or
       $custody.release_admitted -ne $false -or
       $custody.publisher_key_approved -ne $false -or
