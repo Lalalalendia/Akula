@@ -175,6 +175,13 @@ try {
     throw 'VIDEO_TOOLS_01E_HOLD: genuine native Windows ACL witness missing'
   }
   Write-Output 'VIDEO_TOOLS_01E_NATIVE_WIN32_PASS release=0'
+  # VIDEO-TOOLS-01f: real local standard user must be denied seven Win32 mutation rights.
+  $userProof=@(& (Join-Path $repo 'scripts/windows-video-tools-01f-standard-user.ps1') -Root $root -LabId $tag -Work $work 2>&1)
+  $userProof | Out-Host
+  if (!(($userProof | Out-String).Contains('VIDEO_TOOLS_01F_NONADMIN_PASS'))) {
+    throw 'VIDEO_TOOLS_01F_HOLD: genuine standard-user Windows denial missing'
+  }
+  Write-Output 'VIDEO_TOOLS_01F_NONADMIN_PASS release=0'
   # A foreign file must survive explicit uninstall, rather than Delete /r.
   Set-Content -LiteralPath (Join-Path $root 'unrelated-private-note.md') -Value 'preserve-me' -NoNewline
   $uninstaller = Join-Path $root 'uninstall.exe'

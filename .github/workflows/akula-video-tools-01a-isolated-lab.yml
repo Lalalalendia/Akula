@@ -11,6 +11,9 @@ on:
       - 'scripts/video-tools-01d-acl.ps1'
       - 'scripts/windows-video-tools-01d-acl-negative.ps1'
       - 'scripts/windows-video-tools-01e-native-lab.ps1'
+      - 'scripts/windows-video-tools-01f-standard-user.ps1'
+      - '.github/scripts/video-tools-01f-standard-user.test.cjs'
+      - 'docs/release/video-tools-01f-standard-user.md'
       - 'aquilum-app/native/src/video/tools_package_windows.rs'
       - 'aquilum-app/native/src/video/tools_package_probe.rs'
       - '.github/scripts/video-tools-01e-native.test.cjs'
@@ -51,6 +54,7 @@ jobs:
           node --test .github/scripts/video-tools-01c-root.test.cjs
           node --test .github/scripts/video-tools-01d-acl.test.cjs
           node --test .github/scripts/video-tools-01e-native.test.cjs
+          node --test .github/scripts/video-tools-01f-standard-user.test.cjs
           echo 'VIDEO_TOOLS_01A_SOURCE_CONTRACT_PASS release=0'
 
   windows-real:
@@ -70,10 +74,10 @@ jobs:
             labs/video-lite
           shared-key: akula-video-tools-01a-mux-v1
           save-if: false
-      - name: Parse all six PowerShell scripts before any executable staging
+      - name: Parse all seven PowerShell scripts before any executable staging
         shell: pwsh
         run: |
-          foreach($path in @('scripts/windows-video-tools-01a-isolated-lab.ps1','scripts/windows-video-tools-01c-root-lab.ps1','scripts/video-tools-01c-os-known-root.ps1','scripts/video-tools-01d-acl.ps1','scripts/windows-video-tools-01d-acl-negative.ps1','scripts/windows-video-tools-01e-native-lab.ps1')){
+          foreach($path in @('scripts/windows-video-tools-01a-isolated-lab.ps1','scripts/windows-video-tools-01c-root-lab.ps1','scripts/video-tools-01c-os-known-root.ps1','scripts/video-tools-01d-acl.ps1','scripts/windows-video-tools-01d-acl-negative.ps1','scripts/windows-video-tools-01e-native-lab.ps1','scripts/windows-video-tools-01f-standard-user.ps1')){
             $tokens=$null; $errors=$null
             [System.Management.Automation.Language.Parser]::ParseFile(
               (Join-Path $env:GITHUB_WORKSPACE $path),
@@ -134,4 +138,7 @@ jobs:
           }
           if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01E_NATIVE_WIN32_PASS'))){
             throw 'VIDEO_TOOLS_01E_HOLD: native Windows OS security witness missing'
+          }
+          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01F_NONADMIN_PASS'))){
+            throw 'VIDEO_TOOLS_01F_HOLD: real Windows standard-user access refusal missing'
           }
