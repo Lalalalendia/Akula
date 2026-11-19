@@ -119,7 +119,7 @@ jobs:
           import json
           import sqlite3
           import sys
-          record={"anchor":{"annotation_id":"fixture-id","selected_digest":"a"*64},
+          record={"anchor":{"annotation_id":"fixture-id","selected_digest":[171]*32},
                   "status":sys.argv[2],"color":"yellow"}
           with sqlite3.connect(sys.argv[1]) as db:
               db.execute("UPDATE text_annotation_state SET revision=?,payload=? WHERE id=1",
