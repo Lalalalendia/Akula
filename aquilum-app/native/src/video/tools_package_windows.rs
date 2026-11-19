@@ -140,8 +140,8 @@ fn privileged_sid(sid: &str) -> bool {
             | "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
     )
 }
-pub(super) fn known_program_files_x64() -> Result<PathBuf, String> {
-    if std::mem::size_of::<usize>() != 8 {
+pub(crate) fn known_program_files_x64() -> Result<PathBuf, String> {
+    if !cfg!(target_arch = "x86_64") || std::mem::size_of::<usize>() != 8 {
         return Err(hold("x64 process required"));
     }
     let mut version = OsVersionInfoW {
@@ -186,10 +186,12 @@ fn check_ancestors(path: &Path) -> Result<(), String> {
 }
 /// Only a fixed, publisher-owned product directory can be discovered.
 /// This must not be replaced by a PATH, ProgramFiles environment or caller path.
-pub(super) fn installed_root() -> Result<Option<PathBuf>, String> {
+pub(crate) fn installed_root() -> Result<Option<PathBuf>, String> {
     let root = known_program_files_x64()?.join("Akula Video Tools");
-    if !root.exists() {
-        return Ok(None);
+    match fs::symlink_metadata(&root) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(hold("installed package cannot be inspected")),
+        Ok(_) => {}
     }
     check_ancestors(&root)?;
     Ok(Some(root))
@@ -267,7 +269,7 @@ fn check_object_acl(path: &Path) -> Result<(), String> {
 }
 /// Checks exact package identity, all child file ACLs and parent reparse state.
 /// Does not return any executable handle/path or authorize launching it.
-pub(super) fn check_installed_acl(root: &Path, expected: &[&str]) -> Result<(), String> {
+pub(crate) fn check_installed_acl(root: &Path, expected: &[&str]) -> Result<(), String> {
     if expected.len() < 4 || expected.len() > 6 {
         return Err(hold("unexpected number of installed package files"));
     }
