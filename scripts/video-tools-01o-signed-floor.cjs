@@ -86,7 +86,7 @@ function inside(p,root){
     !path.isAbsolute(rel);
 }
 function cli(){
-  if(process.argv.length!==8)hold('requires candidate, installed, public key, signer and expected verdict');
+  if(process.argv.length!==7)hold('requires candidate, installed, public key, signer and expected verdict');
   if(process.env.GITHUB_ACTIONS!=='true' || process.env.RUNNER_OS!=='Windows' ||
      process.env.RUNNER_ENVIRONMENT!=='github-hosted' ||
      process.env.GITHUB_EVENT_NAME!=='pull_request' ||
@@ -100,11 +100,12 @@ function cli(){
   const [candidate,installed,key,signer,expected]=process.argv.slice(2);
   for(const p of [candidate,key,signer])if(!inside(p,temp))
     hold('caller-selected input escaped runner temp');
-  if(!inside(installed,path.parse(installed).root)){
-    // The installed root is OS-derived by the protected PowerShell fixture,
-    // not an input allowed to authorize production installation.
-    hold('installed directory unavailable');
-  }
+  // The wrapper derives the path from the OS-known Program Files root;
+  // native Akula independently proves the protected ACL before this test.
+  const stat=fs.lstatSync(installed);
+  if(!stat.isDirectory()||stat.isSymbolicLink() ||
+     path.basename(installed).toLowerCase()!=='akula video tools')
+    hold('unexpected installed product root');
   if(!['ALLOW','DENY'].includes(expected))hold('unsupported expected verdict');
   const next=signed(candidate,key,signer,false);
   const current=signed(installed,key,signer,true);
