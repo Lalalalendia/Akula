@@ -4,7 +4,8 @@
 param(
   [Parameter(Mandatory=$true)][string]$MuxPath,
   [Parameter(Mandatory=$true)][string]$YtDlpPath,
-  [Parameter(Mandatory=$true)][string]$QuickJsPath
+  [Parameter(Mandatory=$true)][string]$QuickJsPath,
+  [Parameter(Mandatory=$true)][string]$ProofFile
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -24,6 +25,12 @@ if (!$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
   throw 'VIDEO_TOOLS_01J_HOLD: protected separate install needs real administrator token'
 }
 $repo=[IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
+$expectedProof=Join-Path ([IO.Path]::GetFullPath($env:RUNNER_TEMP)) ('akula-video-tools-01j-'+$env:EXPECTED_HEAD_SHA+'.proof')
+if(![IO.Path]::GetFullPath($ProofFile).Equals(
+    [IO.Path]::GetFullPath($expectedProof),[StringComparison]::OrdinalIgnoreCase) -or
+    (Test-Path -LiteralPath $ProofFile)){
+  throw 'VIDEO_TOOLS_01J_HOLD: unsafe or existing final acceptance proof path'
+}
 $signer=$env:VIDEO_TOOLS_01J_MINISIGN
 if([string]::IsNullOrWhiteSpace($signer)){
   throw 'VIDEO_TOOLS_01J_HOLD: exact official test signer missing'
@@ -244,6 +251,11 @@ try {
   Remove-Item -LiteralPath $root
   Run-Native -Mode 'missing' -Public '-'
   Write-Output 'VIDEO_TOOLS_01J_SIX_SIGNED_PASS fixed_root=1 real_exes=3 files=6 ephemeral_minisign=1 native_discovery=1 hold=1 negative=5 uninstall=1 private_notes_preserved=1 release=0'
+  # This file is the authoritative CI handoff. It is created ONLY after
+  # both positive native Minisign verdicts, all five negative cases, and
+  # uninstall + user data preservation have completed successfully.
+  $proofContent="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`n"
+  [IO.File]::WriteAllText($ProofFile,$proofContent,[Text.UTF8Encoding]::new($false))
 } finally {
   if($installed -and (Test-Path -LiteralPath (Join-Path $root 'uninstall.exe') -PathType Leaf)) {
     Assert-AkulaVideoToolsNoReparseParents -Path $root -RequireExists

@@ -198,25 +198,22 @@ jobs:
           $ErrorActionPreference='Stop'
           # Stream Rust compiler and Minisign errors live; buffering an
           # entire terminating PowerShell script hides the real error cause.
-          $proofLog=Join-Path $env:RUNNER_TEMP ('akula-video-tools-01j-' + $env:EXPECTED_HEAD_SHA + '.log')
-          if(Test-Path -LiteralPath $proofLog){
-            throw 'VIDEO_TOOLS_01J_HOLD: acceptance proof log already exists'
+          $proofFile=Join-Path $env:RUNNER_TEMP ('akula-video-tools-01j-' + $env:EXPECTED_HEAD_SHA + '.proof')
+          if(Test-Path -LiteralPath $proofFile){
+            throw 'VIDEO_TOOLS_01J_HOLD: exact-head acceptance proof already exists'
           }
           try {
-            # Tee-Object -Variable does not reliably retain output from a
-            # nested PowerShell script under GitHub pwsh. Preserve the proof
-            # in runner temp, still streaming compiler and Minisign diagnostics.
-            & ./scripts/windows-video-tools-01j-six-signed-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS 2>&1 |
-              Tee-Object -FilePath $proofLog | Out-Host
-            $proof=Get-Content -LiteralPath $proofLog -Raw -ErrorAction Stop
-            if(!$proof.Contains('VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS')){
-              throw 'VIDEO_TOOLS_01J_HOLD: real Minisign signature was not admitted by native Rust test'
-            }
-            if(!$proof.Contains('VIDEO_TOOLS_01J_SIX_SIGNED_PASS')){
-              throw 'VIDEO_TOOLS_01J_HOLD: exact protected six-file signed install and uninstall incomplete'
+            # Nested PowerShell stdout is informational only. The isolated
+            # test script writes its exact proof file ONLY after native
+            # signature checks, all negative cases and safe uninstall.
+            & ./scripts/windows-video-tools-01j-six-signed-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS -ProofFile $proofFile 2>&1 | Out-Host
+            $proof=Get-Content -LiteralPath $proofFile -Raw -ErrorAction Stop
+            $expected="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`n"
+            if($proof -cne $expected){
+              throw 'VIDEO_TOOLS_01J_HOLD: complete signed six-file acceptance proof is absent'
             }
           } finally {
-            if(Test-Path -LiteralPath $proofLog){
-              Remove-Item -LiteralPath $proofLog -Force -ErrorAction Stop
+            if(Test-Path -LiteralPath $proofFile){
+              Remove-Item -LiteralPath $proofFile -Force -ErrorAction Stop
             }
           }
