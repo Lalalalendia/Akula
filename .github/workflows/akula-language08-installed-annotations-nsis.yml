@@ -1,0 +1,91 @@
+name: Akula LANG-08a genuine installed annotations NSIS UIA (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/windows-lang08-installed-annotations.ps1'
+      - '.github/workflows/akula-language08-installed-annotations-nsis.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lang08-installed-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Fail closed before NSIS build - inspect installed witness script
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify script syntax and non-release boundaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path=Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-lang08-installed-annotations.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count -ne 0){throw ('LANG-08 PowerShell parse errors: '+($errors|Out-String))}
+          $source=[IO.File]::ReadAllText($path)
+          foreach($needle in @('RUNNER_ENVIRONMENT','github-hosted','GetForegroundWindow','GetWindowThreadProcessId',
+             'SendInput','compiled_executable_sha256','SQLite format 3','backupExport','backupImport',
+             'rebind','AKULA_LANG08_INSTALLED_UNINSTALL_PASS')){
+            if(!$source.Contains($needle)){throw "Missing LANG-08 acceptance invariant $needle"}
+          }
+          $cfg=[IO.File]::ReadAllText('aquilum-app/native/packaging/akula-windows.json')|ConvertFrom-Json
+          if($cfg.productName -cne 'Akula' -or @($cfg.binaries).Count -ne 2){
+            throw 'LANG-08 must reuse current two-binary release configuration without modifying it'
+          }
+          Write-Host 'AKULA_LANG08_NONRELEASE_CONTRACT_PASS syntax=1 installer_unmodified=1 real_os_ui=1'
+
+  candidate:
+    name: Build, install-test and stage actual unsigned NSIS without release
+    needs: contract
+    uses: ./.github/workflows/windows-beta.yml
+    permissions:
+      contents: read
+
+  installed-annotations:
+    name: Installed Akula OS mouse, UIA, SQLite, restart and uninstall
+    needs: candidate
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: akula-windows-beta-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: lang08-candidate
+      - name: Verify candidate exactly matches manifest then run installed OS witness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $candidate=Join-Path $env:GITHUB_WORKSPACE 'lang08-candidate'
+          $setups=@(Get-ChildItem -LiteralPath $candidate -File -Filter 'Akula_*-setup.exe')
+          $manifest=Join-Path $candidate 'candidate-manifest.json'
+          if($setups.Count -ne 1 -or !(Test-Path -LiteralPath $manifest -PathType Leaf)){
+            throw 'LANG-08 requires exactly one genuine NSIS candidate and its provenance'
+          }
+          $windowsPowerShell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-lang08-installed-annotations.ps1') -SetupPath $setups[0].FullName -ManifestPath $manifest
+          if($LASTEXITCODE -ne 0){throw "LANG-08 real installed Windows evidence failed: $LASTEXITCODE"}
+      - name: Record non-release synthetic evidence
+        if: success()
+        shell: pwsh
+        run: |
+          @'
+          LANG-08a passes only with real NSIS installation from the exact checked candidate,
+          OS-level mouse and keyboard actions against the installed UI, an SQLite highlight,
+          fail-closed manual HOLD with no database, menu visibility, restart and uninstall.
+          All Markdown and SQLite are created under RUNNER_TEMP; no user data or release.
+          This is not the full LANG-08 test of imported backup + user rebind or named decks.
+          '@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
