@@ -193,6 +193,25 @@ try {
   $installed=$true
   Assert-Exact-Six
   Run-Native -Mode 'valid' -Public $public
+  # VIDEO-TOOLS-01n: manual updates may NEVER silently overwrite a live
+  # protected package, even when signed test components are fully valid.
+  $before01n=@{}
+  foreach($itemName in $names){
+    $before01n[$itemName]=(Get-FileHash -LiteralPath (Join-Path $root $itemName) -Algorithm SHA256).Hash
+  }
+  $attempt01n=Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
+  if($attempt01n.ExitCode -ne 77){
+    throw ('VIDEO_TOOLS_01N_HOLD: existing protected install was not explicitly refused, code='+$attempt01n.ExitCode)
+  }
+  Assert-Exact-Six
+  foreach($itemName in $names){
+    $after=(Get-FileHash -LiteralPath (Join-Path $root $itemName) -Algorithm SHA256).Hash
+    if($after -cne $before01n[$itemName]){
+      throw ('VIDEO_TOOLS_01N_HOLD: denied manual reinstall altered protected object '+$itemName)
+    }
+  }
+  Run-Native -Mode 'valid' -Public $public
+  Write-Output 'VIDEO_TOOLS_01N_REINSTALL_HOLD_PASS errorlevel=77 six_sha_unchanged=1 os_acl=1 ephemeral_signature=1 production_admission=0 release=0'
   Run-Native -Mode 'wrong-key' -Public $otherPublic
   # Negative mutation: exact signed on-disk manifest changed, no signature change.
   $installedManifest=Join-Path $root 'manifest.json'
