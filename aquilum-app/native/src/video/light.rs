@@ -9,7 +9,6 @@ use std::io::{BufRead, BufReader, Read};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-
 use super::{download, library::{Library, LIBRARY_MAX, SINGLE_VIDEO_MAX}, youtube};
 #[cfg(all(windows, feature = "video-rust-bundle"))]
 #[path = "light_windows_version.rs"]
@@ -314,13 +313,14 @@ fn bundled_mux_from_exe(application: &Path, expected_sha256: &str) -> Result<Pat
     Ok(mux)
 }
 
-/// The only production Rust path is the installer-staged, build-time-pinned
-/// sidecar next to the running Akula executable. The old arbitrary-path opt-in
-/// is rejected. No download of executables happens at runtime.
+// Installed Windows launch remains disabled.
 pub(super) fn download_one_or_legacy(
     library: &Library, executable: &OsStr, url: &str,
     on_progress: impl FnMut(download::Progress),
 ) -> Result<PathBuf, String> {
+    if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e"))) {
+        return Err("VIDEO_TOOLS_01K_HOLD: publisher-approved process launch is unavailable".into());
+    }
     if std::env::var_os("AKULA_RUST_MUX_BIN").is_some() {
         return Err("AKULA_RUST_MUX_BIN is no longer supported: arbitrary mux executables are refused".into());
     }

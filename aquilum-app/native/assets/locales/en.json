@@ -46,6 +46,16 @@
     "localIdentityCopyFail": "Could not copy the public device ID."
   },
   "editor": {
+    "videoToolsMissingTitle": "Akula Video Tools are not installed",
+    "videoToolsMissing": "The separate Akula Video Tools package was not found in its protected Program Files directory. YouTube downloads are disabled in installed Akula. After an official release, you can install the package manually. Link previews and already saved offline videos remain available.",
+    "videoToolsUnsafeTitle": "Video Tools installation did not pass verification",
+    "videoToolsUnsafe": "The Video Tools file set or access permissions do not meet Akula's requirements, or authenticity checks failed. Execution is blocked. Do not replace files manually; after the official release, reinstall a verified separate package. Your notes are unaffected.",
+    "videoToolsUnapprovedTitle": "Video Tools publisher is not yet approved",
+    "videoToolsUnapproved": "The Video Tools package is present, but its publisher key and execution have not been approved. An EXE on disk, environment variables or temporary CI signatures do not authorize launching the downloader. Wait for a separate official release.",
+    "videoToolsIncompatibleTitle": "Incompatible Video Tools version",
+    "videoToolsIncompatible": "The package signature was verified, but this version is not supported by your Akula build. Updating requires a compatible official package and a manual install after closing Akula. Video downloads remain blocked.",
+    "videoToolsAttestedTitle": "Video Tools signature is verified",
+    "videoToolsAttested": "Native diagnostics found a signed Video Tools package. This is read-only evidence, not permission to execute the tools. YouTube downloads remain disabled until separate acceptance and an official release.",
     "videoDownloadUnavailableTitle": "YouTube download needs a separate tool",
     "videoDownloadUnavailable": "This signed Akula installation does not include yt-dlp or a bundled video downloader. Install a trusted yt-dlp separately to enable downloads, or use preview and already saved local video. The protected five-file video build is not released.",
     "resetUiStateWarning": "The reset forgets open tabs, the list of knowledge bases, home pages and book reading positions; notes, history and settings stay.",

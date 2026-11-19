@@ -4,9 +4,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-
 use super::{download, library::Library, youtube};
-
 #[derive(Clone, Debug)]
 pub enum Status {
     Queued,
@@ -14,23 +12,18 @@ pub enum Status {
     Ready(PathBuf),
     Failed(String),
 }
-
 static JOBS: OnceLock<Mutex<HashMap<String, Status>>> = OnceLock::new();
 static SERIAL: Mutex<()> = Mutex::new(());
-
 fn jobs() -> &'static Mutex<HashMap<String, Status>> {
     JOBS.get_or_init(|| Mutex::new(HashMap::new()))
 }
-
 fn change(id: &str, status: Status) {
     jobs().lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_owned(), status);
 }
-
 pub fn status(url: &str) -> Option<Status> {
     let id = youtube::video_id(url)?;
     jobs().lock().unwrap_or_else(|e| e.into_inner()).get(id).cloned()
 }
-
 /// Called only after the user presses Download in the media card.
 /// Does not silently launch any process during startup, synchronization or
 /// network metadata resolution. A finished file is shared by all notes by ID.
@@ -40,6 +33,11 @@ pub fn enqueue(
     registered_roots: Vec<PathBuf>,
     changed: Arc<dyn Fn(bool, &str) + Send + Sync>,
 ) -> Result<bool, &'static str> {
+    // Video Tools release is not approved. Installed Windows may not turn
+    // a PATH entry, env-selected yt-dlp or CI signature into process rights.
+    if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e"))) {
+        return Err("Video Tools execution is not approved for installed Akula");
+    }
     let id = youtube::video_id(&url).ok_or("invalid single-video URL")?.to_owned();
     {
         let mut list = jobs().lock().unwrap_or_else(|e| e.into_inner());
@@ -78,7 +76,9 @@ pub fn enqueue(
     });
     Ok(true)
 }
-
+#[cfg(all(test, windows, feature = "installed", not(feature = "video-ui-e2e")))]
+#[path = "queue_01k_tests.rs"]
+mod installed_tests;
 #[cfg(test)]
 mod tests {
     use super::*;

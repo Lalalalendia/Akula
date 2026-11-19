@@ -4,20 +4,19 @@ use super::tools_package::{
     APPROVED_VIDEO_TOOLS_KEY, MAX_MANIFEST, MAX_SIGNATURE,
     bounded_metadata, shipping_admission_enabled, verify_signed,
 };
-
 #[path = "tools_package_windows.rs"]
 pub(super) mod windows_discovery;
-
 /// Native Video Tools discovery is diagnostics only. Not executable admission.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum ToolsDiscovery {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ToolsDiscovery {
     Missing,
     Unsafe,
     PublisherNotApproved,
+    IncompatibleVersion,
     ReadOnlyAttested,
 }
-
-pub(super) fn probe_installed_video_tools() -> ToolsDiscovery {
+/// Read-only diagnostic state, never an executable path or launch permit.
+pub(crate) fn probe_installed_video_tools() -> ToolsDiscovery {
     let root = match windows_discovery::installed_root() {
         Ok(Some(root)) => root,
         Ok(None) => return ToolsDiscovery::Missing,
@@ -51,12 +50,13 @@ pub(super) fn probe_installed_video_tools() -> ToolsDiscovery {
         Ok(signed) => signed,
         Err(_) => return ToolsDiscovery::Unsafe,
     };
-    if verify_signed(&root, &raw, signed, APPROVED_VIDEO_TOOLS_KEY).is_err() {
-        return ToolsDiscovery::Unsafe;
+    // Version selection follows publisher-authenticated contents only.
+    match verify_signed(&root, &raw, signed, APPROVED_VIDEO_TOOLS_KEY) {
+        Ok(attested) if attested.version == "0.1.0" => ToolsDiscovery::ReadOnlyAttested,
+        Ok(_) => ToolsDiscovery::IncompatibleVersion,
+        Err(_) => ToolsDiscovery::Unsafe,
     }
-    ToolsDiscovery::ReadOnlyAttested
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
