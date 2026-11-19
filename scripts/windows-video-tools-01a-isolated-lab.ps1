@@ -168,6 +168,13 @@ try {
     throw 'VIDEO_TOOLS_01D_HOLD: genuine poisoned Windows ACL was not rejected'
   }
   Write-Output 'VIDEO_TOOLS_01D_ACL_MUTATION_PASS restored=1 release=0'
+  # VIDEO-TOOLS-01e: native Rust Win32 ACL admission/poison on real installed PEs.
+  $nativeProof=@(& (Join-Path $repo 'scripts/windows-video-tools-01e-native-lab.ps1') -Root $root -LabId $tag -Work $work 2>&1)
+  $nativeProof | Out-Host
+  if (!(($nativeProof | Out-String).Contains('VIDEO_TOOLS_01E_NATIVE_WIN32_PASS'))) {
+    throw 'VIDEO_TOOLS_01E_HOLD: genuine native Windows ACL witness missing'
+  }
+  Write-Output 'VIDEO_TOOLS_01E_NATIVE_WIN32_PASS release=0'
   # A foreign file must survive explicit uninstall, rather than Delete /r.
   Set-Content -LiteralPath (Join-Path $root 'unrelated-private-note.md') -Value 'preserve-me' -NoNewline
   $uninstaller = Join-Path $root 'uninstall.exe'

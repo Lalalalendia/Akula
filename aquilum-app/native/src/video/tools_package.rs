@@ -8,8 +8,8 @@ use minisign_verify::{PublicKey, Signature};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-const MAX_MANIFEST: usize = 32 * 1024;
-const MAX_SIGNATURE: usize = 16 * 1024;
+pub(super) const MAX_MANIFEST: usize = 32 * 1024;
+pub(super) const MAX_SIGNATURE: usize = 16 * 1024;
 const MAX_COMPONENT: u64 = 128 * 1024 * 1024;
 const NAMES: [&str; 3] = [
     "akula-video-mux.exe", "akula-yt-dlp.exe", "akula-quickjs.exe",
@@ -72,7 +72,7 @@ fn regular(path: &Path, dir: bool) -> Result<(), String> {
     }
     Ok(())
 }
-fn bounded_metadata(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
+pub(super) fn bounded_metadata(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
     regular(path, false)?;
     let file = File::open(path).map_err(|_| hold("cannot read package metadata"))?;
     let mut bounded = file.take(limit as u64 + 1);
@@ -149,7 +149,7 @@ fn inspect_authenticated(root: &Path, raw: &[u8]) -> Result<AttestedContents, St
     Ok(AttestedContents { version: data.version, digests })
 }
 
-fn verify_signed(root: &Path, raw: &[u8], signed: &str, trusted_key: &str)
+pub(super) fn verify_signed(root: &Path, raw: &[u8], signed: &str, trusted_key: &str)
     -> Result<AttestedContents, String>
 {
     if trusted_key.is_empty() { return Err(hold("publisher signing key not approved")); }
