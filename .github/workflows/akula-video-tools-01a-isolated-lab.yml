@@ -151,7 +151,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $expected='38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a'
-          $url='https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download'
+          $url='https://download.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-setup.exe'
           $setup=Join-Path $env:RUNNER_TEMP 'nsis-3.11-setup.exe'
           if(Test-Path -LiteralPath $setup){throw 'VIDEO_TOOLS_01O_HOLD: official NSIS setup already exists'}
           try {
