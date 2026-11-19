@@ -96,13 +96,14 @@ public static class AkulaLang08Pointer {
   }
 }
 '@
-$labels=@{actions=@();backupExport=@();backupImport=@();rebind=@();highlight=@();yellow=@()}
+$labels=@{actions=@();backupExport=@();backupImport=@();rebind=@();highlight=@();yellow=@();noticeClose=@()}
 foreach($lang in @('en','ru')){
   $p=Join-Path $workspace ("aquilum-app\native\assets\locales\"+$lang+".json")
   $l=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)|ConvertFrom-Json
-  foreach($k in @('actions','backupExport','backupImport','rebind','highlight','yellow')){
+  foreach($k in @('actions','backupExport','backupImport','rebind','highlight','yellow','noticeClose')){
     $value=switch($k){
       actions { [string]$l.editor.noteActions }
+      noticeClose { [string]$l.editor.table.studyClose }
       backupExport { [string]$l.editor.annotation.backupExport }
       backupImport { [string]$l.editor.annotation.backupImport }
       rebind { [string]$l.editor.annotation.rebindHeld }
@@ -134,6 +135,21 @@ function Wait-Visible {
     if($null -ne $found){return $found}
     Start-Sleep -Milliseconds 200
   }
+  $foundNames=@()
+  try {
+    $all=$Root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition)
+    for($j=0;$j -lt $all.Count -and $foundNames.Count -lt 30;$j++){
+      try{
+        $item=$all.Item($j).Current
+        if(!$item.IsOffscreen -and $item.IsEnabled -and
+           ($item.ControlType -eq [Windows.Automation.ControlType]::MenuItem -or
+            $item.ControlType -eq [Windows.Automation.ControlType]::Button)){
+          $foundNames+=("$($item.ControlType.ProgrammaticName):$($item.Name)")
+        }
+      }catch [Windows.Automation.ElementNotAvailableException]{}
+    }
+  } catch {}
+  Write-Host ("LANG-08 UIA available interactive controls: "+($foundNames -join ' | '))
   throw "LANG-08 missing installed UIA control: $($Names -join ' / ')"
 }
 function Click-Visible {
@@ -292,11 +308,24 @@ try {
   if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash){
     throw 'LANG-08 invalid rebind modified Markdown'
   }
-  Write-Host 'AKULA_LANG08_INSTALLED_REBIND_DENY_PASS genuine_nsis=1 os_mouse=1 sidecar_created=0 source_unchanged=1'
+  # The failed rebind deliberately raises a *modal* study_notice (AlertDialog).
+  # Do not try to interact with the obscured editor until we close it through
+  # the actual installed Windows UI. This modal is part of the negative test.
+  $closeNotice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $closeNotice -Window $window -Process $proc
+  $dismissed=$false
+  for($i=0;$i -lt 45;$i++){
+    if($null -eq (Find-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button))){
+      $dismissed=$true;break
+    }
+    Start-Sleep -Milliseconds 150
+  }
+  if(!$dismissed){throw 'LANG-08 denial notice was not dismissed through installed UI'}
+  Write-Host 'AKULA_LANG08_INSTALLED_REBIND_DENY_PASS genuine_nsis=1 os_mouse=1 sidecar_created=0 source_unchanged=1 modal_closed=1'
 
   Focus-Akula -Process $proc
   $body=Select-EditorBody -Root $window
-  [AkulaBetaGuiInput]::PressCtrlShortcut([IntPtr]$proc.MainWindowHandle,$proc.Id,[uint16]0x41)
+  Readback-Selected -Process $proc -Expected $text
   Click-Visible -Target $body -Window $window -Process $proc -Right
   $highlight=Wait-Visible -Root $window -Names $labels.highlight -Type ([Windows.Automation.ControlType]::MenuItem)
   Click-Visible -Target $highlight -Window $window -Process $proc
