@@ -102,3 +102,40 @@ fn lang03_external_watcher_change_does_not_retarget_annotation_or_write_sidecar(
         "duplicate phrases or changed text cannot relocate stored anchors");
     eprintln!("AKULA_LANG03_WATCHER_PASS=stale_hidden,no_retarget,no_write");
 }
+
+#[test]
+fn lang03_native_undo_redo_replays_verified_edits_before_disk_ack() {
+    let mut h = Harness::new();
+    let a = save_highlight(&mut h);
+    let before = h.body_text();
+    let original = sidecar(&h).load().unwrap().records[0].anchor.byte_start;
+    let body = h.app.note_ids.as_ref().unwrap().body;
+    body.edit(&mut h.root, |mut editor| {
+        TextEditor::select_byte_range(&mut editor, 0, 0);
+        TextEditor::insert_text(&mut editor, "prefix ");
+    });
+    h.deliver();
+    assert_eq!(h.body_text(), format!("prefix {before}"));
+    h.root.focus_on(Some(body.id()));
+    h.key(Key::Character("z".into()), Modifiers::CONTROL);
+    assert_eq!(h.body_text(), before, "Ctrl+Z must undo the real editor edit");
+    assert_eq!(sidecar(&h).load().unwrap().revision, 1);
+    h.key(Key::Character("y".into()), Modifiers::CONTROL);
+    assert_eq!(h.body_text(), format!("prefix {before}"),
+        "Ctrl+Y must redo the exact previously verified editor change");
+    assert_eq!(sidecar(&h).load().unwrap().revision, 1,
+        "neither shortcut may persist coordinates before the native saver ACK");
+
+    let core = std::sync::Arc::clone(&h.app.workspace.core);
+    let current = h.app.text.clone();
+    h.app.note.as_mut().unwrap().flush(&core, &current);
+    h.app.finish_annotation_rebind_after_save(&mut h.root);
+    let saved = sidecar(&h).load().unwrap();
+    assert_eq!(saved.revision, 2);
+    assert_eq!(saved.records[0].status, BindingStatus::Current);
+    let moved = saved.records[0].anchor.byte_start..saved.records[0].anchor.byte_end;
+    assert_eq!(moved.start, original + "prefix ".len());
+    assert_eq!(spans(&h), vec![moved]);
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), h.body_text());
+    eprintln!("AKULA_LANG03_UNDO_REDO_PASS=real_shortcuts,after_save_only");
+}
