@@ -7,7 +7,9 @@ const {test} = require('node:test');
 const base=path.resolve(__dirname,'../..');
 const files={
   rust:'aquilum-app/native/src/video/tools_package_windows.rs',
-  module:'aquilum-app/native/src/video/tools_package.rs',
+  module:'aquilum-app/native/src/video/tools_package_probe.rs',
+  core:'aquilum-app/native/src/video/tools_package.rs',
+  parent:'aquilum-app/native/src/video/mod.rs',
   lab:'scripts/windows-video-tools-01e-native-lab.ps1',
   installer:'scripts/windows-video-tools-01a-isolated-lab.ps1',
   workflow:'.github/workflows/akula-video-tools-01a-isolated-lab.yml',
@@ -16,7 +18,7 @@ const files={
 const read = name => fs.readFileSync(path.join(base,files[name]),'utf8');
 const hold=(ok,message)=>assert.ok(ok,'VIDEO_TOOLS_01E_HOLD: '+message);
 function check(x){
-  const {rust,module,lab,installer,workflow,product}=x;
+  const {rust,module,core,parent,lab,installer,workflow,product}=x;
   assert.deepEqual(JSON.parse(product).binaries.map(x=>x.path),['akula-app','shiva-pdf-preview']);
   for(const token of [
     'SHGetKnownFolderPath','PROGRAM_FILES_X64','0x6d809377',
@@ -36,13 +38,20 @@ function check(x){
   hold(!/std::env::var(?:_os)?\(("|')ProgramFiles|GetEnvironmentVariable\(("|')ProgramFiles/.test(rust),
     'native discovery must not trust ambient ProgramFiles');
   for(const token of [
-    '#[cfg(windows)]','tools_package_windows.rs','windows_discovery::installed_root()',
+    'tools_package_windows.rs','windows_discovery::installed_root()',
     'windows_discovery::check_installed_acl',
     'APPROVED_VIDEO_TOOLS_KEY.is_empty()','shipping_admission_enabled()',
     'verify_signed(&root, &raw, signed, APPROVED_VIDEO_TOOLS_KEY)',
     'manifest.json','manifest.minisig',
     'ReadOnlyAttested','PublisherNotApproved'
   ])hold(module.includes(token),'native signed-content binding missing '+token);
+  for(const token of [
+    'pub(super) const MAX_MANIFEST', 'pub(super) const MAX_SIGNATURE',
+    'pub(super) fn verify_signed', 'pub(super) fn bounded_metadata',
+    'pub(super) const APPROVED_VIDEO_TOOLS_KEY',
+  ])hold(core.includes(token),'existing signed verifier not reused '+token);
+  hold(parent.includes('mod tools_package_probe;') && parent.includes('all(windows, any(test, feature = "installed"))'),
+    'native probe must be gated to Windows installed/test configurations');
   for(const token of [
     "RUNNER_ENVIRONMENT -cne 'github-hosted'",
     "GITHUB_EVENT_NAME -cne 'pull_request'",
@@ -65,6 +74,7 @@ function check(x){
   ])hold(installer.includes(token),'actual NSIS runner did not invoke native guard '+token);
   for(const token of [
     "      - 'aquilum-app/native/src/video/tools_package_windows.rs'",
+    "      - 'aquilum-app/native/src/video/tools_package_probe.rs'",
     "      - 'scripts/windows-video-tools-01e-native-lab.ps1'",
     "      - '.github/scripts/video-tools-01e-native.test.cjs'",
     'node --test .github/scripts/video-tools-01e-native.test.cjs',
@@ -87,6 +97,8 @@ test('negative source mutations cannot bypass native Win32 gates or publish',()=
     ['rust','check_object_acl(&item.path())','// skipped native file rights'],
     ['rust','signed package is incomplete','ignored files'],
     ['module','APPROVED_VIDEO_TOOLS_KEY.is_empty()','false'],
+    ['parent','mod tools_package_probe;','// removed'],
+    ['core','pub(super) fn verify_signed','fn verify_signed'],
     ['module','verify_signed(&root, &raw, signed, APPROVED_VIDEO_TOOLS_KEY)','Ok(())'],
     ['lab','Set-Acl -LiteralPath $Target -AclObject $before','Write-Host no-restore'],
     ['lab','VIDEO_TOOLS_01E_NATIVE_WIN32_PASS','FAKE_PASS'],

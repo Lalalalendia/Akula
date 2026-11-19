@@ -12,7 +12,7 @@ on:
       - 'scripts/windows-video-tools-01d-acl-negative.ps1'
       - 'scripts/windows-video-tools-01e-native-lab.ps1'
       - 'aquilum-app/native/src/video/tools_package_windows.rs'
-      - 'aquilum-app/native/src/video/tools_package.rs'
+      - 'aquilum-app/native/src/video/tools_package_probe.rs'
       - '.github/scripts/video-tools-01e-native.test.cjs'
       - 'docs/release/video-tools-01e-native.md'
       - '.github/scripts/video-tools-01d-acl.test.cjs'
