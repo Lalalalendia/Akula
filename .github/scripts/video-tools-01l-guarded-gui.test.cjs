@@ -108,6 +108,6 @@ test('negative mutations of click, protected root and CI proof are blocked',()=>
    ['flow','permissions:\n  contents: read','permissions:\n  contents: write']
  ]){
     hold(s[file].includes(from),'mutation anchor missing '+file+' '+from);
-    assert.throws(()=>check({...s,[file]:s[file].replace(from,to)}),/VIDEO_TOOLS_01L_HOLD/);
+    assert.throws(()=>check({...s,[file]:s[file].replaceAll(from,to)}),/VIDEO_TOOLS_01L_HOLD/, 'mutation must fail: '+file+' '+from);
  }
 });
