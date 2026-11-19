@@ -355,7 +355,7 @@ public static class AkulaLang08DialogKeys {
 function Wait-FileDialog {
   param([Diagnostics.Process]$Process)
   $desktop=[Windows.Automation.AutomationElement]::RootElement
-  $windowType=New-Object Windows.Automation.PropertyCondition(
+  $windowType=[Windows.Automation.PropertyCondition]::new(
     [Windows.Automation.AutomationElement]::ControlTypeProperty,
     [Windows.Automation.ControlType]::Window)
   for($attempt=0;$attempt -lt 120;$attempt++){
@@ -367,7 +367,7 @@ function Wait-FileDialog {
         $w=$windows.Item($i);$s=$w.Current
         if($s.ProcessId -eq $Process.Id -and !$s.IsOffscreen -and $s.IsEnabled -and
            $s.NativeWindowHandle -ne 0 -and
-           $s.NativeWindowHandle -ne $Process.MainWindowHandle.ToInt32() -and
+           [long]$s.NativeWindowHandle -ne $Process.MainWindowHandle.ToInt64() -and
            $s.ClassName -ceq '#32770' -and !$s.BoundingRectangle.IsEmpty){
           return $w
         }
