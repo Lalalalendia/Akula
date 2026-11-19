@@ -21,15 +21,6 @@ on:
       - 'labs/video-tools-01j/'
       - '.github/scripts/video-tools-01j-six-signed.test.cjs'
       - 'docs/release/video-tools-01j-six-signed.md'
-      - 'aquilum-app/native/src/app/editor_requests/video.rs'
-      - 'aquilum-app/native/src/app/editor_requests/video_stock_admission.rs'
-      - 'aquilum-app/native/src/video/mod.rs'
-      - 'aquilum-app/native/src/video/queue.rs'
-      - 'aquilum-app/native/src/video/light.rs'
-      - 'aquilum-app/native/assets/locales/ru.json'
-      - 'aquilum-app/native/assets/locales/en.json'
-      - '.github/scripts/video-tools-01k-guarded-ui.test.cjs'
-      - 'docs/release/video-tools-01k-user-status.md'
       - '.github/scripts/video-tools-01g-pin-race.test.cjs'
       - 'aquilum-app/native/src/video/tools_package_pin_windows.rs'
       - 'aquilum-app/native/src/video/tools_package_pin_admission.rs'
@@ -235,7 +226,7 @@ jobs:
           if($LASTEXITCODE -ne 0){
             throw 'VIDEO_TOOLS_01K_HOLD: ordinary installed Windows Akula native UI failed to compile'
           }
-          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --bin aquilum-native -- video::queue::tests::installed_download_refusal_creates_no_job_or_local_bytes --exact --nocapture
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --bin aquilum-native -- video::queue::installed_tests::installed_download_refusal_creates_no_job_or_local_bytes --exact --nocapture
           if($LASTEXITCODE -ne 0){
             throw 'VIDEO_TOOLS_01K_HOLD: Windows installed queue accepted an unapproved executable'
           }

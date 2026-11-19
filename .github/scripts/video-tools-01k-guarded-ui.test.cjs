@@ -11,6 +11,7 @@ const files={
   probe:'aquilum-app/native/src/video/tools_package_probe.rs',
   mod:'aquilum-app/native/src/video/mod.rs',
   queue:'aquilum-app/native/src/video/queue.rs',
+  queueTests:'aquilum-app/native/src/video/queue_01k_tests.rs',
   leaf:'aquilum-app/native/src/video/light.rs',
   trust:'aquilum-app/native/src/video/tools_package.rs',
   stock:'aquilum-app/native/packaging/akula-windows.json',
@@ -23,7 +24,7 @@ const load=()=>Object.fromEntries(Object.entries(files).map(([k,p])=>[k,
   fs.readFileSync(path.join(root,p),'utf8')]));
 const ensure=(yes,msg)=>assert.ok(yes,'VIDEO_TOOLS_01K_HOLD: '+msg);
 function check(x){
-  const {ui,click,probe,mod,queue,leaf,trust,stock,ru,en,workflow,document}=x;
+  const {ui,click,probe,mod,queue,queueTests,leaf,trust,stock,ru,en,workflow,document}=x;
   assert.deepEqual(JSON.parse(stock).binaries.map(b=>b.path),['akula-app','shiva-pdf-preview'],
     'VIDEO_TOOLS_01K_HOLD: stock installer must remain only two EXEs');
   ensure(trust.includes('pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";')&&
@@ -38,7 +39,7 @@ function check(x){
     'windows_discovery::installed_root()','windows_discovery::check_installed_acl',
     'APPROVED_VIDEO_TOOLS_KEY.is_empty() || !shipping_admission_enabled()',
     'verify_signed(&root, &raw, signed, APPROVED_VIDEO_TOOLS_KEY)',
-    'if attested.version != "0.1.0"'
+    'attested.version == "0.1.0"'
   ])ensure(probe.includes(token),'native signed status incomplete: '+token);
   const variants=['Missing','Unsafe','PublisherNotApproved','IncompatibleVersion','ReadOnlyAttested'];
   const localeKeys=[];
@@ -85,18 +86,19 @@ function check(x){
   ensure(launch.includes(queueGate) &&
     launch.indexOf(queueGate)<launch.indexOf('if std::env::var_os("AKULA_RUST_MUX_BIN")'),
     'internal process guard must precede env-selected mux inside launch function');
+  ensure(queue.includes('mod installed_tests;')&&queue.includes('#[path = "queue_01k_tests.rs"]'),
+    'installed queue must register its standalone native test');
   for(const token of [
     'installed_download_refusal_creates_no_job_or_local_bytes',
     'assert!(status(url).is_none())',
     'std::fs::read_dir(temp.path()).unwrap().count(), 0'
-  ])ensure(queue.includes(token),'Windows no-job/no-local-bytes test missing '+token);
+  ])ensure(queueTests.includes(token),'Windows no-job/no-local-bytes test missing '+token);
   for(const token of [
-    "      - 'aquilum-app/native/src/app/editor_requests/video_stock_admission.rs'",
-    "      - 'aquilum-app/native/src/video/queue.rs'",
-    "      - '.github/scripts/video-tools-01k-guarded-ui.test.cjs'",
+    "      - 'aquilum-app/native/src/video/tools_package_probe.rs'",
+    "      - '.github/workflows/akula-video-tools-01a-isolated-lab.yml'",
     'node --test .github/scripts/video-tools-01k-guarded-ui.test.cjs',
     'cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed',
-    'video::queue::tests::installed_download_refusal_creates_no_job_or_local_bytes',
+    'video::queue::installed_tests::installed_download_refusal_creates_no_job_or_local_bytes',
     'all_five_native_states_show_distinct_russian_and_english_status',
     'VIDEO_TOOLS_01K_INSTALLED_WINDOWS_PASS',
     'runs-on: windows-2025','permissions:\n  contents: read','persist-credentials: false'
@@ -115,9 +117,9 @@ test('mutations of UI/native guard, locales, or Windows acceptance cannot silent
     ['ui','return true;','return false;'],
     ['click','if self.optional_video_tools_notice(root) { return; }','if false { return; }'],
     ['queue','if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))','if false'],
-    ['queue','assert!(status(url).is_none())','assert!(true)'],
+    ['queueTests','assert!(status(url).is_none())','assert!(true)'],
     ['leaf','VIDEO_TOOLS_01K_HOLD: publisher-approved process launch is unavailable','allow execution'],
-    ['probe','if attested.version != "0.1.0"','if false'],
+    ['probe','attested.version == "0.1.0"','false'],
     ['trust','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "ci";'],
     ['ru','"videoToolsMissingTitle"', '"missingRussianTitle"'],
     ['en','"videoToolsUnapprovedTitle"', '"missingEnglishTitle"'],

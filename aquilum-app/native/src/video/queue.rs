@@ -4,9 +4,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-
 use super::{download, library::Library, youtube};
-
 #[derive(Clone, Debug)]
 pub enum Status {
     Queued,
@@ -14,23 +12,18 @@ pub enum Status {
     Ready(PathBuf),
     Failed(String),
 }
-
 static JOBS: OnceLock<Mutex<HashMap<String, Status>>> = OnceLock::new();
 static SERIAL: Mutex<()> = Mutex::new(());
-
 fn jobs() -> &'static Mutex<HashMap<String, Status>> {
     JOBS.get_or_init(|| Mutex::new(HashMap::new()))
 }
-
 fn change(id: &str, status: Status) {
     jobs().lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_owned(), status);
 }
-
 pub fn status(url: &str) -> Option<Status> {
     let id = youtube::video_id(url)?;
     jobs().lock().unwrap_or_else(|e| e.into_inner()).get(id).cloned()
 }
-
 /// Called only after the user presses Download in the media card.
 /// Does not silently launch any process during startup, synchronization or
 /// network metadata resolution. A finished file is shared by all notes by ID.
@@ -83,22 +76,12 @@ pub fn enqueue(
     });
     Ok(true)
 }
-
+#[cfg(all(test, windows, feature = "installed", not(feature = "video-ui-e2e")))]
+#[path = "queue_01k_tests.rs"]
+mod installed_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-    #[test]
-    fn installed_download_refusal_creates_no_job_or_local_bytes() {
-        let temp = tempfile::tempdir().unwrap();
-        let url = "https://youtu.be/AbCdEfGhIJK";
-        let callback = Arc::new(|_: bool, _: &str| {});
-        assert_eq!(enqueue(url.into(), temp.path().to_path_buf(), vec![], callback),
-            Err("Video Tools execution is not approved for installed Akula"));
-        assert!(status(url).is_none());
-        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
-    }
-
     #[test]
     fn untrusted_link_never_creates_a_download_job() {
         let dir = tempfile::tempdir().unwrap();
