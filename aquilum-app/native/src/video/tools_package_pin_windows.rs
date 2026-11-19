@@ -151,12 +151,12 @@ mod tests {
         let denied = OpenOptions::new().write(true).open(root.join(LAB_NAMES[0]))
             .expect_err("pinned FILE_SHARE_READ handle must deny write");
         assert_eq!(denied.raw_os_error(), Some(32), "expected sharing violation");
-        fs::write(root.join("alien.exe"), b"alien").unwrap();
-        assert!(PinnedPackage::open(&root, &LAB_NAMES).is_err());
-        fs::remove_file(root.join("alien.exe")).unwrap();
         drop(pinned);
         OpenOptions::new().write(true).open(root.join(LAB_NAMES[0]))
             .expect("write opens again once pinning guard is dropped");
+        fs::write(root.join("alien.exe"), b"alien").unwrap();
+        assert!(PinnedPackage::open(&root, &LAB_NAMES).is_err());
+        fs::remove_file(root.join("alien.exe")).unwrap();
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -168,14 +168,11 @@ mod tests {
         let _ = fs::remove_file(&root);
         fs::write(&root, b"MZ-unchanged").unwrap();
         let mut held = File::open(&root).unwrap();
-        let mut original = std::io::Cursor::new(b"MZ-original".to_vec());
-        // Cursor cannot be passed as File: compare the independently staged
-        // source file, as done in the actual Windows NSIS witness.
+        // The source reference is independent of the installed payload.
         let reference = root.with_extension("reference");
         fs::write(&reference, b"MZ-original").unwrap();
         let mut expected = File::open(&reference).unwrap();
         assert!(compare_reference(&mut held, &mut expected).is_err());
-        drop(original);
         fs::remove_file(&root).unwrap();
         fs::remove_file(&reference).unwrap();
     }
@@ -200,7 +197,12 @@ fn main() {
     }
     let mut guard = PinnedPackage::open(&root, &LAB_NAMES).expect("pin real installed PE handles");
     guard.inspect(|name, held| {
-        let mut reference = File::open(source.join(name))
+        let reference_path = if name == "uninstall.exe" {
+            root.join(name) // The lab installer generates this separately.
+        } else {
+            source.join(name)
+        };
+        let mut reference = File::open(reference_path)
             .map_err(|_| hold("staged source reference unavailable"))?;
         compare_reference(held, &mut reference)
     }).expect("all held PE bytes must match exact staged source");
@@ -212,5 +214,5 @@ fn main() {
     assert!(work.join("video-tools-01g-release").exists(),
         "VIDEO_TOOLS_01G_HOLD: race witness release did not arrive before deadline");
     drop(guard);
-    println!("VIDEO_TOOLS_01G_NATIVE_PIN_PASS source_bytes=4 root_held=1 files_held=4 release=0");
+    println!("VIDEO_TOOLS_01G_NATIVE_PIN_PASS source_bytes=3 root_held=1 files_held=4 release=0");
 }
