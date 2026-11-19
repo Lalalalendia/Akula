@@ -81,8 +81,10 @@ function check(x){
     queue.indexOf(queueGate)<queue.indexOf('std::thread::spawn(')&&
     queue.indexOf(queueGate)<queue.indexOf('list.insert('),
     'queue guard must precede any job state or background thread');
-  ensure(leaf.indexOf(queueGate)<leaf.indexOf('AKULA_RUST_MUX_BIN'),
-    'internal process guard must precede env-selected mux');
+  const launch=leaf.slice(leaf.indexOf('pub(super) fn download_one_or_legacy('));
+  ensure(launch.includes(queueGate) &&
+    launch.indexOf(queueGate)<launch.indexOf('if std::env::var_os("AKULA_RUST_MUX_BIN")'),
+    'internal process guard must precede env-selected mux inside launch function');
   for(const token of [
     'installed_download_refusal_creates_no_job_or_local_bytes',
     'assert!(status(url).is_none())',
