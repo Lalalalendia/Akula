@@ -39,7 +39,7 @@ Section "Install only separate nonrelease Video Tools"
 SectionEnd
 
 Section "Uninstall"
-  ; Exact six files. Never Delete /r or touch user notes.
+  ; Explicit names only. No recursive uninstall; foreign user notes remain.
   Delete "$INSTDIR\akula-video-mux.exe"
   Delete "$INSTDIR\akula-yt-dlp.exe"
   Delete "$INSTDIR\akula-quickjs.exe"
