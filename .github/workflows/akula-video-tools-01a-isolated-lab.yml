@@ -31,6 +31,7 @@ on:
       - 'docs/release/video-tools-01f-standard-user.md'
       - 'aquilum-app/native/src/video/tools_package_windows.rs'
       - 'aquilum-app/native/src/video/tools_package_probe.rs'
+      - 'aquilum-app/native/src/video/tools_package_probe_version.rs'
       - '.github/scripts/video-tools-01e-native.test.cjs'
       - 'docs/release/video-tools-01e-native.md'
       - '.github/scripts/video-tools-01d-acl.test.cjs'
