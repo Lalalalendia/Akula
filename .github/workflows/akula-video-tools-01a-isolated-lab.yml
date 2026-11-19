@@ -1,5 +1,5 @@
 name: Akula VIDEO-TOOLS-01a protected three-PE identity lab (non-release)
-# github-hosted Windows PR-only; no artifact uploads, signing or publisher environment.
+# github-hosted Windows PR-only; ephemeral test signature, no publisher keys, releases or uploads.
 on:
   pull_request:
     branches: [main]
@@ -16,6 +16,11 @@ on:
       - 'scripts/video-tools-01i-unsigned-custody.cjs'
       - '.github/scripts/video-tools-01i-unsigned-custody.test.cjs'
       - 'docs/release/video-tools-01i-unsigned-custody.md'
+      - 'scripts/video-tools-01j-six-file-lab.nsi'
+      - 'scripts/windows-video-tools-01j-six-signed-lab.ps1'
+      - 'labs/video-tools-01j/'
+      - '.github/scripts/video-tools-01j-six-signed.test.cjs'
+      - 'docs/release/video-tools-01j-six-signed.md'
       - '.github/scripts/video-tools-01g-pin-race.test.cjs'
       - 'aquilum-app/native/src/video/tools_package_pin_windows.rs'
       - 'aquilum-app/native/src/video/tools_package_pin_admission.rs'
@@ -65,6 +70,7 @@ jobs:
           node --test .github/scripts/video-tools-01f-standard-user.test.cjs
           node --test .github/scripts/video-tools-01g-pin-race.test.cjs
           node --test .github/scripts/video-tools-01i-unsigned-custody.test.cjs
+          node --test .github/scripts/video-tools-01j-six-signed.test.cjs
           echo 'VIDEO_TOOLS_01A_SOURCE_CONTRACT_PASS release=0'
 
   windows-real:
@@ -84,10 +90,10 @@ jobs:
             labs/video-lite
           shared-key: akula-video-tools-01a-mux-v1
           save-if: false
-      - name: Parse all eight PowerShell scripts before any executable staging
+      - name: Parse all nine PowerShell scripts before any executable staging
         shell: pwsh
         run: |
-          foreach($path in @('scripts/windows-video-tools-01a-isolated-lab.ps1','scripts/windows-video-tools-01c-root-lab.ps1','scripts/video-tools-01c-os-known-root.ps1','scripts/video-tools-01d-acl.ps1','scripts/windows-video-tools-01d-acl-negative.ps1','scripts/windows-video-tools-01e-native-lab.ps1','scripts/windows-video-tools-01f-standard-user.ps1','scripts/windows-video-tools-01g-pin-race.ps1')){
+          foreach($path in @('scripts/windows-video-tools-01a-isolated-lab.ps1','scripts/windows-video-tools-01c-root-lab.ps1','scripts/video-tools-01c-os-known-root.ps1','scripts/video-tools-01d-acl.ps1','scripts/windows-video-tools-01d-acl-negative.ps1','scripts/windows-video-tools-01e-native-lab.ps1','scripts/windows-video-tools-01f-standard-user.ps1','scripts/windows-video-tools-01g-pin-race.ps1','scripts/windows-video-tools-01j-six-signed-lab.ps1')){
             $tokens=$null; $errors=$null
             [System.Management.Automation.Language.Parser]::ParseFile(
               (Join-Path $env:GITHUB_WORKSPACE $path),
@@ -157,4 +163,25 @@ jobs:
           }
           if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01I_UNSIGNED_CUSTODY_PASS'))){
             throw 'VIDEO_TOOLS_01I_HOLD: actual three pinned PE metadata was not built'
+          }
+      - name: Install pinned TEST-ONLY Minisign CLI on ephemeral Windows runner
+        shell: pwsh
+        run: |
+          choco install minisign --version=0.8.0 --yes --no-progress
+          if($LASTEXITCODE -ne 0){ throw 'VIDEO_TOOLS_01J_HOLD: independent Minisign CLI unavailable' }
+          $found=Get-Command minisign -ErrorAction Stop
+          if(!$found){throw 'VIDEO_TOOLS_01J_HOLD: real Minisign tool missing'}
+      - name: Real six-file separate signed NSIS, native Akula read-only admission and negative cases
+        shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $proof=@(& ./scripts/windows-video-tools-01j-six-signed-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS 2>&1)
+          $proof | Out-Host
+          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS'))){
+            throw 'VIDEO_TOOLS_01J_HOLD: real Minisign signature was not admitted by native Rust test'
+          }
+          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01J_SIX_SIGNED_PASS'))){
+            throw 'VIDEO_TOOLS_01J_HOLD: exact protected six-file signed install and uninstall incomplete'
           }
