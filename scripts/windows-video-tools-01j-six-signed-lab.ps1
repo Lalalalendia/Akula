@@ -115,6 +115,8 @@ try {
     }
     Copy-Item -LiteralPath $source -Destination (Join-Path $stageThree $name) -ErrorAction Stop
   }
+  & cargo build --release --manifest-path (Join-Path $repo 'labs/video-tools-01j/Cargo.toml')
+  if ($LASTEXITCODE -ne 0) { throw 'VIDEO_TOOLS_01J_HOLD: native Akula verifier failed to compile' }
   Run-Native -Mode 'missing' -Public '-'
   $output=@(& node (Join-Path $repo 'scripts/video-tools-01i-unsigned-custody.cjs') $stageThree $unsigned 2>&1)
   $output | Out-Host
@@ -157,8 +159,6 @@ try {
   if (@(Get-ChildItem -LiteralPath $stageSix).Count -ne 5) {
     throw 'VIDEO_TOOLS_01J_HOLD: installer stage contains more than five input files'
   }
-  & cargo build --release --manifest-path (Join-Path $repo 'labs/video-tools-01j/Cargo.toml')
-  if ($LASTEXITCODE -ne 0) { throw 'VIDEO_TOOLS_01J_HOLD: native Akula verifier failed to compile' }
   $make=Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'NSIS/makensis.exe'
   if (!(Test-Path -LiteralPath $make -PathType Leaf)) {
     throw 'VIDEO_TOOLS_01J_HOLD: protected NSIS compiler missing'
