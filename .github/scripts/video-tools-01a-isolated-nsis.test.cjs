@@ -103,7 +103,10 @@ function verify(x) {
     'needs: contract',
     'github-hosted','--locked',
     '2026.10.26','v0.18.0',
-    'choco install nsis --version=3.11.0',
+    'nsis-3.11-setup.exe',
+    '38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a',
+    'VIDEO_TOOLS_01O_NSIS_OFFICIAL_PIN_PASS',
+    'if($actual -cne $expected)',
     './scripts/windows-video-tools-01a-isolated-lab.ps1',
     'VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS'
   ]) hold(wf.includes(token),'workflow missing exact-head admission or real Windows test '+token);
@@ -131,6 +134,8 @@ test('negative mutations fail on identity, signing HOLD, Windows gate and protec
     ['runner','Get-FileHash -LiteralPath $source -Algorithm SHA256','Write-Host no-hashes'],
     ['runner','unrelated-private-note.md','nuke-everything.txt'],
     ['runner','VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS','FAKE_PASS'],
+    ['workflow','38d49f8fe09b1c332b01d0940e57b7258f4447733643273a01c59959ad9d3b0a','0'.repeat(64)],
+    ['workflow','if($actual -cne $expected)','if($false)'],
     ['workflow','needs: contract','needs: manual'],
     ['workflow','permissions:\n  contents: read','permissions:\n  contents: write'],
     ['workflow','VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS','MISSING_PROOF'],
