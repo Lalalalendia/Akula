@@ -198,12 +198,25 @@ jobs:
           $ErrorActionPreference='Stop'
           # Stream Rust compiler and Minisign errors live; buffering an
           # entire terminating PowerShell script hides the real error cause.
-          $proof=@()
-          & ./scripts/windows-video-tools-01j-six-signed-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS 2>&1 |
-            Tee-Object -Variable proof | Out-Host
-          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS'))){
-            throw 'VIDEO_TOOLS_01J_HOLD: real Minisign signature was not admitted by native Rust test'
+          $proofLog=Join-Path $env:RUNNER_TEMP ('akula-video-tools-01j-' + $env:EXPECTED_HEAD_SHA + '.log')
+          if(Test-Path -LiteralPath $proofLog){
+            throw 'VIDEO_TOOLS_01J_HOLD: acceptance proof log already exists'
           }
-          if(!(($proof | Out-String).Contains('VIDEO_TOOLS_01J_SIX_SIGNED_PASS'))){
-            throw 'VIDEO_TOOLS_01J_HOLD: exact protected six-file signed install and uninstall incomplete'
+          try {
+            # Tee-Object -Variable does not reliably retain output from a
+            # nested PowerShell script under GitHub pwsh. Preserve the proof
+            # in runner temp, still streaming compiler and Minisign diagnostics.
+            & ./scripts/windows-video-tools-01j-six-signed-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS 2>&1 |
+              Tee-Object -FilePath $proofLog | Out-Host
+            $proof=Get-Content -LiteralPath $proofLog -Raw -ErrorAction Stop
+            if(!$proof.Contains('VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS')){
+              throw 'VIDEO_TOOLS_01J_HOLD: real Minisign signature was not admitted by native Rust test'
+            }
+            if(!$proof.Contains('VIDEO_TOOLS_01J_SIX_SIGNED_PASS')){
+              throw 'VIDEO_TOOLS_01J_HOLD: exact protected six-file signed install and uninstall incomplete'
+            }
+          } finally {
+            if(Test-Path -LiteralPath $proofLog){
+              Remove-Item -LiteralPath $proofLog -Force -ErrorAction Stop
+            }
           }
