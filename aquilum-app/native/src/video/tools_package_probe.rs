@@ -6,6 +6,9 @@ use super::tools_package::{
 };
 #[path = "tools_package_windows.rs"]
 pub(super) mod windows_discovery;
+#[path = "tools_package_probe_version.rs"]
+mod version;
+pub(crate) use version::classify_authenticated_version;
 /// Native Video Tools discovery is diagnostics only. Not executable admission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ToolsDiscovery {
@@ -22,7 +25,6 @@ pub(crate) fn probe_installed_video_tools() -> ToolsDiscovery {
         Ok(None) => return ToolsDiscovery::Missing,
         Err(_) => return ToolsDiscovery::Unsafe,
     };
-    // Exact publisher product contents: no environment-selected EXE fallback.
     let files = [
         "manifest.json",
         "manifest.minisig",
@@ -50,10 +52,8 @@ pub(crate) fn probe_installed_video_tools() -> ToolsDiscovery {
         Ok(signed) => signed,
         Err(_) => return ToolsDiscovery::Unsafe,
     };
-    // Version selection follows publisher-authenticated contents only.
     match verify_signed(&root, &raw, signed, APPROVED_VIDEO_TOOLS_KEY) {
-        Ok(attested) if attested.version == "0.1.0" => ToolsDiscovery::ReadOnlyAttested,
-        Ok(_) => ToolsDiscovery::IncompatibleVersion,
+        Ok(attested) => classify_authenticated_version(&attested.version),
         Err(_) => ToolsDiscovery::Unsafe,
     }
 }

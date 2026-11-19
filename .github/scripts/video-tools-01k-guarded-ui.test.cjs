@@ -9,6 +9,7 @@ const files={
   ui:'aquilum-app/native/src/app/editor_requests/video_stock_admission.rs',
   click:'aquilum-app/native/src/app/editor_requests/video.rs',
   probe:'aquilum-app/native/src/video/tools_package_probe.rs',
+  version:'aquilum-app/native/src/video/tools_package_probe_version.rs',
   mod:'aquilum-app/native/src/video/mod.rs',
   queue:'aquilum-app/native/src/video/queue.rs',
   queueTests:'aquilum-app/native/src/video/queue_01k_tests.rs',
@@ -24,7 +25,7 @@ const load=()=>Object.fromEntries(Object.entries(files).map(([k,p])=>[k,
   fs.readFileSync(path.join(root,p),'utf8')]));
 const ensure=(yes,msg)=>assert.ok(yes,'VIDEO_TOOLS_01K_HOLD: '+msg);
 function check(x){
-  const {ui,click,probe,mod,queue,queueTests,leaf,trust,stock,ru,en,workflow,document}=x;
+  const {ui,click,probe,version,mod,queue,queueTests,leaf,trust,stock,ru,en,workflow,document}=x;
   assert.deepEqual(JSON.parse(stock).binaries.map(b=>b.path),['akula-app','shiva-pdf-preview'],
     'VIDEO_TOOLS_01K_HOLD: stock installer must remain only two EXEs');
   ensure(trust.includes('pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";')&&
@@ -39,8 +40,11 @@ function check(x){
     'windows_discovery::installed_root()','windows_discovery::check_installed_acl',
     'APPROVED_VIDEO_TOOLS_KEY.is_empty() || !shipping_admission_enabled()',
     'verify_signed(&root, &raw, signed, APPROVED_VIDEO_TOOLS_KEY)',
-    'attested.version == "0.1.0"'
+    'classify_authenticated_version(&attested.version)'
   ])ensure(probe.includes(token),'native signed status incomplete: '+token);
+  ensure(version.includes('"0.1.0" => ToolsDiscovery::ReadOnlyAttested') &&
+    version.includes('_ => ToolsDiscovery::IncompatibleVersion'),
+    'authenticated exact signed-version classifier missing');
   const variants=['Missing','Unsafe','PublisherNotApproved','IncompatibleVersion','ReadOnlyAttested'];
   const localeKeys=[];
   for(const [v,base] of [
@@ -58,7 +62,8 @@ function check(x){
     }
   }
   for(const token of [
-    'if self.optional_video_tools_notice(root) { return; }',
+    'if self.optional_video_tools_notice(root) {',
+    'mark("NOTICE_BLOCKED"); return; }',
     'crate::video::queue::enqueue('
   ])ensure(click.includes(token),'click-to-notice-to-queue order incomplete');
   ensure(click.indexOf('optional_video_tools_notice')<click.indexOf('queue::enqueue'),
@@ -115,11 +120,11 @@ test('mutations of UI/native guard, locales, or Windows acceptance cannot silent
     ['ui','probe_installed_video_tools()','TrustPATH()'],
     ['ui','ToolsDiscovery::PublisherNotApproved => (','ToolsDiscovery::PublisherNotApproved /* fake */ => ('],
     ['ui','return true;','return false;'],
-    ['click','if self.optional_video_tools_notice(root) { return; }','if false { return; }'],
+    ['click','if self.optional_video_tools_notice(root) {','if false {'],
     ['queue','if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))','if false'],
     ['queueTests','assert!(status(url).is_none())','assert!(true)'],
     ['leaf','VIDEO_TOOLS_01K_HOLD: publisher-approved process launch is unavailable','allow execution'],
-    ['probe','attested.version == "0.1.0"','false'],
+    ['version','"0.1.0" => ToolsDiscovery::ReadOnlyAttested','"0.1.0" => ToolsDiscovery::IncompatibleVersion'],
     ['trust','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "ci";'],
     ['ru','"videoToolsMissingTitle"', '"missingRussianTitle"'],
     ['en','"videoToolsUnapprovedTitle"', '"missingEnglishTitle"'],

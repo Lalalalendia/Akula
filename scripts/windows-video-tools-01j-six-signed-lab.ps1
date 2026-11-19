@@ -104,6 +104,10 @@ function Run-Native {
     'VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS'
   } elseif ($Mode -ceq 'missing') {
     'VIDEO_TOOLS_01J_MISSING_PASS'
+  } elseif ($Mode -ceq 'status-attested') {
+    'VIDEO_TOOLS_01M_NATIVE_STATE_PASS state=read-only-attested real_signature=1'
+  } elseif ($Mode -ceq 'status-incompatible') {
+    'VIDEO_TOOLS_01M_NATIVE_STATE_PASS state=incompatible-version real_signature=1'
   } else {
     'VIDEO_TOOLS_01J_NATIVE_REJECT_PASS case='+$Mode
   }
@@ -225,6 +229,38 @@ try {
     [IO.File]::WriteAllBytes($seventh,[byte[]](77,90,0,0))
     Run-Native -Mode 'seventh-file' -Public $public
   } finally { if(Test-Path -LiteralPath $seventh){Remove-Item -LiteralPath $seventh -Force} }
+  # VIDEO-TOOLS-01m: the EXACT installed, protected, pinned real PE set
+  # must yield two different read-only diagnostic states when signed
+  # manifests are authenticated by the same ephemeral CI key. Neither
+  # result must authorize a production downloader or child process.
+  Run-Native -Mode 'status-attested' -Public $public
+  $saved01mManifest=[IO.File]::ReadAllBytes($installedManifest)
+  $saved01mSignature=[IO.File]::ReadAllBytes($installedSig)
+  $original01m=[Text.Encoding]::UTF8.GetString($saved01mManifest)
+  $fromVersion='"version":"0.1.0"'
+  $toVersion='"version":"0.2.0"'
+  if($original01m.Split([string[]]@($fromVersion),[StringSplitOptions]::None).Count -ne 2){
+    throw 'VIDEO_TOOLS_01M_HOLD: exact single signed version field missing'
+  }
+  $candidate=Join-Path $work '01m-signed-incompatible-manifest.json'
+  $candidateSignature=Join-Path $work '01m-signed-incompatible-manifest.minisig'
+  [IO.File]::WriteAllText($candidate,$original01m.Replace($fromVersion,$toVersion),[Text.UTF8Encoding]::new($false))
+  & $signer -S -q -s $private -m $candidate -x $candidateSignature
+  if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $candidateSignature)){
+    throw 'VIDEO_TOOLS_01M_HOLD: incompatible manifest was not freshly signed'
+  }
+  & $signer -Vm $candidate -x $candidateSignature -p $public -Q | Out-Host
+  if($LASTEXITCODE -ne 0){throw 'VIDEO_TOOLS_01M_HOLD: incompatible signature verification failed'}
+  try {
+    [IO.File]::WriteAllBytes($installedManifest,[IO.File]::ReadAllBytes($candidate))
+    [IO.File]::WriteAllBytes($installedSig,[IO.File]::ReadAllBytes($candidateSignature))
+    Run-Native -Mode 'status-incompatible' -Public $public
+  } finally {
+    [IO.File]::WriteAllBytes($installedManifest,$saved01mManifest)
+    [IO.File]::WriteAllBytes($installedSig,$saved01mSignature)
+  }
+  Run-Native -Mode 'status-attested' -Public $public
+  Write-Output 'VIDEO_TOOLS_01M_REAL_SIGNED_STATES_PASS version_010=1 version_020=1 actual_pe=3 os_acl=1 publisher_approved=0 release=0'
   Assert-Exact-Six
   Run-Native -Mode 'valid' -Public $public
   # An unrelated user note must NOT be deleted by the dedicated uninstaller.
@@ -254,7 +290,7 @@ try {
   # This file is the authoritative CI handoff. It is created ONLY after
   # both positive native Minisign verdicts, all five negative cases, and
   # uninstall + user data preservation have completed successfully.
-  $proofContent="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`n"
+  $proofContent="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`nVIDEO_TOOLS_01M_REAL_SIGNED_STATES_PASS`n"
   [IO.File]::WriteAllText($ProofFile,$proofContent,[Text.UTF8Encoding]::new($false))
 } finally {
   if($installed -and (Test-Path -LiteralPath (Join-Path $root 'uninstall.exe') -PathType Leaf)) {
