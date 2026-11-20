@@ -159,6 +159,12 @@ def validate_windows_inputs(ytroot):
  ]:
   need(groups[group].get(name,{}).get("version")==version,
        "pinned Windows build dependency drift: "+name)
+ builder=groups["win-x64-pyinstaller"]["pyinstaller"]
+ need(builder.get("wheel_origin")=="CUSTOM_DIRECT_URL" and
+      builder.get("custom_wheel_url")==CUSTOM_WHEEL_URL and
+      builder.get("custom_wheel_sha256")==CUSTOM_WHEEL_SHA and
+      builder.get("builder_git_commit")==PYBUILD,
+      "actual Windows PyInstaller wheel provenance not verified")
  py=tomllib.loads((ytroot/"pyproject.toml").read_text("utf8"))
  need(py["project"]["license"]=="Unlicense" and
       "yt-dlp-ejs==0.8.0" in py["project"]["optional-dependencies"]["pin"],
@@ -194,18 +200,21 @@ def archive_tracked(root,commit,prefix,selectors,must_have):
       "required tracked source/build/license file missing from source archive")
  return gzip.compress(raw,compresslevel=9,mtime=0),len(names)
 
-def build(allow,ytroot,qroot,akula,head):
+def build(allow,ytroot,qroot,pyroot,akula,head):
  check_release_hold(allow)
- need(git_head(ytroot)==YT and git_head(qroot)==QJS and git_head(akula)==head,
+ need(git_head(ytroot)==YT and git_head(qroot)==QJS and git_head(pyroot)==PYBUILD and git_head(akula)==head,
       "source checkout commits do not match pinned identity")
  evidence={k:verified_blobs(root,k)
-           for k,root in (("yt",ytroot),("quickjs",qroot),("akula",akula))}
+           for k,root in (("yt",ytroot),("quickjs",qroot),("pybuild",pyroot),("akula",akula))}
  pins=validate_windows_inputs(ytroot)
  data={}
  snapshots={}
  specs=[
   ("yt",ytroot,YT,[],list(BLOBS["yt"]),"yt-dlp"),
   ("quickjs",qroot,QJS,[],["LICENSE"],"quickjs-ng"),
+  ("pybuild",pyroot,PYBUILD,[],["LICENSE","README.md",
+    ".github/workflows/build.yml","requirements/build.txt",
+    "requirements/pip.txt"],"pyinstaller-builds"),
   ("akula",akula,head,["LICENSE","labs/video-lite"],
    ["LICENSE","labs/video-lite/Cargo.toml","labs/video-lite/Cargo.lock",
     "labs/video-lite/src/bin/dash.rs","labs/video-lite/src/version_01o.rs"],"akula"),
