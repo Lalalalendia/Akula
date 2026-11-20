@@ -4,6 +4,11 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/src/video/optional_ytdlp.rs'
+      - 'aquilum-app/native/src/app/settings/video_tools.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/system/video_tools.rs'
+      - 'aquilum-app/native/assets/locales/en.json'
+      - 'aquilum-app/native/assets/locales/ru.json'
+      - 'scripts/windows-video20-settings-uia.ps1'
       - '.github/workflows/akula-video20-user-optin-windows.yml'
 permissions:
   contents: read
@@ -56,7 +61,16 @@ jobs:
           for locale in [ru,en]:
               for key in ["ytdlpTitle","ytdlpDownload","ytdlpRemove","ytdlpConfirmText","ytdlpInvalid"]:
                   assert locale["settings"]["system"].get(key)
+          gui=Path("scripts/windows-video20-settings-uia.ps1").read_text()
+          for evidence in ("VIDEO20_SETTINGS_CANCEL_UIA_PASS",
+                           "VIDEO20_SETTINGS_INSTALL_UIA_PASS",
+                           "VIDEO20_SETTINGS_REMOVE_UIA_PASS",
+                           "SendNavigationKey", "Wait-Dialog"):
+              assert evidence in gui, evidence
+          assert "EXPECTED_HEAD_SHA" in gui
+          assert "GITHUB_EVENT_NAME -cne 'pull_request'" in gui
           print("VIDEO20_STOCK_NSIS_TWO_BINARIES_PASS bundled_yt_dlp=0 explicit_optin=1")
+          print("VIDEO20_REAL_WINDOWS_GUI_SOURCE_PASS separate_workflow=0")
           PY
   windows-installed:
     name: Compile installed Windows + validate user opt-in downloader (HOLD)
@@ -95,3 +109,39 @@ jobs:
           cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::optional_ytdlp::tests::user_optin_real_download_remove_ci_only -- --exact --ignored --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Real signed-pin user-initiated download/remove laboratory test failed' }
           Write-Host 'VIDEO20_OPTIN_OFFICIAL_DOWNLOAD_REMOVE_PASS release=0'
+      - name: Build stock installed GUI from same exact HEAD, no bundle
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --locked -p aquilum-native --features installed
+          if ($LASTEXITCODE -ne 0) { throw 'VIDEO20 installed GUI binary compilation failed' }
+          $compiled=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/debug/aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $compiled -PathType Leaf)) { throw 'VIDEO20 compiled GUI missing' }
+          $targetDir=Join-Path $env:LOCALAPPDATA 'Akula'
+          if (Test-Path -LiteralPath $targetDir) { throw 'VIDEO20 requires clean installed-style GUI runner' }
+          New-Item -ItemType Directory -Path $targetDir | Out-Null
+          $target=Join-Path $targetDir 'akula-app.exe'
+          Copy-Item -LiteralPath $compiled -Destination $target
+          if ((Get-FileHash -LiteralPath $target).Hash -cne (Get-FileHash -LiteralPath $compiled).Hash) {
+            throw 'VIDEO20 staged Akula does not match built installed executable'
+          }
+          Write-Host 'VIDEO20_INSTALLED_GUI_STAGE_PASS binaries=1 bundled_yt_dlp=0'
+      - name: Real Windows Settings consent, official fetch and removal via UIA
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUNNER_ENVIRONMENT: github-hosted
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $script=Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-video20-settings-uia.ps1'
+          $tokens=$null; $errors=$null
+          [Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) { throw ('VIDEO20 GUI syntax error: ' + ($errors | Out-String)) }
+          $powershell=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          $exe=Join-Path $env:LOCALAPPDATA 'Akula/akula-app.exe'
+          $vault=Join-Path $env:RUNNER_TEMP 'video20-real-ui-vault'
+          $data=Join-Path $env:RUNNER_TEMP 'video20-real-ui-data'
+          & $powershell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $script -ExePath $exe -VaultPath $vault -DataDir $data
+          if ($LASTEXITCODE -ne 0) { throw 'VIDEO20 real Windows Settings GUI acceptance failed' }
+          Write-Host 'VIDEO20_REAL_SETTINGS_UIA_PASS no_youtube=1 release=0'
