@@ -75,7 +75,14 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Stage three pinned Git source snapshots, explicitly NOT complete corresponding source
+      - name: Checkout immutable yt-dlp custom PyInstaller bootloader recipe (no binary wheel)
+        uses: actions/checkout@v4
+        with:
+          repository: yt-dlp/Pyinstaller-Builds
+          ref: 5eb86b862d61adc3df0f44e6e0b815b7d74fa3f
+          path: _video-tools-01t-pyi-builder
+          persist-credentials: false
+      - name: Stage four pinned Git source snapshots, explicitly NOT complete corresponding source
         shell: bash
         env:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -83,10 +90,10 @@ jobs:
           set -euo pipefail
           python3 .github/scripts/video-tools-01t-source-starter.py \
             docs/release/video18b04-five-exe-allowlist.json \
-            _video-tools-01q-yt _video-tools-01q-qjs \
+            _video-tools-01q-yt _video-tools-01q-qjs _video-tools-01t-pyi-builder \
             "$EXPECTED_HEAD_SHA" "$RUNNER_TEMP/video-tools-01t-source-starter-HOLD" \
             | tee "$RUNNER_TEMP/video-tools-01t-proof.log"
-          grep -Fx 'VIDEO_TOOLS_01T_SOURCE_STARTER_PASS source_trees=3 wheels=0 complete_source=0 rebuilt_exe=0 legal_approval=0 release=0' \
+          grep -Fx 'VIDEO_TOOLS_01T_SOURCE_STARTER_PASS source_trees=4 wheels=0 complete_source=0 rebuilt_exe=0 legal_approval=0 release=0' \
             "$RUNNER_TEMP/video-tools-01t-proof.log"
           python3 - <<'PY'
           import json,os
@@ -97,13 +104,14 @@ jobs:
           assert m['complete_corresponding_source_available'] is False
           assert m['corresponding_source_rebuilt_and_verified'] is False
           assert m['windows_executables_included'] is False
-          assert len(m['snapshots'])==3
+          assert len(m['snapshots'])==4
           assert all(m['snapshots'][k]['tracked_file_count']>5 for k in m['snapshots'])
           assert m['windows_x64_pinned_install_requirements']['curl-cffi']['yt-dlp-ejs']['version']=='0.8.0'
           assert sorted(x.name for x in p.iterdir())==sorted(
             ['yt-dlp-2026.10.26-GIT-ONLY.tar.gz',
              'quickjs-v0.18.0-GIT-ONLY.tar.gz',
              'akula-video-mux-GIT-ONLY.tar.gz',
+             'pyinstaller-build-recipe-GIT-ONLY.tar.gz',
              'manifest-NOT-COMPLETE.json','README-NOT-COMPLETE.txt'])
           PY
       - name: Retain one-day public Git source STARTER only, no EXE, no release approval
