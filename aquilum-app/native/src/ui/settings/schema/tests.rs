@@ -100,7 +100,7 @@ fn m1dd_native_recovery_settings_are_read_only_for_every_state() {
     ] {
         context.sync_recovery = state.clone();
         let all = blocks(Section::Sync, &config, &context);
-        assert_eq!(all.len(), 2);
+        assert_eq!(all.len(), 2 + usize::from(cfg!(feature = "dropbox-readonly-preview")) + usize::from(cfg!(feature = "yandex-disk-readonly-preview")));
         let rows = &all[1].rows;
         assert!(rows.len() >= 3);
         assert!(rows.iter().all(|row| row.setter.is_none()));
