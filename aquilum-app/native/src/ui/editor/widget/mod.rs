@@ -36,6 +36,7 @@ mod format;
 mod geometry;
 use geometry::{rect, visible};
 mod keys;
+mod mac_keys;
 mod lifecycle;
 mod source_shortcut;
 mod links;
