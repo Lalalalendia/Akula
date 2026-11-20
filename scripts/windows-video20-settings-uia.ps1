@@ -121,8 +121,12 @@ function Wait-Dialog([Diagnostics.Process]$Process, [string[]]$Names) {
 }
 function Decide-Dialog([Windows.Automation.AutomationElement]$Dialog, [bool]$Accept) {
     # Buttons are supplied by the English/Russian Windows OS, not Akula locales.
-    $names = if ($Accept) { @('Yes', '&Yes', 'Да', '&Да') }
-             else { @('No', '&No', 'Нет', '&Нет') }
+    # Windows PowerShell 5.1 reads BOM-less .ps1 in the system ANSI encoding.
+    # Keep this script ASCII-only; synthesize localized OS captions at runtime.
+    $yesRu = [regex]::Unescape('\u0414\u0430')
+    $noRu = [regex]::Unescape('\u041d\u0435\u0442')
+    $names = if ($Accept) { @('Yes', '&Yes', $yesRu, ('&' + $yesRu)) }
+             else { @('No', '&No', $noRu, ('&' + $noRu)) }
     $button = Wait-Button $Dialog $names
     Invoke-Button $button
 }
