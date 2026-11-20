@@ -47,29 +47,31 @@ pub fn enqueue(
         change(&id, Status::Downloading(download::Progress::default()));
         changed(false, &url);
         let mut last_notification = 0_u64;
-        let result = Library::new(&data_dir, &registered_roots)
-            .map_err(|e| format!("local video storage rejected: {e}"))
-            .and_then(|library| {
-                // Installed Windows selects ONLY the user-confirmed, fixed-version,
-                // re-hashed local optional tool. PATH/env never grant execution.
-                #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-                let executable = super::optional_ytdlp::verified_executable(&data_dir)
-                    .map_err(|_| "Install the verified yt-dlp in Settings > System first".to_owned())?
-                    .into_os_string();
-                #[cfg(not(all(windows, feature = "installed", not(feature = "video-ui-e2e"))))]
-                let executable = std::env::var_os("AKULA_YT_DLP_BIN")
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or_else(|| OsString::from("yt-dlp"));
-                super::light::download_one_or_legacy(&library, &executable, &url, |progress| {
-                    change(&id, Status::Downloading(progress));
-                    if progress.downloaded.saturating_sub(last_notification) >= 1024 * 1024
-                        || progress.downloaded == progress.total.unwrap_or(u64::MAX)
-                    {
-                        last_notification = progress.downloaded;
-                        changed(false, &url);
-                    }
+        // Fail before creating even a local video staging directory when
+        // the optional tool was not explicitly installed and re-verified.
+        #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
+        let executable = super::optional_ytdlp::verified_executable(&data_dir)
+            .map(|path| path.into_os_string())
+            .map_err(|_| "Install the verified yt-dlp in Settings > System first".to_owned());
+        #[cfg(not(all(windows, feature = "installed", not(feature = "video-ui-e2e"))))]
+        let executable: Result<OsString, String> = Ok(std::env::var_os("AKULA_YT_DLP_BIN")
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| OsString::from("yt-dlp")));
+        let result = executable.and_then(|executable| {
+            Library::new(&data_dir, &registered_roots)
+                .map_err(|e| format!("local video storage rejected: {e}"))
+                .and_then(|library| {
+                    super::light::download_one_or_legacy(&library, &executable, &url, |progress| {
+                        change(&id, Status::Downloading(progress));
+                        if progress.downloaded.saturating_sub(last_notification) >= 1024 * 1024
+                            || progress.downloaded == progress.total.unwrap_or(u64::MAX)
+                        {
+                            last_notification = progress.downloaded;
+                            changed(false, &url);
+                        }
+                    })
                 })
-            });
+        });
         match result {
             Ok(path) => change(&id, Status::Ready(path)),
             Err(error) => change(&id, Status::Failed(error)),
