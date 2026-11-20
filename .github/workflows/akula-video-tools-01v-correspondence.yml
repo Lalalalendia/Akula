@@ -1,0 +1,109 @@
+name: Akula VIDEO-TOOLS-01v wheel provenance (NONRELEASE)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/scripts/video-tools-01v-wheel-provenance.py'
+      - '.github/scripts/video-tools-01v-wheel-provenance.test.py'
+      - '.github/workflows/akula-video-tools-01v-correspondence.yml'
+      - 'docs/release/video-tools-01v-wheel-correspondence.md'
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  ejs-wheel:
+    name: EJS source and published wheel byte comparison (HOLD)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - run: python3 .github/scripts/video-tools-01v-wheel-provenance.test.py
+      - uses: actions/checkout@v4
+        with:
+          repository: yt-dlp/ejs
+          ref: 4fb477f4af56880cfd324c48bd4294a2d2294e50
+          path: _video-tools-01v-ejs
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb
+        with:
+          deno-version: v2.6.3
+          cache: false
+      - name: Download pinned PyPI EJS wheel and sdist without executing
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/video-tools-01v-wheel-provenance.py download-ejs docs/release/video18b04-five-exe-allowlist.json
+      - name: Rebuild EJS with upstream pinned Deno release toolchain
+        working-directory: _video-tools-01v-ejs
+        run: |
+          deno install --frozen
+          deno task bundle
+      - name: Compare exact wheel members and sdist Git sources (do not release)
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 .github/scripts/video-tools-01v-wheel-provenance.py ejs docs/release/video18b04-five-exe-allowlist.json _video-tools-01v-ejs "$RUNNER_TEMP/video-tools-01v-ejs-NOT-APPROVAL.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video-tools-01v-ejs-source-wheel-NOT-APPROVAL
+          path: ${{ runner.temp }}/video-tools-01v-ejs-NOT-APPROVAL.json
+          retention-days: 1
+          if-no-files-found: error
+  custom-bootloader:
+    name: Rebuild MinGW PyInstaller bootloader and compare custom wheel (HOLD)
+    runs-on: windows-2025
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+        with:
+          update: true
+          msystem: MINGW64
+          install: >-
+            base-devel
+            git
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-python
+      - run: python .github/scripts/video-tools-01v-wheel-provenance.test.py
+      - uses: actions/checkout@v4
+        with:
+          repository: pyinstaller/pyinstaller
+          ref: 70fc17210920bce17f4ab09bbf8104b0dbd45338
+          path: _video-tools-01v-pyi
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: yt-dlp/Pyinstaller-Builds
+          ref: 5eb86b862d61adc3df0f44e6e0b815b7d74fa3f5
+          path: _video-tools-01v-pybuilder
+          persist-credentials: false
+      - name: Acquire exact SHA-pinned custom wheel without execution
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python .github/scripts/video-tools-01v-wheel-provenance.py download-pyi docs/release/video18b04-five-exe-allowlist.json
+      - name: Compile MinGW bootloader from exact PyInstaller source
+        working-directory: _video-tools-01v-pyi/bootloader
+        run: python ./waf --target-arch=64bit --gcc distclean all
+      - name: Compare compiled bootloader with custom release wheel (non-approval)
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python .github/scripts/video-tools-01v-wheel-provenance.py pyinstaller docs/release/video18b04-five-exe-allowlist.json _video-tools-01v-pyi _video-tools-01v-pybuilder "$RUNNER_TEMP/video-tools-01v-pyi-NOT-APPROVAL.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video-tools-01v-pyi-wheel-NOT-APPROVAL
+          path: ${{ runner.temp }}/video-tools-01v-pyi-NOT-APPROVAL.json
+          retention-days: 1
+          if-no-files-found: error
