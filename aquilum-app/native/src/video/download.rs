@@ -30,13 +30,14 @@ fn command_args(url: &str, stage: &Path, max_bytes: u64) -> Vec<OsString> {
     let home = format!("home:{}", stage.display());
     let temp = format!("temp:{}", stage.display());
     [
-        "--ignore-config", "--no-cache-dir", "--no-cookies", "--no-playlist", "--no-exec", "--no-overwrites",
+        "--ignore-config", "--no-plugin-dirs", "--no-remote-components",
+        "--no-cache-dir", "--no-cookies", "--no-playlist", "--no-exec", "--no-overwrites",
         "--no-color", "--no-write-info-json", "--no-write-thumbnail",
         "--no-write-subs", "--no-write-auto-subs", "--no-write-comments",
         "--no-download-archive", "--restrict-filenames", "--newline",
         "--progress", "--no-warnings", "--retries", "3",
         "--fragment-retries", "3", "--socket-timeout", "20",
-        "--format", "bv[vcodec^=avc1][height<=720]+ba[acodec^=mp4a]/b[vcodec^=avc1][acodec^=mp4a][height<=720]",
+        "--format", "b[vcodec^=avc1][acodec^=mp4a][height<=720]/b[ext=mp4][height<=720]",
         "--merge-output-format", "mp4",
         "--output", "%(id)s.%(ext)s",
         "--paths", &home, "--paths", &temp,
