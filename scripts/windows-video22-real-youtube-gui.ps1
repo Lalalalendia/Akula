@@ -14,6 +14,11 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or
     [Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA) {
     throw 'VIDEO-16 may run only in GitHub-hosted Windows PowerShell 5.1 STA'
 }
+# Only pre-authorized, CC BY test clips may be used; never accept arbitrary CI URLs.
+$TestVideoId = [string]$env:AKULA_VIDEO22_TEST_ID
+if (@('BZeKDYqsuj0', 'GhGQV_enM8M') -cnotcontains $TestVideoId) {
+    throw 'VIDEO22 refuses unapproved or missing YouTube test ID'
+}
 if ([IntPtr]::Size -ne 8) { throw 'VIDEO-16 needs x64 Windows' }
 $expected = Join-Path $env:LOCALAPPDATA 'Akula\akula-app.exe'
 $tempRoot = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
@@ -92,7 +97,7 @@ $note = Join-Path $VaultPath 'VIDEO22 Live YouTube.md'
 if (Test-Path -LiteralPath $note) { throw 'Fixture note unexpectedly exists' }
 $text = "# VIDEO22 Live YouTube" + [Environment]::NewLine +
         [Environment]::NewLine +
-        "https://youtu.be/BaW_jenozKc" + [Environment]::NewLine
+        "https://youtu.be/$TestVideoId" + [Environment]::NewLine
 [IO.File]::WriteAllText($note,$text,[Text.UTF8Encoding]::new($false))
 function Get-Video16Sha([string]$LiteralPath) {
     # Use .NET SHA256 instead of Windows PowerShell's autoloaded Utility module.
@@ -102,7 +107,7 @@ function Get-Video16Sha([string]$LiteralPath) {
     finally { $stream.Dispose(); $sha.Dispose() }
 }
 $baseline = Get-Video16Sha $note
-$movie = Join-Path $DataDir 'local-videos\BaW_jenozKc.mp4'
+$movie = Join-Path $DataDir "local-videos/$TestVideoId.mp4"
 if (Test-Path -LiteralPath $movie) { throw 'Fixture MP4 already present' }
 if (Test-Path -LiteralPath $ProbePath) { throw 'Old GUI probe is present' }
 $proc = $null
