@@ -90,7 +90,9 @@ jobs:
               assert x[k] is False, k
           assert all(w["wheel_bytes_uploaded_or_executed"] is False and
                      w["candidate_selected_by_historical_pip_log"] is False and
-                     w["candidate_is_relevant_to_exact_frozen_exe"] is False
+                     w["candidate_whole_wheel_installed_proven"] is False and
+                     w["candidate_native_payload_byte_overlap_proven"] ==
+                         bool(w["native_comparison"]["byte_matches"])
                      for g in x["candidate_wheel_distributions"] for w in g["wheel_candidates"])
           print("VIDEO_TOOLS_01Y_METADATA_ONLY_HOLD_PASS release=0 complete_source=0")
           PY
