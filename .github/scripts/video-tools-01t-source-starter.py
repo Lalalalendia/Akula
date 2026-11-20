@@ -14,6 +14,10 @@ from pathlib import Path
 
 YT="f264a6cbd1f630894da0f368df00f8aae50140e0"
 QJS="d7215b0ad3fc2c562e8317fd9bca058fd4863804"
+PYBUILD="5eb86b862d61adc3df0f44e6e0b815b7d74fa3f"
+UPSTREAM_PYINSTALLER="70fc17210920bce17f4ab09bbf8104b0dbd45338"
+CUSTOM_WHEEL_URL="https://github.com/yt-dlp/Pyinstaller-Builds/releases/download/2026.08.19.215425/pyinstaller-6.22.0-py3-none-win_amd64.whl"
+CUSTOM_WHEEL_SHA="294099ecb5fdd2a13ae4c29006d4e335b697a63b6a16cf052b90ec2b40bef05a"
 YT_EXE="f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d"
 QJS_EXE="ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7"
 BLOBS={
@@ -29,6 +33,14 @@ BLOBS={
   "LICENSE":"68a49daad8ff7e35068f2b7a97d643aab440eaec",
  },
  "quickjs":{"LICENSE":"fae657320cdf957cab10654ac39990fdb20e97ef"},
+ "pybuild":{
+  "README.md":"46fe51986985f5d9f3a7523097254670917f7425",
+  ".github/workflows/build.yml":"413323417c48d73dc226f8a1f053fbd63f1a0322",
+  "pyproject.toml":"ea0a9160bd5559528b162f999b2bacefc3bff6c5",
+  "requirements/build.txt":"6af552ee058c12cf4ba1febdd2da05e8375edea7",
+  "requirements/pip.txt":"92a1e34f1fbc6141bc9e59abfc96ae8b21d47f39",
+  "LICENSE":"68a49daad8ff7e35068f2b7a97d643aab440eaec",
+ },
  "akula":{
   "LICENSE":"fe6b9036ba1818c79c15f802a586a9711ece2b97",
   "labs/video-lite/Cargo.toml":"4adb6f13f345749200e21c05c9b94f1626c4cebd",
@@ -37,6 +49,7 @@ BLOBS={
 OUTPUT={
  "yt":"yt-dlp-2026.10.26-GIT-ONLY.tar.gz",
  "quickjs":"quickjs-v0.18.0-GIT-ONLY.tar.gz",
+ "pybuild":"pyinstaller-build-recipe-GIT-ONLY.tar.gz",
  "akula":"akula-video-mux-GIT-ONLY.tar.gz",
 }
 REQ={
@@ -69,7 +82,7 @@ def verified_blobs(root,kind):
  return result
 
 def parse_requirements(text):
- """Requirements are data: exact pins + SHA hashes, never pip-installed here."""
+ """Pin all build inputs, including non-PyPI custom PyInstaller wheel."""
  pins={}
  key=None
  for original in text.splitlines():
@@ -80,18 +93,38 @@ def parse_requirements(text):
    need(key is not None and
         re.fullmatch(r"--hash=sha256:[0-9a-f]{64}\s*\\?",line) is not None,
         "malformed or orphan SHA-256 wheel hash")
+   digest=line.split(":")[1].split()[0].rstrip("\\")
    pins[key]["hash_count"]+=1
+   if key=="pyinstaller" and pins[key].get("wheel_origin")=="CUSTOM_DIRECT_URL":
+    need(digest==CUSTOM_WHEEL_SHA,"custom PyInstaller wheel SHA-256 changed")
+    pins[key]["custom_wheel_sha256"]=digest
    continue
   if key is not None:
    need(pins[key]["hash_count"]>=1,"unhashed dependency "+key)
   m=re.match(r"^([a-z][a-z0-9_.-]*)==([0-9][a-zA-Z0-9.+_-]*)\b",line,re.I)
-  need(m is not None and line.endswith("\\"),"unversioned, URL or unsupported requirement")
-  key=m.group(1).lower().replace("_","-")
+  if m is None:
+   need(line==("pyinstaller @ "+CUSTOM_WHEEL_URL+" \\"),
+        "unknown or unpinned direct wheel URL; fail closed")
+   key="pyinstaller"
+   version="6.22.0"
+   extra={"wheel_origin":"CUSTOM_DIRECT_URL","custom_wheel_url":CUSTOM_WHEEL_URL,
+          "custom_wheel_sha256":None,"builder_git_commit":PYBUILD,
+          "upstream_pyinstaller_tag_commit":UPSTREAM_PYINSTALLER,
+          "status":"CUSTOM_BOOTLOADER_WHEEL_REQUIRES_CORRESPONDING_SOURCE_REVIEW"}
+  else:
+   need(line.endswith("\\"),"unversioned or unsupported requirement")
+   key=m.group(1).lower().replace("_","-")
+   version=m.group(2)
+   extra={"status":"PINNED_BUILD_INSTALL_INPUT_NOT_VERIFIED_EMBEDDED_SOURCE"}
   need(key not in pins,"duplicate dependency "+key)
-  pins[key]={"version":m.group(2),"hash_count":0,
-             "status":"PINNED_BUILD_INSTALL_INPUT_NOT_VERIFIED_EMBEDDED_SOURCE"}
+  pins[key]={"version":version,"hash_count":0,**extra}
  need(key is not None and pins[key]["hash_count"]>=1,"empty or unhashed requirements")
+ if "pyinstaller" in pins and pins["pyinstaller"].get("wheel_origin")=="CUSTOM_DIRECT_URL":
+  need(pins["pyinstaller"]["hash_count"]==1 and
+       pins["pyinstaller"]["custom_wheel_sha256"]==CUSTOM_WHEEL_SHA,
+       "custom wheel must have exactly one pinned SHA-256")
  return pins
+
 
 def check_release_hold(allow):
  names=[x.get("name") for x in allow.get("components",[])]
