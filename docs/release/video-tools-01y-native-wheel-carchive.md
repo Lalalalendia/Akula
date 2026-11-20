@@ -27,6 +27,24 @@ The PR-only workflow uploads **only** one-day `video-tools-01y-native-overlap-JS
 
 A successful workflow proves a *bounded inspection ran*, **not** that it found any exact overlap or that all candidate components are available as complete corresponding source. Synthetic negative tests reject traversal, wrong PyPI package/version, wrong candidate wheel set and a basename-only inference as binary equality.
 
+## Actual first-pass result — 20 November 2026
+
+The exact PR-head [native source audit run #44793379710](https://github.com/Lalalalendia/Akula/actions/runs/44793379710) succeeded. It downloaded and hash-verified **seven** normal CPython 3.14 Windows x64 wheel candidates, then statically inspected **119** native DLL/PYD entries in the exact pinned `yt-dlp.exe`. There are **47 byte-for-byte native wheel ↔ EXE archive member overlaps** (size and SHA-256, independently checked in each source): 
+
+| Exact locked distribution | Native wheel file matches | Key evidence |
+| --- | ---: | --- |
+| brotli 1.2.1 | 1/1 | `_brotli.cp314-win_amd64.pyd` |
+| cffi 2.1.1 | 1/1 | `_cffi_backend.cp314-win_amd64.pyd` |
+| curl-cffi 0.17.0 | **2/2** | `curl_cffi/_wrapper.pyd`, `curl_cffi.libs/libcurl-impersonate-ae864b926b0a86bfa3b18a664407a1ab.dll` |
+| pycryptodomex 3.24.1 | **42/42** | All native `Cryptodome/**.pyd` payloads |
+| websockets 17.3 (native cp314 wheel) | 1/1 | `websockets/speedups.cp314-win_amd64.pyd` |
+| websockets 17.3 (pure py3 wheel) | 0/0 | No native member to test; the compiled `speedups` comes from a native-compatible payload |
+| mutagen 1.48.1 | 0/0 | Pure-Python package, not identifiable by a native-byte check |
+
+The remaining **72** native EXE entries are not covered by these wheel matches. Important unassigned files include `python314.dll`, `python3.dll`, `libssl-3.dll`, `libcrypto-3.dll`, `libffi-8.dll`, `ucrtbase.dll`, `VCRUNTIME140*.dll`, numerous Python standard-library `.pyd` files and Windows API-set DLLs. These are a **review queue**, not an accusation of missing licenses. Whether a library qualifies as a GPLv3 System Library requires a separate fact- and license-specific determination.
+
+This evidence strongly narrows the candidate wheel provenance, especially `curl-cffi`. It **does not** certify that a whole wheel or all transitive libraries came from the published sdist, identify the original pip installation log, prove reproducible native compilation, or authorize the bundled program to ship.
+
 ## Remaining P0 after inspection
 
 1. Determine the actual installed wheel set from original build logs or independent wheel-native byte evidence. In particular, a candidate `websockets` wheel selected from two possible compatible files cannot be assigned solely from PyPI metadata.
