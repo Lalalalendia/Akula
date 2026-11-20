@@ -334,10 +334,13 @@ public static class AkulaLang08DialogKeys {
   static extern uint GetWindowThreadProcessId(IntPtr h,out uint processId);
   [DllImport("user32.dll",SetLastError=true)]
   static extern uint SendInput(uint n,[In] Input[] inputs,int size);
-  // Only Ctrl+A and Ctrl+V for the installed synthetic name, filename,
-  // or disposable Markdown editor; never arbitrary keyboard or window injection.
+  // Only Ctrl+A, Ctrl+V and Ctrl+Z on the verified foreground installed
+  // Akula PID. Ctrl+Z restores the single disposable unsaved Markdown paste
+  // after the study refusal, including when its table cell has focus.
+  // Never arbitrary keyboard/window injection.
   public static void Chord(IntPtr hwnd,int expectedPid,ushort key) {
-    if(key != 0x41 && key != 0x56)throw new InvalidOperationException("Unapproved file-picker key");
+    if(key != 0x41 && key != 0x56 && key != 0x5A)
+      throw new InvalidOperationException("Unapproved installed synthetic editor key");
     uint pid;
     if(hwnd==IntPtr.Zero || Marshal.SizeOf(typeof(Input))!=40 ||
        GetWindowThreadProcessId(hwnd,out pid)==0 || pid!=(uint)expectedPid ||
@@ -1229,17 +1232,16 @@ if result is None or result[0]!=0:
   Click-Visible -Target $notice -Window $window -Process $proc
   Start-Sleep -Milliseconds 400
 
-  # Restore the exact fixture using the same real OS editor path; graceful
-  # close must neither carry a changed file nor modify the study registry.
+  # Undo the ONE verified synthetic paste through real OS Ctrl+Z.
+  # After a table-menu refusal, Ctrl+A targets a selected table cell rather
+  # than the document; trying to paste the whole note overwrites that cell.
+  # The native table_key Undo path explicitly leaves the table session, then
+  # the editor undo stack restores the entire original Markdown in memory.
+  # This is not a filesystem fixture rewrite or an injected app action.
   Focus-Akula -Process $proc
   $body=Select-EditorBody -Root $window
-  [Windows.Forms.Clipboard]::SetText($studyText)
-  if([Windows.Forms.Clipboard]::GetText() -cne $studyText){
-    throw 'LANG-08c2b5 synthetic restore clipboard mismatch'
-  }
-  [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd,$proc.Id,[uint16]0x41)
-  [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x56)
-  Start-Sleep -Milliseconds 750
+  [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x5A)
+  Start-Sleep -Milliseconds 600
   Focus-Akula -Process $proc
   $body=Select-EditorBody -Root $window
   Readback-Selected -Process $proc -Expected $studyText
