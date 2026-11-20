@@ -186,14 +186,22 @@ fn lang02_changed_table_during_collection_dialog_refuses_stale_bind() {
     };
     h.act(field, TextAction::Changed("Старая таблица".into()));
 
-    // Change the actual editor while a saved table snapshot sits in the dialog.
-    // Do not save: commit must fail closed instead of binding obsolete cells.
+    // Deliberately mutate the real underlying editor widget while its modal
+    // is open. This is a stale-snapshot harness probe, not a normal user edit:
+    // modal dispatch can suppress the note's dirty-state notification.
+    // Compare the live parsed table with the captured table explicitly rather
+    // than asserting a synthetic dirty-state transition.
     let changed = original.replace("star | звезда", "moon | луна");
     h.replace_body(&changed);
     assert_eq!(h.body_text(), changed);
-    assert!(h.app.note.as_ref().is_some_and(|n| n.clean_cache_hash().is_none()));
+    let current = body.get(&h.root).unwrap().inner().study_complete_note()
+        .expect("modified editor must still contain a valid study table");
     let dialog = match &h.app.popup {
-        Some(Popup::StudyNewCollection { dialog, .. }) => dialog.layer,
+        Some(Popup::StudyNewCollection { dialog, pending, .. }) => {
+            assert_ne!(current.selected, pending.table.selected,
+                "stale-dialog fixture must differ from its saved table snapshot");
+            dialog.layer
+        }
         _ => panic!("stale create dialog unexpectedly disappeared before confirmation"),
     };
     h.act(dialog, DialogAnswer::Confirm);
