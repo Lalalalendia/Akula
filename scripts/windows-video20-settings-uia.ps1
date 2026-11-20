@@ -167,16 +167,62 @@ function Wait-Dialog([Diagnostics.Process]$Process, [string[]]$Names) {
     }
     throw ('Verified Akula native consent dialog missing: ' + ($Names -join ' / '))
 }
-function Decide-Dialog([Windows.Automation.AutomationElement]$Dialog, [bool]$Accept) {
-    # Buttons are supplied by the English/Russian Windows OS, not Akula locales.
-    # Windows PowerShell 5.1 reads BOM-less .ps1 in the system ANSI encoding.
-    # Keep this script ASCII-only; synthesize localized OS captions at runtime.
+function Decide-Dialog([Diagnostics.Process]$Process,
+    [Windows.Automation.AutomationElement]$Dialog, [bool]$Accept) {
+    # The native Yes/No button captions vary with Windows locale and may not
+    # be plain "Yes"/"No" in AccessKit/UIA. Verify the system dialog has
+    # exactly TWO visible enabled button rectangles, scoped to the Akula PID.
+    $window = [IntPtr]$Dialog.Current.NativeWindowHandle
+    if ($window -eq [IntPtr]::Zero -or
+        $Dialog.Current.ProcessId -ne $Process.Id) {
+        throw 'VIDEO20 refuses unowned or non-native consent dialog'
+    }
+    $all = $Dialog.FindAll([Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+    $buttons = @()
+    for ($i = 0; $i -lt $all.Count; $i++) {
+        $item = $all.Item($i)
+        try {
+            $rect = $item.Current.BoundingRectangle
+            if (!$item.Current.IsOffscreen -and $item.Current.IsEnabled -and
+                !$rect.IsEmpty -and $rect.Width -gt 6 -and $rect.Height -gt 6) {
+                $buttons += [pscustomobject]@{
+                    element = $item
+                    left = [double]$rect.Left
+                    name = [string]$item.Current.Name
+                }
+            }
+        } catch [Windows.Automation.ElementNotAvailableException] {}
+    }
+    if ($buttons.Count -ne 2) {
+        # Only inspect the exact verified isolated dialog, never other windows.
+        $seen = @($buttons | ForEach-Object { $_.name.Substring(0,[Math]::Min(40,$_.name.Length)) })
+        throw ("VIDEO20 consent expects exactly two visible UIA buttons; count={0}, labels={1}" -f
+            $buttons.Count, ($seen -join '|'))
+    }
+    $sorted = @($buttons | Sort-Object left)
+    if ($sorted[0].left -ge $sorted[1].left) {
+        throw 'VIDEO20 consent buttons overlap; cannot choose safely'
+    }
     $yesRu = [regex]::Unescape('\u0414\u0430')
     $noRu = [regex]::Unescape('\u041d\u0435\u0442')
     $names = if ($Accept) { @('Yes', '&Yes', $yesRu, ('&' + $yesRu)) }
              else { @('No', '&No', $noRu, ('&' + $noRu)) }
-    $button = Wait-Button $Dialog $names
-    Invoke-Button $button
+    $matched = @($sorted | Where-Object { $names -ccontains $_.name })
+    if ($matched.Count -gt 1) { throw 'VIDEO20 ambiguous native consent captions' }
+    # With unknown OS captions, use MessageBox YesNo's verified left-to-right
+    # button order on a hosted en-US runner: Yes at left, No at right.
+    $choice = if ($matched.Count -eq 1) { $matched[0] }
+              elseif ($Accept) { $sorted[0] }
+              else { $sorted[1] }
+    $rect = $choice.element.Current.BoundingRectangle
+    $x = [int][Math]::Round(($rect.Left + $rect.Right) / 2)
+    $y = [int][Math]::Round(($rect.Top + $rect.Bottom) / 2)
+    # Recheck foreground against the SAME native dialog, not the parent Akula.
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        if ([AkulaBetaGuiInput]::GetForegroundWindow() -eq $window) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    [AkulaVideo20Mouse]::Click($window, $Process.Id, $x, $y)
 }
 function Wait-Tool([string]$Path, [bool]$Present, [int]$Attempts) {
     for ($i = 0; $i -lt $Attempts; $i++) {
@@ -225,14 +271,14 @@ try {
     Write-Host 'VIDEO20_SETTINGS_OPEN_UIA_PASS implicit_fetch=0'
 
     Press-AkulaButton $proc (Wait-Button $root $downloadNames)
-    Decide-Dialog (Wait-Dialog $proc $installDialogNames) $false
+    Decide-Dialog $proc (Wait-Dialog $proc $installDialogNames) $false
     Start-Sleep -Milliseconds 600
     if (Test-Path -LiteralPath $tool) { throw 'Declining consent installed yt-dlp' }
     [void](Wait-Button $root $downloadNames)
     Write-Host 'VIDEO20_SETTINGS_CANCEL_UIA_PASS file_created=0'
 
     Press-AkulaButton $proc (Wait-Button $root $downloadNames)
-    Decide-Dialog (Wait-Dialog $proc $installDialogNames) $true
+    Decide-Dialog $proc (Wait-Dialog $proc $installDialogNames) $true
     Wait-Tool $tool $true 320
     if ((Get-Item -LiteralPath $tool).Length -ne 23575744 -or
         (Hash $tool) -cne 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d') {
@@ -242,7 +288,7 @@ try {
     Write-Host 'VIDEO20_SETTINGS_INSTALL_UIA_PASS consent=1 sha256=1 local_only=1'
 
     Press-AkulaButton $proc (Wait-Button $root $removeNames)
-    Decide-Dialog (Wait-Dialog $proc $removeDialogNames) $true
+    Decide-Dialog $proc (Wait-Dialog $proc $removeDialogNames) $true
     Wait-Tool $tool $false 80
     [void](Wait-Button $root $downloadNames)
     if ((Hash $note) -cne $noteHash -or (Hash $existingVideo) -cne $videoHash) {
