@@ -369,6 +369,23 @@ public static class AkulaLang08DialogKeys {
     if(SendInput(4,keys,Marshal.SizeOf(typeof(Input)))!=4)
       throw new InvalidOperationException("Incomplete file-picker filename access key");
   }
+  // The shared AccessKit helper deliberately forbids ESC: its whitelist is
+  // for the global GUI acceptance. This separate, narrow table-menu cleanup
+  // only sends one Escape to the exact foreground Akula HWND and PID.
+  public static void DismissTableProbe(IntPtr hwnd,int expectedPid) {
+    uint pid;
+    if(hwnd==IntPtr.Zero || Marshal.SizeOf(typeof(Input))!=40 ||
+       GetWindowThreadProcessId(hwnd,out pid)==0 || pid!=(uint)expectedPid ||
+       GetForegroundWindow()!=hwnd)
+      throw new InvalidOperationException("Table-probe Escape PID/foreground mismatch");
+    const uint UP=2;
+    Input[] keys=new Input[]{
+      new Input{Type=1,Key=0x1b},
+      new Input{Type=1,Key=0x1b,Flags=UP}
+    };
+    if(SendInput(2,keys,Marshal.SizeOf(typeof(Input)))!=2)
+      throw new InvalidOperationException("Incomplete table-probe Escape input");
+  }
 }
 '@
 function Wait-FileDialog {
@@ -564,7 +581,7 @@ function Open-StudyTableMenu {
       Start-Sleep -Milliseconds 120
       $add=Find-Visible -Root $Window -Names $labels.studyAdd -Type ([Windows.Automation.ControlType]::MenuItem)
       if($null -ne $add){return $add}
-      [AkulaBetaGuiInput]::SendNavigationKey($hwnd,$Process.Id,[uint16]0x1b,$false)
+      [AkulaLang08DialogKeys]::DismissTableProbe($hwnd,$Process.Id)
       Start-Sleep -Milliseconds 90
     }
   }
@@ -595,7 +612,7 @@ function Type-StudyName {
     throw 'LANG-08c cannot set the disposable name clipboard'
   }
   [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd,$Process.Id,[uint16]0x41)
-  [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd,$Process.Id,[uint16]0x56)
+  [AkulaLang08DialogKeys]::Chord($hwnd,$Process.Id,[uint16]0x56)
 }
 function Close-StudyNotice {
   param([Windows.Automation.AutomationElement]$Window,
