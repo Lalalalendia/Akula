@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/windows-video22-real-youtube-gui.ps1'
+      - 'docs/release/VIDEO-22-REAL-YOUTUBE-E2E.md'
       - '.github/workflows/akula-video22-real-youtube-gui.yml'
 
 permissions:
