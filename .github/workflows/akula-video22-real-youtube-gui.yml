@@ -81,24 +81,6 @@ jobs:
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           key: video22-real-youtube-installed
-      - name: Build installed route with observation-only GUI witness
-        working-directory: aquilum-app
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          cargo build --locked -p aquilum-native --features installed,video-tools-gui-e2e
-          if ($LASTEXITCODE -ne 0) { throw 'VIDEO22 installed feature build failed' }
-          $compiled=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/debug/aquilum-native.exe'
-          if (!(Test-Path -LiteralPath $compiled -PathType Leaf)) { throw 'Missing Akula GUI binary' }
-          $target=Join-Path $env:LOCALAPPDATA 'Akula'
-          if (Test-Path -LiteralPath $target) { throw 'VIDEO22 requires clean runner installation' }
-          New-Item -ItemType Directory -Path $target | Out-Null
-          $binary=Join-Path $target 'akula-app.exe'
-          Copy-Item -LiteralPath $compiled -Destination $binary
-          if ((Get-FileHash -LiteralPath $binary).Hash -cne (Get-FileHash -LiteralPath $compiled).Hash) {
-            throw 'VIDEO22 staged binary differs from compiled source'
-          }
-          Write-Host 'VIDEO22_STOCK_INSTALLED_GUI_STAGED_PASS bundled_downloaders=0'
       - name: Stage exact pinned upstream optional tools in disposable device-local profile
         shell: pwsh
         run: |
@@ -121,6 +103,48 @@ jobs:
             throw 'VIDEO22 refuses a non-pinned QuickJS'
           }
           Write-Host 'VIDEO22_EXACT_OPTIONAL_RUNTIME_PINS_PASS profile=disposable no_path_fallback=1'
+      - name: Preflight exact pinned YouTube extraction and progressive MP4 availability (NO MEDIA)
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference='Stop'
+          $data=Join-Path $env:RUNNER_TEMP 'video22-data'
+          $yt=Join-Path $data 'tools/yt-dlp/yt-dlp-2026.10.26.exe'
+          $js=Join-Path $data 'tools/quickjs/qjs.exe'
+          if (!(Test-Path -LiteralPath $yt -PathType Leaf) -or !(Test-Path -LiteralPath $js -PathType Leaf)) {
+            throw 'VIDEO22 pinned executables disappeared before extraction probe'
+          }
+          # Same single progressive AVC/AAC format policy as Akula; never download or write media.
+          $arguments=@('--ignore-config','--no-plugin-dirs','--no-remote-components',
+            '--no-cache-dir','--no-cookies','--no-playlist','--no-exec','--no-overwrites',
+            '--no-js-runtimes','--js-runtimes',("quickjs:" + $js),
+            '--socket-timeout','15','--retries','1','--extractor-retries','1',
+            '--format','b[vcodec^=avc1][acodec^=mp4a][height<=720]/b[ext=mp4][height<=720]',
+            '--skip-download','--print','VIDEO22_REAL_EXTRACTOR_SELECTED:%(id)s:%(format_id)s:%(ext)s:%(acodec)s:%(vcodec)s',
+            '--','https://youtu.be/BaW_jenozKc')
+          & $yt @arguments 2>&1 | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) {
+            throw 'VIDEO22 real yt-dlp extraction failed on hosted runner (site/network/EJS/format); no GUI PASS'
+          }
+          Write-Host 'VIDEO22_REAL_EXTRACTOR_PREFLIGHT_PASS no_media=1'
+      - name: Build installed route with observation-only GUI witness
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo build --locked -p aquilum-native --features installed,video-tools-gui-e2e
+          if ($LASTEXITCODE -ne 0) { throw 'VIDEO22 installed feature build failed' }
+          $compiled=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/debug/aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $compiled -PathType Leaf)) { throw 'Missing Akula GUI binary' }
+          $target=Join-Path $env:LOCALAPPDATA 'Akula'
+          if (Test-Path -LiteralPath $target) { throw 'VIDEO22 requires clean runner installation' }
+          New-Item -ItemType Directory -Path $target | Out-Null
+          $binary=Join-Path $target 'akula-app.exe'
+          Copy-Item -LiteralPath $compiled -Destination $binary
+          if ((Get-FileHash -LiteralPath $binary).Hash -cne (Get-FileHash -LiteralPath $compiled).Hash) {
+            throw 'VIDEO22 staged binary differs from compiled source'
+          }
+          Write-Host 'VIDEO22_STOCK_INSTALLED_GUI_STAGED_PASS bundled_downloaders=0'
       - name: Click real YouTube Download and Play on Win32 desktop, restart and decode frame
         env:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
