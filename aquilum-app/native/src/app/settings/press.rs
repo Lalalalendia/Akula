@@ -46,38 +46,7 @@ impl App {
                 Effect::Content
             }
             #[cfg(windows)]
-            Action::InstallYtDlp if dialog.section == Section::System => {
-                let accepted = rfd::MessageDialog::new()
-                    .set_title(t("settings.system.ytdlpConfirmTitle"))
-                    .set_description(t("settings.system.ytdlpConfirmText"))
-                    .set_buttons(rfd::MessageButtons::YesNo)
-                    .show() == rfd::MessageDialogResult::Yes;
-                if accepted {
-                    let wake = std::sync::Arc::clone(&self.workspace.wake);
-                    if let Err(error) = crate::video::optional_ytdlp::start(self.workspace.data_dir.clone(), wake) {
-                        report!("yt-dlp opt-in install refused: {error}");
-                    }
-                }
-                Effect::Content
-            }
-            #[cfg(windows)]
-            Action::RemoveYtDlp if dialog.section == Section::System => {
-                let accepted = rfd::MessageDialog::new()
-                    .set_title(t("settings.system.ytdlpRemoveTitle"))
-                    .set_description(t("settings.system.ytdlpRemoveConfirm"))
-                    .set_buttons(rfd::MessageButtons::YesNo)
-                    .show() == rfd::MessageDialogResult::Yes;
-                if accepted {
-                    if let Err(error) = crate::video::optional_ytdlp::remove(&self.workspace.data_dir) {
-                        report!("yt-dlp opt-in remove refused: {error}");
-                    }
-                }
-                Effect::Content
-            }
-            #[cfg(windows)]
-            Action::RefreshYtDlp if dialog.section == Section::System => Effect::Content,
-            #[cfg(windows)]
-            Action::InstallYtDlp | Action::RemoveYtDlp | Action::RefreshYtDlp => Effect::None,
+            a @ (Action::InstallYtDlp | Action::RemoveYtDlp | Action::RefreshYtDlp) => self.press_video_tool(a, dialog.section),
             Action::NewToken => self.apply(Setter::Config(|c, _| c.mcp.token = schema::new_token()), Value::Bool(true)),
             Action::Copy(index, code) => {
                 match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(code)) {
