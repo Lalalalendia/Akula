@@ -1,0 +1,267 @@
+name: Akula LANG-08c installed study collections real NSIS UIA (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/windows-lang08c-installed-collections.ps1'
+      - '.github/workflows/akula-language08c-installed-collections-nsis.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    name: Fail closed before NSIS build - inspect installed witness script
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify script syntax and non-release boundaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path=Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-lang08c-installed-collections.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0){throw ('LANG-08c PowerShell parse errors: '+($errors|Out-String))}
+          $source=[IO.File]::ReadAllText($path)
+          foreach($needle in @('AKULA_LANG08C_INSTALLED_EXPORT_PASS','AKULA_LANG08C_INSTALLED_IMPORT_HOLD_PASS',
+             'AKULA_LANG08C_INSTALLED_REBIND_PASS','AKULA_LANG08C_INSTALLED_RESTART_PASS',
+             'Open-StudyTableMenu','Open-StudyCollectionMenu','Type-StudyName',
+             'Get-StudySnapshot','Read-StudyStateHash',
+             'AKULA_LANG08C_INSTALLED_CREATE_PASS','AKULA_LANG08C_INSTALLED_RENAME_PASS',
+             'AKULA_LANG08C_INSTALLED_CANCEL_PASS','AKULA_LANG08C_INSTALLED_DELETE_PASS',
+             'AKULA_LANG08C_INSTALLED_RESTART_PASS',
+             'Wait-FileDialog','Choose-FileThroughNativeDialog','Get-AnnotationSnapshot',
+             'RUNNER_ENVIRONMENT','github-hosted','GetForegroundWindow','GetWindowThreadProcessId',
+             'SendInput','compiled_executable_sha256','SQLite format 3','backupExport','backupImport',
+             'rebind','AKULA_LANG08_INSTALLED_UNINSTALL_PASS')){
+            if(!$source.Contains($needle)){throw "Missing LANG-08c acceptance invariant $needle"}
+          }
+          $cfg=[IO.File]::ReadAllText('aquilum-app/native/packaging/akula-windows.json')|ConvertFrom-Json
+          if($cfg.productName -cne 'Akula' -or @($cfg.binaries).Count -ne 2){
+            throw 'LANG-08c must reuse current two-binary release configuration without modifying it'
+          }
+          # Run the real SQLite revision reader on an ephemeral SQLite fixture
+          # under Windows PowerShell 5.1 before the expensive NSIS build.
+          $reader=@($ast.FindAll({
+            param($node)
+            ($node -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and
+            ($node.Name -eq 'Read-AnnotationState')
+          },$true))
+          if($reader.Count -ne 1){throw 'LANG-08c expected exactly one SQLite reader'}
+          Invoke-Expression $reader[0].Extent.Text
+          $tempDb=Join-Path $env:RUNNER_TEMP ('lang08-sqlite-fixture-'+[Guid]::NewGuid().ToString('N')+'.sqlite')
+          $create=@'
+          import sqlite3
+          import sys
+          db=sqlite3.connect(sys.argv[1])
+          db.execute("CREATE TABLE text_annotation_state (id INTEGER PRIMARY KEY,revision INTEGER NOT NULL,payload BLOB NOT NULL)")
+          db.execute("INSERT INTO text_annotation_state (id,revision,payload) VALUES(1,7,?)",(b"fixture",))
+          db.commit()
+          db.close()
+          '@
+          $update=@'
+          import sqlite3
+          import sys
+          db=sqlite3.connect(sys.argv[1])
+          db.execute("UPDATE text_annotation_state SET revision=8,payload=? WHERE id=1",(b"updated",))
+          db.commit()
+          db.close()
+          '@
+          try {
+            $null=($create | & python - $tempDb)
+            if($LASTEXITCODE -ne 0){throw 'LANG-08c SQLite fixture creation failed'}
+            $before=Read-AnnotationState -Path $tempDb
+            if($before -notmatch '^7:[a-f0-9]{64}$'){
+              throw 'LANG-08c SQLite reader failed on revision 7'
+            }
+            $null=($update | & python - $tempDb)
+            if($LASTEXITCODE -ne 0){throw 'LANG-08c SQLite fixture update failed'}
+            $after=Read-AnnotationState -Path $tempDb
+            if($after -notmatch '^8:[a-f0-9]{64}$' -or $after -ceq $before){
+              throw 'LANG-08c SQLite reader cannot detect a revision change'
+            }
+          } finally {
+            Remove-Item -LiteralPath $tempDb -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host 'AKULA_LANG08_SQLITE_HELPER_CONTRACT_PASS python_stdin=1 revision_change=1'
+          Write-Host 'AKULA_LANG08_NONRELEASE_CONTRACT_PASS syntax=1 installer_unmodified=1 real_os_ui=1'
+
+
+      - name: Exercise real SQLite status reader on disposable revisions before NSIS
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-lang08c-installed-collections.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('LANG-08c parser contract: '+($errors|Out-String))}
+          $reader=@($ast.FindAll({
+            param($node)
+            ($node -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and
+              ($node.Name -eq 'Get-AnnotationSnapshot')
+          },$true))
+          if($reader.Count -ne 1){throw 'LANG-08c must expose exactly one SQLite status reader'}
+          Invoke-Expression $reader[0].Extent.Text
+          $fixture=Join-Path $env:RUNNER_TEMP ('lang08b-state-'+[guid]::NewGuid().ToString('N')+'.sqlite')
+          $setup=@'
+          import sqlite3
+          import sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              db.execute("CREATE TABLE text_annotation_state(id INTEGER PRIMARY KEY,revision INTEGER NOT NULL,payload BLOB NOT NULL)")
+              db.execute("INSERT INTO text_annotation_state VALUES(1,0,?)",(b'{"records":[]}',))
+          '@
+          $change=@'
+          import json
+          import sqlite3
+          import sys
+          record={"anchor":{"annotation_id":"fixture-id","selected_digest":[171]*32},
+                  "status":sys.argv[2],"color":"yellow"}
+          with sqlite3.connect(sys.argv[1]) as db:
+              db.execute("UPDATE text_annotation_state SET revision=?,payload=? WHERE id=1",
+                         (int(sys.argv[3]),json.dumps({"records":[record]}).encode()))
+          '@
+          try {
+            $null=($setup | & python - $fixture)
+            if($LASTEXITCODE -ne 0){throw 'LANG-08c cold SQLite fixture failed'}
+            $empty=Get-AnnotationSnapshot -Path $fixture
+            if($empty.record_count -ne 0 -or $empty.revision -ne 0){
+              throw 'LANG-08c incorrect cold SQLite snapshot'
+            }
+            $null=($change | & python - $fixture 'needs_rebind' 1)
+            if($LASTEXITCODE -ne 0){throw 'LANG-08c HOLD fixture failed'}
+            $held=Get-AnnotationSnapshot -Path $fixture
+            if($held.record_count -ne 1 -or $held.status -cne 'needs_rebind' -or $held.revision -ne 1){
+              throw 'LANG-08c incorrect HOLD SQLite status'
+            }
+            $null=($change | & python - $fixture 'current' 2)
+            if($LASTEXITCODE -ne 0){throw 'LANG-08c Current fixture failed'}
+            $current=Get-AnnotationSnapshot -Path $fixture
+            if($current.status -cne 'current' -or $current.revision -ne 2 -or
+               $current.annotation_id -cne $held.annotation_id -or
+               $current.selected_digest -cne $held.selected_digest){
+              throw 'LANG-08c cannot read verified HOLD-to-Current transition'
+            }
+          } finally {
+            Remove-Item -LiteralPath $fixture -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host 'AKULA_LANG08C_SQLITE_STATE_CONTRACT_PASS cold=1 hold=1 current=1'
+
+
+      - name: Validate language-study SQLite registry parser before NSIS
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-lang08c-installed-collections.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('LANG-08c parser contract: '+($errors|Out-String))}
+          foreach($name in @('Get-StudySnapshot','Read-StudyStateHash')){
+            $matches=@($ast.FindAll({
+              param($node)
+              ($node -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and
+                ($node.Name -eq $name)
+            },$true))
+            if($matches.Count -ne 1){throw "LANG-08c requires exactly one $name helper"}
+            Invoke-Expression $matches[0].Extent.Text
+          }
+          $db=Join-Path $env:RUNNER_TEMP ('lang08c-study-'+[guid]::NewGuid().ToString('N')+'.sqlite')
+          $py=@'
+          import json
+          import sqlite3
+          import sys
+          state={"registry":{"collections":[],"tables":[]},"anchors":[]}
+          with sqlite3.connect(sys.argv[1]) as conn:
+              conn.execute("CREATE TABLE language_study_state(id INTEGER PRIMARY KEY,revision INTEGER NOT NULL,payload BLOB NOT NULL)")
+              conn.execute("INSERT INTO language_study_state VALUES(1,0,?)",
+                           (json.dumps({"version":1,"state":state}).encode(),))
+          '@
+          $update=@'
+          import json
+          import sqlite3
+          import sys
+          state={"registry":{"collections":[{"id":"c1","name":"LANG08C-Biology","members":[{"vault_id":"test","note_id":"test","table_id":"t1"}]}],
+                             "tables":[{"source":{"vault_id":"test","note_id":"test","table_id":"t1"},"columns":{"question":0,"answers":[1],"context":None}}]},
+                 "anchors":[{"note":{"vault_id":"test","note_id":"test"},"tables":[{"table_id":"t1","previous_index":0,"full_digest":[0]*32}]}]}
+          with sqlite3.connect(sys.argv[1]) as conn:
+              conn.execute("UPDATE language_study_state SET revision=1,payload=? WHERE id=1",
+                           (json.dumps({"version":1,"state":state}).encode(),))
+          '@
+          try {
+            $null=($py | & python - $db)
+            if($LASTEXITCODE -ne 0){throw 'LANG-08c failed empty fixture creation'}
+            $empty=Get-StudySnapshot -Path $db
+            $a=Read-StudyStateHash -Path $db
+            if($empty.count -ne 0 -or $empty.revision -ne 0 -or
+               $a -notmatch '^0:[a-f0-9]{64}$'){throw 'LANG-08c SQLite empty state contract failed'}
+            $null=($update | & python - $db)
+            if($LASTEXITCODE -ne 0){throw 'LANG-08c failed named fixture update'}
+            $named=Get-StudySnapshot -Path $db
+            $b=Read-StudyStateHash -Path $db
+            if($named.count -ne 1 -or $named.revision -ne 1 -or
+               $named.name -cne 'LANG08C-Biology' -or $named.id -cne 'c1' -or
+               $named.members -ne 1 -or $named.table_count -ne 1 -or
+               $named.anchor_count -ne 1 -or $b -notmatch '^1:[a-f0-9]{64}$' -or $a -ceq $b){
+              throw 'LANG-08c SQLite named-collection parser contract failed'
+            }
+          } finally {
+            Remove-Item -LiteralPath $db -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host 'AKULA_LANG08C_SQLITE_CONTRACT_PASS empty=1 named=1 revision=1 preserved_anchors=1'
+
+
+  candidate:
+    name: Build, install-test and stage actual unsigned NSIS without release
+    needs: contract
+    uses: ./.github/workflows/windows-beta.yml
+    permissions:
+      contents: read
+
+  installed-collections:
+    name: Installed NSIS native study collection create rename cancel delete restart
+    needs: candidate
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: akula-windows-beta-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: lang08c-candidate
+      - name: Verify candidate exactly matches manifest then run installed OS witness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $candidate=Join-Path $env:GITHUB_WORKSPACE 'lang08c-candidate'
+          $setups=@(Get-ChildItem -LiteralPath $candidate -File -Filter 'Akula_*-setup.exe')
+          $manifest=Join-Path $candidate 'candidate-manifest.json'
+          if($setups.Count -ne 1 -or !(Test-Path -LiteralPath $manifest -PathType Leaf)){
+            throw 'LANG-08c requires exactly one genuine NSIS candidate and its provenance'
+          }
+          $windowsPowerShell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-lang08c-installed-collections.ps1') -SetupPath $setups[0].FullName -ManifestPath $manifest
+          if($LASTEXITCODE -ne 0){throw "LANG-08c real installed Windows evidence failed: $LASTEXITCODE"}
+      - name: Record non-release synthetic evidence
+        if: success()
+        shell: pwsh
+        run: |
+          @'
+          LANG-08c uses a genuine unsigned NSIS from this CI run. A real
+          Windows OS mouse, UIA menus and native dialogs create, rename, cancel
+          and delete a named study collection from a synthetic Markdown table.
+          SQLite revision, stable ID, table mappings, anchors and Markdown bytes
+          are checked across restart and uninstall. RUNNER_TEMP only; no release
+          or user vault.
+          '@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
