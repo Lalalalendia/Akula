@@ -15,6 +15,18 @@ impl App {
         {
             self.refresh_settings(root);
         }
+        #[cfg(windows)]
+        {
+            let version = crate::video::optional_ytdlp::revision();
+            if version != self.video_tool_revision {
+                self.video_tool_revision = version;
+                if matches!(&self.popup, Some(Popup::Settings { dialog, .. })
+                    if dialog.section == crate::ui::settings::schema::Section::System)
+                {
+                    self.refresh_settings(root);
+                }
+            }
+        }
         #[cfg(all(windows, feature = "server-readonly-preflight"))]
         self.on_server_probe(root);
         if self.view_due.is_some_and(|t| t <= now) {
