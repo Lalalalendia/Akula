@@ -4,10 +4,6 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/src/video/optional_ytdlp.rs'
-      - 'aquilum-app/native/src/app/settings/video_tools.rs'
-      - 'aquilum-app/native/src/ui/settings/schema/system/video_tools.rs'
-      - 'aquilum-app/native/assets/locales/en.json'
-      - 'aquilum-app/native/assets/locales/ru.json'
       - 'scripts/windows-video20-settings-uia.ps1'
       - '.github/workflows/akula-video20-user-optin-windows.yml'
 permissions:
@@ -62,6 +58,7 @@ jobs:
               for key in ["ytdlpTitle","ytdlpDownload","ytdlpRemove","ytdlpConfirmText","ytdlpInvalid"]:
                   assert locale["settings"]["system"].get(key)
           gui=Path("scripts/windows-video20-settings-uia.ps1").read_text()
+          assert gui.isascii(), "Windows PowerShell 5.1 parses BOM-less .ps1 as ANSI"
           for evidence in ("VIDEO20_SETTINGS_CANCEL_UIA_PASS",
                            "VIDEO20_SETTINGS_INSTALL_UIA_PASS",
                            "VIDEO20_SETTINGS_REMOVE_UIA_PASS",
