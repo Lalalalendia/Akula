@@ -39,7 +39,9 @@ jobs:
           assert "RUNNER_ENVIRONMENT" in script and "github-hosted" in script
           assert "AKULA_VIDEO22_REAL_YOUTUBE" in script
           assert "AKULA_VIDEO16_MPD_URL" in script and "IsNullOrEmpty" in script
-          assert "https://youtu.be/BaW_jenozKc" in script
+          assert "AKULA_VIDEO22_TEST_ID" in script
+          assert "BZeKDYqsuj0" in script and "GhGQV_enM8M" in script
+          assert "https://youtu.be/$TestVideoId" in script
           assert "VIDEO22_REAL_YOUTUBE_DOWNLOAD_PASS" in script
           assert "VIDEO22_REAL_YOUTUBE_RESTART_DECODE_PASS" in script
           assert "Find-Real-Hover $proc 'HOVER_DOWNLOAD'" in script
@@ -115,17 +117,24 @@ jobs:
             throw 'VIDEO22 pinned executables disappeared before extraction probe'
           }
           # Same single progressive AVC/AAC format policy as Akula; never download or write media.
-          $arguments=@('--ignore-config','--no-plugin-dirs','--no-remote-components',
-            '--no-cache-dir','--no-cookies','--no-playlist','--no-exec','--no-overwrites',
-            '--no-js-runtimes','--js-runtimes',("quickjs:" + $js),
-            '--socket-timeout','15','--retries','1','--extractor-retries','1',
-            '--format','b[vcodec^=avc1][acodec^=mp4a][height<=720]/b[ext=mp4][height<=720]',
-            '--skip-download','--print','VIDEO22_REAL_EXTRACTOR_SELECTED:%(id)s:%(format_id)s:%(ext)s:%(acodec)s:%(vcodec)s',
-            '--','https://youtu.be/BaW_jenozKc')
-          & $yt @arguments 2>&1 | ForEach-Object { Write-Host $_ }
-          if ($LASTEXITCODE -ne 0) {
-            throw 'VIDEO22 real yt-dlp extraction failed on hosted runner (site/network/EJS/format); no GUI PASS'
+          $selected=$null
+          foreach ($id in @('BZeKDYqsuj0','GhGQV_enM8M')) {
+            # These are 2026 AnnexTube Testing CC BY 3.0 clips; short and uploaded for QA.
+            $arguments=@('--ignore-config','--no-plugin-dirs','--no-remote-components',
+              '--no-cache-dir','--no-cookies','--no-playlist','--no-exec','--no-overwrites',
+              '--no-js-runtimes','--js-runtimes',("quickjs:" + $js),
+              '--socket-timeout','15','--retries','1','--extractor-retries','1',
+              '--format','b[vcodec^=avc1][acodec^=mp4a][height<=720]/b[ext=mp4][height<=720]',
+              '--skip-download','--print','VIDEO22_REAL_EXTRACTOR_SELECTED:%(id)s:%(format_id)s:%(ext)s:%(acodec)s:%(vcodec)s',
+              '--',("https://youtu.be/" + $id))
+            & $yt @arguments 2>&1 | ForEach-Object { Write-Host "VIDEO22_PREFLIGHT [$id] $_" }
+            if ($LASTEXITCODE -eq 0) { $selected=$id; break }
           }
+          if (!$selected) {
+            throw 'VIDEO22 cannot extract an AVC/AAC progressive MP4 from either current CC BY test video; release gate remains HOLD'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "AKULA_VIDEO22_TEST_ID=$selected"
+          Write-Host "VIDEO22_SELECTED_LICENSED_TEST_VIDEO=$selected"
           Write-Host 'VIDEO22_REAL_EXTRACTOR_PREFLIGHT_PASS no_media=1'
       - name: Build installed route with observation-only GUI witness
         working-directory: aquilum-app
@@ -165,7 +174,9 @@ jobs:
           $shell=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
           & $shell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File 'scripts/windows-video22-real-youtube-gui.ps1' -ExePath $exe -VaultPath $vault -DataDir $data -ProbePath $probe
           if ($LASTEXITCODE -ne 0) { throw 'VIDEO22 live public test-video GUI E2E failed' }
-          $mp4=Join-Path $data 'local-videos/BaW_jenozKc.mp4'
+          $videoId=[string]$env:AKULA_VIDEO22_TEST_ID
+          if (@('BZeKDYqsuj0','GhGQV_enM8M') -cnotcontains $videoId) { throw 'VIDEO22 unexpected test ID' }
+          $mp4=Join-Path $data ("local-videos/" + $videoId + ".mp4")
           if (!(Test-Path -LiteralPath $mp4 -PathType Leaf)) { throw 'VIDEO22 live MP4 missing after restart' }
           $hash=(Get-FileHash -LiteralPath $mp4 -Algorithm SHA256).Hash.ToLowerInvariant()
           $size=(Get-Item -LiteralPath $mp4).Length
