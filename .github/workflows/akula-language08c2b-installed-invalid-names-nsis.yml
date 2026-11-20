@@ -42,6 +42,7 @@ jobs:
              'AKULA_LANG08C_INSTALLED_RESTART_PASS',
              'AKULA_LANG08C2_INSTALLED_DUPLICATE_PASS','AKULA_LANG08C2_INSTALLED_EMPTY_PASS',
              'AKULA_LANG08C2B_INSTALLED_OVERLONG_PASS','AKULA_LANG08C2B_INSTALLED_BIDI_PASS',
+             'AKULA_LANG08C2B_INSTALLED_DIRTY_NOTE_PASS',
              'Wait-FileDialog','Choose-FileThroughNativeDialog','Get-AnnotationSnapshot',
              'RUNNER_ENVIRONMENT','github-hosted','GetForegroundWindow','GetWindowThreadProcessId',
              'SendInput','compiled_executable_sha256','SQLite format 3','backupExport','backupImport',
@@ -264,10 +265,13 @@ jobs:
         shell: pwsh
         run: |
           @'
-          LANG-08c2b1 adds genuine installed UI refusal for overlong
-          (>64 visible chars) and Unicode bidi-control collection names to
-          the already accepted case-insensitive duplicate and empty cases.
-          Every refusal preserves SQLite revision, payload SHA-256, UUID,
-          membership/anchors and source Markdown. Positive lifecycle and
-          NSIS uninstall still run. RUNNER_TEMP only; no release or user vault.
+          LANG-08c2b1 retains installed UI refusals for overlong
+          and Unicode bidi-control names, plus duplicate/empty names.
+          LANG-08c2b5 adds genuine installed OS Ctrl+V into the Markdown
+          table, confirms the saved file is unchanged, and requires Add to
+          study collection to refuse before column mapping. SQLite revision
+          and payload SHA-256 remain byte-equivalent across the refusal.
+          Restore the original text through OS input and verify graceful
+          close, Markdown SHA-256, and NSIS uninstall. RUNNER_TEMP only;
+          non-release and no user vault.
           '@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
