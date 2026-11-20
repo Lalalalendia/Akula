@@ -43,6 +43,7 @@ jobs:
              'AKULA_LANG08C2_INSTALLED_DUPLICATE_PASS','AKULA_LANG08C2_INSTALLED_EMPTY_PASS',
              'AKULA_LANG08C2B_INSTALLED_OVERLONG_PASS','AKULA_LANG08C2B_INSTALLED_BIDI_PASS',
              'AKULA_LANG08C2B_INSTALLED_DIRTY_NOTE_PASS',
+             'AKULA_LANG08C2B5_SYNTHETIC_DEBOUNCE_CONFIG_PASS','saveDebounceMs',
              'Wait-FileDialog','Choose-FileThroughNativeDialog','Get-AnnotationSnapshot',
              'RUNNER_ENVIRONMENT','github-hosted','GetForegroundWindow','GetWindowThreadProcessId',
              'SendInput','compiled_executable_sha256','SQLite format 3','backupExport','backupImport',
@@ -267,9 +268,11 @@ jobs:
           @'
           LANG-08c2b1 retains installed UI refusals for overlong
           and Unicode bidi-control names, plus duplicate/empty names.
-          LANG-08c2b5 adds genuine installed OS Ctrl+V into the Markdown
-          table, confirms the saved file is unchanged, and requires Add to
-          study collection to refuse before column mapping. SQLite revision
+          LANG-08c2b5 uses the existing saveDebounceMs option (120 s)
+          only in the disposable RUNNER_TEMP profile to preserve a genuine
+          unsaved editor state across slower OS/UIA verification. It pastes
+          edited Markdown through OS Ctrl+V and requires Add to study
+          collection to refuse before column mapping. SQLite revision
           and payload SHA-256 remain byte-equivalent across the refusal.
           Restore the original text through OS input and verify graceful
           close, Markdown SHA-256, and NSIS uninstall. RUNNER_TEMP only;
