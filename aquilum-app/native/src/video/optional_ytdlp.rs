@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicU64, Ordering}};
 use std::time::Duration;
 use sha2::{Digest, Sha256};
 
-pub(super) const VERSION: &str = "2026.10.26";
-pub(super) const BYTES: u64 = 23_575_744;
-pub(super) const SHA256: &str =
+pub(crate) const VERSION: &str = "2026.10.26";
+pub(crate) const BYTES: u64 = 23_575_744;
+pub(crate) const SHA256: &str =
     "f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d";
 pub(super) const URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe";
