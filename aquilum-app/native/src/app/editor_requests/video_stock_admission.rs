@@ -1,17 +1,11 @@
-//! VIDEO-20: installed Windows downloads require a separately user-installed,
-//! SHA-verified yt-dlp. The old signed three-EXE package remains on HOLD.
+//! VIDEO-20: installed yt-dlp is user-installed and hash-checked; old bundle stays HOLD.
 use super::App;
 use masonry::app::RenderRoot;
-#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-use super::Popup;
-#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-use crate::i18n::t;
-#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-use crate::ui::dialog::ConfirmDialog;
-#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-use crate::video::optional_ytdlp::{self, Status};
-#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-use masonry::kurbo::Point;
+#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))] use super::Popup;
+#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))] use crate::i18n::t;
+#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))] use crate::ui::dialog::ConfirmDialog;
+#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))] use crate::video::optional_ytdlp::{self, Status};
+#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))] use masonry::kurbo::Point;
 
 #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
 fn notice_keys(status: &Status) -> (&'static str, &'static str) {
