@@ -85,6 +85,25 @@ class SdistSourceGuards(unittest.TestCase):
                 with self.assertRaisesRegex(M.Hold, expected):
                     M.inspect_source(p, "cffi", "2.1.1")
 
+    def test_only_regular_cpython314_windows_wheels_are_candidates(self):
+        yes = [
+            "cffi-2.1.1-cp314-cp314-win_amd64.whl",
+            "curl_cffi-0.17.0-cp310-abi3-win_amd64.whl",
+            "pycryptodomex-3.24.1-cp37-abi3-win_amd64.whl",
+            "mutagen-1.48.1-py3-none-any.whl",
+        ]
+        no = [
+            "brotli-1.2.1-cp311-cp311-win_amd64.whl",
+            "cffi-2.1.1-cp314-cp314t-win_amd64.whl",
+            "websockets-17.3-cp315-cp315-win_amd64.whl",
+            "pycryptodomex-3.24.1-pp311-pypy311_pp73-win_amd64.whl",
+            "pycryptodomex-3.24.1-cp314-cp314-manylinux_x86_64.whl",
+        ]
+        for name in yes:
+            self.assertTrue(M.compatible_cpython314_win64(name), name)
+        for name in no:
+            self.assertFalse(M.compatible_cpython314_win64(name), name)
+
     def test_source_only_hash_is_not_wheel_proof(self):
         self.assertEqual(len(M.sha256(b"irrelevant")), 64)
         self.assertNotEqual(M.sha256(b"irrelevant"), M.sha256(b"other"))
