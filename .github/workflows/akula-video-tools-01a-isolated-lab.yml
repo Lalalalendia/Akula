@@ -29,6 +29,8 @@ on:
       - 'scripts/video-tools-01o-signed-floor.cjs'
       - '.github/scripts/video-tools-01o-real-mux.test.cjs'
       - 'docs/release/video-tools-01o-real-mux-floor.md'
+      - '.github/scripts/video-tools-01p-signed-nonadmin.test.cjs'
+      - 'docs/release/video-tools-01p-signed-six-nonadmin.md'
       - '.github/scripts/video-tools-01g-pin-race.test.cjs'
       - 'aquilum-app/native/src/video/tools_package_pin_windows.rs'
       - 'aquilum-app/native/src/video/tools_package_pin_admission.rs'
@@ -83,6 +85,7 @@ jobs:
           node --test .github/scripts/video-tools-01m-trust-state.test.cjs
           node --test .github/scripts/video-tools-01n-manual-reinstall.test.cjs
           node --test .github/scripts/video-tools-01o-real-mux.test.cjs
+          node --test .github/scripts/video-tools-01p-signed-nonadmin.test.cjs
           node --test .github/scripts/video-tools-01k-guarded-ui.test.cjs
           echo 'VIDEO_TOOLS_01A_SOURCE_CONTRACT_PASS release=0'
 
@@ -253,7 +256,7 @@ jobs:
             # signature checks, all negative cases and safe uninstall.
             & ./scripts/windows-video-tools-01j-six-signed-lab.ps1 -MuxPath $env:VIDEO_TOOLS_01A_MUX -YtDlpPath $env:VIDEO_TOOLS_01A_YT -QuickJsPath $env:VIDEO_TOOLS_01A_JS -ProofFile $proofFile 2>&1 | Out-Host
             $proof=Get-Content -LiteralPath $proofFile -Raw -ErrorAction Stop
-            $expected="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`nVIDEO_TOOLS_01M_REAL_SIGNED_STATES_PASS`nVIDEO_TOOLS_01N_MANUAL_REINSTALL_PASS`n"
+            $expected="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`nVIDEO_TOOLS_01M_REAL_SIGNED_STATES_PASS`nVIDEO_TOOLS_01N_MANUAL_REINSTALL_PASS`nVIDEO_TOOLS_01P_SIGNED_NONADMIN_PASS`n"
             if($proof -cne $expected){
               throw 'VIDEO_TOOLS_01J_HOLD: complete signed six-file acceptance proof is absent'
             }

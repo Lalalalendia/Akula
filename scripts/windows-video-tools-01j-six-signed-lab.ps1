@@ -193,6 +193,17 @@ try {
   $installed=$true
   Assert-Exact-Six
   Run-Native -Mode 'valid' -Public $public
+  # VIDEO-TOOLS-01p: unlike the older unsigned four-file ACL witness,
+  # this is the genuine signed six-file protected installation. A fresh
+  # standard Windows SID must read all six but be denied 24 mutating rights.
+  $userLabId=[guid]::NewGuid().ToString('N')
+  $userResult=@(& (Join-Path $repo 'scripts/windows-video-tools-01f-standard-user.ps1') -Root $root -LabId $userLabId -Work $work -SignedSix 2>&1)
+  $userResult | Out-Host
+  if(!(($userResult | Out-String).Contains('VIDEO_TOOLS_01P_SIGNED_NONADMIN_PASS token=standard_user signed_six_read=6 denied_rights=24 six_sha_unchanged=1 release=0'))){
+    throw 'VIDEO_TOOLS_01P_HOLD: protected six-file standard-user proof missing'
+  }
+  Assert-Exact-Six
+  Run-Native -Mode 'valid' -Public $public
   # VIDEO-TOOLS-01n: manual updates may NEVER silently overwrite a live
   # protected package, even when signed test components are fully valid.
   $before01n=@{}
@@ -336,7 +347,7 @@ try {
   # This file is the authoritative CI handoff. It is created ONLY after
   # both positive native Minisign verdicts, all five negative cases, and
   # uninstall + user data preservation have completed successfully.
-  $proofContent="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`nVIDEO_TOOLS_01M_REAL_SIGNED_STATES_PASS`nVIDEO_TOOLS_01N_MANUAL_REINSTALL_PASS`n"
+  $proofContent="VIDEO_TOOLS_01J_NATIVE_SIGNED_INSTALLED_PASS`nVIDEO_TOOLS_01J_SIX_SIGNED_PASS`nVIDEO_TOOLS_01M_REAL_SIGNED_STATES_PASS`nVIDEO_TOOLS_01N_MANUAL_REINSTALL_PASS`nVIDEO_TOOLS_01P_SIGNED_NONADMIN_PASS`n"
   [IO.File]::WriteAllText($ProofFile,$proofContent,[Text.UTF8Encoding]::new($false))
 } finally {
   if($installed -and (Test-Path -LiteralPath (Join-Path $root 'uninstall.exe') -PathType Leaf)) {
