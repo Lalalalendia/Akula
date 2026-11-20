@@ -1156,9 +1156,35 @@ if result is None or result[0]!=0:
   $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
   $window=$ready.Window
   Readback-Selected -Process $proc -Expected $studyText
+  # Hold an installed rename modal open while a second, disposable SQLite
+  # writer wins the revision CAS. The stale GUI must show the exact native
+  # "collection changed" message, not overwrite the concurrent winner.
   Open-StudyCollectionMenu -Window $window -Process $proc
   Study-Choose -Window $window -Process $proc -Names $labels.studyManage
   Study-Choose -Window $window -Process $proc -Names @('Rename: LANG08C-Biology')
+  [void](Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button))
+  Type-StudyName -Process $proc -Name 'LANG08C-StaleRename'
+  $winnerHash=Synthetic-AdvanceStudyName -Path $studyDb -ExpectedRevision $created.revision -ExpectedName 'LANG08C-Biology' -NextName 'LANG08C-Concurrent'
+  $staleRenameSave=Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $staleRenameSave -Window $window -Process $proc
+  Assert-StudyChangedNotice -Window $window
+  $staleRenamed=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-Concurrent'
+  if($staleRenamed.revision -ne ($created.revision+1) -or
+     $staleRenamed.id -cne $created.id -or
+     $staleRenamed.members -ne $created.members -or
+     $staleRenamed.table_count -ne $created.table_count -or
+     $staleRenamed.anchor_count -ne $created.anchor_count -or
+     (Read-StudyStateHash -Path $studyDb) -cne $winnerHash -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b6 stale installed rename overwrote competing writer or source'
+  }
+  Write-Host 'AKULA_LANG08C2B6_INSTALLED_STALE_RENAME_PASS os_dialog=1 competing_sqlite_cas=1 native_refusal=1 winner_preserved=1'
+  Close-StudyNotice -Window $window -Process $proc
+
+  # The refreshed installed menu must still permit an ordinary new rename.
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyManage
+  Study-Choose -Window $window -Process $proc -Names @('Rename: LANG08C-Concurrent')
   [void](Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button))
   Type-StudyName -Process $proc -Name 'LANG08C-Botany'
   $save=Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button)
