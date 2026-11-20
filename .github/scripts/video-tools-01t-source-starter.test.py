@@ -31,6 +31,8 @@ class StarterTest(unittest.TestCase):
   self.assertEqual(p["wheel_origin"],"CUSTOM_DIRECT_URL")
   self.assertEqual(p["custom_wheel_sha256"],M.CUSTOM_WHEEL_SHA)
   self.assertEqual(p["builder_git_commit"],M.PYBUILD)
+  self.assertEqual(len(M.PYBUILD),40)
+  self.assertEqual(len(M.UPSTREAM_PYINSTALLER),40)
   for badurl in (
     custom.replace(M.CUSTOM_WHEEL_SHA,"0"*64),
     custom.replace("Pyinstaller-Builds","unknown-repository"),
