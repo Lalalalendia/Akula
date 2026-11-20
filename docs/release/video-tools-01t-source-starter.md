@@ -21,7 +21,7 @@ checks out the custom PyInstaller wheel's build-recipe repository and creates
 | --- | --- | --- |
 | yt-dlp | `f264a6cbd1f630894da0f368df00f8aae50140e0` | Complete **Git-tracked tree** at 2026.10.26, including build workflow, `bundle/pyinstaller.py`, versioned hash-constrained requirements, `pyproject.toml`, `uv.lock`, source LICENSE and `THIRD_PARTY_LICENSES.txt` |
 | QuickJS-NG | `d7215b0ad3fc2c562e8317fd9bca058fd4863804` | Complete **Git-tracked tree** at v0.18.0, including MIT copyright and permission notice |
-| Pyinstaller-Builds recipe | `5eb86b862d61adc3df0f44e6e0b815b7d74fa3f` | Exact source of the **custom MinGW PyInstaller wheel builder** from tag `2026.08.19.215425`, including Windows build workflow and its hashed build dependencies; not the PyInstaller code or wheel |
+| Pyinstaller-Builds recipe | `5eb86b862d61adc3df0f44e6e0b815b7d74fa3f5` | Exact source of the **custom MinGW PyInstaller wheel builder** from tag `2026.08.19.215425`, including Windows build workflow and its hashed build dependencies; not the PyInstaller code or wheel |
 | Akula Rust mux | Exact checked PR HEAD | Git-tracked `labs/video-lite` tree and root AGPL license; Cargo.lock and actual `src/bin/dash.rs` included |
 
 The tarballs are generated from `git archive HEAD`, with stable prefixes,
@@ -42,7 +42,7 @@ an ordinary PyPI package:
 - Release: [yt-dlp/Pyinstaller-Builds 2026.08.19.215425](https://github.com/yt-dlp/Pyinstaller-Builds/releases/tag/2026.08.19.215425)
 - Wheel: `pyinstaller-6.22.0-py3-none-win_amd64.whl`
 - SHA-256: `294099ecb5fdd2a13ae4c29006d4e335b697a63b6a16cf052b90ec2b40bef05a`
-- Recipe commit: `5eb86b862d61adc3df0f44e6e0b815b7d74fa3f`
+- Recipe commit: `5eb86b862d61adc3df0f44e6e0b815b7d74fa3f5`
 - Upstream PyInstaller source tag v6.22.0: `70fc17210920bce17f4ab09bbf8104b0dbd45338` (**not included or source-matched yet**)
 
 The custom recipe builds a Windows bootloader using MinGW. The special
