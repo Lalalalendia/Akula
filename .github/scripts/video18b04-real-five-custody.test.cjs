@@ -12,7 +12,7 @@ const workflowPath = '.github/workflows/akula-video18b04-real-five-custody.yml';
 const docPath = 'docs/release/video18b04-real-five-custody.md';
 const names = ['akula-app.exe','shiva-pdf-preview.exe','akula-video-mux.exe','akula-yt-dlp.exe','akula-quickjs.exe'];
 const pins = {
-  'akula-yt-dlp.exe': ['2026.10.26','f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d',23575744,'Unlicense'],
+  'akula-yt-dlp.exe': ['2026.10.26','f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d',23575744,'GPL-3.0-or-later'],
   'akula-quickjs.exe': ['v0.18.0','ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7',1873152,'MIT']
 };
 function validate(p, ps, workflow, reference) {
@@ -39,6 +39,9 @@ function validate(p, ps, workflow, reference) {
   assert.ok(shiva.license.includes('MIT OR Apache-2.0'),'HOLD: Shiva license metadata was not repaired');
   assert.equal(p.components[2].license_status,'REVIEW_TRANSITIVE_DEPENDENCY_NOTICES');
   assert.equal(p.components[2].license,'AGPL-3.0-only');
+  assert.equal(p.components[3].source_license,'Unlicense');
+  assert.equal(p.components[3].license_status,'REVIEW_BUNDLED_DEPENDENCIES');
+  assert.ok(p.components[3].license_notice.endsWith('/THIRD_PARTY_LICENSES.txt'),'HOLD: bundled yt-dlp notices lost');
   for (const c of p.components.filter(x=>x.kind==='pinned-upstream')) {
     const pin = pins[c.name];
     assert.ok(pin,'HOLD: unexpected upstream EXE');
