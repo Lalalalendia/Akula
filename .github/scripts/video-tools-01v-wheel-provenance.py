@@ -202,7 +202,7 @@ def analyze_pyinstaller(wheel_path, source_root, builder_root, head):
         results = []
         for name in entries:
             data = wheel.read(name)
-            built = source_root / "bootloader" / name[len("PyInstaller/bootloader/"):]
+            built = source_root / name
             have = built.is_file()
             rebuilt = built.read_bytes() if have else b""
             results.append({
