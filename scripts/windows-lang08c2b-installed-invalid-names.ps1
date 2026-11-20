@@ -273,7 +273,10 @@ function Readback-Selected {
   }
   if($null -eq $copy -or
      ![string]::Equals((& $normalize $copy),(& $normalize $Expected),[StringComparison]::Ordinal)){
-    throw 'LANG-08 installed editor failed exact OS Ctrl+A/C clipboard readback'
+    $reason=if($null -eq $copy){'clipboard_copy_missing'}else{'text_mismatch'}
+    $observedLength=if($null -eq $copy){0}else{(& $normalize $copy).Length}
+    $expectedLength=(& $normalize $Expected).Length
+    throw "LANG-08 installed editor failed exact OS Ctrl+A/C clipboard readback reason=$reason expected_length=$expectedLength observed_length=$observedLength"
   }
 }
 # SQLite WAL may checkpoint without changing records: compare snapshot instead
@@ -1166,6 +1169,13 @@ if result is None or result[0]!=0:
   # Readback-Selected left the real editor selected via OS Ctrl+A/C.
   # Physical Ctrl+V enters a valid changed table with the editor focused.
   [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x56)
+  # Winit dispatches ClipboardPaste as an editor event; replacing clipboard
+  # immediately with Readback-Selected's poison can race the paste read.
+  # Let the app consume the synthetic clipboard before the readback changes it.
+  Start-Sleep -Milliseconds 750
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  Write-Host 'LANG08C2B5_PASTE_DIAGNOSTIC settled_before_clipboard_poison=1'
   Readback-Selected -Process $proc -Expected $dirtyText
   if((Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
     throw 'LANG-08c2b5 cannot establish unsaved note; fixture already persisted'
@@ -1199,6 +1209,9 @@ if result is None or result[0]!=0:
   }
   [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd,$proc.Id,[uint16]0x41)
   [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x56)
+  Start-Sleep -Milliseconds 750
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
   Readback-Selected -Process $proc -Expected $studyText
   Close-Note -Process $proc;$proc=$null
   if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
