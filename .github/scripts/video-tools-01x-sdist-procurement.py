@@ -96,6 +96,34 @@ def parse_all_locks(ytroot):
              "native/third-party source version pin changed " + name)
     return groups, hashes
 
+def compatible_cpython314_win64(filename):
+    """Only possible *metadata* wheel candidates for normal CPython 3.14 x64.
+
+    Does not attest the chosen installed wheel, OS loader or native contents.
+    Reject CPython free-threading (cp314t), PyPy and newer cp315 ABI wheels.
+    """
+    if not isinstance(filename, str) or not filename.endswith(".whl"):
+        return False
+    parts = filename[:-4].rsplit("-", 3)
+    if len(parts) != 4:
+        return False
+    _, py, abi, platform = parts
+    if platform not in ("win_amd64", "any"):
+        return False
+    py_tags, abi_tags = set(py.split(".")), set(abi.split("."))
+    if platform == "any" and "none" in abi_tags and (
+            "py3" in py_tags or "py314" in py_tags):
+        return True
+    if platform != "win_amd64":
+        return False
+    if "cp314" in py_tags and ("cp314" in abi_tags or "abi3" in abi_tags):
+        return True
+    for tag in py_tags:
+        match = re.fullmatch(r"cp3([7-9]|1[0-3])", tag)
+        if match and "abi3" in abi_tags:
+            return True
+    return False
+
 def read_pypi_json(name, version):
     url = "https://pypi.org/pypi/" + urllib.parse.quote(name) + "/" + urllib.parse.quote(version) + "/json"
     request = urllib.request.Request(url, headers={
@@ -262,8 +290,7 @@ def acquire(allow_path, ytroot, out_arg):
             if row.get("packagetype") == "bdist_wheel" and
                re.fullmatch(r"[0-9a-f]{64}", row.get("digests", {}).get("sha256", "")) and
                row["digests"]["sha256"] in hashes[SOURCE_GROUP][name] and
-               (row.get("filename", "").endswith("-win_amd64.whl") or
-                row.get("filename", "").endswith("-any.whl"))
+               compatible_cpython314_win64(row.get("filename", ""))
         ], key=lambda z: z["filename"])
         row = {
             "distribution": name, "pinned_version": version,
