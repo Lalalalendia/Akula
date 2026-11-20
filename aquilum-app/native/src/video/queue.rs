@@ -1,4 +1,3 @@
-//! Explicit-only serial video download queue, never invoked by editor render.
 use std::collections::HashMap; use std::ffi::OsString; use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use super::{download, library::Library, youtube};
@@ -9,8 +8,7 @@ pub enum Status {
     Ready(PathBuf),
     Failed(String),
 }
-static JOBS: OnceLock<Mutex<HashMap<String, Status>>> = OnceLock::new();
-static SERIAL: Mutex<()> = Mutex::new(());
+static JOBS: OnceLock<Mutex<HashMap<String, Status>>> = OnceLock::new(); static SERIAL: Mutex<()> = Mutex::new(());
 fn jobs() -> &'static Mutex<HashMap<String, Status>> {
     JOBS.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -21,9 +19,6 @@ pub fn status(url: &str) -> Option<Status> {
     let id = youtube::video_id(url)?;
     jobs().lock().unwrap_or_else(|e| e.into_inner()).get(id).cloned()
 }
-/// Called only after the user presses Download in the media card.
-/// Does not silently launch any process during startup, synchronization or
-/// network metadata resolution. A finished file is shared by all notes by ID.
 pub fn enqueue(
     url: String,
     data_dir: PathBuf,
@@ -44,7 +39,6 @@ pub fn enqueue(
         change(&id, Status::Downloading(download::Progress::default()));
         changed(false, &url);
         let mut last_notification = 0_u64;
-        // Verify optional tool before making local video staging files.
         #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
         let executable = super::optional_ytdlp::verified_executable(&data_dir)
             .map(|path| path.into_os_string())
@@ -53,11 +47,17 @@ pub fn enqueue(
         let executable: Result<OsString, String> = Ok(std::env::var_os("AKULA_YT_DLP_BIN")
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| OsString::from("yt-dlp")));
-        let result = executable.and_then(|executable| {
+        #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
+        let runtime: Result<Option<OsString>, String> = super::optional_ytdlp::quickjs::verified_executable(&data_dir)
+            .map(|p| Some(p.into_os_string()))
+            .map_err(|_| "Install verified QuickJS in Settings > System first".to_owned());
+        #[cfg(not(all(windows, feature = "installed", not(feature = "video-ui-e2e"))))]
+        let runtime: Result<Option<OsString>, String> = Ok(None);
+        let result = executable.and_then(|executable| runtime.and_then(|runtime| {
             Library::new(&data_dir, &registered_roots)
                 .map_err(|e| format!("local video storage rejected: {e}"))
                 .and_then(|library| {
-                    super::queue_dispatch::download_one(&library, &executable, &url, |progress| {
+                    super::queue_dispatch::download_one(&library, &executable, runtime.as_deref(), &url, |progress| {
                         change(&id, Status::Downloading(progress));
                         if progress.downloaded.saturating_sub(last_notification) >= 1024 * 1024
                             || progress.downloaded == progress.total.unwrap_or(u64::MAX)
@@ -67,7 +67,7 @@ pub fn enqueue(
                         }
                     })
                 })
-        });
+        }));
         match result {
             Ok(path) => change(&id, Status::Ready(path)),
             Err(error) => change(&id, Status::Failed(error)),
