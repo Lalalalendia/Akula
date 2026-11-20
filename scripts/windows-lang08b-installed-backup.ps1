@@ -349,6 +349,26 @@ public static class AkulaLang08DialogKeys {
     if(SendInput(4,keys,Marshal.SizeOf(typeof(Input)))!=4)
       throw new InvalidOperationException("Incomplete file-picker SendInput");
   }
+  // Windows common Save/Open file dialogs have a File name mnemonic Alt+N.
+  // On the hosted runner the input is sometimes absent from the UIA Edit
+  // tree while the genuine #32770 dialog itself is visible. Restrict this
+  // access-key fallback to the foreground dialog owned by installed Akula.
+  public static void FocusFileName(IntPtr hwnd,int expectedPid) {
+    uint pid;
+    if(hwnd==IntPtr.Zero || Marshal.SizeOf(typeof(Input))!=40 ||
+       GetWindowThreadProcessId(hwnd,out pid)==0 || pid!=(uint)expectedPid ||
+       GetForegroundWindow()!=hwnd)
+      throw new InvalidOperationException("File-picker access key PID/foreground mismatch");
+    const uint UP=2;
+    Input[] keys=new Input[]{
+      new Input{Type=1,Key=0x12}, // VK_MENU (Alt)
+      new Input{Type=1,Key=0x4e}, // VK_N (English File name mnemonic)
+      new Input{Type=1,Key=0x4e,Flags=UP},
+      new Input{Type=1,Key=0x12,Flags=UP}
+    };
+    if(SendInput(4,keys,Marshal.SizeOf(typeof(Input)))!=4)
+      throw new InvalidOperationException("Incomplete file-picker filename access key");
+  }
 }
 '@
 function Wait-FileDialog {
@@ -422,13 +442,19 @@ function Choose-FileThroughNativeDialog {
     }catch [Windows.Automation.ElementNotAvailableException] {}
   }
   if($null -eq $filename){
-    Write-Host ('LANG-08b file dialog visible Edit controls: '+($seen -join ' | '))
-    throw 'LANG-08b could not identify genuine File name edit'
+    # The genuine Windows common-file dialog can expose the shell list and
+    # Search Box but omit File name as a visible UIA Edit until focused.
+    # Use the standard English File name access key through real OS input,
+    # never substitute a synthetic RFD callback or edit application data.
+    Write-Host 'LANG-08b native File name Edit unavailable in UIA; using PID-checked OS Alt+N'
+    [AkulaLang08DialogKeys]::FocusFileName($hwnd,$Process.Id)
+    Start-Sleep -Milliseconds 150
+  } else {
+    $rect=$filename.Current.BoundingRectangle
+    $x=[int][Math]::Round($rect.Left+$rect.Width/2)
+    $y=[int][Math]::Round($rect.Top+$rect.Height/2)
+    [AkulaLang08Pointer]::Click($hwnd,$Process.Id,$x,$y,$false)
   }
-  $rect=$filename.Current.BoundingRectangle
-  $x=[int][Math]::Round($rect.Left+$rect.Width/2)
-  $y=[int][Math]::Round($rect.Top+$rect.Height/2)
-  [AkulaLang08Pointer]::Click($hwnd,$Process.Id,$x,$y,$false)
   if([AkulaBetaGuiInput]::GetForegroundWindow() -ne $hwnd){
     throw 'LANG-08b file picker lost verified foreground before input'
   }
