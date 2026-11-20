@@ -1212,9 +1212,34 @@ if result is None or result[0]!=0:
   Write-Host 'AKULA_LANG08C_INSTALLED_CANCEL_PASS native_confirmation=1 sqlite_unchanged=1'
   Start-Sleep -Milliseconds 400
 
+  # Hold a genuine installed Delete confirmation, then let the disposable
+  # second writer advance the collection revision. The stale confirmation
+  # must not remove or rename the competing writer's live metadata.
   Open-StudyCollectionMenu -Window $window -Process $proc
   Study-Choose -Window $window -Process $proc -Names $labels.studyManage
   Study-Choose -Window $window -Process $proc -Names @('Delete: LANG08C-Botany')
+  [void](Wait-Visible -Root $window -Names $labels.studyDeleteConfirm -Type ([Windows.Automation.ControlType]::Button))
+  $deleteWinnerHash=Synthetic-AdvanceStudyName -Path $studyDb -ExpectedRevision $renamed.revision -ExpectedName 'LANG08C-Botany' -NextName 'LANG08C-DeleteWinner'
+  $staleDelete=Wait-Visible -Root $window -Names $labels.studyDeleteConfirm -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $staleDelete -Window $window -Process $proc
+  Assert-StudyChangedNotice -Window $window
+  $staleDeleted=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-DeleteWinner'
+  if($staleDeleted.revision -ne ($renamed.revision+1) -or
+     $staleDeleted.id -cne $renamed.id -or
+     $staleDeleted.members -ne $renamed.members -or
+     $staleDeleted.table_count -ne $renamed.table_count -or
+     $staleDeleted.anchor_count -ne $renamed.anchor_count -or
+     (Read-StudyStateHash -Path $studyDb) -cne $deleteWinnerHash -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b6 stale installed delete removed concurrent winner or source'
+  }
+  Write-Host 'AKULA_LANG08C2B6_INSTALLED_STALE_DELETE_PASS os_confirmation=1 competing_sqlite_cas=1 native_refusal=1 winner_preserved=1'
+  Close-StudyNotice -Window $window -Process $proc
+
+  # Only a freshly opened native confirmation can delete the current group.
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyManage
+  Study-Choose -Window $window -Process $proc -Names @('Delete: LANG08C-DeleteWinner')
   $confirm=Wait-Visible -Root $window -Names $labels.studyDeleteConfirm -Type ([Windows.Automation.ControlType]::Button)
   Click-Visible -Target $confirm -Window $window -Process $proc
   $deleted=Require-StudySnapshot -Path $studyDb -Count 0 -Name $null
