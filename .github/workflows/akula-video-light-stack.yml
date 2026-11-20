@@ -103,7 +103,16 @@ jobs:
                            'QUICKJS_WINDOWS_SHA256','YTDLP_WINDOWS_SHA256',
                            'verify_pinned_runtime','fs::hard_link'):
               assert required in light,required
-          assert 'super::light::download_one_or_legacy' in queue
+          # Installed Windows now uses the independently opted-in, verified
+          # single-file downloader. The old 3-EXE lab path still retains
+          # its original release HOLD and may only run on its test feature.
+          assert 'super::queue_dispatch::download_one' in queue
+          assert 'optional_ytdlp::verified_executable' in queue
+          dispatch=Path('aquilum-app/native/src/video/queue_dispatch.rs').read_text()
+          assert 'super::download::download_one(library, executable, url, on_progress)' in dispatch
+          assert 'super::light::download_one_or_legacy(library, executable, url, on_progress)' in dispatch
+          assert '#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]' in dispatch
+          assert 'VIDEO_TOOLS_01K_HOLD' in light
           assert 'std::thread::spawn(move ||' in queue
           assert 'std::env::var_os("AKULA_RUST_MUX_BIN")' in light
           assert 'akula-yt-dlp.exe' in light and 'akula-quickjs.exe' in light
