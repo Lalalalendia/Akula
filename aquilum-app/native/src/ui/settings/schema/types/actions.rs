@@ -1,5 +1,4 @@
-use aquilum_core::sync::NativeRecoveryDecision;
-mod cloud_provider;
+use aquilum_core::sync::NativeRecoveryDecision; mod cloud_provider;
 pub use cloud_provider::CloudProvider;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
