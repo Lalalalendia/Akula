@@ -83,3 +83,54 @@ fn lang02_named_collection_native_gui_persists_without_mutating_markdown() {
     assert_eq!(std::fs::read(&path).unwrap(), saved, "restart changed Markdown");
     eprintln!("AKULA_LANG02_NATIVE_JOURNEY_PASS=columns,create,sqlite,restart,source_unchanged");
 }
+
+#[test]
+fn lang08_dirty_note_refuses_collection_bind_without_persisting_metadata() {
+    let mut h = Harness::new();
+    let path = h.vault.path().join("a.md");
+    let saved_markdown = "| Term | Translation |\n| --- | --- |\n| star | star |";
+    assert!(h.app.open(&mut h.root, path.clone()));
+    h.replace_body(saved_markdown);
+    h.save_now();
+    let on_disk = std::fs::read(&path).unwrap();
+    assert_eq!(on_disk, saved_markdown.as_bytes());
+
+    // Exercise a real editor modification, not a synthetic database write.
+    let dirty_markdown = saved_markdown.replace("star | star", "moon | moon");
+    h.replace_body(&dirty_markdown);
+    assert!(h.app.note.as_ref().is_some_and(|n| n.clean_cache_hash().is_none()),
+        "the edited note must still be unsaved");
+
+    // Activate the live table by pointer, as in the positive native GUI journey.
+    let body = h.app.note_ids.as_ref().unwrap().body;
+    let inside_table = dirty_markdown.find("moon").unwrap();
+    h.root.focus_on(Some(body.id()));
+    body.edit(&mut h.root, |mut editor| {
+        crate::ui::editor::TextEditor::select_byte_range(&mut editor, inside_table, inside_table);
+    });
+    h.settle();
+    let (x, y) = {
+        let widget = body.get(&h.root).unwrap();
+        let rect = widget.ctx().bounding_box();
+        let table_top = widget.inner().top_of(0).expect("table layout");
+        (rect.x0 + 70.0, rect.y0 + table_top + 45.0)
+    };
+    h.click(x, y);
+    assert!(body.get(&h.root).unwrap().inner().study_table_snapshot().is_ok(),
+        "dirty note must still expose the current table through the live editor");
+    assert!(h.app.note.as_ref().is_some_and(|n| n.clean_cache_hash().is_none()));
+
+    h.app.open_study_add(&mut h.root);
+    assert!(matches!(&h.app.popup, Some(Popup::StudyPreview { .. })),
+        "dirty source must show a refusal notice, not a column or collection picker");
+    let db = h.app.workspace.data_dir.join("language-study.sqlite");
+    let store = StudyStore::open(&db).unwrap();
+    let stored = store.load().unwrap();
+    assert_eq!(stored.revision, 0, "dirty source must not increment SQLite revision");
+    assert!(stored.state.registry.collections.is_empty());
+    assert!(stored.state.registry.tables.is_empty());
+    assert!(stored.state.anchors.is_empty());
+    assert_eq!(std::fs::read(&path).unwrap(), on_disk,
+        "refused collection binding must not modify the saved Markdown file");
+    eprintln!("AKULA_LANG08_DIRTY_NATIVE_REFUSAL_PASS=editor_dirty,notice,no_metadata,markdown_unchanged");
+}
