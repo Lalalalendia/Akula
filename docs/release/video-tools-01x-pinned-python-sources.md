@@ -22,8 +22,23 @@ This stage deliberately obtains **six** high-priority source distributions from 
 - Checkout exact Akula PR HEAD and immutable upstream yt-dlp source commit. Verify all 23 build-install pins, package versions, custom PyInstaller SHA, and the unchanged five-EXE release-HOLD allowlist.
 - For the six selected packages, query exact PyPI release metadata, require matching normalized name/version, read only immutable HTTPS `files.pythonhosted.org` sdists, and hash them against the SHA-256 listed by PyPI. Check **independently** if each actual sdist SHA also appears in the original upstream hash-constrained requirements file. An sdist that is merely published by PyPI is identified separately from an upstream-hash-pinned sdist.
 - Inspect source tar/ZIP as **inert archive metadata only**: enforce safe paths and size/count bounds, record whether build metadata and C/C++/Rust/Cython source filenames are present. Never execute `setup.py`, install dependencies, extract to arbitrary paths, import the downloaded source, or build a wheel.
-- Use PyPI release metadata to list Windows x64 wheel names whose **metadata hashes** appear in the upstream lock. Do **not** download executable wheels; a matching version/hash list does not establish which wheel actually went into the frozen EXE.
+- Use PyPI release metadata to list **normal CPython 3.14 Windows x64 compatible** wheel names whose **metadata hashes** appear in the upstream lock; do not mistake cp314t free-threading, PyPy, or other CPython version wheels for installed candidates. Do **not** download executable wheels; a matching version/hash list does not establish which wheel actually went into the frozen EXE.
 - Preserve actual downloaded *source archives only*, plus a JSON review manifest and README, as a PR-only one-day GitHub Actions artifact `video-tools-01x-six-pypi-sdists-NOT-COMPLETE`. Nothing is publicly published as approved corresponding source. No EXE, DLL, wheel, installer, signing key or user data is in the artifact.
+
+## First verified acquisition result (PR HEAD `ab834648`, 20 November 2026)
+
+The source-only workflow [run #44788396207](https://github.com/Lalalendia/Akula/actions/runs/44788396207) was evaluated on its exact PR HEAD and completed **SUCCESS**. The PyPI sdist SHA-256 matched an original upstream requirements-file pin for **all 6/6** selected packages; the archive inspection found their build metadata and produced a source-only artifact with no wheels, DLLs or EXEs.
+
+| Pinned distribution | Acquired sdist bytes | Source archive entries | Native-like source-file names |
+| --- | ---: | ---: | ---: |
+| brotli 1.2.1 | 7,389,447 | 213 | 108 |
+| cffi 2.1.1 | 530,807 | 264 | 52 |
+| curl-cffi 0.17.0 | 282,294 | 115 | 15 |
+| mutagen 1.48.1 | 1,276,978 | 302 | 0 |
+| pycryptodomex 3.24.1 | 4,934,627 | 711 | 111 |
+| websockets 17.3 | 188,878 | 76 | 1 |
+
+The counts indicate source archive contents only, not exact embedded/native library coverage. Initial source-lock checks succeeded, but the **PR is still awaiting final exact-HEAD CI following a stricter CPython 3.14 Windows x64 wheel-*metadata* candidate filter**. Avoid turning source availability into installed-wheel identity or compliance claims.
 
 ## Do not overstate the result
 
