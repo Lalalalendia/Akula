@@ -12,8 +12,12 @@
   restarted local playback are both witnessed.
 
 ## Windows test only
-- Source is a short 10-second [youtube-dl test video](https://www.youtube.com/watch?v=BaW_jenozKc)
-  uploaded specifically for downstream downloader testing.
+- The original youtube-dl sample `BaW_jenozKc` was deleted and must not be used.
+- Source is selected strictly from two uploader-authored **CC BY 3.0** AnnexTube
+  Testing clips (2 seconds `BZeKDYqsuj0` and 1 second `GhGQV_enM8M`).
+  The Windows preflight verifies the exact progressive format supported by
+  Akula, records the selected ID, then uses that same URL in the real GUI.
+  If neither offers a usable stream, CI fails; no synthetic fallback is allowed.
 - Runner: GitHub-hosted Windows 2025, independent disposable vault/data profile.
 - Build: `installed,video-tools-gui-e2e`. The latter is an empty feature
   allowing observation-only pointer/decoder witnesses; it is NOT used in normal
