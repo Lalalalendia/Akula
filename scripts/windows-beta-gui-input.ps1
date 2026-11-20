@@ -145,6 +145,20 @@ public static class AkulaBetaGuiInput {
     public static void PressCtrlShortcut(IntPtr hwnd, int expectedPid, ushort key) {
         if (key != 0x41 && key != 0x43 && key != 0x4F && key != 0x46)
             throw new InvalidOperationException("Only selection/copy/search shortcuts are authorized");
+        SendCtrlChord(hwnd, expectedPid, key);
+    }
+
+    // Clipboard paste is isolated from the read-only shortcut API and can only
+    // be used on disposable hosted Windows fixtures with a verified foreground PID.
+    public static void PasteSyntheticTitleFromClipboard(IntPtr hwnd, int expectedPid) {
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true"
+            || Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT") != "github-hosted"
+            || Environment.GetEnvironmentVariable("RUNNER_OS") != "Windows")
+            throw new InvalidOperationException("Synthetic title paste requires hosted Windows QA");
+        SendCtrlChord(hwnd, expectedPid, 0x56);
+    }
+
+    private static void SendCtrlChord(IntPtr hwnd, int expectedPid, ushort key) {
         if (hwnd == IntPtr.Zero || Marshal.SizeOf(typeof(Input)) != 40)
             throw new InvalidOperationException("Unexpected Windows shortcut window/input layout");
         uint owner;
