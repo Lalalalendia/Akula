@@ -1,0 +1,86 @@
+name: Akula VIDEO-TOOLS-01w PE layout forensics (NONRELEASE)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/scripts/video-tools-01w-pe-layout.py'
+      - '.github/scripts/video-tools-01w-pe-layout.test.py'
+      - '.github/workflows/akula-video-tools-01w-pe-layout.yml'
+      - 'docs/release/video-tools-01w-pe-layout.md'
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  pe-layout-forensics:
+    name: Compare pinned custom wheel PE sections with rebuilt MinGW bootloader (HOLD)
+    runs-on: windows-2025
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+        with:
+          update: true
+          msystem: MINGW64
+          install: >-
+            base-devel
+            git
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-python
+      - name: Reject PE tampering, wrong layout and false release claims
+        run: |
+          python .github/scripts/video-tools-01v-wheel-provenance.test.py
+          python .github/scripts/video-tools-01w-pe-layout.test.py
+      - uses: actions/checkout@v4
+        with:
+          repository: pyinstaller/pyinstaller
+          ref: 70fc17210920bce17f4ab09bbf8104b0dbd45338
+          path: _video-tools-01w-pyi
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: yt-dlp/Pyinstaller-Builds
+          ref: 5eb86b862d61adc3df0f44e6e0b815b7d74fa3f5
+          path: _video-tools-01w-builder
+          persist-credentials: false
+      - name: Obtain published SHA-pinned custom wheel as inert ZIP bytes only
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python .github/scripts/video-tools-01v-wheel-provenance.py download-pyi docs/release/video18b04-five-exe-allowlist.json
+      - name: Rebuild exact PyInstaller upstream source with current MSYS2 GCC
+        working-directory: _video-tools-01w-pyi/bootloader
+        run: python ./waf --target-arch=64bit --gcc distclean all
+      - name: Compare PE headers, sections and observed toolchain
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python .github/scripts/video-tools-01w-pe-layout.py docs/release/video18b04-five-exe-allowlist.json _video-tools-01w-pyi _video-tools-01w-builder "$RUNNER_TEMP/video-tools-01w-pe-layout-HOLD.json"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path(os.environ["RUNNER_TEMP"])/"video-tools-01w-pe-layout-HOLD.json"
+          x=json.loads(p.read_text())
+          assert len(x["images"])==4
+          assert x["historical_runner_toolchain_attested"] is False
+          assert all(x[k] is False for k in (
+              "release_admitted","legal_approval","complete_corresponding_source_available",
+              "corresponding_source_rebuilt_and_verified","publisher_signing_authorized",
+              "binary_sbom_complete"))
+          assert all(len(row["wheel"]["sections"])>0 and
+                     len(row["rebuilt"]["sections"])>0 for row in x["images"])
+          print("VIDEO_TOOLS_01W_BOUNDED_JSON_PASS four_pe_layouts=1 release=0")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video-tools-01w-pe-layout-NOT-APPROVAL
+          path: ${{ runner.temp }}/video-tools-01w-pe-layout-HOLD.json
+          retention-days: 1
+          if-no-files-found: error
