@@ -29,7 +29,7 @@ A successful workflow proves a *bounded inspection ran*, **not** that it found a
 
 ## Actual first-pass result — 20 November 2026
 
-The exact PR-head [native source audit run #44793379710](https://github.com/Lalalalendia/Akula/actions/runs/44793379710) succeeded. It downloaded and hash-verified **seven** normal CPython 3.14 Windows x64 wheel candidates, then statically inspected **119** native DLL/PYD entries in the exact pinned `yt-dlp.exe`. There are **47 byte-for-byte native wheel ↔ EXE archive member overlaps** (size and SHA-256, independently checked in each source): 
+The exact PR-head [native source audit run #44793379710](https://github.com/Lalalalendia/Akula/actions/runs/44793379710) succeeded. It downloaded and hash-verified **seven** normal CPython 3.14 Windows x64 wheel candidates, then statically inspected **119** native DLL/PYD entries in the exact pinned `yt-dlp.exe`. There are **47 byte-for-byte native wheel ↔ EXE archive member overlaps** (size and SHA-256, independently checked in each source):
 
 | Exact locked distribution | Native wheel file matches | Key evidence |
 | --- | ---: | --- |
