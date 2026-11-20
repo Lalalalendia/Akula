@@ -45,13 +45,15 @@ jobs:
           grep -E '^VIDEO_TOOLS_01X_SOURCE_AUDIT_PASS packages=6 acquired=[0-6] lock_sdists=[0-6] complete_source=0 legal_approval=0 release=0$' \
             "$RUNNER_TEMP/video-tools-01x-proof.log"
       - name: Inspect nonrelease manifests, exact PR HEAD and source-only file set
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           python3 - <<'PY'
           import json, os
           from pathlib import Path
           d = Path(os.environ["RUNNER_TEMP"])/"video-tools-01x-source-HOLD"
           m = json.loads((d/"manifest-01x-NOT-COMPLETE.json").read_text("utf8"))
-          assert m["exact_akula_head"] == os.environ["GITHUB_SHA"] or len(m["exact_akula_head"]) == 40
+          assert m["exact_akula_head"] == os.environ["EXPECTED_HEAD_SHA"]
           assert m["yt_dlp_git_commit_verified"] == "f264a6cbd1f630894da0f368df00f8aae50140e0"
           assert m["pinned_build_install_records_total"] == 23
           assert m["selected_source_targets_count"] == 6
