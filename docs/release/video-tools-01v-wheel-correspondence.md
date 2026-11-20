@@ -10,6 +10,17 @@ This is **investigative evidence**, not a release or complete corresponding sour
 
 **Interpretation:** unequal bootloader bytes do *not* prove the wrong sources were used: the compiler environment, link options and timestamps might differ from the historical release. Matching bootloader bytes are narrow evidence only for those PE images, not for all Python sources. An EJS bundle match demonstrates correspondence of two bundled JS members to rebuilt source but not all third-party JS or the contents of the outer `yt-dlp.exe`.
 
+
+## Verified outcome and merge decision — 2026-11-20
+
+The [exact-HEAD provenance CI #44780038924](https://github.com/Lalalalendia/Akula/actions/runs/44780038924) completed **SUCCESS as an inspection**, not as a byte-equivalent PyInstaller rebuild. On PR HEAD `5917177a2d5dde6caa8861c286c18f70e4b4d1a1`:
+
+- **EJS:** PyPI wheel/sdist SHA-256 verified, nine selected sdist source/build files match Git commit `4fb477f4af56880cfd324c48bd4294a2d2294e50`, both minified JS wheel members are byte-identical to Deno 2.6.3 frozen-lock rebuild (`js_equal=1`). These two JS objects are proven; the outer frozen yt-dlp EXE and other dependencies are not.
+- **PyInstaller:** published 1,101,025-byte custom wheel SHA-256 `294099ecb5fdd2a13ae4c29006d4e335b697a63b6a16cf052b90ec2b40bef05a` verified. Four Windows x64 bootloader members were successfully built using the pinned source and the upstream recipe. Comparison outcome **`rebuilt=4 byte_equal=0`**; none are identical to the wheel under the 2026-11 Windows-2025/MSYS2 toolchain (observed GCC 16.2.0). An ordinary green job is *not* a corresponding-source approval.
+- The exact source wheel was published at [upstream release 2026.08.19.215425](https://github.com/yt-dlp/Pyinstaller-Builds/releases/tag/2026.08.19.215425), produced by [upstream workflow #32306212512](https://github.com/yt-dlp/Pyinstaller-Builds/actions/runs/32306212512) on 19 August 2026; all build jobs succeeded. GitHub returns HTTP 410 for the historical Windows x64 job logs, so exact historical MSYS2/compiler/linker package versions are not known from available logs.
+
+**Decision:** accept 01v only as a finished **nonrelease diagnostic pipeline recording the negative PyInstaller comparison**, then investigate 0/4 in a separate 01w task. Do **not** label the wheel source-equivalent or reproduce a historical toolchain without evidence. P0 still includes compiler/linker/PE forensic comparison, complete Python/native corresponding sources, notices and independent approval. Keep all release/approval flags false and VIDEO-18 RELEASE HOLD active.
+
 ## Blocking gaps
 
 - Full third-party Python source/wheel and native DLL/PYD/CPython 3.14 correspondence.
