@@ -105,17 +105,7 @@ jobs:
             _video_tools_01s_source \
             "$RUNNER_TEMP/video-tools-01s-notice-review-HOLD.json" \
             | tee "$RUNNER_TEMP/video-tools-01s-proof.log"
-          grep -E '^VIDEO_TOOLS_01S_NOTICE_REVIEW_PASS actual_carchive=154 actual_modules=1574 candidate_modules=[1-9][0-9]* unmapped_modules=[1-9][0-9]* embedded_notice_bytes=[1-9][0-9]* tagged_notice_bytes=[1-9][0-9]* notice_equal=[01] complete_sbom=0 legal_approval=0 release=0        uses: actions/upload-artifact@v4
-        with:
-          name: video-tools-01r-embedded-names-NOT-APPROVAL
-          path: ${{ runner.temp }}/video-tools-01r-embedded-names-HOLD.json
-          if-no-files-found: error
-          retention-days: 1
-      - name: Remove downloaded Windows EXE from disposable runner
-        if: always()
-        shell: bash
-        run: rm -f "$RUNNER_TEMP/yt-dlp.exe"
- \
+          grep -E '^VIDEO_TOOLS_01S_NOTICE_REVIEW_PASS actual_carchive=154 actual_modules=1574 candidate_modules=[1-9][0-9]* unmapped_modules=[1-9][0-9]* embedded_notice_bytes=[1-9][0-9]* tagged_notice_bytes=[1-9][0-9]* notice_equal=[01] complete_sbom=0 legal_approval=0 release=0$' \
             "$RUNNER_TEMP/video-tools-01s-proof.log"
           python3 - <<'PY'
           import json,os
