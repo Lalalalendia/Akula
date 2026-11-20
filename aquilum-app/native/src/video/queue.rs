@@ -1,8 +1,5 @@
-//! Explicit video download queue. A click enqueues work, never an editor
-//! render or link lookup. All jobs run serially so quota checks are stable.
-use std::collections::HashMap;
-use std::ffi::OsString;
-use std::path::PathBuf;
+//! Explicit-only serial video download queue, never invoked by editor render.
+use std::collections::HashMap; use std::ffi::OsString; use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use super::{download, library::Library, youtube};
 #[derive(Clone, Debug)]
@@ -47,8 +44,7 @@ pub fn enqueue(
         change(&id, Status::Downloading(download::Progress::default()));
         changed(false, &url);
         let mut last_notification = 0_u64;
-        // Fail before creating even a local video staging directory when
-        // the optional tool was not explicitly installed and re-verified.
+        // Verify optional tool before making local video staging files.
         #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
         let executable = super::optional_ytdlp::verified_executable(&data_dir)
             .map(|path| path.into_os_string())
