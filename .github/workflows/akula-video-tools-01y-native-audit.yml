@@ -1,0 +1,107 @@
+name: Akula VIDEO-TOOLS-01y pinned wheel native-byte audit (NONRELEASE)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/scripts/video-tools-01y-native-wheel-audit.py'
+      - '.github/scripts/video-tools-01y-native-wheel-audit.test.py'
+      - '.github/workflows/akula-video-tools-01y-native-audit.yml'
+      - 'docs/release/video-tools-01y-native-wheel-carchive.md'
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  wheel-vs-exe-native:
+    name: Compare exact native wheel members to frozen EXE CArchive (HOLD)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Offline native ZIP/matching and CArchive negative tests
+        run: |
+          python3 .github/scripts/video-tools-01r-pe-archive-inventory.test.py
+          python3 .github/scripts/video-tools-01x-sdist-procurement.test.py
+          python3 .github/scripts/video-tools-01y-native-wheel-audit.test.py
+      - uses: actions/checkout@v4
+        with:
+          repository: yt-dlp/yt-dlp
+          ref: f264a6cbd1f630894da0f368df00f8aae50140e0
+          path: _video_tools_01y_yt
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Acquire exactly SHA-pinned original yt-dlp.exe as inert bytes
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test ! -e "$RUNNER_TEMP/yt-dlp.exe"
+          curl --fail --location --show-error --silent --retry 3 \
+            --retry-all-errors --connect-timeout 20 --max-time 240 \
+            --output "$RUNNER_TEMP/yt-dlp.exe" \
+            "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe"
+          printf '%s  %s\n' \
+            'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d' \
+            "$RUNNER_TEMP/yt-dlp.exe" | sha256sum --check --strict
+          test "$(stat -c '%s' "$RUNNER_TEMP/yt-dlp.exe")" = '23575744'
+      - name: Inspect seven pinned PyPI wheel candidates and native CArchive bytes without executing
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/video-tools-01y-native-wheel-audit.py \
+            docs/release/video18b04-five-exe-allowlist.json \
+            _video_tools_01y_yt \
+            "$RUNNER_TEMP/yt-dlp.exe" \
+            "$RUNNER_TEMP/video-tools-01y-native-wheel-evidence-HOLD.json" \
+            | tee "$RUNNER_TEMP/video-tools-01y-proof.log"
+          grep -E '^VIDEO_TOOLS_01Y_NATIVE_WHEEL_AUDIT_PASS wheels=7 exe_native=[1-9][0-9]* exact_native_overlaps=[0-9]+ complete_source=0 legal_approval=0 release=0$' \
+            "$RUNNER_TEMP/video-tools-01y-proof.log"
+      - name: Refuse completed-source/license/release claims; report is metadata only
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ["RUNNER_TEMP"])/"video-tools-01y-native-wheel-evidence-HOLD.json"
+          x = json.loads(p.read_text("utf8"))
+          assert x["exact_akula_head"] == os.environ["EXPECTED_HEAD_SHA"]
+          assert x["yt_dlp_exe_sha256_verified"] == "f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d"
+          assert x["upstream_lock_build_records_total"] == 23
+          assert x["compatible_locked_wheel_candidate_count"] == 7
+          assert len(x["candidate_wheel_distributions"]) == 6
+          assert x["embedded_native_archive_member_count"] >= 2
+          assert all(g["candidate_wheel_count"] == (2 if g["distribution"] == "websockets" else 1)
+                     for g in x["candidate_wheel_distributions"])
+          for k in ("release_admitted", "legal_approval", "complete_corresponding_source_available",
+                    "corresponding_source_rebuilt_and_verified", "publisher_signing_authorized",
+                    "binary_sbom_complete", "historical_pip_wheel_install_selection_verified",
+                    "native_wheel_to_published_sdist_source_equivalence_verified",
+                    "external_curl_ssl_crypto_native_sources_verified", "cpython_314_embedding_source_verified",
+                    "native_members_extracted_to_disk_or_executed"):
+              assert x[k] is False, k
+          assert all(w["wheel_bytes_uploaded_or_executed"] is False and
+                     w["candidate_selected_by_historical_pip_log"] is False and
+                     w["candidate_whole_wheel_installed_proven"] is False and
+                     w["candidate_native_payload_byte_overlap_proven"] ==
+                         bool(w["native_comparison"]["byte_matches"])
+                     for g in x["candidate_wheel_distributions"] for w in g["wheel_candidates"])
+          print("VIDEO_TOOLS_01Y_METADATA_ONLY_HOLD_PASS release=0 complete_source=0")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video-tools-01y-native-overlap-JSON-NOT-APPROVAL
+          path: ${{ runner.temp }}/video-tools-01y-native-wheel-evidence-HOLD.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Delete the temporary pinned executable without creating a release
+        if: always()
+        run: rm -f "$RUNNER_TEMP/yt-dlp.exe"
