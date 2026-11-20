@@ -43,7 +43,7 @@ impl App {
                 self.updater.install();
                 Effect::Content
             }
-            #[cfg(windows)] a @ (Action::InstallYtDlp | Action::RemoveYtDlp | Action::RefreshYtDlp) => self.press_video_tool(a, dialog.section),
+            #[cfg(windows)] a @ (Action::InstallYtDlp | Action::RemoveYtDlp | Action::RefreshYtDlp | Action::InstallQuickJs | Action::RemoveQuickJs | Action::RefreshQuickJs) => self.press_video_tool(a, dialog.section),
             Action::NewToken => self.apply(Setter::Config(|c, _| c.mcp.token = schema::new_token()), Value::Bool(true)),
             Action::Copy(index, code) => {
                 match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(code)) {

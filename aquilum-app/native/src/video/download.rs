@@ -1,6 +1,3 @@
-//! Explicit-only yt-dlp adapter. No shell, no arbitrary URL, no vault writes.
-//! Download to a disposable directory on the SAME local filesystem, verify
-//! the completed file, then publish with atomic no-clobber hard-link.
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
@@ -8,13 +5,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use super::library::{Library, LIBRARY_MAX, SINGLE_VIDEO_MAX};
 use super::youtube;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Progress {
     pub downloaded: u64,
     pub total: Option<u64>,
 }
-
 pub(super) fn parse_progress(line: &str) -> Option<Progress> {
     let body = line.strip_prefix("AKULA_PROGRESS:")?;
     let mut fields = body.split(':');
@@ -24,7 +19,6 @@ pub(super) fn parse_progress(line: &str) -> Option<Progress> {
         .or_else(|| fields.next().and_then(|v| v.trim().parse::<u64>().ok()).filter(|n| *n > 0));
     Some(Progress { downloaded, total })
 }
-
 fn command_args(url: &str, stage: &Path, max_bytes: u64) -> Vec<OsString> {
     let home = format!("home:{}", stage.display());
     let temp = format!("temp:{}", stage.display());
@@ -45,11 +39,18 @@ fn command_args(url: &str, stage: &Path, max_bytes: u64) -> Vec<OsString> {
         "--", url,
     ].into_iter().map(OsString::from).collect()
 }
-
+fn command_args_with_js(url: &str, stage: &Path, max_bytes: u64, quickjs: Option<&OsStr>) -> Vec<OsString> {
+    let mut args = command_args(url, stage, max_bytes);
+    if let Some(runtime) = quickjs {
+        let mut arg = OsString::from("quickjs:");
+        arg.push(runtime);
+        args.splice(0..0, [OsString::from("--no-js-runtimes"), OsString::from("--js-runtimes"), arg]);
+    }
+    args
+}
 /// If the progress stream cannot be decoded or inspected, the download
 /// process must not continue writing after the staging directory is dropped.
 struct ChildGuard(std::process::Child);
-
 impl Drop for ChildGuard {
     fn drop(&mut self) {
         if self.0.try_wait().ok().flatten().is_none() {
@@ -58,7 +59,6 @@ impl Drop for ChildGuard {
         }
     }
 }
-
 fn get_error(mut reader: impl Read) -> String {
     let mut bytes = [0_u8; 4096];
     let mut recent = Vec::<u8>::new();
@@ -71,27 +71,22 @@ fn get_error(mut reader: impl Read) -> String {
     }
     String::from_utf8_lossy(&recent).trim().chars().take(500).collect()
 }
-
 /// Private same-volume staging directory. Unlike a persistent video, it is
 /// removed on failure, process errors and normal completion.
 struct Staging(PathBuf);
-
 impl Staging {
     fn new(root: &Path) -> Result<Self, String> {
         let path = root.join(format!(".akula-video-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&path).map_err(|e| format!("local video staging failed: {e}"))?;
         Ok(Self(path))
     }
-
     fn path(&self) -> &Path { &self.0 }
 }
-
 impl Drop for Staging {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
-
 fn completed(stage: &Path, id: &str) -> Result<PathBuf, String> {
     let mut candidate = None;
     for entry in fs::read_dir(stage).map_err(|e| e.to_string())? {
@@ -120,14 +115,24 @@ fn completed(stage: &Path, id: &str) -> Result<PathBuf, String> {
     }
     candidate.ok_or_else(|| "yt-dlp completed without a verified single video file".into())
 }
-
 /// This method runs synchronously. The UI MUST call it from its download
 /// worker, never from the rendering thread. It does nothing on note-open.
 pub fn download_one(
-    library: &Library,
-    executable: &OsStr,
-    url: &str,
-    mut on_progress: impl FnMut(Progress),
+    library: &Library, executable: &OsStr, url: &str,
+    on_progress: impl FnMut(Progress),
+) -> Result<PathBuf, String> { download_one_inner(library, executable, None, url, on_progress) }
+pub fn download_one_with_js(
+    library: &Library, executable: &OsStr, quickjs: &OsStr, url: &str,
+    on_progress: impl FnMut(Progress),
+) -> Result<PathBuf, String> {
+    if !Path::new(quickjs).is_absolute() {
+        return Err("pinned QuickJS runtime path must be absolute".into());
+    }
+    download_one_inner(library, executable, Some(quickjs), url, on_progress)
+}
+fn download_one_inner(
+    library: &Library, executable: &OsStr, quickjs: Option<&OsStr>,
+    url: &str, mut on_progress: impl FnMut(Progress),
 ) -> Result<PathBuf, String> {
     let id = youtube::video_id(url).ok_or("unsupported or invalid single YouTube URL")?;
     if let Some(existing) = library.existing(id).map_err(|e| e.to_string())? {
@@ -141,7 +146,7 @@ pub fn download_one(
     let stage = Staging::new(library.root())?;
     let mut child = ChildGuard(Command::new(executable)
         .current_dir(stage.path())
-        .args(command_args(url, stage.path(), allowance))
+        .args(command_args_with_js(url, stage.path(), allowance, quickjs))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -174,8 +179,6 @@ pub fn download_one(
     if used.saturating_add(bytes) > LIBRARY_MAX || bytes > allowance {
         return Err("video would exceed the local library quota".into());
     }
-    // On Windows FlushFileBuffers requires a writable file handle. A read-only
-    // File::open handle can fail with ACCESS_DENIED after yt-dlp succeeded.
     fs::OpenOptions::new().read(true).write(true).open(&staged)
         .and_then(|file| file.sync_all()).map_err(|e| e.to_string())?;
     let ext = staged.extension().and_then(|e| e.to_str()).ok_or("invalid yt-dlp output extension")?;
@@ -183,12 +186,9 @@ pub fn download_one(
     if let Some(existing) = library.existing(id).map_err(|e| e.to_string())? {
         return Ok(existing);
     }
-    // Same-volume hard-link is an atomic create-new operation; unlike rename,
-    // it does not replace a file committed by another Akula process.
     fs::hard_link(&staged, &target).map_err(|e| format!("unable to publish local video without overwrite: {e}"))?;
     Ok(target)
 }
-
 #[cfg(test)]
 #[path = "download_tests.rs"]
-mod tests;
+mod tests; #[cfg(test)] #[path = "download_video21_tests.rs"] mod video21_tests;

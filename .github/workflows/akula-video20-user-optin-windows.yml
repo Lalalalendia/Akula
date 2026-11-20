@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/src/video/optional_ytdlp.rs'
+      - 'aquilum-app/native/src/video/optional_quickjs.rs'
+      - 'aquilum-app/native/src/video/download_video21_tests.rs'
       - 'scripts/windows-video20-settings-uia.ps1'
       - '.github/workflows/akula-video20-user-optin-windows.yml'
 permissions:
@@ -46,7 +48,19 @@ jobs:
           assert "optional_ytdlp::verified_executable" in queue
           assert "queue_dispatch::download_one" in queue
           dispatcher=Path("aquilum-app/native/src/video/queue_dispatch.rs").read_text()
-          assert 'super::download::download_one(library, executable, url, on_progress)' in dispatcher
+          assert 'super::download::download_one_with_js(library, executable, runtime, url, on_progress)' in dispatcher
+          assert 'quickjs.ok_or(' in dispatcher
+          quickjs=Path("aquilum-app/native/src/video/optional_quickjs.rs").read_text()
+          assert 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' in quickjs
+          assert 'ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7' in quickjs
+          assert '1_873_152' in quickjs and 'fs::hard_link' in quickjs
+          assert '.create_new(true)' in quickjs and 'check_ancestors' in quickjs
+          assert 'quickjs::verified_executable' in queue
+          assert queue.index('quickjs::verified_executable') < queue.index('Library::new(')
+          installed=Path("aquilum-app/native/src/video/download.rs").read_text()
+          assert '--no-js-runtimes' in installed and '--js-runtimes' in installed
+          assert 'command_args_with_js' in installed and '--no-remote-components' in installed
+          assert 'download_one_with_js' in installed
           assert 'super::light::download_one_or_legacy(library, executable, url, on_progress)' in dispatcher
           assert 'not(feature = "video-ui-e2e")' in dispatcher
           assert 'VIDEO_TOOLS_01K_HOLD' in Path("aquilum-app/native/src/video/light.rs").read_text()
@@ -55,7 +69,7 @@ jobs:
           ru=json.loads(Path("aquilum-app/native/assets/locales/ru.json").read_text())
           en=json.loads(Path("aquilum-app/native/assets/locales/en.json").read_text())
           for locale in [ru,en]:
-              for key in ["ytdlpTitle","ytdlpDownload","ytdlpRemove","ytdlpConfirmText","ytdlpInvalid"]:
+              for key in ["ytdlpTitle","ytdlpDownload","ytdlpRemove","ytdlpConfirmText","ytdlpInvalid","quickjsDownload","quickjsRemove","quickjsConfirmText","quickjsInvalid"]:
                   assert locale["settings"]["system"].get(key)
           gui=Path("scripts/windows-video20-settings-uia.ps1").read_text()
           assert gui.isascii(), "Windows PowerShell 5.1 parses BOM-less .ps1 as ANSI"
@@ -91,6 +105,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::optional_ytdlp::tests -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Installed Windows optional yt-dlp tests failed' }
+          cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::optional_ytdlp::quickjs::tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Installed QuickJS tests failed' }
+          cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::download::video21_tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Installed yt-dlp QuickJS command tests failed' }
           cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::queue::installed_tests -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Installed Windows queue fail-closed test failed' }
           cargo test --locked -p aquilum-native --features installed --bin aquilum-native ui::settings::schema::tests -- --test-threads=1 --nocapture
@@ -106,6 +124,17 @@ jobs:
           cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::optional_ytdlp::tests::user_optin_real_download_remove_ci_only -- --exact --ignored --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Real signed-pin user-initiated download/remove laboratory test failed' }
           Write-Host 'VIDEO20_OPTIN_OFFICIAL_DOWNLOAD_REMOVE_PASS release=0'
+      - name: User-consented real official QuickJS-NG download, verify, remove (NONRELEASE)
+        working-directory: aquilum-app
+        env:
+          AKULA_VIDEO21_RUN_LAB: '1'
+          RUNNER_ENVIRONMENT: github-hosted
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::optional_ytdlp::quickjs::tests::user_optin_real_quickjs_download_remove_ci_only -- --exact --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Real QuickJS user-opt-in upstream fetch verification failed' }
+          Write-Host 'VIDEO21_OPTIN_PINNED_QUICKJS_DOWNLOAD_REMOVE_PASS release=0'
       - name: Build stock installed GUI from same exact HEAD, no bundle
         working-directory: aquilum-app
         shell: pwsh

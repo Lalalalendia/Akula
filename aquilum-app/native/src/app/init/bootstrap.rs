@@ -89,7 +89,7 @@ impl App {
             titles_rx,
             hold: None,
             updater: crate::updater::Updater::new(Arc::clone(&workspace_wake)),
-            update_shown: crate::updater::Status::Idle, #[cfg(windows)] video_tool_revision: crate::video::optional_ytdlp::revision(),
+            update_shown: crate::updater::Status::Idle, #[cfg(windows)] video_tool_revision: (crate::video::optional_ytdlp::revision(), crate::video::optional_ytdlp::quickjs::revision()),
             update_layer: None,
             open_error: None,
             open_error_ids: None,

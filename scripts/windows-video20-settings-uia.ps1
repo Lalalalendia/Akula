@@ -44,6 +44,7 @@ public static class AkulaVideo20Mouse {
     public struct Input {
         [FieldOffset(0)] public uint Type;
         [FieldOffset(20)] public uint Flags;
+        [FieldOffset(16)] public uint Data;
     }
     [StructLayout(LayoutKind.Sequential)]
     public struct Point { public int X; public int Y; }
@@ -71,6 +72,16 @@ public static class AkulaVideo20Mouse {
             return true;
         }, IntPtr.Zero);
         return found;
+    }
+    public static void Scroll(IntPtr hwnd, int pid, int x, int y) {
+        uint owner;
+        if (GetForegroundWindow() != hwnd || GetWindowThreadProcessId(hwnd, out owner) == 0 ||
+            owner != (uint)pid || !SetCursorPos(x, y))
+            throw new InvalidOperationException("VIDEO21 refuses unowned scroll");
+        Thread.Sleep(75);
+        var wheel = new Input[] {new Input {Type=0,Flags=0x0800,Data=unchecked((uint)-120)}};
+        if (SendInput(1, wheel, Marshal.SizeOf(typeof(Input))) != 1)
+            throw new InvalidOperationException("VIDEO21 physical scroll failed");
     }
     public static void ClickConsent(IntPtr dialog, int pid, bool yes) {
         // rfd 0.16 uses Win32 IDYES=6 and IDNO=7 with both
@@ -130,6 +141,10 @@ $downloadNames = @(Labels { param($v) $v.settings.system.ytdlpDownload })
 $removeNames = @(Labels { param($v) $v.settings.system.ytdlpRemove })
 $installDialogNames = @(Labels { param($v) $v.settings.system.ytdlpConfirmTitle })
 $removeDialogNames = @(Labels { param($v) $v.settings.system.ytdlpRemoveTitle })
+$quickjsDownloadNames = @(Labels { param($v) $v.settings.system.quickjsDownload })
+$quickjsRemoveNames = @(Labels { param($v) $v.settings.system.quickjsRemove })
+$quickjsInstallDialogNames = @(Labels { param($v) $v.settings.system.quickjsConfirmTitle })
+$quickjsRemoveDialogNames = @(Labels { param($v) $v.settings.system.quickjsRemoveTitle })
 $buttonCondition = [Windows.Automation.PropertyCondition]::new(
     [Windows.Automation.AutomationElement]::ControlTypeProperty,
     [Windows.Automation.ControlType]::Button)
@@ -157,6 +172,23 @@ function Wait-Button([Windows.Automation.AutomationElement]$Root, [string[]]$Nam
         Start-Sleep -Milliseconds 200
     }
     throw ('Expected live Windows UIA button was not found: ' + ($Names -join ' / '))
+}
+function Reveal-Button([Diagnostics.Process]$Process,
+    [Windows.Automation.AutomationElement]$Root, [string[]]$Names) {
+    for ($n = 0; $n -lt 12; $n++) {
+        $button = Find-Button $Root $Names
+        if ($null -ne $button) { return $button }
+        $hwnd = Foreground $Process
+        $rect = $Root.Current.BoundingRectangle
+        if ($rect.IsEmpty -or $rect.Width -lt 300 -or $rect.Height -lt 200) {
+            throw 'VIDEO21 cannot scroll Settings without verified visible bounds'
+        }
+        $x = [int][Math]::Round($rect.Left + $rect.Width * 0.65)
+        $y = [int][Math]::Round($rect.Top + $rect.Height * 0.60)
+        [AkulaVideo20Mouse]::Scroll($hwnd, $Process.Id, $x, $y)
+        Start-Sleep -Milliseconds 180
+    }
+    throw ('VIDEO21 QuickJS Settings button not found after native scrolling: ' + ($Names -join ' / '))
 }
 function Invoke-Button([Windows.Automation.AutomationElement]$Button) {
     $pattern = [Windows.Automation.InvokePattern]$Button.GetCurrentPattern(
@@ -240,9 +272,11 @@ $existingVideo = Join-Path $videoDir 'already-downloaded.mp4'
 $noteHash = Hash $note
 $videoHash = Hash $existingVideo
 $tool = Join-Path $DataDir 'tools\yt-dlp\yt-dlp-2026.10.26.exe'
+$quickjsTool = Join-Path $DataDir 'tools\quickjs\qjs.exe'
 
 try {
     if (Test-Path -LiteralPath $tool) { throw 'Opt-in tool exists before any GUI consent' }
+    if (Test-Path -LiteralPath $quickjsTool) { throw 'QuickJS exists before GUI consent' }
     $args = '--vault "{0}" --data-dir "{1}" --open "{2}" --focus' -f $VaultPath, $DataDir, $note
     $proc = Start-Process -FilePath $expectedExe -ArgumentList $args -PassThru
     $ready = $false
@@ -293,6 +327,32 @@ try {
         throw 'yt-dlp or video bytes appeared in synchronized vault'
     }
     Write-Host 'VIDEO20_SETTINGS_REMOVE_UIA_PASS file_removed=1 note_unchanged=1 media_retained=1'
+    # VIDEO-21: exact native mouse clicks in the same installed-style GUI.
+    $quickjsButton = Reveal-Button $proc $root $quickjsDownloadNames
+    if (Test-Path -LiteralPath $quickjsTool) { throw 'Opening Settings silently installed QuickJS' }
+    Press-AkulaButton $proc $quickjsButton
+    Decide-Dialog $proc (Wait-Dialog $proc $quickjsInstallDialogNames) $false
+    Start-Sleep -Milliseconds 400
+    if (Test-Path -LiteralPath $quickjsTool) { throw 'Declining QuickJS consent created an executable' }
+    Write-Host 'VIDEO21_QUICKJS_CANCEL_UIA_PASS tool_created=0'
+
+    Press-AkulaButton $proc (Reveal-Button $proc $root $quickjsDownloadNames)
+    Decide-Dialog $proc (Wait-Dialog $proc $quickjsInstallDialogNames) $true
+    Wait-Tool $quickjsTool $true 240
+    if ((Get-Item -LiteralPath $quickjsTool).Length -ne 1873152 -or
+        (Hash $quickjsTool) -cne 'ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7') {
+        throw 'GUI-installed QuickJS differs from exact pinned release'
+    }
+    [void](Reveal-Button $proc $root $quickjsRemoveNames)
+    Write-Host 'VIDEO21_QUICKJS_INSTALL_UIA_PASS consent=1 sha256=1 local_only=1'
+
+    Press-AkulaButton $proc (Reveal-Button $proc $root $quickjsRemoveNames)
+    Decide-Dialog $proc (Wait-Dialog $proc $quickjsRemoveDialogNames) $true
+    Wait-Tool $quickjsTool $false 80
+    if ((Hash $note) -cne $noteHash -or (Hash $existingVideo) -cne $videoHash) {
+        throw 'QuickJS removal changed user Markdown or saved video'
+    }
+    Write-Host 'VIDEO21_QUICKJS_REMOVE_UIA_PASS removed=1 media_retained=1 note_unchanged=1'
 }
 finally {
     if ($null -ne $proc) {

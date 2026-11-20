@@ -32,5 +32,5 @@ pub enum Action {
     InstallServer,
     CheckUpdates,
     InstallUpdate,
-    #[cfg(windows)] InstallYtDlp, #[cfg(windows)] RemoveYtDlp, #[cfg(windows)] RefreshYtDlp,
+    #[cfg(windows)] InstallYtDlp, #[cfg(windows)] RemoveYtDlp, #[cfg(windows)] RefreshYtDlp, #[cfg(windows)] InstallQuickJs, #[cfg(windows)] RemoveQuickJs, #[cfg(windows)] RefreshQuickJs,
 }
