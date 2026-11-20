@@ -126,6 +126,35 @@ def embedded_notice(image, entries):
     return found
 
 
+def normalized_notice_bytes(data):
+    # Compare exact text independent of CRLF/LF transport, preserving all other bytes.
+    return data.replace(b"\r\n", b"\n")
+
+
+def notice_section_fingerprints(data):
+    """Hashes of normalized per-section bodies, without retaining any license body."""
+    lines = normalized_notice_bytes(data).splitlines(keepends=True)
+    starts = [0]
+    section_names = ["__PREAMBLE__"]
+    for i in range(1, len(lines)):
+        preceding = lines[i-1].strip()
+        if len(preceding) < 20 or set(preceding) != {45}:
+            continue
+        m = re.fullmatch(rb"([^|\n]{2,100}?)\s+\|\s+([^\n]{2,120})", lines[i].strip())
+        if m:
+            starts.append(i-1)
+            section_names.append(m.group(1).decode("utf-8").strip())
+    result = {}
+    for k, title in enumerate(section_names):
+        start = starts[k]
+        end = starts[k+1] if k + 1 < len(starts) else len(lines)
+        chunk = b"".join(lines[start:end])
+        if title in result:
+            hold("duplicate notice section header")
+        result[title] = {"normalized_bytes": len(chunk), "sha256": hashlib.sha256(chunk).hexdigest()}
+    return result
+
+
 def make_report(index, source, embedded):
     items = index["inventory"]["carchive_items"]
     modules = index["inventory"]["embedded_python_items"]
@@ -177,6 +206,20 @@ def make_report(index, source, embedded):
         hold("missing module root from review queue")
     src_unique = set(tagged)
     packed_unique = set(packed)
+    normalized_tagged = normalized_notice_bytes(source)
+    normalized_packed = normalized_notice_bytes(embedded)
+    normal_equal = normalized_tagged == normalized_packed
+    tagged_chunks = notice_section_fingerprints(source)
+    packed_chunks = notice_section_fingerprints(embedded)
+    changed_sections = [
+        {"section": name,
+         "tagged": tagged_chunks.get(name),
+         "embedded": packed_chunks.get(name)}
+        for name in sorted(set(tagged_chunks) | set(packed_chunks))
+        if tagged_chunks.get(name) != packed_chunks.get(name)
+    ]
+    status = ("BYTE_EXACT" if embedded == source else
+              "LINE_ENDING_ONLY" if normal_equal else "DIFF_REQUIRES_MANUAL_REVIEW")
     return {
         "schema": 1,
         "stage": "VIDEO-TOOLS-01s NONRELEASE embedded binary notice and candidate provenance",
@@ -203,6 +246,13 @@ def make_report(index, source, embedded):
             "embedded_bytes": len(embedded),
             "size_delta_embedded_minus_tagged": len(embedded) - len(source),
             "byte_exact_match": embedded == source,
+            "newline_normalized_match": normal_equal,
+            "tagged_crlf_count": source.count(b"\r\n"),
+            "embedded_crlf_count": embedded.count(b"\r\n"),
+            "tagged_lf_count": source.count(b"\n"),
+            "embedded_lf_count": embedded.count(b"\n"),
+            "normalized_sha256": hashlib.sha256(normalized_tagged).hexdigest(),
+            "changed_normalized_sections": changed_sections,
             "tagged_sha256": hashlib.sha256(source).hexdigest(),
             "embedded_sha256": hashlib.sha256(embedded).hexdigest(),
             "tagged_sections_count": len(src_sections),
@@ -213,7 +263,7 @@ def make_report(index, source, embedded):
                 {"section": k, "tagged_label": tagged[k], "embedded_label": packed[k]}
                 for k in sorted(src_unique & packed_unique) if tagged[k] != packed[k]
             ],
-            "status": "BYTE_EXACT" if embedded == source else "DIFF_REQUIRES_MANUAL_REVIEW",
+            "status": status,
         },
         "known_limitations": [
             "Top-level Python module names are candidate families, not audited package ownership",
