@@ -161,10 +161,12 @@ fn fetch(app_data: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), Stri
         .map_err(|e| format!("cannot stage the optional downloader: {e}"))?;
     // This URL is pinned. Redirects on GitHub may use release-assets hosts,
     // but no downloaded byte is usable until SHA-256 and exact size verify.
-    let reply = ureq::get(URL)
+    let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(20))
         .timeout_read(Duration::from_secs(30))
-        .call().map_err(|e| format!("official yt-dlp download failed: {e}"))?;
+        .build();
+    let reply = agent.get(URL).call()
+        .map_err(|e| format!("official yt-dlp download failed: {e}"))?;
     if reply.status() != 200 {
         return Err("official yt-dlp release returned a non-200 response".into());
     }
