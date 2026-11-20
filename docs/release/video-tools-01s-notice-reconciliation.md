@@ -17,18 +17,33 @@ The actual EXE contains a compressed THIRD_PARTY_LICENSES.txt member with
 **248,243** recorded unpacked bytes. The Git-tagged source file contains
 **243,550** UTF-8 bytes: a difference of **4,693** bytes.
 
-That size delta proves the two cannot be byte-identical, but it does not
-identify which notice statements changed. The 01s CI reads **only** that
-embedded notice text in memory (no DLL or Python code extraction or execution),
-checks source commit and Git blob identity, and compares the two
-full notices. CI retains only one-day JSON with hashes, lengths,
-section titles, label differences and source-review queue; **no EXE and no
-license-text bodies are uploaded**.
+**Actual 01s CI acceptance:** [Windows EXE / notice workflow #44736504563](https://github.com/Lalalalendia/Akula/actions/runs/44736504563)
+compared all text bytes and proved the difference is **only Windows line
+endings**, not altered license content. The tagged source has **4,693 LF**
+newlines and 0 CRLF; the embedded file has **4,693 CRLF** newlines.
+After normalizing CRLF to LF the SHA-256 is identical:
+`472aefe951c7db35e1657c1d13fd337140511ed6f2b329205105ad441c5a02b7`.
+Both texts contain **45 notice section titles and license labels**, with
+**zero modified normalized sections**. The audited status is
+`LINE_ENDING_ONLY` (original files still differ in bytes).
+This resolves the **text-difference investigation**, but does not establish
+notice completeness for all embedded dependencies or legal compliance.
+
+CI reads **only** that embedded notice text in memory (no DLL or Python code
+extraction or execution), checks source commit and Git blob identity, and
+compares full notices. It retains only one-day JSON with hashes, sizes,
+section headings and source-review queue; **no EXE or license-text bodies
+are uploaded**.
 
 ## Family-level review candidates, not audited packages
 
 From the 01r real PyInstaller archive, top-level module roots give likely
-families, not exact dependency licensing or ownership. For example:
+families, not exact dependency licensing or ownership. The 01s candidate
+mapping covers **1,325 of 1,574** module names across 14 candidate roots;
+**249** names remain unassigned (many appear to be Python standard library).
+The upstream and embedded texts contain the same 45 titled notice sections;
+this is *candidate notice coverage*, **not a determination that the executable
+has legally complete notices**. For example:
 - yt_dlp (1,041 modules), Cryptodome (68), websockets (52), mutagen (48),
   urllib3 (36), curl_cffi (20), requests (19), cffi (16), plus other
   roots and stdlib. Both Python modules and native libraries must be reviewed.
