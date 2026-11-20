@@ -255,6 +255,56 @@ mod tests {
         assert_eq!(BYTES, 23_575_744);
     }
     #[test]
+    fn missing_invalid_and_manual_removal_do_not_touch_local_media() {
+        let temp = tempfile::tempdir().unwrap();
+        let profile = temp.path().join("AkulaProfile");
+        fs::create_dir(&profile).unwrap();
+        let videos = profile.join("local-videos");
+        fs::create_dir(&videos).unwrap();
+        let saved = videos.join("already-downloaded.mp4");
+        fs::write(&saved, b"local offline video stays").unwrap();
+        assert_eq!(status(&profile), Status::Missing);
+        assert!(!local_root(&profile).unwrap().exists(),
+                "checking status cannot install tools or create directories");
+        let root = local_root(&profile).unwrap();
+        ensure_directory(&root).unwrap();
+        fs::write(root.join(FILENAME), b"malicious executable").unwrap();
+        assert_eq!(status(&profile), Status::Invalid);
+        assert!(verified_executable(&profile).is_err());
+        remove(&profile).unwrap();
+        assert_eq!(status(&profile), Status::Missing);
+        assert_eq!(fs::read(&saved).unwrap(), b"local offline video stays");
+    }
+
+    #[test]
+    #[ignore = "CI-only, user-initiated official GitHub download; no executable execution"]
+    fn user_optin_real_download_remove_ci_only() {
+        assert_eq!(std::env::var("AKULA_VIDEO20_RUN_LAB").ok().as_deref(), Some("1"));
+        assert_eq!(std::env::var("RUNNER_ENVIRONMENT").ok().as_deref(), Some("github-hosted"));
+        let temp = tempfile::tempdir().unwrap();
+        let profile = temp.path().join("isolated-profile");
+        fs::create_dir(&profile).unwrap();
+        assert_eq!(status(&profile), Status::Missing);
+        assert!(!local_root(&profile).unwrap().exists());
+        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(|| {});
+        start(profile.clone(), wake).expect("explicit opt-in starts a single background download");
+        let mut ok = false;
+        for _ in 0..240 {
+            match status(&profile) {
+                Status::Installed => { ok = true; break; },
+                Status::Failed(reason) => panic!("pinned official download failed: {reason}"),
+                _ => std::thread::sleep(Duration::from_millis(250)),
+            }
+        }
+        assert!(ok, "pinned yt-dlp must be installed after user consent in CI lab");
+        let binary = verified_executable(&profile).unwrap();
+        assert_eq!(fs::metadata(binary).unwrap().len(), BYTES);
+        remove(&profile).unwrap();
+        assert_eq!(status(&profile), Status::Missing);
+        assert!(!local_root(&profile).unwrap().join(FILENAME).exists());
+        println!("VIDEO20_USER_INITIATED_OFFICIAL_YTDLP_PASS file_verified=1 removed=1 release=0");
+    }
+    #[test]
     fn never_accept_an_unpinned_download_or_arbitrary_binary() {
         let folder = tempfile::tempdir().unwrap();
         let file = folder.path().join(FILENAME);
