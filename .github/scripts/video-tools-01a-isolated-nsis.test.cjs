@@ -103,7 +103,12 @@ function verify(x) {
     'needs: contract',
     'github-hosted','--locked',
     '2026.10.26','v0.18.0',
-    'choco install nsis --version=3.11.0',
+    'nsis-dev/setup-nsis@8d0428ec39fab53ad3ded22435983e70cd7e599e',
+    'nsis-3.11.zip',
+    'c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1',
+    'VIDEO_TOOLS_01O_NSIS_ZIP_SHA256_PASS',
+    'VIDEO_TOOLS_01O_NSIS_UPSTREAM_ACTION_PASS',
+    'Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()\n            if($actual -cne $expected)',
     './scripts/windows-video-tools-01a-isolated-lab.ps1',
     'VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS'
   ]) hold(wf.includes(token),'workflow missing exact-head admission or real Windows test '+token);
@@ -131,6 +136,8 @@ test('negative mutations fail on identity, signing HOLD, Windows gate and protec
     ['runner','Get-FileHash -LiteralPath $source -Algorithm SHA256','Write-Host no-hashes'],
     ['runner','unrelated-private-note.md','nuke-everything.txt'],
     ['runner','VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS','FAKE_PASS'],
+    ['workflow','c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1','0'.repeat(64)],
+    ['workflow','Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()\n            if($actual -cne $expected)','Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()\n            if($false)'],
     ['workflow','needs: contract','needs: manual'],
     ['workflow','permissions:\n  contents: read','permissions:\n  contents: write'],
     ['workflow','VIDEO_TOOLS_01A_ISOLATED_THREE_PE_PASS','MISSING_PROOF'],
