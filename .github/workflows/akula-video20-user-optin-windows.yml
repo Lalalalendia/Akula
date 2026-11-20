@@ -57,7 +57,7 @@ jobs:
           assert "Action::RemoveYtDlp" in settings
           queue=Path("aquilum-app/native/src/video/queue.rs").read_text()
           assert "optional_ytdlp::verified_executable" in queue
-          assert "PATH/env never grant execution" in queue
+          assert queue.index("optional_ytdlp::verified_executable") < queue.index("std::env::var_os")
           assert 'cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))' in queue
           ru=json.loads(Path("aquilum-app/native/assets/locales/ru.json").read_text())
           en=json.loads(Path("aquilum-app/native/assets/locales/en.json").read_text())
