@@ -1,5 +1,4 @@
-#[cfg(windows)]
-pub(crate) mod optional_ytdlp;
+#[cfg(windows)] pub(crate) mod optional_ytdlp;
 pub(crate) mod download;
 pub(crate) mod library;
 pub(crate) mod light;
@@ -31,7 +30,6 @@ use self::windows::Engine;
 pub fn poster(path: &Path) -> Option<ImageBrush> {
     Engine::poster(path)
 }
-
 #[cfg(target_os = "macos")]
 pub use self::macos::poster;
 const MOVED: f64 = 0.05;
@@ -43,7 +41,6 @@ pub struct State {
     pub duration: f64,
     pub muted: bool,
 }
-
 struct Player {
     engine: Engine,
     state: State,
