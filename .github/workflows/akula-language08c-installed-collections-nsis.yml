@@ -205,76 +205,13 @@ jobs:
             if($empty.count -ne 0 -or $empty.revision -ne 0 -or
                $null -ne $confirmedEmpty.name -or
                $confirmedEmpty.count -ne 0 -or
-               $a -notmatch '^0:[a-f0-9]{64}
+               $a -notmatch '^0:[a-f0-9]{64}$'){throw 'LANG-08c SQLite empty state contract failed'}
             $null=($update | & python - $db)
             if($LASTEXITCODE -ne 0){throw 'LANG-08c failed named fixture update'}
             $named=Get-StudySnapshot -Path $db
             $namedFromWitness=Require-StudySnapshot -Path $db -Count 1 -Name 'LANG08C-Biology'
             $b=Read-StudyStateHash -Path $db
             if($named.count -ne 1 -or $namedFromWitness.id -cne 'c1' -or $named.revision -ne 1 -or
-               $named.name -cne 'LANG08C-Biology' -or $named.id -cne 'c1' -or
-               $named.members -ne 1 -or $named.table_count -ne 1 -or
-               $named.anchor_count -ne 1 -or $b -notmatch '^1:[a-f0-9]{64}$' -or $a -ceq $b){
-              throw 'LANG-08c SQLite named-collection parser contract failed'
-            }
-          } finally {
-            Remove-Item -LiteralPath $db -Force -ErrorAction SilentlyContinue
-          }
-          Write-Host 'AKULA_LANG08C_SQLITE_CONTRACT_PASS empty=1 named=1 revision=1 preserved_anchors=1'
-
-
-  candidate:
-    name: Build, install-test and stage actual unsigned NSIS without release
-    needs: contract
-    uses: ./.github/workflows/windows-beta.yml
-    permissions:
-      contents: read
-
-  installed-collections:
-    name: Installed NSIS native study collection create rename cancel delete restart
-    needs: candidate
-    runs-on: windows-2022
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@v7
-        with:
-          name: akula-windows-beta-candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          path: lang08c-candidate
-      - name: Verify candidate exactly matches manifest then run installed OS witness
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $candidate=Join-Path $env:GITHUB_WORKSPACE 'lang08c-candidate'
-          $setups=@(Get-ChildItem -LiteralPath $candidate -File -Filter 'Akula_*-setup.exe')
-          $manifest=Join-Path $candidate 'candidate-manifest.json'
-          if($setups.Count -ne 1 -or !(Test-Path -LiteralPath $manifest -PathType Leaf)){
-            throw 'LANG-08c requires exactly one genuine NSIS candidate and its provenance'
-          }
-          $windowsPowerShell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-          & $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-lang08c-installed-collections.ps1') -SetupPath $setups[0].FullName -ManifestPath $manifest
-          if($LASTEXITCODE -ne 0){throw "LANG-08c real installed Windows evidence failed: $LASTEXITCODE"}
-      - name: Record non-release synthetic evidence
-        if: success()
-        shell: pwsh
-        run: |
-          @'
-          LANG-08c uses a genuine unsigned NSIS from this CI run. A real
-          Windows OS mouse, UIA menus and native dialogs create, rename, cancel
-          and delete a named study collection from a synthetic Markdown table.
-          SQLite revision, stable ID, table mappings, anchors and Markdown bytes
-          are checked across restart and uninstall. RUNNER_TEMP only; no release
-          or user vault.
-          '@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-){throw 'LANG-08c SQLite empty state contract failed'}
-            $null=($update | & python - $db)
-            if($LASTEXITCODE -ne 0){throw 'LANG-08c failed named fixture update'}
-            $named=Get-StudySnapshot -Path $db
-            $b=Read-StudyStateHash -Path $db
-            if($named.count -ne 1 -or $named.revision -ne 1 -or
                $named.name -cne 'LANG08C-Biology' -or $named.id -cne 'c1' -or
                $named.members -ne 1 -or $named.table_count -ne 1 -or
                $named.anchor_count -ne 1 -or $b -notmatch '^1:[a-f0-9]{64}$' -or $a -ceq $b){
