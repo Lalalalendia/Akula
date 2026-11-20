@@ -43,11 +43,22 @@ jobs:
             lang02_ \
             -- --nocapture --test-threads=1 2>&1 | tee ../lang02-native-windows.log
           grep -F 'AKULA_LANG02_NATIVE_JOURNEY_PASS=' ../lang02-native-windows.log >> "$GITHUB_STEP_SUMMARY"
+      - name: Native unsaved Markdown must refuse collection binding without SQLite writes
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --bin aquilum-native \
+            lang08_dirty_note_refuses_collection_bind_without_persisting_metadata \
+            -- --nocapture --test-threads=1 2>&1 | tee ../lang08-dirty-native-windows.log
+          grep -F 'AKULA_LANG08_DIRTY_NATIVE_REFUSAL_PASS=' ../lang08-dirty-native-windows.log >> "$GITHUB_STEP_SUMMARY"
       - name: Save synthetic test transcript
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: lang02-native-dialog-windows
-          path: lang02-native-windows.log
+          path: |
+            lang02-native-windows.log
+            lang08-dirty-native-windows.log
           retention-days: 10
           if-no-files-found: warn
