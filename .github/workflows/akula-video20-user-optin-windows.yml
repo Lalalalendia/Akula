@@ -82,7 +82,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installed Windows optional yt-dlp tests failed' }
           cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::queue::installed_tests -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Installed Windows queue fail-closed test failed' }
-          cargo test --locked -p aquilum-native --features installed --bin aquilum-native ui::settings::schema::tests -- --nocapture
+          cargo test --locked -p aquilum-native --features installed --bin aquilum-native ui::settings::schema::tests -- --test-threads=1 --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Installed Windows Settings schema tests failed' }
       - name: User-opt-in-only real official executable download, verify, remove
         working-directory: aquilum-app
