@@ -19,7 +19,7 @@ pub(super) const URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe";
 const FILENAME: &str = "yt-dlp-2026.10.26.exe";
 #[path = "light_windows_version.rs"]
-mod version_gate;
+mod version_gate; #[path = "optional_quickjs.rs"] pub(crate) mod quickjs;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Status {
