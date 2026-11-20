@@ -650,10 +650,7 @@ foreach($lang in @('en','ru')){
   $p=Join-Path $workspace ("aquilum-app\native\assets\locales\"+$lang+".json")
   $l=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)|ConvertFrom-Json
   foreach($k in @('studyAdd','studyNew','studyCreate','studyManage','studyRenameSave','studyDeleteConfirm')){
-    $key=$k.Substring(5,1).ToLowerInvariant()+$k.Substring(6)
-    if($k -ceq 'studyRenameSave'){$key='studyRenameSave'}
-    if($k -ceq 'studyDeleteConfirm'){$key='studyDeleteConfirm'}
-    $value=[string]$l.editor.table.$key
+    $value=[string]$l.editor.table.$k
     if([string]::IsNullOrWhiteSpace($value)){throw "LANG-08c missing native locale $lang/$k"}
     if(!$labels.ContainsKey($k)){$labels[$k]=@()}
     $labels[$k]+=$value
