@@ -1,0 +1,93 @@
+name: Akula VIDEO-TOOLS-01r pinned yt-dlp.exe archive-name inventory (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/scripts/video-tools-01r-pe-archive-inventory.py'
+      - '.github/scripts/video-tools-01r-pe-archive-inventory.test.py'
+      - 'docs/release/video-tools-01r-binary-constituents.md'
+      - '.github/workflows/akula-video-tools-01r-embedded-review.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source-contract:
+    name: Synthetic CArchive/PYZ and release-HOLD negative tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Reject malformed archives, fake binary provenance or release-admission bypass
+        run: python3 .github/scripts/video-tools-01r-pe-archive-inventory.test.py
+
+  genuine-archive:
+    name: Static member-name inventory of exact sha256-pinned upstream Windows executable
+    needs: source-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Download exact immutable yt-dlp.exe without running it, verify release SHA and byte size
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test ! -e "$RUNNER_TEMP/yt-dlp.exe"
+          curl --fail --location --show-error --silent --retry 3 --retry-all-errors \
+            --connect-timeout 20 --max-time 240 \
+            --output "$RUNNER_TEMP/yt-dlp.exe" \
+            "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe"
+          printf '%s  %s\n' \
+            'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d' \
+            "$RUNNER_TEMP/yt-dlp.exe" | sha256sum --check --strict
+          test "$(stat -c '%s' "$RUNNER_TEMP/yt-dlp.exe")" = "23575744"
+      - name: Inspect CArchive and PYZ TOC without extraction/execution or license self-approval
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/video-tools-01r-pe-archive-inventory.py \
+            docs/release/video18b04-five-exe-allowlist.json \
+            "$RUNNER_TEMP/yt-dlp.exe" \
+            "$RUNNER_TEMP/video-tools-01r-embedded-names-HOLD.json" \
+            | tee "$RUNNER_TEMP/video-tools-01r-proof.log"
+          grep -E '^VIDEO_TOOLS_01R_REAL_PYINSTALLER_INVENTORY_PASS sha256=1 carchive_items=[1-9][0-9]* python_modules=[1-9][0-9]* binary_executed=0 complete_sbom=0 legal_approval=0 release=0$' \
+            "$RUNNER_TEMP/video-tools-01r-proof.log"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'video-tools-01r-embedded-names-HOLD.json'
+          x=json.loads(p.read_text('utf8'))
+          assert x['release_admitted'] is False
+          assert x['legal_approval'] is False
+          assert x['complete_corresponding_source_available'] is False
+          assert x['binary_constituent_license_review_complete'] is False
+          assert x['inventory']['carchive_count'] > 0
+          assert x['inventory']['python_module_count'] > 0
+          PY
+      - name: Upload one-day non-approval names-only inventory (never EXE or extracted archive)
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-tools-01r-embedded-names-NOT-APPROVAL
+          path: ${{ runner.temp }}/video-tools-01r-embedded-names-HOLD.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Remove downloaded Windows EXE from disposable runner
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/yt-dlp.exe"
