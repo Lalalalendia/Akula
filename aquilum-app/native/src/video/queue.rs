@@ -57,7 +57,7 @@ pub fn enqueue(
             Library::new(&data_dir, &registered_roots)
                 .map_err(|e| format!("local video storage rejected: {e}"))
                 .and_then(|library| {
-                    super::light::download_one_or_legacy(&library, &executable, &url, |progress| {
+                    super::queue_dispatch::download_one(&library, &executable, &url, |progress| {
                         change(&id, Status::Downloading(progress));
                         if progress.downloaded.saturating_sub(last_notification) >= 1024 * 1024
                             || progress.downloaded == progress.total.unwrap_or(u64::MAX)
