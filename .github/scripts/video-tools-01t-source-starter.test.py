@@ -25,6 +25,19 @@ class StarterTest(unittest.TestCase):
   x=M.parse_requirements(sample)
   self.assertEqual(x["curl-cffi"]["version"],"0.17.0")
   self.assertEqual(x["websockets"]["hash_count"],1)
+  custom="pyinstaller @ "+M.CUSTOM_WHEEL_URL+" \\\n    --hash=sha256:"+M.CUSTOM_WHEEL_SHA+"\n"
+  p=M.parse_requirements(custom)["pyinstaller"]
+  self.assertEqual(p["version"],"6.22.0")
+  self.assertEqual(p["wheel_origin"],"CUSTOM_DIRECT_URL")
+  self.assertEqual(p["custom_wheel_sha256"],M.CUSTOM_WHEEL_SHA)
+  self.assertEqual(p["builder_git_commit"],M.PYBUILD)
+  for badurl in (
+    custom.replace(M.CUSTOM_WHEEL_SHA,"0"*64),
+    custom.replace("Pyinstaller-Builds","unknown-repository"),
+    custom.replace("pyinstaller-6.22.0","pyinstaller-6.23.0"),
+  ):
+   with self.assertRaises(M.Hold):
+    M.parse_requirements(badurl)
   for bad in (
    "curl-cffi>=0.17.0 \\\n --hash=sha256:"+"a"*64,
    "curl-cffi==0.17.0 \\\n",
@@ -87,6 +100,9 @@ class StarterTest(unittest.TestCase):
    "python3 .github/scripts/video-tools-01t-source-starter.test.py",
    "python3 .github/scripts/video-tools-01t-source-starter.py",
    "video-tools-01t-source-starter-HOLD",
+   "repository: yt-dlp/Pyinstaller-Builds",
+   "ref: 5eb86b862d61adc3df0f44e6e0b815b7d74fa3f",
+   "source_trees=4",
    "VIDEO_TOOLS_01T_SOURCE_STARTER_PASS",
    "retention-days: 1","persist-credentials: false",
    "permissions:\n  contents: read",
@@ -99,6 +115,7 @@ class StarterTest(unittest.TestCase):
    self.assertIn(term,doc)
   self.assertIs(M.build.__doc__,None)
   self.assertIn("NOT complete corresponding source",M.README)
+  self.assertIn("Pyinstaller-Builds",M.README)
   self.assertIn("VIDEO-18 RELEASE HOLD",M.README)
 
 if __name__=="__main__":
