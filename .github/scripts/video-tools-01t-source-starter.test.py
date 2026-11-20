@@ -101,7 +101,7 @@ class StarterTest(unittest.TestCase):
    "python3 .github/scripts/video-tools-01t-source-starter.py",
    "video-tools-01t-source-starter-HOLD",
    "repository: yt-dlp/Pyinstaller-Builds",
-   "ref: 5eb86b862d61adc3df0f44e6e0b815b7d74fa3f",
+   "ref: 2026.08.19.215425",
    "source_trees=4",
    "VIDEO_TOOLS_01T_SOURCE_STARTER_PASS",
    "retention-days: 1","persist-credentials: false",
