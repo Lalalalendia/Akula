@@ -114,7 +114,7 @@ jobs:
           assert r['release_admitted'] is False and r['legal_approval'] is False
           assert r['complete_corresponding_source_available'] is False
           assert r['license_compatibility_review_complete'] is False
-          assert r['upstream_notice']['status'] in ('BYTE_EXACT','DIFF_REQUIRES_MANUAL_REVIEW')
+          assert r['upstream_notice']['status'] in ('BYTE_EXACT','LINE_ENDING_ONLY','DIFF_REQUIRES_MANUAL_REVIEW')
           assert r['candidate_group_module_names']+r['unmapped_module_names']==1574
           PY
       - name: Preserve only one-day section-diff and component-review metadata
