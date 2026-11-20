@@ -226,18 +226,26 @@ def build(allow,ytroot,qroot,pyroot,akula,head):
                    "tracked_file_count":count,"sha256":hashlib.sha256(archive).hexdigest(),
                    "bytes":len(archive),"contents":"Git-tracked sources only; not dependencies"}
  manifest={
-  "schema":1,"stage":"VIDEO-TOOLS-01t three-source starter / NOT legally complete corresponding source",
+  "schema":1,"stage":"VIDEO-TOOLS-01t four-source starter / NOT legally complete corresponding source",
   "exact_akula_head":head,"release_admitted":False,
   "legal_approval":False,"complete_corresponding_source_available":False,
   "corresponding_source_rebuilt_and_verified":False,
   "windows_executables_included":False,"notices_distribution_approved":False,
   "publisher_signing_authorized":False,
   "snapshots":snapshots,"pinned_git_blob_evidence":evidence,
+  "custom_pyinstaller_wheel":{
+   "url":CUSTOM_WHEEL_URL,"sha256":CUSTOM_WHEEL_SHA,
+   "recipe_git_commit":PYBUILD,
+   "upstream_pyinstaller_tag_commit":UPSTREAM_PYINSTALLER,
+   "wheel_bytes_included":False,
+   "exact_wheel_to_source_match_verified":False,
+  },
   "windows_x64_pinned_install_requirements":pins,
   "binary_evidence":{"yt_dlp_exe_sha256":YT_EXE,"quickjs_exe_sha256":QJS_EXE,
                      "actual_01s_module_names":1574,"unmapped_module_names":249},
   "unresolved_for_release":[
    "Acquire exact matching third-party Python wheel source distributions (not just hashed wheel pins)",
+   "Reconcile special yt-dlp/Pyinstaller-Builds MinGW wheel SHA with PyInstaller v6.22.0 upstream code and bootloader source: this starter has build recipe only",
    "Establish exact provenance of Python 3.14, PyInstaller bootloader, DLL/PYD and curl-cffi native libraries",
    "Obtain and verify yt-dlp-ejs 0.8.0 generated JS corresponding sources",
    "Rebuild exact yt-dlp Windows EXE and prove binary/source correspondence; no rebuild is done here",
@@ -249,8 +257,10 @@ def build(allow,ytroot,qroot,pyroot,akula,head):
  return manifest,data
 
 README="""VIDEO-TOOLS-01t: source starter -- NOT complete corresponding source.
-Contains three exact Git source snapshots: yt-dlp 2026.10.26, QuickJS v0.18.0,
-and the Akula video-lite lab at exact PR HEAD.
+Contains four Git snapshots: yt-dlp 2026.10.26, QuickJS v0.18.0,
+Pyinstaller-Builds recipe at 2026.08.19.215425, and Akula video-lite at
+exact PR HEAD. The custom PyInstaller wheel and upstream PyInstaller code
+are NOT included.
 No Python wheels/sdists, CPython/bootloader/DLL source, JavaScript EJS generated
 sources, or Rust Cargo transitive source archives are included. These are
 not yet proven to match all contents of the compiled Windows executables.
@@ -260,8 +270,8 @@ VIDEO-18 RELEASE HOLD remains mandatory.
 """
 
 def cli(argv):
- need(len(argv)==6,"usage: script allowlist yt-source quickjs-source HEAD output-dir")
- _,apath,yroot,qroot,head,output=argv
+ need(len(argv)==7,"usage: script allowlist yt-source quickjs-source builder-source HEAD output-dir")
+ _,apath,yroot,qroot,proot,head,output=argv
  need(os.environ.get("GITHUB_ACTIONS")=="true" and
       os.environ.get("GITHUB_EVENT_NAME")=="pull_request" and
       re.fullmatch(r"[0-9a-f]{40}",head) is not None and
@@ -274,8 +284,9 @@ def cli(argv):
       not out.exists(),"staging directory not fresh under disposable runner")
  ytroot=Path(yroot).resolve(strict=True)
  qjsroot=Path(qroot).resolve(strict=True)
- need(ytroot!=akula and qjsroot!=akula and ytroot!=qjsroot,"source checkout paths overlap")
- manifest,archives=build(json.loads(Path(apath).read_text("utf8")),ytroot,qjsroot,akula,head)
+ pyroot=Path(proot).resolve(strict=True)
+ need(len({ytroot,qjsroot,pyroot,akula})==4,"source checkout paths overlap")
+ manifest,archives=build(json.loads(Path(apath).read_text("utf8")),ytroot,qjsroot,pyroot,akula,head)
  out.mkdir(mode=0o700)
  for kind,data in archives.items():
   (out/OUTPUT[kind]).write_bytes(data)
@@ -284,7 +295,7 @@ def cli(argv):
  need(sorted(x.name for x in out.iterdir())==
       sorted([*OUTPUT.values(),"manifest-NOT-COMPLETE.json","README-NOT-COMPLETE.txt"]),
       "source starter contains unexpected files")
- print("VIDEO_TOOLS_01T_SOURCE_STARTER_PASS source_trees=3 wheels=0 "
+ print("VIDEO_TOOLS_01T_SOURCE_STARTER_PASS source_trees=4 wheels=0 "
        "complete_source=0 rebuilt_exe=0 legal_approval=0 release=0")
 
 if __name__=="__main__":
