@@ -18,6 +18,8 @@ pub(super) const SHA256: &str =
 pub(super) const URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe";
 const FILENAME: &str = "yt-dlp-2026.10.26.exe";
+#[path = "light_windows_version.rs"]
+mod version_gate;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Status {
@@ -147,8 +149,6 @@ impl Drop for Partial {
     fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
 }
 fn fetch(app_data: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), String> {
-    #[path = "light_windows_version.rs"]
-    mod version_gate;
     version_gate::require_pinned_windows_video_runtime()?;
     let root = local_root(app_data)?;
     ensure_directory(&root)?;
