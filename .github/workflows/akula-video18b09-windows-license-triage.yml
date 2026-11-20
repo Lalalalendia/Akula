@@ -11,6 +11,9 @@ on:
       - '.github/scripts/video18b07-license-inventory.cjs'
       - 'docs/release/video18b04-five-exe-allowlist.json'
       - 'docs/release/video18b09-windows-license-triage.md'
+      - '.github/scripts/video-tools-01q-executable-license-evidence.cjs'
+      - '.github/scripts/video-tools-01q-executable-license-evidence.test.cjs'
+      - 'docs/release/video-tools-01q-binary-license-review.md'
 
 permissions:
   contents: read
@@ -30,7 +33,43 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Verify source, graph mismatch, license and release HOLD negatives
-        run: node --test .github/scripts/video18b09-windows-license-triage.test.cjs
+        run: |
+          node --test .github/scripts/video18b09-windows-license-triage.test.cjs
+          node --test .github/scripts/video-tools-01q-executable-license-evidence.test.cjs
+      - name: Checkout exact tagged yt-dlp source for executable-license evidence
+        uses: actions/checkout@v4
+        with:
+          repository: yt-dlp/yt-dlp
+          ref: f264a6cbd1f630894da0f368df00f8aae50140e0
+          path: _video-tools-01q-yt
+          persist-credentials: false
+      - name: Checkout exact tagged QuickJS source for MIT copyright evidence
+        uses: actions/checkout@v4
+        with:
+          repository: quickjs-ng/quickjs
+          ref: d7215b0ad3fc2c562e8317fd9bca058fd4863804
+          path: _video-tools-01q-qjs
+          persist-credentials: false
+      - name: Verify immutable source license Git blobs without approving executable distribution
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          node .github/scripts/video-tools-01q-executable-license-evidence.cjs \
+            docs/release/video18b04-five-exe-allowlist.json \
+            _video-tools-01q-yt _video-tools-01q-qjs \
+            "$EXPECTED_HEAD_SHA" "$RUNNER_TEMP/video-tools-01q-license-HOLD.json" \
+            | tee "$RUNNER_TEMP/video-tools-01q-evidence.log"
+          grep -Fx 'VIDEO_TOOLS_01Q_SOURCE_LICENSE_PASS pinned_tags=2 verified_texts=4 binary_gpl3plus=1 legal_approval=0 release=0' \
+            "$RUNNER_TEMP/video-tools-01q-evidence.log"
+      - name: Retain only one-day non-approval license metadata, never sources or binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-tools-01q-executable-license-evidence-HOLD
+          path: ${{ runner.temp }}/video-tools-01q-license-HOLD.json
+          if-no-files-found: error
+          retention-days: 1
 
   windows-target-license-triage:
     name: Windows-msvc pinned video feature closure and license review queue
