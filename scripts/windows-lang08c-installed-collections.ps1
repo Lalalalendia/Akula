@@ -592,8 +592,11 @@ function Open-StudyCollectionMenu {
         [Diagnostics.Process]$Process)
   $add=Open-StudyTableMenu -Window $Window -Process $Process
   Click-Visible -Target $add -Window $Window -Process $Process
-  Study-Choose -Window $Window -Process $Process -Names @('1 · Q')
-  Study-Choose -Window $Window -Process $Process -Names @('2 · A')
+  # powershell.exe 5.1 -File decodes UTF-8 without BOM as legacy ANSI.
+  # Build the exact U+00B7 separator from ASCII-only source to match UIA.
+  $middot=[char]0x00b7
+  Study-Choose -Window $Window -Process $Process -Names @("1 $middot Q")
+  Study-Choose -Window $Window -Process $Process -Names @("2 $middot A")
 }
 function Type-StudyName {
   param([Diagnostics.Process]$Process,[string]$Name)
