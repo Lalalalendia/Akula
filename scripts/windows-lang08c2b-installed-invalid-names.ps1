@@ -1166,6 +1166,14 @@ if result is None or result[0]!=0:
   Focus-Akula -Process $proc
   $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
   $window=$ready.Window
+  # If Akula rejects/overwrites a test-only JSON setting, the negative
+  # fixture is invalid: fail before editing rather than silently testing
+  # a note that will autosave during OS/UIA traversal.
+  $runtimeSettings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if((Test-Path -LiteralPath ($settingsPath+'.unreadable')) -or
+     [int]$runtimeSettings.editor.saveDebounceMs -ne 120000){
+    throw 'LANG-08c2b5 installed settings did not retain disposable unsaved window'
+  }
   Readback-Selected -Process $proc -Expected $studyText
   if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
      (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
