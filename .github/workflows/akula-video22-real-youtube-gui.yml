@@ -1,0 +1,190 @@
+name: Akula VIDEO-22 real YouTube through installed Windows GUI (NONRELEASE)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/windows-video22-real-youtube-gui.ps1'
+      - 'docs/release/VIDEO-22-REAL-YOUTUBE-E2E.md'
+      - '.github/workflows/akula-video22-real-youtube-gui.yml'
+
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source-boundary:
+    name: Reject bundled runtime, remote override and fake YouTube E2E
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Validate exact opt-in installed route and disposable network test
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, tomllib
+          script=Path("scripts/windows-video22-real-youtube-gui.ps1").read_text()
+          assert script.isascii(), "Windows PowerShell 5.1 must parse script as ASCII"
+          assert "RUNNER_ENVIRONMENT" in script and "github-hosted" in script
+          assert "AKULA_VIDEO22_REAL_YOUTUBE" in script
+          assert "AKULA_VIDEO16_MPD_URL" in script and "IsNullOrEmpty" in script
+          assert "AKULA_VIDEO22_TEST_ID" in script
+          assert "BZeKDYqsuj0" in script and "GhGQV_enM8M" in script
+          assert "https://youtu.be/$TestVideoId" in script
+          assert "VIDEO22_REAL_YOUTUBE_DOWNLOAD_PASS" in script
+          assert "VIDEO22_REAL_YOUTUBE_RESTART_DECODE_PASS" in script
+          assert "Find-Real-Hover $proc 'HOVER_DOWNLOAD'" in script
+          assert "Find-Real-Hover $proc 'HOVER_LOCAL_PLAY'" in script
+          assert "Wait-Event 'DECODED_FRAME'" in script
+          assert "SendInput(1,down" in script
+          assert "VIDEO16_ACTUAL_HOVER_POINT_CLICK" in script
+          pack=json.loads(Path("aquilum-app/native/packaging/akula-windows.json").read_text())
+          assert [x["path"] for x in pack["binaries"]] == ["akula-app","shiva-pdf-preview"]
+          assert "yt-dlp" not in json.dumps(pack) and "quickjs" not in json.dumps(pack)
+          cargo=tomllib.loads(Path("aquilum-app/native/Cargo.toml").read_text())
+          assert cargo["features"]["video-tools-gui-e2e"] == []
+          assert "video-tools-gui-e2e" not in cargo["features"]["installed"]
+          assert "video-ui-e2e" not in cargo["features"]["installed"]
+          queue=Path("aquilum-app/native/src/video/queue.rs").read_text()
+          assert "optional_ytdlp::verified_executable" in queue
+          assert "quickjs::verified_executable" in queue
+          dispatch=Path("aquilum-app/native/src/video/queue_dispatch.rs").read_text()
+          assert "download_one_with_js" in dispatch
+          real=Path("aquilum-app/native/src/video/download.rs").read_text()
+          for arg in ("--no-js-runtimes","--js-runtimes","--no-remote-components",
+                      "--no-plugin-dirs","--no-cookies","--no-playlist"):
+              assert arg in real, arg
+          print("VIDEO22_REAL_YOUTUBE_SOURCE_BOUNDARY_PASS public_test_video=1 shipping_tools=0")
+          PY
+
+  real-windows-gui:
+    name: Live YouTube real click, device-local MP4 and restarted decoded frame
+    needs: source-boundary
+    runs-on: windows-2025
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: video22-real-youtube-installed
+      - name: Stage exact pinned upstream optional tools in disposable device-local profile
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $profile=Join-Path $env:RUNNER_TEMP 'video22-data'
+          $ytDir=Join-Path $profile 'tools/yt-dlp'
+          $jsDir=Join-Path $profile 'tools/quickjs'
+          if (Test-Path -LiteralPath $profile) { throw 'VIDEO22 refuses a reused profile' }
+          New-Item -ItemType Directory -Path $ytDir,$jsDir -Force | Out-Null
+          $yt=Join-Path $ytDir 'yt-dlp-2026.10.26.exe'
+          $js=Join-Path $jsDir 'qjs.exe'
+          Invoke-WebRequest -Uri 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' -OutFile $yt -UseBasicParsing
+          Invoke-WebRequest -Uri 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' -OutFile $js -UseBasicParsing
+          if ((Get-Item -LiteralPath $yt).Length -ne 23575744 -or
+              (Get-FileHash -LiteralPath $yt -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d') {
+            throw 'VIDEO22 refuses a non-pinned yt-dlp'
+          }
+          if ((Get-Item -LiteralPath $js).Length -ne 1873152 -or
+              (Get-FileHash -LiteralPath $js -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7') {
+            throw 'VIDEO22 refuses a non-pinned QuickJS'
+          }
+          Write-Host 'VIDEO22_EXACT_OPTIONAL_RUNTIME_PINS_PASS profile=disposable no_path_fallback=1'
+      - name: Preflight exact pinned YouTube extraction and progressive MP4 availability (NO MEDIA)
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference='Stop'
+          $data=Join-Path $env:RUNNER_TEMP 'video22-data'
+          $yt=Join-Path $data 'tools/yt-dlp/yt-dlp-2026.10.26.exe'
+          $js=Join-Path $data 'tools/quickjs/qjs.exe'
+          if (!(Test-Path -LiteralPath $yt -PathType Leaf) -or !(Test-Path -LiteralPath $js -PathType Leaf)) {
+            throw 'VIDEO22 pinned executables disappeared before extraction probe'
+          }
+          # Same single progressive AVC/AAC format policy as Akula; never download or write media.
+          $selected=$null
+          foreach ($id in @('BZeKDYqsuj0','GhGQV_enM8M')) {
+            # These are 2026 AnnexTube Testing CC BY 3.0 clips; short and uploaded for QA.
+            $arguments=@('--ignore-config','--no-plugin-dirs','--no-remote-components',
+              '--no-cache-dir','--no-cookies','--no-playlist','--no-exec','--no-overwrites',
+              '--no-js-runtimes','--js-runtimes',("quickjs:" + $js),
+              '--socket-timeout','15','--retries','1','--extractor-retries','1',
+              '--format','b[vcodec^=avc1][acodec^=mp4a][height<=720]/b[ext=mp4][height<=720]',
+              '--skip-download','--print','VIDEO22_REAL_EXTRACTOR_SELECTED:%(id)s:%(format_id)s:%(ext)s:%(acodec)s:%(vcodec)s',
+              '--',("https://youtu.be/" + $id))
+            & $yt @arguments 2>&1 | ForEach-Object { Write-Host "VIDEO22_PREFLIGHT [$id] $_" }
+            if ($LASTEXITCODE -eq 0) { $selected=$id; break }
+          }
+          if (!$selected) {
+            throw 'VIDEO22 cannot extract an AVC/AAC progressive MP4 from either current CC BY test video; release gate remains HOLD'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "AKULA_VIDEO22_TEST_ID=$selected"
+          Write-Host "VIDEO22_SELECTED_LICENSED_TEST_VIDEO=$selected"
+          Write-Host 'VIDEO22_REAL_EXTRACTOR_PREFLIGHT_PASS no_media=1'
+      - name: Build installed route with observation-only GUI witness
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          cargo build --locked -p aquilum-native --features installed,video-tools-gui-e2e
+          if ($LASTEXITCODE -ne 0) { throw 'VIDEO22 installed feature build failed' }
+          $compiled=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/debug/aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $compiled -PathType Leaf)) { throw 'Missing Akula GUI binary' }
+          $target=Join-Path $env:LOCALAPPDATA 'Akula'
+          if (Test-Path -LiteralPath $target) { throw 'VIDEO22 requires clean runner installation' }
+          New-Item -ItemType Directory -Path $target | Out-Null
+          $binary=Join-Path $target 'akula-app.exe'
+          Copy-Item -LiteralPath $compiled -Destination $binary
+          if ((Get-FileHash -LiteralPath $binary).Hash -cne (Get-FileHash -LiteralPath $compiled).Hash) {
+            throw 'VIDEO22 staged binary differs from compiled source'
+          }
+          Write-Host 'VIDEO22_STOCK_INSTALLED_GUI_STAGED_PASS bundled_downloaders=0'
+      - name: Click real YouTube Download and Play on Win32 desktop, restart and decode frame
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUNNER_ENVIRONMENT: github-hosted
+          AKULA_VIDEO22_REAL_YOUTUBE: '1'
+        shell: pwsh
+        timeout-minutes: 12
+        run: |
+          $ErrorActionPreference='Stop'
+          if ((git rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA) { throw 'VIDEO22 checkout changed' }
+          $exe=Join-Path $env:LOCALAPPDATA 'Akula/akula-app.exe'
+          $vault=Join-Path $env:RUNNER_TEMP 'video22-vault'
+          $data=Join-Path $env:RUNNER_TEMP 'video22-data'
+          $probe=Join-Path $env:RUNNER_TEMP 'video16-events.log'
+          New-Item -ItemType Directory -Path $vault | Out-Null
+          $env:AKULA_VIDEO16_PROBE=$probe
+          if (!(Test-Path -LiteralPath $data -PathType Container)) { throw 'VIDEO22 runtime profile vanished' }
+          $shell=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          & $shell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File 'scripts/windows-video22-real-youtube-gui.ps1' -ExePath $exe -VaultPath $vault -DataDir $data -ProbePath $probe
+          if ($LASTEXITCODE -ne 0) { throw 'VIDEO22 live public test-video GUI E2E failed' }
+          $videoId=[string]$env:AKULA_VIDEO22_TEST_ID
+          if (@('BZeKDYqsuj0','GhGQV_enM8M') -cnotcontains $videoId) { throw 'VIDEO22 unexpected test ID' }
+          $mp4=Join-Path $data ("local-videos/" + $videoId + ".mp4")
+          if (!(Test-Path -LiteralPath $mp4 -PathType Leaf)) { throw 'VIDEO22 live MP4 missing after restart' }
+          $hash=(Get-FileHash -LiteralPath $mp4 -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size=(Get-Item -LiteralPath $mp4).Length
+          if ($size -lt 1024) { throw 'VIDEO22 live MP4 suspiciously small' }
+          Write-Host "VIDEO22_LIVE_YOUTUBE_GUI_PASS bytes=$size sha256=$hash local_only=1"
+          Remove-Item -LiteralPath $vault,$data -Recurse -Force
+      - name: No publication and no video artifact
+        shell: pwsh
+        run: |
+          Write-Host 'VIDEO22_NONRELEASE_PASS signed_installer=0 upload_media=0 publish=0'
