@@ -4,7 +4,8 @@
 param(
   [Parameter(Mandatory=$true)][string]$Root,
   [Parameter(Mandatory=$true)][string]$LabId,
-  [Parameter(Mandatory=$true)][string]$Work
+  [Parameter(Mandatory=$true)][string]$Work,
+  [switch]$SignedSix
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -26,13 +27,31 @@ if (!$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $repo=[IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
 . (Join-Path $repo 'scripts/video-tools-01c-os-known-root.ps1')
 . (Join-Path $repo 'scripts/video-tools-01d-acl.ps1')
-Assert-AkulaVideoToolsLabRoot -Path $Root -LabId $LabId -RequireExists
-Assert-AkulaVideoToolsInstalledAcl -Path $Root -LabId $LabId
+if ($SignedSix) {
+  $expectedRoot=Join-Path (Get-AkulaVideoToolsOsProgramFiles) 'Akula Video Tools'
+  if (![IO.Path]::GetFullPath($Root).Equals(
+      [IO.Path]::GetFullPath($expectedRoot),[StringComparison]::OrdinalIgnoreCase)) {
+    throw 'VIDEO_TOOLS_01P_HOLD: signed package root is not OS-known'
+  }
+  Assert-AkulaVideoToolsNoReparseParents -Path $Root -RequireExists
+  $items=@(Get-ChildItem -LiteralPath $Root -Force -ErrorAction Stop)
+  $expectedNames=@('akula-video-mux.exe','akula-yt-dlp.exe','akula-quickjs.exe',
+                   'manifest.json','manifest.minisig','uninstall.exe')
+  if ($items.Count -ne 6 -or @($items | Where-Object {
+      $_.Name -cnotin $expectedNames -or $_.PSIsContainer -or
+      ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+    }).Count -ne 0) {
+    throw 'VIDEO_TOOLS_01P_HOLD: non-exact signed six-file package'
+  }
+} else {
+  Assert-AkulaVideoToolsLabRoot -Path $Root -LabId $LabId -RequireExists
+  Assert-AkulaVideoToolsInstalledAcl -Path $Root -LabId $LabId
+}
 $tempBase=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
 if (![IO.Path]::GetFullPath($Work).StartsWith($tempBase, [StringComparison]::OrdinalIgnoreCase)) {
   throw 'VIDEO_TOOLS_01F_HOLD: test output escaped runner temp'
 }
-$names=@('akula-video-mux.exe','akula-yt-dlp.exe','akula-quickjs.exe','uninstall.exe')
+$names=if($SignedSix){$expectedNames}else{@('akula-video-mux.exe','akula-yt-dlp.exe','akula-quickjs.exe','uninstall.exe')}
 $before=@{}
 foreach($name in $names) {
   $before[$name]=(Get-FileHash -LiteralPath (Join-Path $Root $name) -Algorithm SHA256).Hash
@@ -54,6 +73,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $root=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('__ROOT_B64__'))
 $expected='__EXPECTED_SID__'
+$signedSix=[bool]::Parse('__SIGNED_SIX__')
 $id=[Security.Principal.WindowsIdentity]::GetCurrent()
 $principal=[Security.Principal.WindowsPrincipal]::new($id)
 if ($id.User.Value -cne $expected -or
@@ -105,6 +125,33 @@ foreach($case in $cases) {
       $case.Name + ', got ' + $code)
   }
 }
+if ($signedSix) {
+  # Every authenticated metadata/PE/uninstaller file is readable, but
+  # none grants write/delete/ownership/ACL-change to a genuine local user.
+  $six=@('akula-video-mux.exe','akula-yt-dlp.exe','akula-quickjs.exe',
+         'manifest.json','manifest.minisig','uninstall.exe')
+  $denied=0
+  foreach($name in $six) {
+    $filePath=Join-Path $root $name
+    $stream=[IO.File]::OpenRead($filePath)
+    try {
+      if($stream.ReadByte() -lt 0){throw 'VIDEO_TOOLS_01P_HOLD: unreadable '+$name}
+    } finally {$stream.Dispose()}
+    foreach($access in @([uint32]0x2,[uint32]0x10000,[uint32]0x40000,[uint32]0x80000)) {
+      $handle=[AkulaVideoToolsAccessProbe]::Open($filePath,$access,7,[IntPtr]::Zero,3,0,[IntPtr]::Zero)
+      $code=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
+      if(!$handle.IsInvalid) {
+        $handle.Dispose()
+        throw 'VIDEO_TOOLS_01P_HOLD: signed component unexpectedly writable '+$name
+      }
+      $handle.Dispose()
+      if($code -ne 5){throw ('VIDEO_TOOLS_01P_HOLD: expected ERROR_ACCESS_DENIED for '+$name+', got '+$code)}
+      $denied++
+    }
+  }
+  if($denied -ne 24){throw 'VIDEO_TOOLS_01P_HOLD: incomplete signed component access denial'}
+  Write-Output 'VIDEO_TOOLS_01P_CHILD_PASS standard_token=1 signed_six_read=6 denied_rights=24'
+}
 Write-Output 'VIDEO_TOOLS_01F_CHILD_PASS standard_token=1 read=1 denied_rights=7'
 '@
 try {
@@ -120,7 +167,7 @@ try {
   }
   $credential=[PSCredential]::new("$env:COMPUTERNAME\$user",$secret)
   $rootB64=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Root))
-  $child=$childSource.Replace('__ROOT_B64__',$rootB64).Replace('__EXPECTED_SID__',$account.SID.Value)
+  $child=$childSource.Replace('__ROOT_B64__',$rootB64).Replace('__EXPECTED_SID__',$account.SID.Value).Replace('__SIGNED_SIX__',$SignedSix.ToString())
   # CreateProcessWithLogonW accepts at most 1024 command-line characters.
   # A full -EncodedCommand exceeded this limit and failed with ERROR_INVALID_PARAMETER.
   # Put non-secret fixture code in a unique admin-owned ProgramData directory instead.
@@ -168,13 +215,24 @@ try {
     throw ('VIDEO_TOOLS_01F_HOLD: actual non-admin OS test failed exit=' +
       $process.ExitCode + ': ' + $diagnostic.Substring(0,[Math]::Min(2048,$diagnostic.Length)))
   }
-  Assert-AkulaVideoToolsInstalledAcl -Path $Root -LabId $LabId
+  if($SignedSix) {
+    if(!$output.Contains('VIDEO_TOOLS_01P_CHILD_PASS standard_token=1 signed_six_read=6 denied_rights=24')){
+      throw 'VIDEO_TOOLS_01P_HOLD: actual six-file Windows standard-user witness missing'
+    }
+    Assert-AkulaVideoToolsNoReparseParents -Path $Root -RequireExists
+  } else {
+    Assert-AkulaVideoToolsInstalledAcl -Path $Root -LabId $LabId
+  }
   foreach($name in $names) {
     if ((Get-FileHash -LiteralPath (Join-Path $Root $name) -Algorithm SHA256).Hash -cne $before[$name]) {
       throw 'VIDEO_TOOLS_01F_HOLD: installed bytes changed during standard-user test'
     }
   }
-  Write-Output 'VIDEO_TOOLS_01F_NONADMIN_PASS token=standard_user read=1 create=0 write=0 delete=0 acl=0 ownership=0 restored=1 release=0'
+  if($SignedSix) {
+    Write-Output 'VIDEO_TOOLS_01P_SIGNED_NONADMIN_PASS token=standard_user signed_six_read=6 denied_rights=24 six_sha_unchanged=1 release=0'
+  } else {
+    Write-Output 'VIDEO_TOOLS_01F_NONADMIN_PASS token=standard_user read=1 create=0 write=0 delete=0 acl=0 ownership=0 restored=1 release=0'
+  }
 } finally {
   try {
     if ($created) {
