@@ -100,7 +100,7 @@ class AddonTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
             (root/"COPYING.txt").write_bytes(b"tampered")
-            with self.assertRaisesRegex(M.STARTER.Hold,"Git blob"):
+            with self.assertRaisesRegex(M.STARTER.Hold,"blob SHA drift"):
                 M.verify_blobs(root,{"COPYING.txt":M.PY_BLOBS["COPYING.txt"]})
 
     def test_existing_ci_safeguards_are_reused_not_expanded_to_release(self):
