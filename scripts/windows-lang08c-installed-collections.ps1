@@ -605,12 +605,20 @@ function Close-StudyNotice {
   Start-Sleep -Milliseconds 400
 }
 function Require-StudySnapshot {
-  param([string]$Path,[int]$Count,[string]$Name)
+  # [string] coerces a null argument into an empty string on PowerShell 5.1,
+  # but the genuine Rust/serde empty registry returns JSON null for name.
+  # Preserve null and assert that deletion truly removed the collection.
+  param([string]$Path,[int]$Count,[AllowNull()][object]$Name)
   for($i=0;$i -lt 70;$i++){
     Start-Sleep -Milliseconds 150
     if(!(Test-Path -LiteralPath $Path -PathType Leaf)){continue}
     $snap=Get-StudySnapshot -Path $Path
-    if($snap.count -eq $Count -and $snap.name -ceq $Name){return $snap}
+    $matchesName=if($Count -eq 0) {
+      ($null -eq $snap.name -and $null -eq $Name)
+    } else {
+      ($null -ne $snap.name -and $snap.name -ceq $Name)
+    }
+    if($snap.count -eq $Count -and $matchesName){return $snap}
   }
   throw "LANG-08c expected installed UI SQLite named collection $Name/$Count"
 }
