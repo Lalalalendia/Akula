@@ -14,6 +14,9 @@ on:
       - '.github/scripts/video-tools-01q-executable-license-evidence.cjs'
       - '.github/scripts/video-tools-01q-executable-license-evidence.test.cjs'
       - 'docs/release/video-tools-01q-binary-license-review.md'
+      - '.github/scripts/video-tools-01t-source-starter.py'
+      - '.github/scripts/video-tools-01t-source-starter.test.py'
+      - 'docs/release/video-tools-01t-source-starter.md'
 
 permissions:
   contents: read
@@ -36,6 +39,7 @@ jobs:
         run: |
           node --test .github/scripts/video18b09-windows-license-triage.test.cjs
           node --test .github/scripts/video-tools-01q-executable-license-evidence.test.cjs
+          python3 .github/scripts/video-tools-01t-source-starter.test.py
       - name: Checkout exact tagged yt-dlp source for executable-license evidence
         uses: actions/checkout@v4
         with:
@@ -68,6 +72,53 @@ jobs:
         with:
           name: video-tools-01q-executable-license-evidence-HOLD
           path: ${{ runner.temp }}/video-tools-01q-license-HOLD.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Checkout immutable yt-dlp custom PyInstaller bootloader recipe (no binary wheel)
+        uses: actions/checkout@v4
+        with:
+          repository: yt-dlp/Pyinstaller-Builds
+          ref: 2026.08.19.215425
+          path: _video-tools-01t-pyi-builder
+          persist-credentials: false
+      - name: Stage four pinned Git source snapshots, explicitly NOT complete corresponding source
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/video-tools-01t-source-starter.py \
+            docs/release/video18b04-five-exe-allowlist.json \
+            _video-tools-01q-yt _video-tools-01q-qjs _video-tools-01t-pyi-builder \
+            "$EXPECTED_HEAD_SHA" "$RUNNER_TEMP/video-tools-01t-source-starter-HOLD" \
+            | tee "$RUNNER_TEMP/video-tools-01t-proof.log"
+          grep -Fx 'VIDEO_TOOLS_01T_SOURCE_STARTER_PASS source_trees=4 wheels=0 complete_source=0 rebuilt_exe=0 legal_approval=0 release=0' \
+            "$RUNNER_TEMP/video-tools-01t-proof.log"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'video-tools-01t-source-starter-HOLD'
+          m=json.loads((p/'manifest-NOT-COMPLETE.json').read_text('utf8'))
+          assert m['release_admitted'] is False and m['legal_approval'] is False
+          assert m['complete_corresponding_source_available'] is False
+          assert m['corresponding_source_rebuilt_and_verified'] is False
+          assert m['windows_executables_included'] is False
+          assert len(m['snapshots'])==4
+          assert all(m['snapshots'][k]['tracked_file_count']>5 for k in m['snapshots'])
+          assert m['windows_x64_pinned_install_requirements']['curl-cffi']['yt-dlp-ejs']['version']=='0.8.0'
+          assert sorted(x.name for x in p.iterdir())==sorted(
+            ['yt-dlp-2026.10.26-GIT-ONLY.tar.gz',
+             'quickjs-v0.18.0-GIT-ONLY.tar.gz',
+             'akula-video-mux-GIT-ONLY.tar.gz',
+             'pyinstaller-build-recipe-GIT-ONLY.tar.gz',
+             'manifest-NOT-COMPLETE.json','README-NOT-COMPLETE.txt'])
+          PY
+      - name: Retain one-day public Git source STARTER only, no EXE, no release approval
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-tools-01t-source-starter-NOT-COMPLETE
+          path: ${{ runner.temp }}/video-tools-01t-source-starter-HOLD/
           if-no-files-found: error
           retention-days: 1
 
