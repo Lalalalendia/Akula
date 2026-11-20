@@ -331,8 +331,8 @@ public static class AkulaLang08DialogKeys {
   static extern uint GetWindowThreadProcessId(IntPtr h,out uint processId);
   [DllImport("user32.dll",SetLastError=true)]
   static extern uint SendInput(uint n,[In] Input[] inputs,int size);
-  // Only Ctrl+A (replace the filename) and Ctrl+V (paste the synthetic
-  // RUNNER_TEMP filename), never arbitrary keyboard or window injection.
+  // Only Ctrl+A and Ctrl+V for the installed synthetic name, filename,
+  // or disposable Markdown editor; never arbitrary keyboard or window injection.
   public static void Chord(IntPtr hwnd,int expectedPid,ushort key) {
     if(key != 0x41 && key != 0x56)throw new InvalidOperationException("Unapproved file-picker key");
     uint pid;
@@ -1148,6 +1148,69 @@ if result is None or result[0]!=0:
   }
   Assert-Upstream
   Write-Host 'AKULA_LANG08C_INSTALLED_RESTART_PASS reopened=1 study_sqlite_stable=1 source_untouched=1'
+
+  # LANG-08c2b5: installed Windows user input makes the currently open note
+  # dirty before choosing Add to study collection. Exercise the actual OS
+  # pointer/menu route, not a RenderRoot harness mutation or SQLite injection.
+  # A valid changed Markdown table must still be refused until it is saved.
+  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08C Collections'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $studyText
+  $dirtyText=$studyText.Replace('| oxygen | gas |','| helium | gas |')
+  if($dirtyText -ceq $studyText -or $dirtyText -notmatch '\| helium \| gas \|'){
+    throw 'LANG-08c2b5 invalid synthetic edited table fixture'
+  }
+  $hwnd=[IntPtr]$proc.MainWindowHandle
+  [Windows.Forms.Clipboard]::SetText($dirtyText)
+  if([Windows.Forms.Clipboard]::GetText() -cne $dirtyText){
+    throw 'LANG-08c2b5 synthetic editor clipboard mismatch'
+  }
+  # Readback-Selected left the real editor selected via OS Ctrl+A/C.
+  # Physical Ctrl+V enters a valid changed table with the editor focused.
+  [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x56)
+  Readback-Selected -Process $proc -Expected $dirtyText
+  if((Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 cannot establish unsaved note; fixture already persisted'
+  }
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState){
+    throw 'LANG-08c2b5 synthetic study registry changed before refusal'
+  }
+  $add=Open-StudyTableMenu -Window $window -Process $proc
+  Click-Visible -Target $add -Window $window -Process $proc
+  $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  # An unsaved note must not enter the question-column picker.
+  $middot=[char]0x00b7
+  if($null -ne (Find-Visible -Root $window -Names @("1 $middot Q") -Type ([Windows.Automation.ControlType]::MenuItem))){
+    throw 'LANG-08c2b5 dirty note reached study column mapping'
+  }
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 installed dirty-note refusal changed SQLite or saved Markdown'
+  }
+  Write-Host 'AKULA_LANG08C2B_INSTALLED_DIRTY_NOTE_PASS os_editor_paste=1 native_refusal=1 sqlite_unchanged=1 markdown_sha256=1'
+  Click-Visible -Target $notice -Window $window -Process $proc
+  Start-Sleep -Milliseconds 400
+
+  # Restore the exact fixture using the same real OS editor path; graceful
+  # close must neither carry a changed file nor modify the study registry.
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  [Windows.Forms.Clipboard]::SetText($studyText)
+  if([Windows.Forms.Clipboard]::GetText() -cne $studyText){
+    throw 'LANG-08c2b5 synthetic restore clipboard mismatch'
+  }
+  [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd,$proc.Id,[uint16]0x41)
+  [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x56)
+  Readback-Selected -Process $proc -Expected $studyText
+  Close-Note -Process $proc;$proc=$null
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 restoring fixture changed SQLite or Markdown on installed exit'
+  }
+  Assert-Upstream
 
 } finally {
   if($null -ne $proc){
