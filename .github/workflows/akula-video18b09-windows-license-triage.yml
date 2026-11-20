@@ -79,7 +79,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: yt-dlp/Pyinstaller-Builds
-          ref: 5eb86b862d61adc3df0f44e6e0b815b7d74fa3f
+          ref: 2026.08.19.215425
           path: _video-tools-01t-pyi-builder
           persist-credentials: false
       - name: Stage four pinned Git source snapshots, explicitly NOT complete corresponding source
