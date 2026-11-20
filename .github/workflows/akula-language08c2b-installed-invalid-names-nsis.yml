@@ -44,6 +44,8 @@ jobs:
              'AKULA_LANG08C2B_INSTALLED_OVERLONG_PASS','AKULA_LANG08C2B_INSTALLED_BIDI_PASS',
              'AKULA_LANG08C2B_INSTALLED_DIRTY_NOTE_PASS',
              'AKULA_LANG08C2B5_SYNTHETIC_DEBOUNCE_CONFIG_PASS','saveDebounceMs',
+             'Synthetic-AdvanceStudyName','Assert-StudyChangedNotice',
+             'AKULA_LANG08C2B6_INSTALLED_STALE_RENAME_PASS','AKULA_LANG08C2B6_INSTALLED_STALE_DELETE_PASS',
              'Wait-FileDialog','Choose-FileThroughNativeDialog','Get-AnnotationSnapshot',
              'RUNNER_ENVIRONMENT','github-hosted','GetForegroundWindow','GetWindowThreadProcessId',
              'SendInput','compiled_executable_sha256','SQLite format 3','backupExport','backupImport',
@@ -169,7 +171,7 @@ jobs:
           $tokens=$null;$errors=$null
           $ast=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
           if($errors.Count){throw ('LANG-08c parser contract: '+($errors|Out-String))}
-          foreach($name in @('Get-StudySnapshot','Read-StudyStateHash','Require-StudySnapshot')){
+          foreach($name in @('Get-StudySnapshot','Read-StudyStateHash','Require-StudySnapshot','Synthetic-AdvanceStudyName')){
             $matches=@($ast.FindAll({
               param($node)
               ($node -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and
@@ -178,6 +180,7 @@ jobs:
             if($matches.Count -ne 1){throw "LANG-08c requires exactly one $name helper"}
             Invoke-Expression $matches[0].Extent.Text
           }
+          $temp=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')+'\'
           $db=Join-Path $env:RUNNER_TEMP ('lang08c-study-'+[guid]::NewGuid().ToString('N')+'.sqlite')
           $py=@'
           import json
@@ -221,6 +224,18 @@ jobs:
                $named.anchor_count -ne 1 -or $b -notmatch '^1:[a-f0-9]{64}$' -or $a -ceq $b){
               throw 'LANG-08c SQLite named-collection parser contract failed'
             }
+            # Exercise the actual Python/SQLite IMMEDIATE CAS helper before
+            # expensive NSIS compilation, on isolated CI fixture bytes.
+            $winner=Synthetic-AdvanceStudyName -Path $db -ExpectedRevision 1 -ExpectedName 'LANG08C-Biology' -NextName 'LANG08C-Concurrent'
+            $current=Require-StudySnapshot -Path $db -Count 1 -Name 'LANG08C-Concurrent'
+            if($current.revision -ne 2 -or $current.id -cne $named.id -or
+               $current.members -ne $named.members -or
+               $current.table_count -ne $named.table_count -or
+               $current.anchor_count -ne $named.anchor_count -or
+               (Read-StudyStateHash -Path $db) -cne $winner){
+              throw 'LANG-08c2b6 competing SQLite CAS helper contract failed'
+            }
+            Write-Host 'AKULA_LANG08C2B6_SQLITE_WRITER_CONTRACT_PASS revision_cas=1 mappings_unchanged=1'
           } finally {
             Remove-Item -LiteralPath $db -Force -ErrorAction SilentlyContinue
           }
@@ -275,6 +290,9 @@ jobs:
           collection to refuse before column mapping. SQLite revision
           and payload SHA-256 remain byte-equivalent across the refusal.
           Restore the original text through OS input and verify graceful
-          close, Markdown SHA-256, and NSIS uninstall. RUNNER_TEMP only;
-          non-release and no user vault.
+          close, Markdown SHA-256, and NSIS uninstall. LANG-08c2b6
+          additionally holds installed rename/delete dialogs while an
+          independent disposable SQLite CAS writer wins; stale confirmations
+          must refuse and preserve winner metadata, anchors and Markdown.
+          RUNNER_TEMP only, non-release and no user vault.
           '@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
