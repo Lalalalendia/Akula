@@ -123,3 +123,59 @@ fn lang02_stale_collection_menu_refuses_delete_without_changing_sources() {
     assert_eq!(std::fs::read(source).unwrap(), source_bytes);
     eprintln!("AKULA_LANG02_STALE_PASS=revision_guard,source_unchanged");
 }
+
+#[test]
+fn lang02_stale_rename_dialog_refuses_concurrent_update_without_losing_sources() {
+    let mut h = Harness::new();
+    let source = h.vault.path().join("a.md");
+    let source_bytes = std::fs::read(&source).unwrap();
+    let db = seed_group(&mut h);
+
+    // Open a real native rename modal at the current collection revision.
+    h.app.open_study_manage(&mut h.root);
+    let layer = match &h.app.popup {
+        Some(Popup::StudyManage { layer, actions, .. }) => {
+            assert_eq!(actions[0].0, "botany");
+            assert!(!actions[0].2, "first action should rename");
+            *layer
+        }
+        _ => panic!("collection management must be visible"),
+    };
+    h.act(layer, MenuChoice::Item(0));
+    let field = match &h.app.popup {
+        Some(Popup::StudyRename { field, .. }) => field.id(),
+        _ => panic!("native rename dialog must be open"),
+    };
+    h.act(field, TextAction::Changed("Stale dialog value".into()));
+    let stale_dialog = match &h.app.popup {
+        Some(Popup::StudyRename { dialog, .. }) => dialog.layer,
+        _ => panic!("native rename modal must preserve its initial revision"),
+    };
+
+    // Another writer commits while the original dialog remains open.
+    // Only the temporary app-owned SQLite is touched, never user data.
+    let mut writer = StudyStore::open(&db).unwrap();
+    let initial_revision = writer.load().unwrap().revision;
+    let committed_revision = writer.rename_collection(initial_revision, "botany", "Concurrent winner")
+        .expect("concurrent synthetic writer must succeed");
+    let before_stale = writer.load().unwrap();
+    assert_eq!(before_stale.revision, committed_revision);
+    assert_eq!(before_stale.state.registry.collections[0].name, "Concurrent winner");
+
+    h.act(stale_dialog, DialogAnswer::Confirm);
+    assert!(matches!(&h.app.popup, Some(Popup::StudyPreview { .. })),
+        "stale native rename must show a notice rather than succeeding");
+    let after_stale = StudyStore::open(&db).unwrap().load().unwrap();
+    assert_eq!(after_stale.revision, committed_revision,
+        "rejected rename must not advance SQLite revision");
+    assert_eq!(after_stale.state.registry.collections[0].id, "botany");
+    assert_eq!(after_stale.state.registry.collections[0].name, "Concurrent winner",
+        "stale native dialog must never overwrite concurrent metadata");
+    assert_eq!(after_stale.state.registry.tables, before_stale.state.registry.tables,
+        "stale rename must not modify source mappings");
+    assert_eq!(after_stale.state.anchors, before_stale.state.anchors,
+        "stale rename must not modify anchors");
+    assert_eq!(std::fs::read(&source).unwrap(), source_bytes,
+        "stale rename must not modify Markdown");
+    eprintln!("AKULA_LANG02_STALE_RENAME_PASS=dialog_cas,concurrent_winner,source_unchanged");
+}
