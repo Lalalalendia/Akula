@@ -273,7 +273,10 @@ function Readback-Selected {
   }
   if($null -eq $copy -or
      ![string]::Equals((& $normalize $copy),(& $normalize $Expected),[StringComparison]::Ordinal)){
-    throw 'LANG-08 installed editor failed exact OS Ctrl+A/C clipboard readback'
+    $reason=if($null -eq $copy){'clipboard_copy_missing'}else{'text_mismatch'}
+    $observedLength=if($null -eq $copy){0}else{(& $normalize $copy).Length}
+    $expectedLength=(& $normalize $Expected).Length
+    throw "LANG-08 installed editor failed exact OS Ctrl+A/C clipboard readback reason=$reason expected_length=$expectedLength observed_length=$observedLength"
   }
 }
 # SQLite WAL may checkpoint without changing records: compare snapshot instead
@@ -331,10 +334,13 @@ public static class AkulaLang08DialogKeys {
   static extern uint GetWindowThreadProcessId(IntPtr h,out uint processId);
   [DllImport("user32.dll",SetLastError=true)]
   static extern uint SendInput(uint n,[In] Input[] inputs,int size);
-  // Only Ctrl+A (replace the filename) and Ctrl+V (paste the synthetic
-  // RUNNER_TEMP filename), never arbitrary keyboard or window injection.
+  // Only Ctrl+A, Ctrl+V and Ctrl+Z on the verified foreground installed
+  // Akula PID. Ctrl+Z restores the single disposable unsaved Markdown paste
+  // after the study refusal, including when its table cell has focus.
+  // Never arbitrary keyboard/window injection.
   public static void Chord(IntPtr hwnd,int expectedPid,ushort key) {
-    if(key != 0x41 && key != 0x56)throw new InvalidOperationException("Unapproved file-picker key");
+    if(key != 0x41 && key != 0x56 && key != 0x5A)
+      throw new InvalidOperationException("Unapproved installed synthetic editor key");
     uint pid;
     if(hwnd==IntPtr.Zero || Marshal.SizeOf(typeof(Input))!=40 ||
        GetWindowThreadProcessId(hwnd,out pid)==0 || pid!=(uint)expectedPid ||
@@ -1136,18 +1142,115 @@ if result is None or result[0]!=0:
   Close-Note -Process $proc;$proc=$null
 
   $studyState=Read-StudyStateHash -Path $studyDb
+
+  # The production default autosave debounce is 1000 ms; genuine OS/UIA
+  # clipboard readback and table-menu traversal take longer than that.
+  # Hold a REAL unsaved edit during this negative witness using Akula's
+  # existing saveDebounceMs setting in this disposable RUNNER_TEMP profile.
+  # No source file, production config, SQLite or user-owned vault is changed.
+  $settingsPath=Join-Path $data 'settings.json'
+  if(!(Test-Path -LiteralPath $settingsPath -PathType Leaf)){
+    throw 'LANG-08c2b5 installed synthetic app settings missing'
+  }
+  $settings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if($null -eq $settings.editor -or $null -eq $settings.editor.saveDebounceMs){
+    throw 'LANG-08c2b5 invalid installed editor settings schema'
+  }
+  $settings.editor.saveDebounceMs=120000
+  $settingsJson=$settings | ConvertTo-Json -Depth 100
+  [IO.File]::WriteAllText($settingsPath,$settingsJson,[Text.UTF8Encoding]::new($false))
+  $readbackSettings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if([int]$readbackSettings.editor.saveDebounceMs -ne 120000){
+    throw 'LANG-08c2b5 synthetic autosave window was not configured'
+  }
+  Write-Host 'AKULA_LANG08C2B5_SYNTHETIC_DEBOUNCE_CONFIG_PASS runner_temp_only=1 debounce_ms=120000'
   $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
   Wait-Window -Process $proc -Needle 'LANG08C Collections'
   Focus-Akula -Process $proc
   $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  # If Akula rejects/overwrites a test-only JSON setting, the negative
+  # fixture is invalid: fail before editing rather than silently testing
+  # a note that will autosave during OS/UIA traversal.
+  $runtimeSettings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if((Test-Path -LiteralPath ($settingsPath+'.unreadable')) -or
+     [int]$runtimeSettings.editor.saveDebounceMs -ne 120000){
+    throw 'LANG-08c2b5 installed settings did not retain disposable unsaved window'
+  }
   Readback-Selected -Process $proc -Expected $studyText
-  Close-Note -Process $proc;$proc=$null
   if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
      (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
     throw 'LANG-08c installed restart changed study SQLite or Markdown'
   }
   Assert-Upstream
   Write-Host 'AKULA_LANG08C_INSTALLED_RESTART_PASS reopened=1 study_sqlite_stable=1 source_untouched=1'
+
+  # LANG-08c2b5 reuses the already verified foreground OS/UIA editor
+  # from the restart test above. The test-only long debounce prevents normal
+  # autosave from racing several seconds of OS clipboard verification.
+  # Real Ctrl+A/C selected the whole note; Ctrl+V must change the live
+  # table before the installed Add-to-study refusal is tested.
+  $dirtyText=$studyText.Replace('| oxygen | gas |','| helium | gas |')
+  if($dirtyText -ceq $studyText -or $dirtyText -notmatch '\| helium \| gas \|'){
+    throw 'LANG-08c2b5 invalid synthetic edited table fixture'
+  }
+  $hwnd=[IntPtr]$proc.MainWindowHandle
+  [Windows.Forms.Clipboard]::SetText($dirtyText)
+  if([Windows.Forms.Clipboard]::GetText() -cne $dirtyText){
+    throw 'LANG-08c2b5 synthetic editor clipboard mismatch'
+  }
+  # Readback-Selected left the real editor selected via OS Ctrl+A/C.
+  # Physical Ctrl+V enters a valid changed table with the editor focused.
+  [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x56)
+  # Winit dispatches ClipboardPaste as an editor event; replacing clipboard
+  # immediately with Readback-Selected's poison can race the paste read.
+  # Let the app consume the synthetic clipboard before the readback changes it.
+  Start-Sleep -Milliseconds 750
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  Write-Host 'LANG08C2B5_PASTE_DIAGNOSTIC settled_before_clipboard_poison=1'
+  Readback-Selected -Process $proc -Expected $dirtyText
+  if((Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 cannot establish unsaved note; fixture already persisted'
+  }
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState){
+    throw 'LANG-08c2b5 synthetic study registry changed before refusal'
+  }
+  $add=Open-StudyTableMenu -Window $window -Process $proc
+  Click-Visible -Target $add -Window $window -Process $proc
+  $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  # An unsaved note must not enter the question-column picker.
+  $middot=[char]0x00b7
+  if($null -ne (Find-Visible -Root $window -Names @("1 $middot Q") -Type ([Windows.Automation.ControlType]::MenuItem))){
+    throw 'LANG-08c2b5 dirty note reached study column mapping'
+  }
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 installed dirty-note refusal changed SQLite or saved Markdown'
+  }
+  Write-Host 'AKULA_LANG08C2B_INSTALLED_DIRTY_NOTE_PASS os_editor_paste=1 native_refusal=1 sqlite_unchanged=1 markdown_sha256=1'
+  Click-Visible -Target $notice -Window $window -Process $proc
+  Start-Sleep -Milliseconds 400
+
+  # Undo the ONE verified synthetic paste through real OS Ctrl+Z.
+  # After a table-menu refusal, Ctrl+A targets a selected table cell rather
+  # than the document; trying to paste the whole note overwrites that cell.
+  # The native table_key Undo path explicitly leaves the table session, then
+  # the editor undo stack restores the entire original Markdown in memory.
+  # This is not a filesystem fixture rewrite or an injected app action.
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x5A)
+  Start-Sleep -Milliseconds 600
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  Readback-Selected -Process $proc -Expected $studyText
+  Close-Note -Process $proc;$proc=$null
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 restoring fixture changed SQLite or Markdown on installed exit'
+  }
+  Assert-Upstream
 
 } finally {
   if($null -ne $proc){
