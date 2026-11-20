@@ -33,11 +33,6 @@ pub fn enqueue(
     registered_roots: Vec<PathBuf>,
     changed: Arc<dyn Fn(bool, &str) + Send + Sync>,
 ) -> Result<bool, &'static str> {
-    // Video Tools release is not approved. Installed Windows may not turn
-    // a PATH entry, env-selected yt-dlp or CI signature into process rights.
-    if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e"))) {
-        return Err("Video Tools execution is not approved for installed Akula");
-    }
     let id = youtube::video_id(&url).ok_or("invalid single-video URL")?.to_owned();
     {
         let mut list = jobs().lock().unwrap_or_else(|e| e.into_inner());
@@ -55,6 +50,13 @@ pub fn enqueue(
         let result = Library::new(&data_dir, &registered_roots)
             .map_err(|e| format!("local video storage rejected: {e}"))
             .and_then(|library| {
+                // Installed Windows selects ONLY the user-confirmed, fixed-version,
+                // re-hashed local optional tool. PATH/env never grant execution.
+                #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
+                let executable = super::optional_ytdlp::verified_executable(&data_dir)
+                    .map_err(|_| "Install the verified yt-dlp in Settings > System first".to_owned())?
+                    .into_os_string();
+                #[cfg(not(all(windows, feature = "installed", not(feature = "video-ui-e2e"))))]
                 let executable = std::env::var_os("AKULA_YT_DLP_BIN")
                     .filter(|value| !value.is_empty())
                     .unwrap_or_else(|| OsString::from("yt-dlp"));
