@@ -17,6 +17,9 @@ on:
       - '.github/scripts/video-tools-01t-source-starter.py'
       - '.github/scripts/video-tools-01t-source-starter.test.py'
       - 'docs/release/video-tools-01t-source-starter.md'
+      - '.github/scripts/video-tools-01u-pinned-sources.py'
+      - '.github/scripts/video-tools-01u-pinned-sources.test.py'
+      - 'docs/release/video-tools-01u-source-addon.md'
 
 permissions:
   contents: read
@@ -40,6 +43,7 @@ jobs:
           node --test .github/scripts/video18b09-windows-license-triage.test.cjs
           node --test .github/scripts/video-tools-01q-executable-license-evidence.test.cjs
           python3 .github/scripts/video-tools-01t-source-starter.test.py
+          python3 .github/scripts/video-tools-01u-pinned-sources.test.py
       - name: Checkout exact tagged yt-dlp source for executable-license evidence
         uses: actions/checkout@v4
         with:
@@ -119,6 +123,64 @@ jobs:
         with:
           name: video-tools-01t-source-starter-NOT-COMPLETE
           path: ${{ runner.temp }}/video-tools-01t-source-starter-HOLD/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Checkout immutable upstream PyInstaller 6.22.0 **source**, not bootloader EXE
+        uses: actions/checkout@v4
+        with:
+          repository: pyinstaller/pyinstaller
+          ref: 70fc17210920bce17f4ab09bbf8104b0dbd45338
+          path: _video-tools-01u-pyi
+          persist-credentials: false
+      - name: Checkout immutable yt-dlp/ejs 0.8.0 JS **source** and lockfiles
+        uses: actions/checkout@v4
+        with:
+          repository: yt-dlp/ejs
+          ref: 4fb477f4af56880cfd324c48bd4294a2d2294e50
+          path: _video-tools-01u-ejs
+          persist-credentials: false
+      - name: Stage pinned source-only add-on and verify EJS JS license distinction
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/video-tools-01u-pinned-sources.py \
+            docs/release/video18b04-five-exe-allowlist.json \
+            _video-tools-01u-pyi _video-tools-01u-ejs \
+            "$RUNNER_TEMP/video-tools-01t-source-starter-HOLD/manifest-NOT-COMPLETE.json" \
+            "$EXPECTED_HEAD_SHA" "$RUNNER_TEMP/video-tools-01u-source-addon-HOLD" \
+            | tee "$RUNNER_TEMP/video-tools-01u-proof.log"
+          grep -Fx 'VIDEO_TOOLS_01U_GIT_SOURCES_PASS sources=2 pyinstaller_git=1 ejs_git=1 wheel_bytes=0 complete_source=0 rebuilt_exe=0 legal_approval=0 release=0' \
+            "$RUNNER_TEMP/video-tools-01u-proof.log"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path(os.environ["RUNNER_TEMP"])/"video-tools-01u-source-addon-HOLD"
+          m=json.loads((p/"manifest-01u-NOT-COMPLETE.json").read_text("utf8"))
+          assert len(m["verified_01t_source_tree_hashes"])==4
+          assert len(m["supplemental_source_snapshots"])==2
+          assert all(m[k] is False for k in (
+              "release_admitted","legal_approval",
+              "complete_corresponding_source_available",
+              "corresponding_source_rebuilt_and_verified",
+              "publisher_signing_authorized",
+              "windows_executables_included",
+              "complete_license_notice_package",
+              "binary_sbom_complete"))
+          assert m["licenses_and_dependency_pins"]["ejs"]["built_wheel_declared_license"]=="Unlicense AND MIT AND ISC"
+          assert m["licenses_and_dependency_pins"]["ejs"]["pypi_artifact_bytes_checked"] is False
+          assert sorted(x.name for x in p.iterdir())==sorted([
+              "pyinstaller-6.22.0-SOURCE-ONLY.tar.gz",
+              "yt-dlp-ejs-0.8.0-SOURCE-ONLY.tar.gz",
+              "manifest-01u-NOT-COMPLETE.json","README-NOT-COMPLETE.txt"])
+          PY
+      - name: Retain one-day two-source add-on with explicit NOT-COMPLETE and no binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-tools-01u-source-addon-NOT-COMPLETE
+          path: ${{ runner.temp }}/video-tools-01u-source-addon-HOLD/
           if-no-files-found: error
           retention-days: 1
 
