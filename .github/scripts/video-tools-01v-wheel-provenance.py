@@ -69,10 +69,9 @@ def git_head(root):
     ).strip()
 
 def safe_name(name):
-    parts = name.split("/")
+    parts = name.rstrip("/").split("/")
     return (bool(name) and not name.startswith("/") and "\\" not in name and
-            "\x00" not in name and all(x not in ("", ".", "..") for x in parts
-                                     if x != "" or name.endswith("/")))
+            "\x00" not in name and all(x not in ("", ".", "..") for x in parts))
 
 def checked_zip(path, maximum=MAX_ARCHIVE_TOTAL):
     need(zipfile.is_zipfile(path), "not a ZIP wheel")
@@ -295,7 +294,7 @@ def save_report(report, target):
         out.write("\n")
 
 def cli(argv):
-    need(len(argv) >= 4, "usage: script download-pyi|download-ejs|pyinstaller|ejs allowlist ...")
+    need(len(argv) >= 3, "usage: script download-pyi|download-ejs|pyinstaller|ejs allowlist ...")
     kind, allow_path = argv[1:3]
     head, temp = common_guard(allow_path)
     if kind == "download-pyi":
