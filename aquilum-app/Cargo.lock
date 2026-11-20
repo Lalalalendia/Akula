@@ -443,6 +443,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "unicode-segmentation",
+ "ureq",
  "uuid",
  "vello_cpu",
  "windows",
