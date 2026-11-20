@@ -33,6 +33,49 @@ foreach ($path in @($VaultPath, $DataDir)) {
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms -ErrorAction Stop
 . (Join-Path $PSScriptRoot 'windows-beta-gui-input.ps1')
 
+# Native pointer click: AccessKit buttons may not support UIA SetFocus.
+# The click is permitted only inside the verified foreground Akula HWND.
+Add-Type -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+public static class AkulaVideo20Mouse {
+    [StructLayout(LayoutKind.Explicit, Size=40)]
+    public struct Input {
+        [FieldOffset(0)] public uint Type;
+        [FieldOffset(20)] public uint Flags;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Point { public int X; public int Y; }
+    [DllImport("user32.dll", SetLastError=true)] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint owner);
+    [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint n, [In] Input[] data, int size);
+    public static void Click(IntPtr hwnd, int pid, int x, int y) {
+        uint owner;
+        if (hwnd == IntPtr.Zero || GetForegroundWindow() != hwnd ||
+            GetWindowThreadProcessId(hwnd, out owner) == 0 || owner != (uint)pid)
+            throw new InvalidOperationException("VIDEO20 refuses nonforeground Akula click");
+        if (!SetCursorPos(x, y))
+            throw new InvalidOperationException("VIDEO20 pointer move failed");
+        Thread.Sleep(120);
+        var hit = WindowFromPoint(new Point {X=x, Y=y});
+        if (hit == IntPtr.Zero || GetAncestor(hit, 2) != hwnd ||
+            GetForegroundWindow() != hwnd)
+            throw new InvalidOperationException("VIDEO20 refuses pointer outside Akula");
+        var down = new Input[] {new Input {Type=0,Flags=0x0002}};
+        var up = new Input[] {new Input {Type=0,Flags=0x0004}};
+        if (SendInput(1, down, Marshal.SizeOf(typeof(Input))) != 1)
+            throw new InvalidOperationException("VIDEO20 real pointer down failed");
+        Thread.Sleep(90);
+        if (SendInput(1, up, Marshal.SizeOf(typeof(Input))) != 1)
+            throw new InvalidOperationException("VIDEO20 real pointer up failed");
+    }
+}
+'@
+
 $locales = @()
 foreach ($lang in @('en', 'ru')) {
     $file = Join-Path $env:GITHUB_WORKSPACE "aquilum-app\native\assets\locales\$lang.json"
@@ -97,10 +140,15 @@ function Foreground([Diagnostics.Process]$Process) {
 function Press-AkulaButton([Diagnostics.Process]$Process,
     [Windows.Automation.AutomationElement]$Button) {
     $hwnd = Foreground $Process
-    $Button.SetFocus()
-    # A real Win32 keyboard event, not a direct call into the Rust action.
-    # Unlike InvokePattern, this returns while the native Yes/No dialog is open.
-    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $Process.Id, [UInt16]0x0d, $false)
+    $rect = $Button.Current.BoundingRectangle
+    if ($rect.IsEmpty -or $rect.Width -lt 4 -or $rect.Height -lt 4 -or
+        $Button.Current.IsOffscreen -or !$Button.Current.IsEnabled) {
+        throw 'VIDEO20 refuses hidden, disabled or zero-size settings button'
+    }
+    $x = [int][Math]::Round(($rect.Left + $rect.Right) / 2)
+    $y = [int][Math]::Round(($rect.Top + $rect.Bottom) / 2)
+    # A real physical pointer dispatch; never call Akula's Rust handlers.
+    [AkulaVideo20Mouse]::Click($hwnd, $Process.Id, $x, $y)
 }
 function Wait-Dialog([Diagnostics.Process]$Process, [string[]]$Names) {
     for ($i = 0; $i -lt 80; $i++) {
