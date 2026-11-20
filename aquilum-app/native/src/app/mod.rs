@@ -172,6 +172,7 @@ pub struct App {
     hold: Option<Instant>,
     updater: crate::updater::Updater,
     update_shown: crate::updater::Status,
+    #[cfg(windows)] video_tool_revision: u64,
     update_layer: Option<WidgetId>,
     pub open_error: Option<(PathBuf, String)>,
     pub open_error_ids: Option<crate::ui::note::OpenErrorIds>,
