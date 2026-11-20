@@ -57,6 +57,8 @@ class ReviewTest(unittest.TestCase):
         o=M.make_report(inventory(),s,s+b"new platform notice text")
         self.assertFalse(o["upstream_notice"]["byte_exact_match"])
         self.assertEqual(o["upstream_notice"]["status"],"DIFF_REQUIRES_MANUAL_REVIEW")
+        self.assertFalse(o["upstream_notice"]["newline_normalized_match"])
+        self.assertGreater(len(o["upstream_notice"]["changed_normalized_sections"]),0)
         self.assertEqual(o["candidate_group_module_names"],1120)
         self.assertEqual(o["unmapped_module_names"],454)
         f={v["python_root"]:v for v in o["candidate_groups"]}
@@ -67,6 +69,23 @@ class ReviewTest(unittest.TestCase):
                      "binary_constituent_license_review_complete"):
             self.assertFalse(o[name])
         self.assertTrue(all(v["review_status"].startswith("CANDIDATE_ONLY") for v in o["candidate_groups"]))
+
+    def test_crlf_only_difference_is_non_substantive_but_not_legal_approval(self):
+        tagged=(b"Header\n"+b"-"*80+b"\nwebsockets | BSD-3-Clause\nNotice text\n"
+                +b"-"*80+b"\nmutagen | GPL-2.0-or-later\nOther text\n")
+        packed=tagged.replace(b"\n",b"\r\n")
+        report=M.make_report(inventory(),tagged,packed)
+        review=report["upstream_notice"]
+        self.assertFalse(review["byte_exact_match"])
+        self.assertTrue(review["newline_normalized_match"])
+        self.assertEqual(review["status"],"LINE_ENDING_ONLY")
+        self.assertEqual(review["changed_normalized_sections"],[])
+        self.assertEqual(review["size_delta_embedded_minus_tagged"],tagged.count(b"\n"))
+        self.assertFalse(report["complete_corresponding_source_available"])
+        altered=packed.replace(b"Other text",b"Modified notice text")
+        report2=M.make_report(inventory(),tagged,altered)
+        self.assertEqual(report2["upstream_notice"]["status"],"DIFF_REQUIRES_MANUAL_REVIEW")
+        self.assertEqual([x["section"] for x in report2["upstream_notice"]["changed_normalized_sections"]],["mutagen"])
 
     def test_missing_member_count_is_hold(self):
         obj=inventory()
