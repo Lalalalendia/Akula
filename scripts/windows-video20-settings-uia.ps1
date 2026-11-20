@@ -53,6 +53,46 @@ public static class AkulaVideo20Mouse {
     [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint owner);
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint n, [In] Input[] data, int size);
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Rect { public int Left, Top, Right, Bottom; }
+    delegate bool EnumChildProc(IntPtr child, IntPtr param);
+    [DllImport("user32.dll")] static extern IntPtr GetDlgItem(IntPtr dialog, int id);
+    [DllImport("user32.dll")] static extern int GetDlgCtrlID(IntPtr child);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr param);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr hwnd);
+    [DllImport("user32.dll", SetLastError=true)] static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    static IntPtr FindControl(IntPtr dialog, int id) {
+        var direct = GetDlgItem(dialog, id);
+        if (direct != IntPtr.Zero) return direct;
+        IntPtr found = IntPtr.Zero;
+        EnumChildWindows(dialog, (hwnd, arg) => {
+            if (GetDlgCtrlID(hwnd) == id) { found = hwnd; return false; }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+    public static void ClickConsent(IntPtr dialog, int pid, bool yes) {
+        // rfd 0.16 uses Win32 IDYES=6 and IDNO=7 with both
+        // MessageBoxW and TaskDialogIndirect on Windows.
+        IntPtr affirmative = FindControl(dialog, 6);
+        IntPtr negative = FindControl(dialog, 7);
+        if (affirmative == IntPtr.Zero || negative == IntPtr.Zero ||
+            affirmative == negative)
+            throw new InvalidOperationException("VIDEO20 native IDYES/IDNO controls missing");
+        IntPtr target = yes ? affirmative : negative;
+        uint owner;
+        if (!IsWindowVisible(target) || !IsWindowEnabled(target) ||
+            GetWindowThreadProcessId(target, out owner) == 0 ||
+            owner != (uint)pid)
+            throw new InvalidOperationException("VIDEO20 unowned or disabled native consent control");
+        Rect rect;
+        if (!GetWindowRect(target, out rect) || rect.Right-rect.Left < 6 ||
+            rect.Bottom-rect.Top < 6)
+            throw new InvalidOperationException("VIDEO20 native consent control has no bounds");
+        Click(dialog, pid, rect.Left + (rect.Right-rect.Left)/2,
+              rect.Top + (rect.Bottom-rect.Top)/2);
+    }
     public static void Click(IntPtr hwnd, int pid, int x, int y) {
         uint owner;
         if (hwnd == IntPtr.Zero || GetForegroundWindow() != hwnd ||
@@ -169,60 +209,14 @@ function Wait-Dialog([Diagnostics.Process]$Process, [string[]]$Names) {
 }
 function Decide-Dialog([Diagnostics.Process]$Process,
     [Windows.Automation.AutomationElement]$Dialog, [bool]$Accept) {
-    # The native Yes/No button captions vary with Windows locale and may not
-    # be plain "Yes"/"No" in AccessKit/UIA. Verify the system dialog has
-    # exactly TWO visible enabled button rectangles, scoped to the Akula PID.
     $window = [IntPtr]$Dialog.Current.NativeWindowHandle
     if ($window -eq [IntPtr]::Zero -or
         $Dialog.Current.ProcessId -ne $Process.Id) {
         throw 'VIDEO20 refuses unowned or non-native consent dialog'
     }
-    $all = $Dialog.FindAll([Windows.Automation.TreeScope]::Descendants, $buttonCondition)
-    $buttons = @()
-    for ($i = 0; $i -lt $all.Count; $i++) {
-        $item = $all.Item($i)
-        try {
-            $rect = $item.Current.BoundingRectangle
-            if (!$item.Current.IsOffscreen -and $item.Current.IsEnabled -and
-                !$rect.IsEmpty -and $rect.Width -gt 6 -and $rect.Height -gt 6) {
-                $buttons += [pscustomobject]@{
-                    element = $item
-                    left = [double]$rect.Left
-                    name = [string]$item.Current.Name
-                }
-            }
-        } catch [Windows.Automation.ElementNotAvailableException] {}
-    }
-    if ($buttons.Count -ne 2) {
-        # Only inspect the exact verified isolated dialog, never other windows.
-        $seen = @($buttons | ForEach-Object { $_.name.Substring(0,[Math]::Min(40,$_.name.Length)) })
-        throw ("VIDEO20 consent expects exactly two visible UIA buttons; count={0}, labels={1}" -f
-            $buttons.Count, ($seen -join '|'))
-    }
-    $sorted = @($buttons | Sort-Object left)
-    if ($sorted[0].left -ge $sorted[1].left) {
-        throw 'VIDEO20 consent buttons overlap; cannot choose safely'
-    }
-    $yesRu = [regex]::Unescape('\u0414\u0430')
-    $noRu = [regex]::Unescape('\u041d\u0435\u0442')
-    $names = if ($Accept) { @('Yes', '&Yes', $yesRu, ('&' + $yesRu)) }
-             else { @('No', '&No', $noRu, ('&' + $noRu)) }
-    $matched = @($sorted | Where-Object { $names -ccontains $_.name })
-    if ($matched.Count -gt 1) { throw 'VIDEO20 ambiguous native consent captions' }
-    # With unknown OS captions, use MessageBox YesNo's verified left-to-right
-    # button order on a hosted en-US runner: Yes at left, No at right.
-    $choice = if ($matched.Count -eq 1) { $matched[0] }
-              elseif ($Accept) { $sorted[0] }
-              else { $sorted[1] }
-    $rect = $choice.element.Current.BoundingRectangle
-    $x = [int][Math]::Round(($rect.Left + $rect.Right) / 2)
-    $y = [int][Math]::Round(($rect.Top + $rect.Bottom) / 2)
-    # Recheck foreground against the SAME native dialog, not the parent Akula.
-    for ($attempt = 0; $attempt -lt 20; $attempt++) {
-        if ([AkulaBetaGuiInput]::GetForegroundWindow() -eq $window) { break }
-        Start-Sleep -Milliseconds 100
-    }
-    [AkulaVideo20Mouse]::Click($window, $Process.Id, $x, $y)
+    # Real Win32 pointer down/up on the two exact system dialog controls.
+    # No UIA caption heuristics and no direct application message/handler.
+    [AkulaVideo20Mouse]::ClickConsent($window, $Process.Id, $Accept)
 }
 function Wait-Tool([string]$Path, [bool]$Present, [int]$Attempts) {
     for ($i = 0; $i -lt $Attempts; $i++) {
