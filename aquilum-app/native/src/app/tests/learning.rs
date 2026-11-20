@@ -133,3 +133,90 @@ fn lang08_dirty_note_refuses_collection_bind_without_persisting_metadata() {
         "refused collection binding must not modify the saved Markdown file");
     eprintln!("AKULA_LANG08_DIRTY_NATIVE_REFUSAL_PASS=editor_dirty,notice,no_metadata,markdown_unchanged");
 }
+
+#[test]
+fn lang02_changed_table_during_collection_dialog_refuses_stale_bind() {
+    let mut h = Harness::new();
+    let path = h.vault.path().join("a.md");
+    let original = "| Term | Translation |\n| --- | --- |\n| star | звезда |";
+    assert!(h.app.open(&mut h.root, path.clone()));
+    h.replace_body(original);
+    h.save_now();
+    let saved_bytes = std::fs::read(&path).unwrap();
+    assert!(h.app.note.as_ref().is_some_and(|n| n.clean_cache_hash().is_some()));
+
+    // Follow the actual native table pointer and column-mapping UI.
+    let body = h.app.note_ids.as_ref().unwrap().body;
+    let inside = original.find("star").unwrap();
+    h.root.focus_on(Some(body.id()));
+    body.edit(&mut h.root, |mut editor| {
+        crate::ui::editor::TextEditor::select_byte_range(&mut editor, inside, inside);
+    });
+    h.settle();
+    let (x, y) = {
+        let widget = body.get(&h.root).unwrap();
+        let rect = widget.ctx().bounding_box();
+        let top = widget.inner().top_of(0).expect("fixture table layout");
+        (rect.x0 + 70.0, rect.y0 + top + 45.0)
+    };
+    h.click(x, y);
+    assert!(body.get(&h.root).unwrap().inner().study_table_snapshot().is_ok());
+    h.app.open_study_add(&mut h.root);
+    let question = match &h.app.popup {
+        Some(Popup::StudyAddQuestion { layer, .. }) => *layer,
+        _ => panic!("saved note must expose native question picker"),
+    };
+    h.act(question, MenuChoice::Item(0));
+    let answer = match &h.app.popup {
+        Some(Popup::StudyAddAnswer { layer, .. }) => *layer,
+        _ => panic!("question choice must lead to answer picker"),
+    };
+    h.act(answer, MenuChoice::Item(0));
+    let (collection_menu, new_index) = match &h.app.popup {
+        Some(Popup::StudyAddCollection { layer, choices, .. }) => (
+            *layer,
+            choices.iter().position(|(id, _)| id.is_empty()).unwrap(),
+        ),
+        _ => panic!("column mapping must reach collection selection"),
+    };
+    h.act(collection_menu, MenuChoice::Item(new_index));
+    let field = match &h.app.popup {
+        Some(Popup::StudyNewCollection { field, .. }) => field.id(),
+        _ => panic!("New collection must open native name dialog"),
+    };
+    h.act(field, TextAction::Changed("Старая таблица".into()));
+
+    // Deliberately mutate the real underlying editor widget while its modal
+    // is open. This is a stale-snapshot harness probe, not a normal user edit:
+    // modal dispatch can suppress the note's dirty-state notification.
+    // Compare the live parsed table with the captured table explicitly rather
+    // than asserting a synthetic dirty-state transition.
+    let changed = original.replace("star | звезда", "moon | луна");
+    h.replace_body(&changed);
+    assert_eq!(h.body_text(), changed);
+    let current = body.get(&h.root).unwrap().inner().study_complete_note()
+        .expect("modified editor must still contain a valid study table");
+    let dialog = match &h.app.popup {
+        Some(Popup::StudyNewCollection { dialog, pending, .. }) => {
+            assert_ne!(current.selected, pending.table.selected,
+                "stale-dialog fixture must differ from its saved table snapshot");
+            dialog.layer
+        }
+        _ => panic!("stale create dialog unexpectedly disappeared before confirmation"),
+    };
+    h.act(dialog, DialogAnswer::Confirm);
+    assert!(matches!(&h.app.popup, Some(Popup::StudyPreview { .. })),
+        "stale source must refuse with native notice instead of saving membership");
+
+    // The application may create an empty SQLite file when listing collection
+    // choices; no metadata or Markdown side effect is permitted on refusal.
+    let db = h.app.workspace.data_dir.join("language-study.sqlite");
+    let snapshot = StudyStore::open(&db).unwrap().load().unwrap();
+    assert_eq!(snapshot.revision, 0, "stale bind must not advance revision");
+    assert!(snapshot.state.registry.collections.is_empty());
+    assert!(snapshot.state.registry.tables.is_empty());
+    assert!(snapshot.state.anchors.is_empty());
+    assert_eq!(std::fs::read(&path).unwrap(), saved_bytes,
+        "stale create dialog must not modify saved Markdown");
+    eprintln!("AKULA_LANG02_CHANGED_DIALOG_PASS=stale_editor,notice,no_sqlite_write,source_unchanged");
+}
