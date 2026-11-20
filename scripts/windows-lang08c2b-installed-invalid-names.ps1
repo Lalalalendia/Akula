@@ -1139,6 +1139,28 @@ if result is None or result[0]!=0:
   Close-Note -Process $proc;$proc=$null
 
   $studyState=Read-StudyStateHash -Path $studyDb
+
+  # The production default autosave debounce is 1000 ms; genuine OS/UIA
+  # clipboard readback and table-menu traversal take longer than that.
+  # Hold a REAL unsaved edit during this negative witness using Akula's
+  # existing saveDebounceMs setting in this disposable RUNNER_TEMP profile.
+  # No source file, production config, SQLite or user-owned vault is changed.
+  $settingsPath=Join-Path $data 'settings.json'
+  if(!(Test-Path -LiteralPath $settingsPath -PathType Leaf)){
+    throw 'LANG-08c2b5 installed synthetic app settings missing'
+  }
+  $settings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if($null -eq $settings.editor -or $null -eq $settings.editor.saveDebounceMs){
+    throw 'LANG-08c2b5 invalid installed editor settings schema'
+  }
+  $settings.editor.saveDebounceMs=120000
+  $settingsJson=$settings | ConvertTo-Json -Depth 100
+  [IO.File]::WriteAllText($settingsPath,$settingsJson,[Text.UTF8Encoding]::new($false))
+  $readbackSettings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if([int]$readbackSettings.editor.saveDebounceMs -ne 120000){
+    throw 'LANG-08c2b5 synthetic autosave window was not configured'
+  }
+  Write-Host 'AKULA_LANG08C2B5_SYNTHETIC_DEBOUNCE_CONFIG_PASS runner_temp_only=1 debounce_ms=120000'
   $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
   Wait-Window -Process $proc -Needle 'LANG08C Collections'
   Focus-Akula -Process $proc
@@ -1152,11 +1174,11 @@ if result is None or result[0]!=0:
   Assert-Upstream
   Write-Host 'AKULA_LANG08C_INSTALLED_RESTART_PASS reopened=1 study_sqlite_stable=1 source_untouched=1'
 
-  # LANG-08c2b5 reuses the already verified, foreground OS/UIA editor from
-  # the restart test above. A redundant close/reopen raced the clipboard
-  # readback on the first CI attempt before the dirty-note probe had begun.
-  # Do not bypass the real editor: OS Ctrl+A/C above selected the entire note.
-  # Change this valid Markdown table through physical Ctrl+V, without saving.
+  # LANG-08c2b5 reuses the already verified foreground OS/UIA editor
+  # from the restart test above. The test-only long debounce prevents normal
+  # autosave from racing several seconds of OS clipboard verification.
+  # Real Ctrl+A/C selected the whole note; Ctrl+V must change the live
+  # table before the installed Add-to-study refusal is tested.
   $dirtyText=$studyText.Replace('| oxygen | gas |','| helium | gas |')
   if($dirtyText -ceq $studyText -or $dirtyText -notmatch '\| helium \| gas \|'){
     throw 'LANG-08c2b5 invalid synthetic edited table fixture'
