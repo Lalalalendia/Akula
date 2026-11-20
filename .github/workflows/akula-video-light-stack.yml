@@ -109,7 +109,9 @@ jobs:
           assert 'super::queue_dispatch::download_one' in queue
           assert 'optional_ytdlp::verified_executable' in queue
           dispatch=Path('aquilum-app/native/src/video/queue_dispatch.rs').read_text()
-          assert 'super::download::download_one(library, executable, url, on_progress)' in dispatch
+          assert 'super::download::download_one_with_js(library, executable, runtime, url, on_progress)' in dispatch
+          assert 'quickjs.ok_or(' in dispatch
+          assert 'quickjs::verified_executable' in queue
           assert 'super::light::download_one_or_legacy(library, executable, url, on_progress)' in dispatch
           assert '#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]' in dispatch
           assert 'VIDEO_TOOLS_01K_HOLD' in light
