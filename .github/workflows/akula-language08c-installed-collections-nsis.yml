@@ -33,8 +33,8 @@ jobs:
           $ast=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
           if($errors.Count -ne 0){throw ('LANG-08c PowerShell parse errors: '+($errors|Out-String))}
           $source=[IO.File]::ReadAllText($path)
-          foreach($needle in @('AKULA_LANG08C_INSTALLED_EXPORT_PASS','AKULA_LANG08C_INSTALLED_IMPORT_HOLD_PASS',
-             'AKULA_LANG08C_INSTALLED_REBIND_PASS','AKULA_LANG08C_INSTALLED_RESTART_PASS',
+          foreach($needle in @('AKULA_LANG08B_INSTALLED_EXPORT_PASS','AKULA_LANG08B_INSTALLED_IMPORT_HOLD_PASS',
+             'AKULA_LANG08B_INSTALLED_REBIND_PASS','AKULA_LANG08B_INSTALLED_RESTART_PASS',
              'Open-StudyTableMenu','Open-StudyCollectionMenu','Type-StudyName',
              'Get-StudySnapshot','Read-StudyStateHash',
              'AKULA_LANG08C_INSTALLED_CREATE_PASS','AKULA_LANG08C_INSTALLED_RENAME_PASS',
