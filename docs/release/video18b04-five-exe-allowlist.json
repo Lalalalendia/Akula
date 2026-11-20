@@ -54,9 +54,16 @@
       "source_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe",
       "sha256": "f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d",
       "size_bytes": 23575744,
-      "license": "Unlicense",
-      "license_notice": "https://github.com/yt-dlp/yt-dlp/blob/2026.10.26/LICENSE",
-      "license_status": "REVIEW_BUNDLED_DEPENDENCIES"
+      "license": "GPL-3.0-or-later",
+      "license_notice": "https://github.com/yt-dlp/yt-dlp/blob/2026.10.26/THIRD_PARTY_LICENSES.txt",
+      "license_status": "REVIEW_BUNDLED_DEPENDENCIES",
+      "source_license": "Unlicense",
+      "source_license_notice": "https://github.com/yt-dlp/yt-dlp/blob/2026.10.26/LICENSE",
+      "combined_license_evidence": "https://github.com/yt-dlp/yt-dlp/blob/2026.10.26/README.md#licensing",
+      "tag_commit_sha": "f264a6cbd1f630894da0f368df00f8aae50140e0",
+      "readme_blob_sha1": "750fae655ea0d5221bf49901508deb44681f3db0",
+      "third_party_license_blob_sha1": "88f9872c66b456703e91ca32db4041e1ec47258d",
+      "source_license_blob_sha1": "68a49daad8ff7e35068f2b7a97d643aab440eaec"
     },
     {
       "name": "akula-quickjs.exe",
@@ -68,7 +75,9 @@
       "size_bytes": 1873152,
       "license": "MIT",
       "license_notice": "https://github.com/quickjs-ng/quickjs/blob/v0.18.0/LICENSE",
-      "license_status": "REVIEW_NOTICE_PACKAGING"
+      "license_status": "REVIEW_NOTICE_PACKAGING",
+      "tag_commit_sha": "d7215b0ad3fc2c562e8317fd9bca058fd4863804",
+      "license_blob_sha1": "fae657320cdf957cab10654ac39990fdb20e97ef"
     }
   ],
   "blocked_until": [
