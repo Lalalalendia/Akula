@@ -1,0 +1,83 @@
+name: Akula VIDEO-TOOLS-01x pinned Python source acquisition (NONRELEASE)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/scripts/video-tools-01x-sdist-procurement.py'
+      - '.github/scripts/video-tools-01x-sdist-procurement.test.py'
+      - '.github/workflows/akula-video-tools-01x-sources.yml'
+      - 'docs/release/video-tools-01x-pinned-python-sources.md'
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  python-sources:
+    name: Check exact wheel hashes and acquire six pinned PyPI source archives (HOLD)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Validate source-only code and reject fake evidence
+        run: |
+          python3 .github/scripts/video-tools-01t-source-starter.test.py
+          python3 .github/scripts/video-tools-01x-sdist-procurement.test.py
+      - uses: actions/checkout@v4
+        with:
+          repository: yt-dlp/yt-dlp
+          ref: f264a6cbd1f630894da0f368df00f8aae50140e0
+          path: _video_tools_01x_yt
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Acquire source archives strictly from pinned release metadata
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 .github/scripts/video-tools-01x-sdist-procurement.py \
+            docs/release/video18b04-five-exe-allowlist.json \
+            _video_tools_01x_yt \
+            "$RUNNER_TEMP/video-tools-01x-source-HOLD" \
+            | tee "$RUNNER_TEMP/video-tools-01x-proof.log"
+          grep -E '^VIDEO_TOOLS_01X_SOURCE_AUDIT_PASS packages=6 acquired=[0-6] lock_sdists=[0-6] complete_source=0 legal_approval=0 release=0$' \
+            "$RUNNER_TEMP/video-tools-01x-proof.log"
+      - name: Inspect nonrelease manifests, exact PR HEAD and source-only file set
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          d = Path(os.environ["RUNNER_TEMP"])/"video-tools-01x-source-HOLD"
+          m = json.loads((d/"manifest-01x-NOT-COMPLETE.json").read_text("utf8"))
+          assert m["exact_akula_head"] == os.environ["GITHUB_SHA"] or len(m["exact_akula_head"]) == 40
+          assert m["yt_dlp_git_commit_verified"] == "f264a6cbd1f630894da0f368df00f8aae50140e0"
+          assert m["pinned_build_install_records_total"] == 23
+          assert m["selected_source_targets_count"] == 6
+          assert m["source_distributions_acquired_count"] >= 3
+          assert len(m["sources"]) == 6
+          assert not any(m[k] for k in (
+              "release_admitted", "legal_approval", "complete_corresponding_source_available",
+              "corresponding_source_rebuilt_and_verified", "publisher_signing_authorized",
+              "binary_sbom_complete", "notices_packaging_approved",
+              "windows_executables_included_in_source_artifact"))
+          assert all(row["actual_wheel_downloaded_or_verified_in_exe"] is False and
+                     row["corresponding_source_to_actual_wheel_proved"] is False
+                     for row in m["sources"])
+          found = sorted(x.name for x in d.iterdir())
+          expected = sorted(["manifest-01x-NOT-COMPLETE.json", "README-NOT-COMPLETE.txt"] +
+                            [row["source_filename"] for row in m["sources"]
+                             if row["source_archive_acquired"]])
+          assert found == expected
+          print("VIDEO_TOOLS_01X_MANIFEST_NONRELEASE_PASS source_only=1 release=0")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video-tools-01x-six-pypi-sdists-NOT-COMPLETE
+          path: ${{ runner.temp }}/video-tools-01x-source-HOLD/
+          retention-days: 1
+          if-no-files-found: error
+      - name: Remove downloaded source archive bytes from temporary runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/video-tools-01x-source-HOLD"
