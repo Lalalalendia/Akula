@@ -181,7 +181,11 @@ jobs:
             Invoke-Expression $matches[0].Extent.Text
           }
           $temp=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')+'\'
-          $db=Join-Path $env:RUNNER_TEMP ('lang08c-study-'+[guid]::NewGuid().ToString('N')+'.sqlite')
+          # Use the exact production SQLite basename, but only in a freshly
+          # created synthetic directory within RUNNER_TEMP.
+          $fixtureDir=Join-Path $env:RUNNER_TEMP ('lang08c-study-'+[guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $fixtureDir -ErrorAction Stop | Out-Null
+          $db=Join-Path $fixtureDir 'language-study.sqlite'
           $py=@'
           import json
           import sqlite3
@@ -237,7 +241,7 @@ jobs:
             }
             Write-Host 'AKULA_LANG08C2B6_SQLITE_WRITER_CONTRACT_PASS revision_cas=1 mappings_unchanged=1'
           } finally {
-            Remove-Item -LiteralPath $db -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $fixtureDir -Recurse -Force -ErrorAction SilentlyContinue
           }
           Write-Host 'AKULA_LANG08C_SQLITE_CONTRACT_PASS empty=1 named=1 revision=1 preserved_anchors=1'
 
