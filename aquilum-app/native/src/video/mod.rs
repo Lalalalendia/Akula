@@ -1,3 +1,5 @@
+#[cfg(windows)]
+pub(crate) mod optional_ytdlp;
 pub(crate) mod download;
 pub(crate) mod library;
 pub(crate) mod light;
