@@ -25,5 +25,5 @@ pub struct Context {
     pub copied: Option<usize>,
     pub trash_page: usize,
     pub autostart: Option<bool>,
-    pub update: Option<crate::updater::Status>, #[cfg(windows)] pub optional_ytdlp: crate::video::optional_ytdlp::Status,
+    pub update: Option<crate::updater::Status>, #[cfg(windows)] pub optional_ytdlp: crate::video::optional_ytdlp::Status, #[cfg(windows)] pub optional_quickjs: crate::video::optional_ytdlp::Status,
 }
