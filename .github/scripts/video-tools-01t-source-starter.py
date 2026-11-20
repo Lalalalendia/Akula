@@ -150,8 +150,10 @@ def archive_tracked(root,commit,prefix,selectors,must_have):
  with tarfile.open(fileobj=io.BytesIO(raw),mode="r:") as tar:
   for m in tar.getmembers():
    path=m.name
-   need(path.startswith(prefix+"/") and ".." not in path.split("/") and
-        not path.startswith("/") and not path.lower().endswith((".exe",".dll")) and
+   at_source_root=(m.isdir() and path==prefix)
+   need((at_source_root or path.startswith(prefix+"/")) and
+        ".." not in path.split("/") and not path.startswith("/") and
+        not path.lower().endswith((".exe",".dll")) and
         (m.isfile() or m.isdir()),"unsafe or compiled Windows file inside source snapshot")
    if m.isfile():
     names.add(path)
