@@ -211,6 +211,8 @@ def analyze_pyinstaller(wheel_path, source_root, builder_root, head):
                 "recompiled_sha256": sha256(rebuilt) if have else None,
                 "byte_identical": have and data == rebuilt,
             })
+    need(all(row["recompiled_file_present"] for row in results),
+         "compiled MinGW bootloader output missing, cannot compare wheel bytes")
     report = base_report(head, "custom PyInstaller-6.22.0 win_amd64 bootloader")
     matched = sum(x["byte_identical"] for x in results)
     report.update({
