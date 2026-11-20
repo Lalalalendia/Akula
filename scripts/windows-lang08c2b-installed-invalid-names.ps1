@@ -695,6 +695,1246 @@ print(str(row[0])+":"+hashlib.sha256(row[1]).hexdigest())
   return $out
 }
 
+
+# LANG-08c2b6 synthetic second-writer adversary: independently perform a
+# real SQLite IMMEDIATE/CAS update while an installed native modal is OPEN.
+# The only writable target is the disposable RUNNER_TEMP study registry.
+function Synthetic-AdvanceStudyName {
+  param([string]$Path,[int]$ExpectedRevision,[string]$ExpectedName,[string]$NextName)
+  $full=[IO.Path]::GetFullPath($Path)
+  if(!$full.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -or
+     [IO.Path]::GetFileName($full) -cne 'language-study.sqlite' -or
+     !(Test-Path -LiteralPath $full -PathType Leaf) -or
+     ((Get-Item -LiteralPath $full).Attributes -band [IO.FileAttributes]::ReparsePoint)){
+    throw 'LANG-08c2b6 refuses non-synthetic SQLite writer target'
+  }
+  foreach($name in @($ExpectedName,$NextName)){
+    if($name -cnotmatch '^LANG08C-[A-Za-z-]+
+  param([string]$Markdown,[string]$ExpectedHash,[string]$Backup,[string]$BackupHash)
+  if((Get-FileHash -LiteralPath $Markdown -Algorithm SHA256).Hash -cne $ExpectedHash -or
+     (Get-FileHash -LiteralPath $Backup -Algorithm SHA256).Hash -cne $BackupHash){
+    throw 'LANG-08b modified synthetic source Markdown or exported JSON backup'
+  }
+}
+
+
+foreach($lang in @('en','ru')){
+  $p=Join-Path $workspace ("aquilum-app\native\assets\locales\"+$lang+".json")
+  $l=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)|ConvertFrom-Json
+  foreach($k in @('studyAdd','studyNew','studyCreate','studyManage','studyRenameSave','studyDeleteConfirm','studyManageChanged')){
+    $value=[string]$l.editor.table.$k
+    if([string]::IsNullOrWhiteSpace($value)){throw "LANG-08c missing native locale $lang/$k"}
+    if(!$labels.ContainsKey($k)){$labels[$k]=@()}
+    $labels[$k]+=$value
+  }
+}
+
+$installed=$false
+$proc=$null
+$note=$null
+$beforeHash=$null
+$dbState=$null
+New-Item -ItemType Directory -Path $vault,$data -ErrorAction Stop|Out-Null
+New-Item -ItemType Directory -Path $upstream,$updata -ErrorAction Stop|Out-Null
+[IO.File]::WriteAllText((Join-Path $upstream 'sentinel.txt'),'AKULA_LANG08_UPSTREAM')
+[IO.File]::WriteAllText((Join-Path $updata 'sentinel.txt'),'AKULA_LANG08_UPDATA')
+New-Item -Path $upkey -Force|Out-Null
+Set-ItemProperty -Path $upkey -Name DisplayName -Value 'Aquilum'
+function Assert-Upstream {
+  if([IO.File]::ReadAllText((Join-Path $upstream 'sentinel.txt')) -cne 'AKULA_LANG08_UPSTREAM' -or
+     [IO.File]::ReadAllText((Join-Path $updata 'sentinel.txt')) -cne 'AKULA_LANG08_UPDATA' -or
+     (Get-ItemProperty $upkey).DisplayName -cne 'Aquilum') {
+    throw 'LANG-08 installed Akula altered a simulated upstream Aquilum installation'
+  }
+}
+try {
+  $setupProc=Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+  if($setupProc.ExitCode -ne 0){throw "LANG-08 NSIS setup failed ($($setupProc.ExitCode))"}
+  $installed=$true
+  $installedHash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+  if(!(Test-Path -LiteralPath $key) -or
+     (Get-ItemProperty $key).DisplayName -cne 'Akula' -or
+     $installedHash -cne $manifest.compiled_executable_sha256) {
+    throw 'LANG-08 wrong installed NSIS identity or compiled EXE SHA256'
+  }
+  Assert-Upstream
+  $note=Join-Path $vault 'LANG08 Annotation.md'
+  $text='# LANG08 Annotation'+[char]10+[char]10+'alpha eat omega'+[char]10
+  [IO.File]::WriteAllText($note,$text,[Text.UTF8Encoding]::new($false))
+  $beforeHash=(Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
+  $db=Join-Path $data 'text-annotations.sqlite'
+  if(Test-Path -LiteralPath $db){throw 'LANG-08 cold sidecar was unexpectedly present'}
+  $proc=Open-Note -Note $note -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
+  Focus-Akula -Process $proc
+  $window=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]$proc.MainWindowHandle)
+  if($null -eq $window){throw 'LANG-08 installed window has no UIA tree'}
+  $body=Select-EditorBody -Root $window
+  Readback-Selected -Process $proc -Expected $text
+
+  # Negative: exact selection + real context menu + rebind with no sidecar.
+  Click-Visible -Target $body -Window $window -Process $proc -Right
+  $reb=Wait-Visible -Root $window -Names $labels.rebind -Type ([Windows.Automation.ControlType]::MenuItem)
+  Click-Visible -Target $reb -Window $window -Process $proc
+  if(Test-Path -LiteralPath $db){throw 'LANG-08 invalid HOLD rebind created a database'}
+  if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash){
+    throw 'LANG-08 invalid rebind modified Markdown'
+  }
+  # The failed rebind deliberately raises a *modal* study_notice (AlertDialog).
+  # Do not try to interact with the obscured editor until we close it through
+  # the actual installed Windows UI. This modal is part of the negative test.
+  $closeNotice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $closeNotice -Window $window -Process $proc
+  # UIAutomation can retain a stale exposed Close button after the native
+  # modal begins its fade-out. Presence of that label in the broad root tree
+  # is NOT evidence the dialog still owns focus. Verify real behavior instead:
+  # regain the editor, read back exact Markdown with physical Ctrl+A/C and
+  # prove that its actual context menu is openable through the OS mouse.
+  Start-Sleep -Milliseconds 400
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  Readback-Selected -Process $proc -Expected $text
+  Click-Visible -Target $body -Window $window -Process $proc -Right
+  $highlight=Wait-Visible -Root $window -Names $labels.highlight -Type ([Windows.Automation.ControlType]::MenuItem)
+  Write-Host 'AKULA_LANG08_INSTALLED_REBIND_DENY_PASS genuine_nsis=1 os_mouse=1 sidecar_created=0 source_unchanged=1 editor_access_restored=1'
+  Click-Visible -Target $highlight -Window $window -Process $proc
+  $yellow=Wait-Visible -Root $window -Names $labels.yellow -Type ([Windows.Automation.ControlType]::MenuItem)
+  Click-Visible -Target $yellow -Window $window -Process $proc
+  $dbReady=$false
+  for($i=0;$i -lt 80;$i++){
+    Start-Sleep -Milliseconds 150
+    if(Test-Path -LiteralPath $db -PathType Leaf){
+      $info=Get-Item -LiteralPath $db
+      if($info.Length -gt 512){$dbReady=$true;break}
+    }
+  }
+  if(!$dbReady){throw 'LANG-08 real OS highlight never persisted SQLite'}
+  $header=[IO.File]::ReadAllBytes($db)
+  if([Text.Encoding]::ASCII.GetString($header,0,15) -cne 'SQLite format 3'){
+    throw 'LANG-08 native annotation sidecar is not a SQLite database'
+  }
+  if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash){
+    throw 'LANG-08 highlight modified source Markdown'
+  }
+  Write-Host 'AKULA_LANG08_INSTALLED_HIGHLIGHT_PASS genuine_nsis=1 real_color_menu=1 sqlite=1 source_unchanged=1'
+
+  Focus-Akula -Process $proc
+  $actions=Wait-Visible -Root $window -Names $labels.actions -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $actions -Window $window -Process $proc
+  [void](Wait-Visible -Root $window -Names $labels.backupExport -Type ([Windows.Automation.ControlType]::MenuItem))
+  [void](Wait-Visible -Root $window -Names $labels.backupImport -Type ([Windows.Automation.ControlType]::MenuItem))
+  Write-Host 'AKULA_LANG08_INSTALLED_BACKUP_MENU_PASS genuine_nsis=1 export_visible=1 import_visible=1'
+  Close-Note -Process $proc;$proc=$null
+  $dbState=Read-AnnotationState -Path $db
+  if($dbState -notmatch '^[1-9][0-9]*:[a-f0-9]{64}$'){
+    throw 'LANG-08 installed highlight missing positive SQLite revision and payload digest'
+  }
+
+  $proc=Open-Note -Note $note -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
+  Focus-Akula -Process $proc
+  $reopened=Wait-EditorBody -Process $proc -Needle 'LANG08 Annotation'
+  $window=$reopened.Window
+  if($null -eq $reopened.Editor){throw 'LANG-08 restart returned no editor'}
+  Readback-Selected -Process $proc -Expected $text
+  Close-Note -Process $proc;$proc=$null
+  if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash -or
+     (Read-AnnotationState -Path $db) -cne $dbState){
+    throw 'LANG-08 restart modified Markdown or saved annotation SQLite'
+  }
+  Assert-Upstream
+  Write-Host 'AKULA_LANG08_INSTALLED_RESTART_PASS genuine_nsis=1 reopened=1 sqlite_unchanged=1 markdown_sha256=1'
+
+  # LANG-08b starts after the independent LANG-08a restart witness.
+  # Everything below runs on a genuine, unsigned, installed Akula binary.
+  $backup=Join-Path $env:RUNNER_TEMP 'lang08b-disposable.annotations.json'
+  $archive=Join-Path $env:RUNNER_TEMP 'lang08b-original-sidecar.sqlite'
+  if((Test-Path -LiteralPath $backup) -or (Test-Path -LiteralPath $archive)){
+    throw 'LANG-08b refuses stale disposable backup/archive fixture'
+  }
+  $original=Get-AnnotationSnapshot -Path $db
+  if($original.record_count -ne 1 -or $original.status -cne 'current' -or
+     $original.revision -lt 1){throw 'LANG-08b expected one genuine current highlight'}
+  $proc=Open-Note -Note $note -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08 Annotation'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $text
+  $actions=Wait-Visible -Root $window -Names $labels.actions -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $actions -Window $window -Process $proc
+  $export=Wait-Visible -Root $window -Names $labels.backupExport -Type ([Windows.Automation.ControlType]::MenuItem)
+  $appWindowHandle=[IntPtr]$proc.MainWindowHandle
+  Click-Visible -Target $export -Window $window -Process $proc
+  Choose-FileThroughNativeDialog -Process $proc -Path $backup -AppWindowHandle $appWindowHandle
+  $backupReady=$false
+  for($i=0;$i -lt 90;$i++){
+    Start-Sleep -Milliseconds 200
+    if(Test-Path -LiteralPath $backup -PathType Leaf){
+      if((Get-Item -LiteralPath $backup).Length -gt 40){$backupReady=$true;break}
+    }
+  }
+  if(!$backupReady){throw 'LANG-08b real Save dialog did not create synthetic backup'}
+  $backupJson=[IO.File]::ReadAllText($backup,[Text.Encoding]::UTF8)|ConvertFrom-Json
+  # Rust serde serializes TextAnchor.selected_digest as an array of 32
+  # byte values. Compare stable lowercase hex, never PS array identity.
+  $backupDigestValues=@($backupJson.records[0].anchor.selected_digest)
+  if($backupDigestValues.Count -ne 32){throw 'LANG-08b invalid backup digest length'}
+  $backupDigestBytes=New-Object byte[] 32
+  for($i=0;$i -lt 32;$i++){
+    # Windows PowerShell ConvertFrom-Json can represent JSON integers as
+    # Int64 rather than Int32. Accept either native integer representation,
+    # but refuse booleans, floating point values and out-of-range bytes.
+    $value=$backupDigestValues[$i]
+    if($value -is [bool] -or
+       !($value -is [int] -or $value -is [long]) -or
+       $value -lt 0 -or $value -gt 255){
+      throw 'LANG-08b invalid backup digest byte'
+    }
+    $backupDigestBytes[$i]=[byte]$value
+  }
+  $backupDigest=[BitConverter]::ToString($backupDigestBytes).Replace('-','').ToLowerInvariant()
+  if($backupJson.format -cne 'akula-text-annotations' -or $backupJson.version -ne 1 -or
+     @($backupJson.records).Count -ne 1 -or
+     $backupJson.records[0].status -cne 'current' -or
+     $backupJson.records[0].anchor.annotation_id -cne $original.annotation_id -or
+     $backupDigest -cne $original.selected_digest -or
+     ([IO.File]::ReadAllText($backup)).Contains('alpha eat omega')){
+    throw 'LANG-08b saved backup has invalid metadata scope or leaked Markdown'
+  }
+  $backupHash=(Get-FileHash -LiteralPath $backup -Algorithm SHA256).Hash
+  Assert-SyntheticUnchanged -Markdown $note -ExpectedHash $beforeHash -Backup $backup -BackupHash $backupHash
+  $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $notice -Window $window -Process $proc
+  Start-Sleep -Milliseconds 400
+  Close-Note -Process $proc;$proc=$null
+  Write-Host 'AKULA_LANG08B_INSTALLED_EXPORT_PASS native_save_picker=1 document_scoped=1 json=1 markdown_sha256=1'
+
+  # The *disposable* sidecar is archived only with Akula closed, so import
+  # cannot silently merge into existing metadata or overwrite the old record.
+  # Checkpoint, close and then move the actual SQLite file; refuse stale WAL.
+  $checkpoint=@'
+import sqlite3
+import sys
+with sqlite3.connect(sys.argv[1]) as db:
+    result=db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+if result is None or result[0]!=0:
+    raise ValueError("SQLite WAL checkpoint busy")
+'@
+  $null=($checkpoint | & python - $db)
+  if($LASTEXITCODE -ne 0){throw 'LANG-08b failed synthetic SQLite checkpoint'}
+  foreach($side in @($db+'-wal',$db+'-shm')){
+    if(Test-Path -LiteralPath $side){
+      throw 'LANG-08b refuses an unclosed SQLite WAL or SHM file'
+    }
+  }
+  if((Read-AnnotationState -Path $db) -cne $dbState){
+    throw 'LANG-08b changed sidecar before archiving'
+  }
+  Move-Item -LiteralPath $db -Destination $archive -ErrorAction Stop
+  if(Test-Path -LiteralPath $db){throw 'LANG-08b expected a cold sidecar after archive'}
+
+  $proc=Open-Note -Note $note -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08 Annotation'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $text
+  if(Test-Path -LiteralPath $db){
+    $cold=Get-AnnotationSnapshot -Path $db
+    if($cold.record_count -ne 0 -or $cold.revision -ne 0){
+      throw 'LANG-08b fresh sidecar was not empty before import'
+    }
+  }
+  $actions=Wait-Visible -Root $window -Names $labels.actions -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $actions -Window $window -Process $proc
+  $import=Wait-Visible -Root $window -Names $labels.backupImport -Type ([Windows.Automation.ControlType]::MenuItem)
+  $appWindowHandle=[IntPtr]$proc.MainWindowHandle
+  Click-Visible -Target $import -Window $window -Process $proc
+  Choose-FileThroughNativeDialog -Process $proc -Path $backup -AppWindowHandle $appWindowHandle
+  $held=$null
+  for($i=0;$i -lt 90;$i++){
+    Start-Sleep -Milliseconds 200
+    if(Test-Path -LiteralPath $db -PathType Leaf){
+      $held=Get-AnnotationSnapshot -Path $db
+      if($held.record_count -eq 1 -and $held.status -ceq 'needs_rebind'){break}
+    }
+  }
+  if($null -eq $held -or $held.record_count -ne 1 -or
+     $held.status -cne 'needs_rebind' -or $held.revision -lt 1 -or
+     $held.annotation_id -cne $original.annotation_id -or
+     $held.selected_digest -cne $original.selected_digest -or
+     $held.color -cne $original.color){
+    throw 'LANG-08b installed import failed to restore matching annotation on HOLD'
+  }
+  Assert-SyntheticUnchanged -Markdown $note -ExpectedHash $beforeHash -Backup $backup -BackupHash $backupHash
+  Write-Host 'AKULA_LANG08B_INSTALLED_IMPORT_HOLD_PASS native_open_picker=1 needs_rebind=1 no_auto_attach=1'
+  $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $notice -Window $window -Process $proc
+  Start-Sleep -Milliseconds 400
+
+  # User explicitly selects the same text with physical Ctrl+A/C, right-clicks,
+  # then invokes rebind through the actual installed context menu. No Core API
+  # injection and no direct SQLite mutation is used for import or rebind.
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  Readback-Selected -Process $proc -Expected $text
+  Click-Visible -Target $body -Window $window -Process $proc -Right
+  $rebind=Wait-Visible -Root $window -Names $labels.rebind -Type ([Windows.Automation.ControlType]::MenuItem)
+  Click-Visible -Target $rebind -Window $window -Process $proc
+  $restored=$null
+  for($i=0;$i -lt 90;$i++){
+    Start-Sleep -Milliseconds 200
+    $restored=Get-AnnotationSnapshot -Path $db
+    if($restored.status -ceq 'current' -and $restored.revision -gt $held.revision){break}
+  }
+  if($null -eq $restored -or $restored.status -cne 'current' -or
+     $restored.record_count -ne 1 -or $restored.revision -le $held.revision -or
+     $restored.annotation_id -cne $original.annotation_id -or
+     $restored.selected_digest -cne $original.selected_digest -or
+     $restored.color -cne $original.color){
+    throw 'LANG-08b selected installed rebind did not convert HOLD to Current'
+  }
+  Assert-SyntheticUnchanged -Markdown $note -ExpectedHash $beforeHash -Backup $backup -BackupHash $backupHash
+  Write-Host 'AKULA_LANG08B_INSTALLED_REBIND_PASS real_os_selection=1 explicit_menu=1 sqlite_cas=1 markdown_sha256=1'
+  $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $notice -Window $window -Process $proc
+  Close-Note -Process $proc;$proc=$null
+  $restoredState=Read-AnnotationState -Path $db
+  $proc=Open-Note -Note $note -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08 Annotation'
+  Readback-Selected -Process $proc -Expected $text
+  Close-Note -Process $proc;$proc=$null
+  if((Read-AnnotationState -Path $db) -cne $restoredState){
+    throw 'LANG-08b installed restart changed restored SQLite annotation'
+  }
+  Assert-SyntheticUnchanged -Markdown $note -ExpectedHash $beforeHash -Backup $backup -BackupHash $backupHash
+  Assert-Upstream
+  Write-Host 'AKULA_LANG08B_INSTALLED_RESTART_PASS reopened=1 restored_sqlite_stable=1 source_untouched=1'
+
+  # LANG-08c: a real installed UIA/OS-backed named collections lifecycle.
+  # The prior LANG-08b suite has already verified this unsigned NSIS,
+  # annotation sidecar and original Markdown; it is not modified here.
+  $studyNote=Join-Path $vault 'LANG08C Collections.md'
+  $studyText='| Q | A |'+[char]10+'| --- | --- |'+[char]10+
+    '| oxygen | gas |'+[char]10+'| sodium | metal |'+[char]10
+  [IO.File]::WriteAllText($studyNote,$studyText,[Text.UTF8Encoding]::new($false))
+  $studyHash=(Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash
+  $studyDb=Join-Path $data 'language-study.sqlite'
+  if(Test-Path -LiteralPath $studyDb){
+    $cold=Get-StudySnapshot -Path $studyDb
+    if($cold.revision -ne 0 -or $cold.count -ne 0 -or
+       $cold.table_count -ne 0 -or $cold.anchor_count -ne 0){
+      throw 'LANG-08c expected an empty synthetic study registry'
+    }
+  }
+  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08C Collections'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $studyText
+
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyNew
+  [void](Wait-Visible -Root $window -Names $labels.studyCreate -Type ([Windows.Automation.ControlType]::Button))
+  Type-StudyName -Process $proc -Name 'LANG08C-Biology'
+  $create=Wait-Visible -Root $window -Names $labels.studyCreate -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $create -Window $window -Process $proc
+  $created=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-Biology'
+  if($created.revision -lt 1 -or [string]::IsNullOrWhiteSpace($created.id) -or
+     $created.members -ne 1 -or $created.table_count -ne 1 -or
+     $created.anchor_count -ne 1){
+    throw 'LANG-08c installed collection creation has wrong SQLite identity/bindings'
+  }
+  if((Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c native collection creation modified source Markdown'
+  }
+  Write-Host 'AKULA_LANG08C_INSTALLED_CREATE_PASS os_table_menu=1 native_name_dialog=1 sqlite_member=1 source_unchanged=1'
+  Close-StudyNotice -Window $window -Process $proc
+
+  # LANG-08c2a: real installed refusal for case-insensitive duplicate and
+  # empty names. Establish one valid collection via the GUI above, then prove
+  # each failed create leaves the real SQLite payload/revision and Markdown
+  # unchanged. No test-side data mutation or bypass of the native app.
+  $negativeBefore=Read-StudyStateHash -Path $studyDb
+  foreach($case in @('duplicate','empty','too-long','bidi')){
+    Open-StudyCollectionMenu -Window $window -Process $proc
+    Study-Choose -Window $window -Process $proc -Names $labels.studyNew
+    $create=Wait-Visible -Root $window -Names $labels.studyCreate -Type ([Windows.Automation.ControlType]::Button)
+    if($case -ceq 'duplicate'){
+      Type-StudyName -Process $proc -Name 'LANG08C-BIOLOGY'
+    } elseif($case -ceq 'too-long' -or $case -ceq 'bidi'){
+      Type-StudyInvalidName -Process $proc -Case $case
+    }
+    $create=Wait-Visible -Root $window -Names $labels.studyCreate -Type ([Windows.Automation.ControlType]::Button)
+    Click-Visible -Target $create -Window $window -Process $proc
+    Start-Sleep -Milliseconds 200
+    # A refusal must replace the create modal with an error notice, rather
+    # than merely leave the pending create dialog open or silently succeed.
+    if($null -ne (Find-Visible -Root $window -Names $labels.studyCreate -Type ([Windows.Automation.ControlType]::Button))){
+      throw "LANG-08c2 $case did not leave the native create dialog"
+    }
+    $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+    $snapshot=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-Biology'
+    if($snapshot.id -cne $created.id -or $snapshot.revision -ne $created.revision -or
+       $snapshot.members -ne $created.members -or
+       $snapshot.table_count -ne $created.table_count -or
+       $snapshot.anchor_count -ne $created.anchor_count -or
+       (Read-StudyStateHash -Path $studyDb) -cne $negativeBefore -or
+       (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+      throw "LANG-08c2 $case refusal changed real SQLite identity/payload or Markdown"
+    }
+    if($case -ceq 'duplicate'){
+      Write-Host 'AKULA_LANG08C2_INSTALLED_DUPLICATE_PASS native_refusal=1 case_insensitive=1 sqlite_unchanged=1 markdown_sha256=1'
+    } elseif($case -ceq 'empty') {
+      Write-Host 'AKULA_LANG08C2_INSTALLED_EMPTY_PASS native_refusal=1 empty_name=1 sqlite_unchanged=1 markdown_sha256=1'
+    } elseif($case -ceq 'too-long') {
+      Write-Host 'AKULA_LANG08C2B_INSTALLED_OVERLONG_PASS native_refusal=1 length_gt_64=1 sqlite_unchanged=1 markdown_sha256=1'
+    } else {
+      Write-Host 'AKULA_LANG08C2B_INSTALLED_BIDI_PASS native_refusal=1 bidi_control=1 sqlite_unchanged=1 markdown_sha256=1'
+    }
+    Click-Visible -Target $notice -Window $window -Process $proc
+    Start-Sleep -Milliseconds 400
+  }
+  Close-Note -Process $proc;$proc=$null
+
+  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08C Collections'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $studyText
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyManage
+  Study-Choose -Window $window -Process $proc -Names @('Rename: LANG08C-Biology')
+  [void](Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button))
+  Type-StudyName -Process $proc -Name 'LANG08C-Botany'
+  $save=Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $save -Window $window -Process $proc
+  $renamed=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-Botany'
+  if($renamed.revision -le $created.revision -or $renamed.id -cne $created.id -or
+     $renamed.members -ne $created.members -or
+     $renamed.table_count -ne $created.table_count -or
+     $renamed.anchor_count -ne $created.anchor_count){
+    throw 'LANG-08c installed rename changed collection identity or table mappings'
+  }
+  Write-Host 'AKULA_LANG08C_INSTALLED_RENAME_PASS os_dialog=1 stable_id=1 table_mappings=1'
+  Close-StudyNotice -Window $window -Process $proc
+
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyManage
+  Study-Choose -Window $window -Process $proc -Names @('Delete: LANG08C-Botany')
+  $cancel=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $cancel -Window $window -Process $proc
+  $afterCancel=Get-StudySnapshot -Path $studyDb
+  if($afterCancel.revision -ne $renamed.revision -or
+     $afterCancel.id -cne $created.id -or $afterCancel.name -cne $renamed.name){
+    throw 'LANG-08c cancelled installed delete modified SQLite revision or collection'
+  }
+  Write-Host 'AKULA_LANG08C_INSTALLED_CANCEL_PASS native_confirmation=1 sqlite_unchanged=1'
+  Start-Sleep -Milliseconds 400
+
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyManage
+  Study-Choose -Window $window -Process $proc -Names @('Delete: LANG08C-Botany')
+  $confirm=Wait-Visible -Root $window -Names $labels.studyDeleteConfirm -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $confirm -Window $window -Process $proc
+  $deleted=Require-StudySnapshot -Path $studyDb -Count 0 -Name $null
+  if($deleted.revision -le $renamed.revision -or
+     $deleted.table_count -ne $created.table_count -or
+     $deleted.anchor_count -ne $created.anchor_count){
+    throw 'LANG-08c installed delete damaged table/anchor records'
+  }
+  if((Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c installed delete changed source Markdown'
+  }
+  Write-Host 'AKULA_LANG08C_INSTALLED_DELETE_PASS native_confirmation=1 collection_gone=1 tables_preserved=1 markdown_sha256=1'
+  Close-StudyNotice -Window $window -Process $proc
+  Close-Note -Process $proc;$proc=$null
+
+  $studyState=Read-StudyStateHash -Path $studyDb
+
+  # The production default autosave debounce is 1000 ms; genuine OS/UIA
+  # clipboard readback and table-menu traversal take longer than that.
+  # Hold a REAL unsaved edit during this negative witness using Akula's
+  # existing saveDebounceMs setting in this disposable RUNNER_TEMP profile.
+  # No source file, production config, SQLite or user-owned vault is changed.
+  $settingsPath=Join-Path $data 'settings.json'
+  if(!(Test-Path -LiteralPath $settingsPath -PathType Leaf)){
+    throw 'LANG-08c2b5 installed synthetic app settings missing'
+  }
+  $settings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if($null -eq $settings.editor -or $null -eq $settings.editor.saveDebounceMs){
+    throw 'LANG-08c2b5 invalid installed editor settings schema'
+  }
+  $settings.editor.saveDebounceMs=120000
+  $settingsJson=$settings | ConvertTo-Json -Depth 100
+  [IO.File]::WriteAllText($settingsPath,$settingsJson,[Text.UTF8Encoding]::new($false))
+  $readbackSettings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if([int]$readbackSettings.editor.saveDebounceMs -ne 120000){
+    throw 'LANG-08c2b5 synthetic autosave window was not configured'
+  }
+  Write-Host 'AKULA_LANG08C2B5_SYNTHETIC_DEBOUNCE_CONFIG_PASS runner_temp_only=1 debounce_ms=120000'
+  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08C Collections'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  # If Akula rejects/overwrites a test-only JSON setting, the negative
+  # fixture is invalid: fail before editing rather than silently testing
+  # a note that will autosave during OS/UIA traversal.
+  $runtimeSettings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if((Test-Path -LiteralPath ($settingsPath+'.unreadable')) -or
+     [int]$runtimeSettings.editor.saveDebounceMs -ne 120000){
+    throw 'LANG-08c2b5 installed settings did not retain disposable unsaved window'
+  }
+  Readback-Selected -Process $proc -Expected $studyText
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c installed restart changed study SQLite or Markdown'
+  }
+  Assert-Upstream
+  Write-Host 'AKULA_LANG08C_INSTALLED_RESTART_PASS reopened=1 study_sqlite_stable=1 source_untouched=1'
+
+  # LANG-08c2b5 reuses the already verified foreground OS/UIA editor
+  # from the restart test above. The test-only long debounce prevents normal
+  # autosave from racing several seconds of OS clipboard verification.
+  # Real Ctrl+A/C selected the whole note; Ctrl+V must change the live
+  # table before the installed Add-to-study refusal is tested.
+  $dirtyText=$studyText.Replace('| oxygen | gas |','| helium | gas |')
+  if($dirtyText -ceq $studyText -or $dirtyText -notmatch '\| helium \| gas \|'){
+    throw 'LANG-08c2b5 invalid synthetic edited table fixture'
+  }
+  $hwnd=[IntPtr]$proc.MainWindowHandle
+  [Windows.Forms.Clipboard]::SetText($dirtyText)
+  if([Windows.Forms.Clipboard]::GetText() -cne $dirtyText){
+    throw 'LANG-08c2b5 synthetic editor clipboard mismatch'
+  }
+  # Readback-Selected left the real editor selected via OS Ctrl+A/C.
+  # Physical Ctrl+V enters a valid changed table with the editor focused.
+  [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x56)
+  # Winit dispatches ClipboardPaste as an editor event; replacing clipboard
+  # immediately with Readback-Selected's poison can race the paste read.
+  # Let the app consume the synthetic clipboard before the readback changes it.
+  Start-Sleep -Milliseconds 750
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  Write-Host 'LANG08C2B5_PASTE_DIAGNOSTIC settled_before_clipboard_poison=1'
+  Readback-Selected -Process $proc -Expected $dirtyText
+  if((Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 cannot establish unsaved note; fixture already persisted'
+  }
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState){
+    throw 'LANG-08c2b5 synthetic study registry changed before refusal'
+  }
+  $add=Open-StudyTableMenu -Window $window -Process $proc
+  Click-Visible -Target $add -Window $window -Process $proc
+  $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  # An unsaved note must not enter the question-column picker.
+  $middot=[char]0x00b7
+  if($null -ne (Find-Visible -Root $window -Names @("1 $middot Q") -Type ([Windows.Automation.ControlType]::MenuItem))){
+    throw 'LANG-08c2b5 dirty note reached study column mapping'
+  }
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 installed dirty-note refusal changed SQLite or saved Markdown'
+  }
+  Write-Host 'AKULA_LANG08C2B_INSTALLED_DIRTY_NOTE_PASS os_editor_paste=1 native_refusal=1 sqlite_unchanged=1 markdown_sha256=1'
+  Click-Visible -Target $notice -Window $window -Process $proc
+  Start-Sleep -Milliseconds 400
+
+  # Undo the ONE verified synthetic paste through real OS Ctrl+Z.
+  # After a table-menu refusal, Ctrl+A targets a selected table cell rather
+  # than the document; trying to paste the whole note overwrites that cell.
+  # The native table_key Undo path explicitly leaves the table session, then
+  # the editor undo stack restores the entire original Markdown in memory.
+  # This is not a filesystem fixture rewrite or an injected app action.
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x5A)
+  Start-Sleep -Milliseconds 600
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  Readback-Selected -Process $proc -Expected $studyText
+  Close-Note -Process $proc;$proc=$null
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 restoring fixture changed SQLite or Markdown on installed exit'
+  }
+  Assert-Upstream
+
+} finally {
+  if($null -ne $proc){
+    $proc.Refresh()
+    if(!$proc.HasExited){$proc.Kill();$proc.WaitForExit()}
+    $proc.Dispose()
+  }
+  if($installed){
+    $uninstaller=Join-Path $install 'uninstall.exe'
+    if(!(Test-Path -LiteralPath $uninstaller -PathType Leaf)){
+      throw 'LANG-08 genuine NSIS uninstaller missing'
+    }
+    $remove=Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+    if($remove.ExitCode -ne 0 -or (Test-Path -LiteralPath $exe) -or (Test-Path -LiteralPath $key)){
+      throw 'LANG-08 NSIS uninstall failed or retained installed identity'
+    }
+    Assert-Upstream
+    if($null -ne $beforeHash -and
+       (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash){
+      throw 'LANG-08 uninstall changed synthetic Markdown'
+    }
+    Write-Host 'AKULA_LANG08_INSTALLED_UNINSTALL_PASS clean=1 upstream_untouched=1 data_preserved=1'
+  }
+}
+ -or $name.Length -gt 64){
+      throw 'LANG-08c2b6 refuses non-synthetic collection name'
+    }
+  }
+  $code=@'
+import hashlib
+import json
+import os
+from pathlib import Path
+import sqlite3
+import sys
+db=Path(sys.argv[1]).resolve()
+runner=Path(os.environ["RUNNER_TEMP"]).resolve()
+if runner not in db.parents or db.name!="language-study.sqlite":
+    raise ValueError("Refusing foreign SQLite path")
+rev=int(sys.argv[2])
+before=sys.argv[3]
+after=sys.argv[4]
+if not (before.startswith("LANG08C-") and after.startswith("LANG08C-")
+        and before!=after):
+    raise ValueError("Non-synthetic concurrent names")
+with sqlite3.connect(db,timeout=10) as c:
+    c.execute("BEGIN IMMEDIATE")
+    row=c.execute("SELECT revision,payload FROM language_study_state WHERE id=1").fetchone()
+    if row is None or row[0]!=rev or row[0]<0:
+        raise ValueError("Synthetic writer lost its expected SQLite revision")
+    payload=json.loads(row[1])
+    if payload.get("version")!=1 or not isinstance(payload.get("state"),dict):
+        raise ValueError("Unexpected study payload schema")
+    state=payload["state"]
+    registry=state["registry"]
+    groups=registry["collections"]
+    if len(groups)!=1 or groups[0]["name"]!=before or groups[0]["id"]=="common":
+        raise ValueError("Unexpected collection in synthetic concurrency fixture")
+    unchanged=json.dumps([registry["tables"],state["anchors"],groups[0]["members"]],
+                         sort_keys=True,ensure_ascii=False)
+    groups[0]["name"]=after
+    if json.dumps([registry["tables"],state["anchors"],groups[0]["members"]],
+                  sort_keys=True,ensure_ascii=False)!=unchanged:
+        raise ValueError("Writer changed mappings/anchors/members")
+    body=json.dumps(payload,ensure_ascii=False,separators=(",",":")).encode("utf-8")
+    if len(body)>1024*1024:
+        raise ValueError("Synthetic study state exceeds app bound")
+    next_rev=rev+1
+    cur=c.execute("UPDATE language_study_state SET revision=?,payload=? WHERE id=1 AND revision=?",
+                  (next_rev,sqlite3.Binary(body),rev))
+    if cur.rowcount!=1:
+        raise ValueError("SQLite writer CAS did not update exactly one row")
+    c.commit()
+print(str(next_rev)+":"+hashlib.sha256(body).hexdigest())
+'@
+  $out=($code | & python - $full ([string]$ExpectedRevision) $ExpectedName $NextName | Out-String).Trim()
+  if($LASTEXITCODE -ne 0 -or $out -notmatch '^\d+:[a-f0-9]{64}
+  param([string]$Markdown,[string]$ExpectedHash,[string]$Backup,[string]$BackupHash)
+  if((Get-FileHash -LiteralPath $Markdown -Algorithm SHA256).Hash -cne $ExpectedHash -or
+     (Get-FileHash -LiteralPath $Backup -Algorithm SHA256).Hash -cne $BackupHash){
+    throw 'LANG-08b modified synthetic source Markdown or exported JSON backup'
+  }
+}
+
+
+foreach($lang in @('en','ru')){
+  $p=Join-Path $workspace ("aquilum-app\native\assets\locales\"+$lang+".json")
+  $l=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)|ConvertFrom-Json
+  foreach($k in @('studyAdd','studyNew','studyCreate','studyManage','studyRenameSave','studyDeleteConfirm')){
+    $value=[string]$l.editor.table.$k
+    if([string]::IsNullOrWhiteSpace($value)){throw "LANG-08c missing native locale $lang/$k"}
+    if(!$labels.ContainsKey($k)){$labels[$k]=@()}
+    $labels[$k]+=$value
+  }
+}
+
+$installed=$false
+$proc=$null
+$note=$null
+$beforeHash=$null
+$dbState=$null
+New-Item -ItemType Directory -Path $vault,$data -ErrorAction Stop|Out-Null
+New-Item -ItemType Directory -Path $upstream,$updata -ErrorAction Stop|Out-Null
+[IO.File]::WriteAllText((Join-Path $upstream 'sentinel.txt'),'AKULA_LANG08_UPSTREAM')
+[IO.File]::WriteAllText((Join-Path $updata 'sentinel.txt'),'AKULA_LANG08_UPDATA')
+New-Item -Path $upkey -Force|Out-Null
+Set-ItemProperty -Path $upkey -Name DisplayName -Value 'Aquilum'
+function Assert-Upstream {
+  if([IO.File]::ReadAllText((Join-Path $upstream 'sentinel.txt')) -cne 'AKULA_LANG08_UPSTREAM' -or
+     [IO.File]::ReadAllText((Join-Path $updata 'sentinel.txt')) -cne 'AKULA_LANG08_UPDATA' -or
+     (Get-ItemProperty $upkey).DisplayName -cne 'Aquilum') {
+    throw 'LANG-08 installed Akula altered a simulated upstream Aquilum installation'
+  }
+}
+try {
+  $setupProc=Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+  if($setupProc.ExitCode -ne 0){throw "LANG-08 NSIS setup failed ($($setupProc.ExitCode))"}
+  $installed=$true
+  $installedHash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+  if(!(Test-Path -LiteralPath $key) -or
+     (Get-ItemProperty $key).DisplayName -cne 'Akula' -or
+     $installedHash -cne $manifest.compiled_executable_sha256) {
+    throw 'LANG-08 wrong installed NSIS identity or compiled EXE SHA256'
+  }
+  Assert-Upstream
+  $note=Join-Path $vault 'LANG08 Annotation.md'
+  $text='# LANG08 Annotation'+[char]10+[char]10+'alpha eat omega'+[char]10
+  [IO.File]::WriteAllText($note,$text,[Text.UTF8Encoding]::new($false))
+  $beforeHash=(Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
+  $db=Join-Path $data 'text-annotations.sqlite'
+  if(Test-Path -LiteralPath $db){throw 'LANG-08 cold sidecar was unexpectedly present'}
+  $proc=Open-Note -Note $note -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
+  Focus-Akula -Process $proc
+  $window=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]$proc.MainWindowHandle)
+  if($null -eq $window){throw 'LANG-08 installed window has no UIA tree'}
+  $body=Select-EditorBody -Root $window
+  Readback-Selected -Process $proc -Expected $text
+
+  # Negative: exact selection + real context menu + rebind with no sidecar.
+  Click-Visible -Target $body -Window $window -Process $proc -Right
+  $reb=Wait-Visible -Root $window -Names $labels.rebind -Type ([Windows.Automation.ControlType]::MenuItem)
+  Click-Visible -Target $reb -Window $window -Process $proc
+  if(Test-Path -LiteralPath $db){throw 'LANG-08 invalid HOLD rebind created a database'}
+  if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash){
+    throw 'LANG-08 invalid rebind modified Markdown'
+  }
+  # The failed rebind deliberately raises a *modal* study_notice (AlertDialog).
+  # Do not try to interact with the obscured editor until we close it through
+  # the actual installed Windows UI. This modal is part of the negative test.
+  $closeNotice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $closeNotice -Window $window -Process $proc
+  # UIAutomation can retain a stale exposed Close button after the native
+  # modal begins its fade-out. Presence of that label in the broad root tree
+  # is NOT evidence the dialog still owns focus. Verify real behavior instead:
+  # regain the editor, read back exact Markdown with physical Ctrl+A/C and
+  # prove that its actual context menu is openable through the OS mouse.
+  Start-Sleep -Milliseconds 400
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  Readback-Selected -Process $proc -Expected $text
+  Click-Visible -Target $body -Window $window -Process $proc -Right
+  $highlight=Wait-Visible -Root $window -Names $labels.highlight -Type ([Windows.Automation.ControlType]::MenuItem)
+  Write-Host 'AKULA_LANG08_INSTALLED_REBIND_DENY_PASS genuine_nsis=1 os_mouse=1 sidecar_created=0 source_unchanged=1 editor_access_restored=1'
+  Click-Visible -Target $highlight -Window $window -Process $proc
+  $yellow=Wait-Visible -Root $window -Names $labels.yellow -Type ([Windows.Automation.ControlType]::MenuItem)
+  Click-Visible -Target $yellow -Window $window -Process $proc
+  $dbReady=$false
+  for($i=0;$i -lt 80;$i++){
+    Start-Sleep -Milliseconds 150
+    if(Test-Path -LiteralPath $db -PathType Leaf){
+      $info=Get-Item -LiteralPath $db
+      if($info.Length -gt 512){$dbReady=$true;break}
+    }
+  }
+  if(!$dbReady){throw 'LANG-08 real OS highlight never persisted SQLite'}
+  $header=[IO.File]::ReadAllBytes($db)
+  if([Text.Encoding]::ASCII.GetString($header,0,15) -cne 'SQLite format 3'){
+    throw 'LANG-08 native annotation sidecar is not a SQLite database'
+  }
+  if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash){
+    throw 'LANG-08 highlight modified source Markdown'
+  }
+  Write-Host 'AKULA_LANG08_INSTALLED_HIGHLIGHT_PASS genuine_nsis=1 real_color_menu=1 sqlite=1 source_unchanged=1'
+
+  Focus-Akula -Process $proc
+  $actions=Wait-Visible -Root $window -Names $labels.actions -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $actions -Window $window -Process $proc
+  [void](Wait-Visible -Root $window -Names $labels.backupExport -Type ([Windows.Automation.ControlType]::MenuItem))
+  [void](Wait-Visible -Root $window -Names $labels.backupImport -Type ([Windows.Automation.ControlType]::MenuItem))
+  Write-Host 'AKULA_LANG08_INSTALLED_BACKUP_MENU_PASS genuine_nsis=1 export_visible=1 import_visible=1'
+  Close-Note -Process $proc;$proc=$null
+  $dbState=Read-AnnotationState -Path $db
+  if($dbState -notmatch '^[1-9][0-9]*:[a-f0-9]{64}$'){
+    throw 'LANG-08 installed highlight missing positive SQLite revision and payload digest'
+  }
+
+  $proc=Open-Note -Note $note -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
+  Focus-Akula -Process $proc
+  $reopened=Wait-EditorBody -Process $proc -Needle 'LANG08 Annotation'
+  $window=$reopened.Window
+  if($null -eq $reopened.Editor){throw 'LANG-08 restart returned no editor'}
+  Readback-Selected -Process $proc -Expected $text
+  Close-Note -Process $proc;$proc=$null
+  if((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash -or
+     (Read-AnnotationState -Path $db) -cne $dbState){
+    throw 'LANG-08 restart modified Markdown or saved annotation SQLite'
+  }
+  Assert-Upstream
+  Write-Host 'AKULA_LANG08_INSTALLED_RESTART_PASS genuine_nsis=1 reopened=1 sqlite_unchanged=1 markdown_sha256=1'
+
+  # LANG-08b starts after the independent LANG-08a restart witness.
+  # Everything below runs on a genuine, unsigned, installed Akula binary.
+  $backup=Join-Path $env:RUNNER_TEMP 'lang08b-disposable.annotations.json'
+  $archive=Join-Path $env:RUNNER_TEMP 'lang08b-original-sidecar.sqlite'
+  if((Test-Path -LiteralPath $backup) -or (Test-Path -LiteralPath $archive)){
+    throw 'LANG-08b refuses stale disposable backup/archive fixture'
+  }
+  $original=Get-AnnotationSnapshot -Path $db
+  if($original.record_count -ne 1 -or $original.status -cne 'current' -or
+     $original.revision -lt 1){throw 'LANG-08b expected one genuine current highlight'}
+  $proc=Open-Note -Note $note -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08 Annotation'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $text
+  $actions=Wait-Visible -Root $window -Names $labels.actions -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $actions -Window $window -Process $proc
+  $export=Wait-Visible -Root $window -Names $labels.backupExport -Type ([Windows.Automation.ControlType]::MenuItem)
+  $appWindowHandle=[IntPtr]$proc.MainWindowHandle
+  Click-Visible -Target $export -Window $window -Process $proc
+  Choose-FileThroughNativeDialog -Process $proc -Path $backup -AppWindowHandle $appWindowHandle
+  $backupReady=$false
+  for($i=0;$i -lt 90;$i++){
+    Start-Sleep -Milliseconds 200
+    if(Test-Path -LiteralPath $backup -PathType Leaf){
+      if((Get-Item -LiteralPath $backup).Length -gt 40){$backupReady=$true;break}
+    }
+  }
+  if(!$backupReady){throw 'LANG-08b real Save dialog did not create synthetic backup'}
+  $backupJson=[IO.File]::ReadAllText($backup,[Text.Encoding]::UTF8)|ConvertFrom-Json
+  # Rust serde serializes TextAnchor.selected_digest as an array of 32
+  # byte values. Compare stable lowercase hex, never PS array identity.
+  $backupDigestValues=@($backupJson.records[0].anchor.selected_digest)
+  if($backupDigestValues.Count -ne 32){throw 'LANG-08b invalid backup digest length'}
+  $backupDigestBytes=New-Object byte[] 32
+  for($i=0;$i -lt 32;$i++){
+    # Windows PowerShell ConvertFrom-Json can represent JSON integers as
+    # Int64 rather than Int32. Accept either native integer representation,
+    # but refuse booleans, floating point values and out-of-range bytes.
+    $value=$backupDigestValues[$i]
+    if($value -is [bool] -or
+       !($value -is [int] -or $value -is [long]) -or
+       $value -lt 0 -or $value -gt 255){
+      throw 'LANG-08b invalid backup digest byte'
+    }
+    $backupDigestBytes[$i]=[byte]$value
+  }
+  $backupDigest=[BitConverter]::ToString($backupDigestBytes).Replace('-','').ToLowerInvariant()
+  if($backupJson.format -cne 'akula-text-annotations' -or $backupJson.version -ne 1 -or
+     @($backupJson.records).Count -ne 1 -or
+     $backupJson.records[0].status -cne 'current' -or
+     $backupJson.records[0].anchor.annotation_id -cne $original.annotation_id -or
+     $backupDigest -cne $original.selected_digest -or
+     ([IO.File]::ReadAllText($backup)).Contains('alpha eat omega')){
+    throw 'LANG-08b saved backup has invalid metadata scope or leaked Markdown'
+  }
+  $backupHash=(Get-FileHash -LiteralPath $backup -Algorithm SHA256).Hash
+  Assert-SyntheticUnchanged -Markdown $note -ExpectedHash $beforeHash -Backup $backup -BackupHash $backupHash
+  $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $notice -Window $window -Process $proc
+  Start-Sleep -Milliseconds 400
+  Close-Note -Process $proc;$proc=$null
+  Write-Host 'AKULA_LANG08B_INSTALLED_EXPORT_PASS native_save_picker=1 document_scoped=1 json=1 markdown_sha256=1'
+
+  # The *disposable* sidecar is archived only with Akula closed, so import
+  # cannot silently merge into existing metadata or overwrite the old record.
+  # Checkpoint, close and then move the actual SQLite file; refuse stale WAL.
+  $checkpoint=@'
+import sqlite3
+import sys
+with sqlite3.connect(sys.argv[1]) as db:
+    result=db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+if result is None or result[0]!=0:
+    raise ValueError("SQLite WAL checkpoint busy")
+'@
+  $null=($checkpoint | & python - $db)
+  if($LASTEXITCODE -ne 0){throw 'LANG-08b failed synthetic SQLite checkpoint'}
+  foreach($side in @($db+'-wal',$db+'-shm')){
+    if(Test-Path -LiteralPath $side){
+      throw 'LANG-08b refuses an unclosed SQLite WAL or SHM file'
+    }
+  }
+  if((Read-AnnotationState -Path $db) -cne $dbState){
+    throw 'LANG-08b changed sidecar before archiving'
+  }
+  Move-Item -LiteralPath $db -Destination $archive -ErrorAction Stop
+  if(Test-Path -LiteralPath $db){throw 'LANG-08b expected a cold sidecar after archive'}
+
+  $proc=Open-Note -Note $note -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08 Annotation'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $text
+  if(Test-Path -LiteralPath $db){
+    $cold=Get-AnnotationSnapshot -Path $db
+    if($cold.record_count -ne 0 -or $cold.revision -ne 0){
+      throw 'LANG-08b fresh sidecar was not empty before import'
+    }
+  }
+  $actions=Wait-Visible -Root $window -Names $labels.actions -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $actions -Window $window -Process $proc
+  $import=Wait-Visible -Root $window -Names $labels.backupImport -Type ([Windows.Automation.ControlType]::MenuItem)
+  $appWindowHandle=[IntPtr]$proc.MainWindowHandle
+  Click-Visible -Target $import -Window $window -Process $proc
+  Choose-FileThroughNativeDialog -Process $proc -Path $backup -AppWindowHandle $appWindowHandle
+  $held=$null
+  for($i=0;$i -lt 90;$i++){
+    Start-Sleep -Milliseconds 200
+    if(Test-Path -LiteralPath $db -PathType Leaf){
+      $held=Get-AnnotationSnapshot -Path $db
+      if($held.record_count -eq 1 -and $held.status -ceq 'needs_rebind'){break}
+    }
+  }
+  if($null -eq $held -or $held.record_count -ne 1 -or
+     $held.status -cne 'needs_rebind' -or $held.revision -lt 1 -or
+     $held.annotation_id -cne $original.annotation_id -or
+     $held.selected_digest -cne $original.selected_digest -or
+     $held.color -cne $original.color){
+    throw 'LANG-08b installed import failed to restore matching annotation on HOLD'
+  }
+  Assert-SyntheticUnchanged -Markdown $note -ExpectedHash $beforeHash -Backup $backup -BackupHash $backupHash
+  Write-Host 'AKULA_LANG08B_INSTALLED_IMPORT_HOLD_PASS native_open_picker=1 needs_rebind=1 no_auto_attach=1'
+  $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $notice -Window $window -Process $proc
+  Start-Sleep -Milliseconds 400
+
+  # User explicitly selects the same text with physical Ctrl+A/C, right-clicks,
+  # then invokes rebind through the actual installed context menu. No Core API
+  # injection and no direct SQLite mutation is used for import or rebind.
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  Readback-Selected -Process $proc -Expected $text
+  Click-Visible -Target $body -Window $window -Process $proc -Right
+  $rebind=Wait-Visible -Root $window -Names $labels.rebind -Type ([Windows.Automation.ControlType]::MenuItem)
+  Click-Visible -Target $rebind -Window $window -Process $proc
+  $restored=$null
+  for($i=0;$i -lt 90;$i++){
+    Start-Sleep -Milliseconds 200
+    $restored=Get-AnnotationSnapshot -Path $db
+    if($restored.status -ceq 'current' -and $restored.revision -gt $held.revision){break}
+  }
+  if($null -eq $restored -or $restored.status -cne 'current' -or
+     $restored.record_count -ne 1 -or $restored.revision -le $held.revision -or
+     $restored.annotation_id -cne $original.annotation_id -or
+     $restored.selected_digest -cne $original.selected_digest -or
+     $restored.color -cne $original.color){
+    throw 'LANG-08b selected installed rebind did not convert HOLD to Current'
+  }
+  Assert-SyntheticUnchanged -Markdown $note -ExpectedHash $beforeHash -Backup $backup -BackupHash $backupHash
+  Write-Host 'AKULA_LANG08B_INSTALLED_REBIND_PASS real_os_selection=1 explicit_menu=1 sqlite_cas=1 markdown_sha256=1'
+  $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $notice -Window $window -Process $proc
+  Close-Note -Process $proc;$proc=$null
+  $restoredState=Read-AnnotationState -Path $db
+  $proc=Open-Note -Note $note -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08 Annotation'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08 Annotation'
+  Readback-Selected -Process $proc -Expected $text
+  Close-Note -Process $proc;$proc=$null
+  if((Read-AnnotationState -Path $db) -cne $restoredState){
+    throw 'LANG-08b installed restart changed restored SQLite annotation'
+  }
+  Assert-SyntheticUnchanged -Markdown $note -ExpectedHash $beforeHash -Backup $backup -BackupHash $backupHash
+  Assert-Upstream
+  Write-Host 'AKULA_LANG08B_INSTALLED_RESTART_PASS reopened=1 restored_sqlite_stable=1 source_untouched=1'
+
+  # LANG-08c: a real installed UIA/OS-backed named collections lifecycle.
+  # The prior LANG-08b suite has already verified this unsigned NSIS,
+  # annotation sidecar and original Markdown; it is not modified here.
+  $studyNote=Join-Path $vault 'LANG08C Collections.md'
+  $studyText='| Q | A |'+[char]10+'| --- | --- |'+[char]10+
+    '| oxygen | gas |'+[char]10+'| sodium | metal |'+[char]10
+  [IO.File]::WriteAllText($studyNote,$studyText,[Text.UTF8Encoding]::new($false))
+  $studyHash=(Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash
+  $studyDb=Join-Path $data 'language-study.sqlite'
+  if(Test-Path -LiteralPath $studyDb){
+    $cold=Get-StudySnapshot -Path $studyDb
+    if($cold.revision -ne 0 -or $cold.count -ne 0 -or
+       $cold.table_count -ne 0 -or $cold.anchor_count -ne 0){
+      throw 'LANG-08c expected an empty synthetic study registry'
+    }
+  }
+  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08C Collections'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $studyText
+
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyNew
+  [void](Wait-Visible -Root $window -Names $labels.studyCreate -Type ([Windows.Automation.ControlType]::Button))
+  Type-StudyName -Process $proc -Name 'LANG08C-Biology'
+  $create=Wait-Visible -Root $window -Names $labels.studyCreate -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $create -Window $window -Process $proc
+  $created=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-Biology'
+  if($created.revision -lt 1 -or [string]::IsNullOrWhiteSpace($created.id) -or
+     $created.members -ne 1 -or $created.table_count -ne 1 -or
+     $created.anchor_count -ne 1){
+    throw 'LANG-08c installed collection creation has wrong SQLite identity/bindings'
+  }
+  if((Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c native collection creation modified source Markdown'
+  }
+  Write-Host 'AKULA_LANG08C_INSTALLED_CREATE_PASS os_table_menu=1 native_name_dialog=1 sqlite_member=1 source_unchanged=1'
+  Close-StudyNotice -Window $window -Process $proc
+
+  # LANG-08c2a: real installed refusal for case-insensitive duplicate and
+  # empty names. Establish one valid collection via the GUI above, then prove
+  # each failed create leaves the real SQLite payload/revision and Markdown
+  # unchanged. No test-side data mutation or bypass of the native app.
+  $negativeBefore=Read-StudyStateHash -Path $studyDb
+  foreach($case in @('duplicate','empty','too-long','bidi')){
+    Open-StudyCollectionMenu -Window $window -Process $proc
+    Study-Choose -Window $window -Process $proc -Names $labels.studyNew
+    $create=Wait-Visible -Root $window -Names $labels.studyCreate -Type ([Windows.Automation.ControlType]::Button)
+    if($case -ceq 'duplicate'){
+      Type-StudyName -Process $proc -Name 'LANG08C-BIOLOGY'
+    } elseif($case -ceq 'too-long' -or $case -ceq 'bidi'){
+      Type-StudyInvalidName -Process $proc -Case $case
+    }
+    $create=Wait-Visible -Root $window -Names $labels.studyCreate -Type ([Windows.Automation.ControlType]::Button)
+    Click-Visible -Target $create -Window $window -Process $proc
+    Start-Sleep -Milliseconds 200
+    # A refusal must replace the create modal with an error notice, rather
+    # than merely leave the pending create dialog open or silently succeed.
+    if($null -ne (Find-Visible -Root $window -Names $labels.studyCreate -Type ([Windows.Automation.ControlType]::Button))){
+      throw "LANG-08c2 $case did not leave the native create dialog"
+    }
+    $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+    $snapshot=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-Biology'
+    if($snapshot.id -cne $created.id -or $snapshot.revision -ne $created.revision -or
+       $snapshot.members -ne $created.members -or
+       $snapshot.table_count -ne $created.table_count -or
+       $snapshot.anchor_count -ne $created.anchor_count -or
+       (Read-StudyStateHash -Path $studyDb) -cne $negativeBefore -or
+       (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+      throw "LANG-08c2 $case refusal changed real SQLite identity/payload or Markdown"
+    }
+    if($case -ceq 'duplicate'){
+      Write-Host 'AKULA_LANG08C2_INSTALLED_DUPLICATE_PASS native_refusal=1 case_insensitive=1 sqlite_unchanged=1 markdown_sha256=1'
+    } elseif($case -ceq 'empty') {
+      Write-Host 'AKULA_LANG08C2_INSTALLED_EMPTY_PASS native_refusal=1 empty_name=1 sqlite_unchanged=1 markdown_sha256=1'
+    } elseif($case -ceq 'too-long') {
+      Write-Host 'AKULA_LANG08C2B_INSTALLED_OVERLONG_PASS native_refusal=1 length_gt_64=1 sqlite_unchanged=1 markdown_sha256=1'
+    } else {
+      Write-Host 'AKULA_LANG08C2B_INSTALLED_BIDI_PASS native_refusal=1 bidi_control=1 sqlite_unchanged=1 markdown_sha256=1'
+    }
+    Click-Visible -Target $notice -Window $window -Process $proc
+    Start-Sleep -Milliseconds 400
+  }
+  Close-Note -Process $proc;$proc=$null
+
+  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08C Collections'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $studyText
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyManage
+  Study-Choose -Window $window -Process $proc -Names @('Rename: LANG08C-Biology')
+  [void](Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button))
+  Type-StudyName -Process $proc -Name 'LANG08C-Botany'
+  $save=Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $save -Window $window -Process $proc
+  $renamed=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-Botany'
+  if($renamed.revision -le $created.revision -or $renamed.id -cne $created.id -or
+     $renamed.members -ne $created.members -or
+     $renamed.table_count -ne $created.table_count -or
+     $renamed.anchor_count -ne $created.anchor_count){
+    throw 'LANG-08c installed rename changed collection identity or table mappings'
+  }
+  Write-Host 'AKULA_LANG08C_INSTALLED_RENAME_PASS os_dialog=1 stable_id=1 table_mappings=1'
+  Close-StudyNotice -Window $window -Process $proc
+
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyManage
+  Study-Choose -Window $window -Process $proc -Names @('Delete: LANG08C-Botany')
+  $cancel=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $cancel -Window $window -Process $proc
+  $afterCancel=Get-StudySnapshot -Path $studyDb
+  if($afterCancel.revision -ne $renamed.revision -or
+     $afterCancel.id -cne $created.id -or $afterCancel.name -cne $renamed.name){
+    throw 'LANG-08c cancelled installed delete modified SQLite revision or collection'
+  }
+  Write-Host 'AKULA_LANG08C_INSTALLED_CANCEL_PASS native_confirmation=1 sqlite_unchanged=1'
+  Start-Sleep -Milliseconds 400
+
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyManage
+  Study-Choose -Window $window -Process $proc -Names @('Delete: LANG08C-Botany')
+  $confirm=Wait-Visible -Root $window -Names $labels.studyDeleteConfirm -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $confirm -Window $window -Process $proc
+  $deleted=Require-StudySnapshot -Path $studyDb -Count 0 -Name $null
+  if($deleted.revision -le $renamed.revision -or
+     $deleted.table_count -ne $created.table_count -or
+     $deleted.anchor_count -ne $created.anchor_count){
+    throw 'LANG-08c installed delete damaged table/anchor records'
+  }
+  if((Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c installed delete changed source Markdown'
+  }
+  Write-Host 'AKULA_LANG08C_INSTALLED_DELETE_PASS native_confirmation=1 collection_gone=1 tables_preserved=1 markdown_sha256=1'
+  Close-StudyNotice -Window $window -Process $proc
+  Close-Note -Process $proc;$proc=$null
+
+  $studyState=Read-StudyStateHash -Path $studyDb
+
+  # The production default autosave debounce is 1000 ms; genuine OS/UIA
+  # clipboard readback and table-menu traversal take longer than that.
+  # Hold a REAL unsaved edit during this negative witness using Akula's
+  # existing saveDebounceMs setting in this disposable RUNNER_TEMP profile.
+  # No source file, production config, SQLite or user-owned vault is changed.
+  $settingsPath=Join-Path $data 'settings.json'
+  if(!(Test-Path -LiteralPath $settingsPath -PathType Leaf)){
+    throw 'LANG-08c2b5 installed synthetic app settings missing'
+  }
+  $settings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if($null -eq $settings.editor -or $null -eq $settings.editor.saveDebounceMs){
+    throw 'LANG-08c2b5 invalid installed editor settings schema'
+  }
+  $settings.editor.saveDebounceMs=120000
+  $settingsJson=$settings | ConvertTo-Json -Depth 100
+  [IO.File]::WriteAllText($settingsPath,$settingsJson,[Text.UTF8Encoding]::new($false))
+  $readbackSettings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if([int]$readbackSettings.editor.saveDebounceMs -ne 120000){
+    throw 'LANG-08c2b5 synthetic autosave window was not configured'
+  }
+  Write-Host 'AKULA_LANG08C2B5_SYNTHETIC_DEBOUNCE_CONFIG_PASS runner_temp_only=1 debounce_ms=120000'
+  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08C Collections'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  # If Akula rejects/overwrites a test-only JSON setting, the negative
+  # fixture is invalid: fail before editing rather than silently testing
+  # a note that will autosave during OS/UIA traversal.
+  $runtimeSettings=[IO.File]::ReadAllText($settingsPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if((Test-Path -LiteralPath ($settingsPath+'.unreadable')) -or
+     [int]$runtimeSettings.editor.saveDebounceMs -ne 120000){
+    throw 'LANG-08c2b5 installed settings did not retain disposable unsaved window'
+  }
+  Readback-Selected -Process $proc -Expected $studyText
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c installed restart changed study SQLite or Markdown'
+  }
+  Assert-Upstream
+  Write-Host 'AKULA_LANG08C_INSTALLED_RESTART_PASS reopened=1 study_sqlite_stable=1 source_untouched=1'
+
+  # LANG-08c2b5 reuses the already verified foreground OS/UIA editor
+  # from the restart test above. The test-only long debounce prevents normal
+  # autosave from racing several seconds of OS clipboard verification.
+  # Real Ctrl+A/C selected the whole note; Ctrl+V must change the live
+  # table before the installed Add-to-study refusal is tested.
+  $dirtyText=$studyText.Replace('| oxygen | gas |','| helium | gas |')
+  if($dirtyText -ceq $studyText -or $dirtyText -notmatch '\| helium \| gas \|'){
+    throw 'LANG-08c2b5 invalid synthetic edited table fixture'
+  }
+  $hwnd=[IntPtr]$proc.MainWindowHandle
+  [Windows.Forms.Clipboard]::SetText($dirtyText)
+  if([Windows.Forms.Clipboard]::GetText() -cne $dirtyText){
+    throw 'LANG-08c2b5 synthetic editor clipboard mismatch'
+  }
+  # Readback-Selected left the real editor selected via OS Ctrl+A/C.
+  # Physical Ctrl+V enters a valid changed table with the editor focused.
+  [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x56)
+  # Winit dispatches ClipboardPaste as an editor event; replacing clipboard
+  # immediately with Readback-Selected's poison can race the paste read.
+  # Let the app consume the synthetic clipboard before the readback changes it.
+  Start-Sleep -Milliseconds 750
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  Write-Host 'LANG08C2B5_PASTE_DIAGNOSTIC settled_before_clipboard_poison=1'
+  Readback-Selected -Process $proc -Expected $dirtyText
+  if((Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 cannot establish unsaved note; fixture already persisted'
+  }
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState){
+    throw 'LANG-08c2b5 synthetic study registry changed before refusal'
+  }
+  $add=Open-StudyTableMenu -Window $window -Process $proc
+  Click-Visible -Target $add -Window $window -Process $proc
+  $notice=Wait-Visible -Root $window -Names $labels.noticeClose -Type ([Windows.Automation.ControlType]::Button)
+  # An unsaved note must not enter the question-column picker.
+  $middot=[char]0x00b7
+  if($null -ne (Find-Visible -Root $window -Names @("1 $middot Q") -Type ([Windows.Automation.ControlType]::MenuItem))){
+    throw 'LANG-08c2b5 dirty note reached study column mapping'
+  }
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 installed dirty-note refusal changed SQLite or saved Markdown'
+  }
+  Write-Host 'AKULA_LANG08C2B_INSTALLED_DIRTY_NOTE_PASS os_editor_paste=1 native_refusal=1 sqlite_unchanged=1 markdown_sha256=1'
+  Click-Visible -Target $notice -Window $window -Process $proc
+  Start-Sleep -Milliseconds 400
+
+  # Undo the ONE verified synthetic paste through real OS Ctrl+Z.
+  # After a table-menu refusal, Ctrl+A targets a selected table cell rather
+  # than the document; trying to paste the whole note overwrites that cell.
+  # The native table_key Undo path explicitly leaves the table session, then
+  # the editor undo stack restores the entire original Markdown in memory.
+  # This is not a filesystem fixture rewrite or an injected app action.
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  [AkulaLang08DialogKeys]::Chord($hwnd,$proc.Id,[uint16]0x5A)
+  Start-Sleep -Milliseconds 600
+  Focus-Akula -Process $proc
+  $body=Select-EditorBody -Root $window
+  Readback-Selected -Process $proc -Expected $studyText
+  Close-Note -Process $proc;$proc=$null
+  if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b5 restoring fixture changed SQLite or Markdown on installed exit'
+  }
+  Assert-Upstream
+
+} finally {
+  if($null -ne $proc){
+    $proc.Refresh()
+    if(!$proc.HasExited){$proc.Kill();$proc.WaitForExit()}
+    $proc.Dispose()
+  }
+  if($installed){
+    $uninstaller=Join-Path $install 'uninstall.exe'
+    if(!(Test-Path -LiteralPath $uninstaller -PathType Leaf)){
+      throw 'LANG-08 genuine NSIS uninstaller missing'
+    }
+    $remove=Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+    if($remove.ExitCode -ne 0 -or (Test-Path -LiteralPath $exe) -or (Test-Path -LiteralPath $key)){
+      throw 'LANG-08 NSIS uninstall failed or retained installed identity'
+    }
+    Assert-Upstream
+    if($null -ne $beforeHash -and
+       (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -cne $beforeHash){
+      throw 'LANG-08 uninstall changed synthetic Markdown'
+    }
+    Write-Host 'AKULA_LANG08_INSTALLED_UNINSTALL_PASS clean=1 upstream_untouched=1 data_preserved=1'
+  }
+}
+){
+    throw 'LANG-08c2b6 synthetic concurrent writer failed'
+  }
+  if((Read-StudyStateHash -Path $full) -cne $out){
+    throw 'LANG-08c2b6 concurrent writer acknowledgment mismatch'
+  }
+  return $out
+}
+function Assert-StudyChangedNotice {
+  param([Windows.Automation.AutomationElement]$Window)
+  # Require the exact native localized CAS refusal, not any generic modal.
+  [void](Wait-Visible -Root $Window -Names $labels.studyManageChanged -Type ([Windows.Automation.ControlType]::Text))
+}
+
 function Assert-SyntheticUnchanged {
   param([string]$Markdown,[string]$ExpectedHash,[string]$Backup,[string]$BackupHash)
   if((Get-FileHash -LiteralPath $Markdown -Algorithm SHA256).Hash -cne $ExpectedHash -or
