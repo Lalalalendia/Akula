@@ -4,20 +4,6 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/src/video/optional_ytdlp.rs'
-      - 'aquilum-app/native/src/video/queue.rs'
-      - 'aquilum-app/native/src/video/download.rs'
-      - 'aquilum-app/native/src/video/download_tests.rs'
-      - 'aquilum-app/native/src/video/mod.rs'
-      - 'aquilum-app/native/src/app/settings/**'
-      - 'aquilum-app/native/src/app/editor_requests/video_stock_admission.rs'
-      - 'aquilum-app/native/src/app/lifecycle/tick.rs'
-      - 'aquilum-app/native/src/app/mod.rs'
-      - 'aquilum-app/native/src/app/init/bootstrap.rs'
-      - 'aquilum-app/native/src/ui/settings/schema/**'
-      - 'aquilum-app/native/assets/locales/**'
-      - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
-      - 'docs/release/video20-optin-ytdlp-product.md'
       - '.github/workflows/akula-video20-user-optin-windows.yml'
 permissions:
   contents: read
