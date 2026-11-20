@@ -12,7 +12,7 @@ mod action;
 mod cloud_action;
 mod menu_action;
 mod apply;
-mod press;
+mod press; #[cfg(windows)] mod video_tools;
 mod context;
 mod bindings;
 mod refresh;
