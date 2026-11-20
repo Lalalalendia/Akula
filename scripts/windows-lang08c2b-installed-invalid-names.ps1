@@ -1140,8 +1140,8 @@ if result is None or result[0]!=0:
   Wait-Window -Process $proc -Needle 'LANG08C Collections'
   Focus-Akula -Process $proc
   $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
   Readback-Selected -Process $proc -Expected $studyText
-  Close-Note -Process $proc;$proc=$null
   if((Read-StudyStateHash -Path $studyDb) -cne $studyState -or
      (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
     throw 'LANG-08c installed restart changed study SQLite or Markdown'
@@ -1149,16 +1149,11 @@ if result is None or result[0]!=0:
   Assert-Upstream
   Write-Host 'AKULA_LANG08C_INSTALLED_RESTART_PASS reopened=1 study_sqlite_stable=1 source_untouched=1'
 
-  # LANG-08c2b5: installed Windows user input makes the currently open note
-  # dirty before choosing Add to study collection. Exercise the actual OS
-  # pointer/menu route, not a RenderRoot harness mutation or SQLite injection.
-  # A valid changed Markdown table must still be refused until it is saved.
-  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
-  Wait-Window -Process $proc -Needle 'LANG08C Collections'
-  Focus-Akula -Process $proc
-  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
-  $window=$ready.Window
-  Readback-Selected -Process $proc -Expected $studyText
+  # LANG-08c2b5 reuses the already verified, foreground OS/UIA editor from
+  # the restart test above. A redundant close/reopen raced the clipboard
+  # readback on the first CI attempt before the dirty-note probe had begun.
+  # Do not bypass the real editor: OS Ctrl+A/C above selected the entire note.
+  # Change this valid Markdown table through physical Ctrl+V, without saving.
   $dirtyText=$studyText.Replace('| oxygen | gas |','| helium | gas |')
   if($dirtyText -ceq $studyText -or $dirtyText -notmatch '\| helium \| gas \|'){
     throw 'LANG-08c2b5 invalid synthetic edited table fixture'
