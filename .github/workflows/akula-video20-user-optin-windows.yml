@@ -62,7 +62,7 @@ jobs:
           for evidence in ("VIDEO20_SETTINGS_CANCEL_UIA_PASS",
                            "VIDEO20_SETTINGS_INSTALL_UIA_PASS",
                            "VIDEO20_SETTINGS_REMOVE_UIA_PASS",
-                           "SendNavigationKey", "Wait-Dialog"):
+                           "AkulaVideo20Mouse", "SendInput(1, down", "Wait-Dialog"):
               assert evidence in gui, evidence
           assert "EXPECTED_HEAD_SHA" in gui
           assert "GITHUB_EVENT_NAME -cne 'pull_request'" in gui
