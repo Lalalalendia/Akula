@@ -14,7 +14,7 @@ from pathlib import Path
 
 YT="f264a6cbd1f630894da0f368df00f8aae50140e0"
 QJS="d7215b0ad3fc2c562e8317fd9bca058fd4863804"
-PYBUILD="5eb86b862d61adc3df0f44e6e0b815b7d74fa3f"
+PYBUILD="5eb86b862d61adc3df0f44e6e0b815b7d74fa3f5"
 UPSTREAM_PYINSTALLER="70fc17210920bce17f4ab09bbf8104b0dbd45338"
 CUSTOM_WHEEL_URL="https://github.com/yt-dlp/Pyinstaller-Builds/releases/download/2026.08.19.215425/pyinstaller-6.22.0-py3-none-win_amd64.whl"
 CUSTOM_WHEEL_SHA="294099ecb5fdd2a13ae4c29006d4e335b697a63b6a16cf052b90ec2b40bef05a"
