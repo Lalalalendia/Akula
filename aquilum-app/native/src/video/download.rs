@@ -6,7 +6,6 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-
 use super::library::{Library, LIBRARY_MAX, SINGLE_VIDEO_MAX};
 use super::youtube;
 
@@ -30,8 +29,7 @@ fn command_args(url: &str, stage: &Path, max_bytes: u64) -> Vec<OsString> {
     let home = format!("home:{}", stage.display());
     let temp = format!("temp:{}", stage.display());
     [
-        "--ignore-config", "--no-plugin-dirs", "--no-remote-components",
-        "--no-cache-dir", "--no-cookies", "--no-playlist", "--no-exec", "--no-overwrites",
+        "--ignore-config", "--no-plugin-dirs", "--no-remote-components", "--no-cache-dir", "--no-cookies", "--no-playlist", "--no-exec", "--no-overwrites",
         "--no-color", "--no-write-info-json", "--no-write-thumbnail",
         "--no-write-subs", "--no-write-auto-subs", "--no-write-comments",
         "--no-download-archive", "--restrict-filenames", "--newline",
