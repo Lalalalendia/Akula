@@ -1,8 +1,5 @@
-//! Explicit video download queue. A click enqueues work, never an editor
-//! render or link lookup. All jobs run serially so quota checks are stable.
-use std::collections::HashMap;
-use std::ffi::OsString;
-use std::path::PathBuf;
+//! Explicit-only serial video download queue, never invoked by editor render.
+use std::collections::HashMap; use std::ffi::OsString; use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use super::{download, library::Library, youtube};
 #[derive(Clone, Debug)]
@@ -33,11 +30,6 @@ pub fn enqueue(
     registered_roots: Vec<PathBuf>,
     changed: Arc<dyn Fn(bool, &str) + Send + Sync>,
 ) -> Result<bool, &'static str> {
-    // Video Tools release is not approved. Installed Windows may not turn
-    // a PATH entry, env-selected yt-dlp or CI signature into process rights.
-    if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e"))) {
-        return Err("Video Tools execution is not approved for installed Akula");
-    }
     let id = youtube::video_id(&url).ok_or("invalid single-video URL")?.to_owned();
     {
         let mut list = jobs().lock().unwrap_or_else(|e| e.into_inner());
@@ -52,22 +44,30 @@ pub fn enqueue(
         change(&id, Status::Downloading(download::Progress::default()));
         changed(false, &url);
         let mut last_notification = 0_u64;
-        let result = Library::new(&data_dir, &registered_roots)
-            .map_err(|e| format!("local video storage rejected: {e}"))
-            .and_then(|library| {
-                let executable = std::env::var_os("AKULA_YT_DLP_BIN")
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or_else(|| OsString::from("yt-dlp"));
-                super::light::download_one_or_legacy(&library, &executable, &url, |progress| {
-                    change(&id, Status::Downloading(progress));
-                    if progress.downloaded.saturating_sub(last_notification) >= 1024 * 1024
-                        || progress.downloaded == progress.total.unwrap_or(u64::MAX)
-                    {
-                        last_notification = progress.downloaded;
-                        changed(false, &url);
-                    }
+        // Verify optional tool before making local video staging files.
+        #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
+        let executable = super::optional_ytdlp::verified_executable(&data_dir)
+            .map(|path| path.into_os_string())
+            .map_err(|_| "Install the verified yt-dlp in Settings > System first".to_owned());
+        #[cfg(not(all(windows, feature = "installed", not(feature = "video-ui-e2e"))))]
+        let executable: Result<OsString, String> = Ok(std::env::var_os("AKULA_YT_DLP_BIN")
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| OsString::from("yt-dlp")));
+        let result = executable.and_then(|executable| {
+            Library::new(&data_dir, &registered_roots)
+                .map_err(|e| format!("local video storage rejected: {e}"))
+                .and_then(|library| {
+                    super::queue_dispatch::download_one(&library, &executable, &url, |progress| {
+                        change(&id, Status::Downloading(progress));
+                        if progress.downloaded.saturating_sub(last_notification) >= 1024 * 1024
+                            || progress.downloaded == progress.total.unwrap_or(u64::MAX)
+                        {
+                            last_notification = progress.downloaded;
+                            changed(false, &url);
+                        }
+                    })
                 })
-            });
+        });
         match result {
             Ok(path) => change(&id, Status::Ready(path)),
             Err(error) => change(&id, Status::Failed(error)),

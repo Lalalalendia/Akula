@@ -1,5 +1,4 @@
-use aquilum_core::sync::NativeRecoveryDecision;
-mod cloud_provider;
+use aquilum_core::sync::NativeRecoveryDecision; mod cloud_provider;
 pub use cloud_provider::CloudProvider;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
@@ -33,4 +32,5 @@ pub enum Action {
     InstallServer,
     CheckUpdates,
     InstallUpdate,
+    #[cfg(windows)] InstallYtDlp, #[cfg(windows)] RemoveYtDlp, #[cfg(windows)] RefreshYtDlp,
 }

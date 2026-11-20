@@ -1,7 +1,8 @@
+#[cfg(windows)] pub(crate) mod optional_ytdlp;
 pub(crate) mod download;
 pub(crate) mod library;
 pub(crate) mod light;
-pub(crate) mod queue;
+pub(crate) mod queue; mod queue_dispatch;
 pub(crate) mod youtube; #[cfg(any(test, all(windows, feature = "installed")))] #[allow(dead_code)] mod tools_package;
 #[cfg(all(windows, any(test, feature = "installed")))] #[allow(dead_code)] pub(crate) mod tools_package_probe; #[cfg(all(windows, any(test, feature = "installed")))] #[allow(dead_code)] mod tools_package_pin_admission; #[cfg(all(windows, any(test, feature = "installed")))] #[allow(dead_code)] mod tools_package_01h_process_boundary_windows;
 #[cfg(all(windows, any(feature = "video-ui-e2e", feature = "video-tools-gui-e2e")))] pub(crate) mod ui_acceptance;
@@ -29,7 +30,6 @@ use self::windows::Engine;
 pub fn poster(path: &Path) -> Option<ImageBrush> {
     Engine::poster(path)
 }
-
 #[cfg(target_os = "macos")]
 pub use self::macos::poster;
 const MOVED: f64 = 0.05;
@@ -41,7 +41,6 @@ pub struct State {
     pub duration: f64,
     pub muted: bool,
 }
-
 struct Player {
     engine: Engine,
     state: State,

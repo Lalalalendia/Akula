@@ -1,7 +1,5 @@
-use super::*;
-
+use super::*; #[cfg(windows)] mod video_tools;
 pub(super) const PROJECT_TELEGRAM_URL: &str = "https://t.me/AkulaHubl";
-
 pub(super) fn update_row(status: &crate::updater::Status) -> Row {
     use crate::updater::Status;
     let description = match status {
@@ -20,7 +18,6 @@ pub(super) fn update_row(status: &crate::updater::Status) -> Row {
     };
     info(t("settings.system.manualUpdate"), Some(description), Control::Buttons(vec![button]))
 }
-
 pub(super) fn system(config: &AppConfig, ctx: &Context) -> Vec<Block> {
     let mut updates = vec![row(
         t("settings.system.autoUpdate"),
@@ -38,7 +35,7 @@ pub(super) fn system(config: &AppConfig, ctx: &Context) -> Vec<Block> {
             ),
         });
     }
-    vec![
+    let mut blocks = vec![
         Block { title: t("settings.system.updates"), rows: updates },
         Block {
             title: t("settings.system.autostart"),
@@ -62,5 +59,8 @@ pub(super) fn system(config: &AppConfig, ctx: &Context) -> Vec<Block> {
                 ),
             ],
         },
-    ]
+    ];
+    #[cfg(windows)]
+    blocks.insert(2, video_tools::optional_ytdlp_block(ctx));
+    blocks
 }

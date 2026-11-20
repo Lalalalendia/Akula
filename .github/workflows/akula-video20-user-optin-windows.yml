@@ -1,0 +1,97 @@
+name: Akula VIDEO-20 optional yt-dlp Settings Windows release path (NONRELEASE)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/video/optional_ytdlp.rs'
+      - '.github/workflows/akula-video20-user-optin-windows.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  source-boundary:
+    name: Akula-only NSIS and exact pinned official yt-dlp (HOLD)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Enforce opt-in only, no third-party EXEs in stock installer
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path("aquilum-app/native/packaging/akula-windows.json")
+          a=json.loads(p.read_text(encoding="utf-8"))
+          assert [x["path"] for x in a["binaries"]] == ["akula-app","shiva-pdf-preview"]
+          assert "yt-dlp" not in p.read_text() and "quickjs" not in p.read_text()
+          source=Path("aquilum-app/native/src/video/optional_ytdlp.rs").read_text()
+          assert 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' in source
+          assert 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d' in source
+          assert "23_575_744" in source and ".create_new(true)" in source
+          assert "fs::hard_link" in source and "SHA256" in source
+          settings=Path("aquilum-app/native/src/app/settings/press.rs").read_text()
+          assert "Action::InstallYtDlp" in settings and "MessageButtons::YesNo" in settings
+          assert "Action::RemoveYtDlp" in settings
+          queue=Path("aquilum-app/native/src/video/queue.rs").read_text()
+          assert "optional_ytdlp::verified_executable" in queue
+          assert "queue_dispatch::download_one" in queue
+          dispatcher=Path("aquilum-app/native/src/video/queue_dispatch.rs").read_text()
+          assert 'super::download::download_one(library, executable, url, on_progress)' in dispatcher
+          assert 'super::light::download_one_or_legacy(library, executable, url, on_progress)' in dispatcher
+          assert 'not(feature = "video-ui-e2e")' in dispatcher
+          assert 'VIDEO_TOOLS_01K_HOLD' in Path("aquilum-app/native/src/video/light.rs").read_text()
+          assert queue.index("optional_ytdlp::verified_executable") < queue.index("std::env::var_os")
+          assert 'cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))' in queue
+          ru=json.loads(Path("aquilum-app/native/assets/locales/ru.json").read_text())
+          en=json.loads(Path("aquilum-app/native/assets/locales/en.json").read_text())
+          for locale in [ru,en]:
+              for key in ["ytdlpTitle","ytdlpDownload","ytdlpRemove","ytdlpConfirmText","ytdlpInvalid"]:
+                  assert locale["settings"]["system"].get(key)
+          print("VIDEO20_STOCK_NSIS_TWO_BINARIES_PASS bundled_yt_dlp=0 explicit_optin=1")
+          PY
+  windows-installed:
+    name: Compile installed Windows + validate user opt-in downloader (HOLD)
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: video20-user-optin-installed
+          cache-on-failure: true
+      - name: Build installed Windows and run offline opt-in tests
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::optional_ytdlp::tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Windows optional yt-dlp tests failed' }
+          cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::queue::installed_tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Windows queue fail-closed test failed' }
+          cargo test --locked -p aquilum-native --features installed --bin aquilum-native ui::settings::schema::tests -- --test-threads=1 --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Windows Settings schema tests failed' }
+      - name: User-opt-in-only real official executable download, verify, remove
+        working-directory: aquilum-app
+        env:
+          AKULA_VIDEO20_RUN_LAB: '1'
+          RUNNER_ENVIRONMENT: github-hosted
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::optional_ytdlp::tests::user_optin_real_download_remove_ci_only -- --exact --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Real signed-pin user-initiated download/remove laboratory test failed' }
+          Write-Host 'VIDEO20_OPTIN_OFFICIAL_DOWNLOAD_REMOVE_PASS release=0'

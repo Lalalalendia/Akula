@@ -1,26 +1,20 @@
-//! VIDEO-TOOLS-01k: localized installed Video Tools status, never launch authority.
-//! PATH presence, owner-unapproved keys and CI signatures cannot unlock Download.
+//! VIDEO-20: installed yt-dlp is user-installed and hash-checked; old bundle stays HOLD.
 use super::App;
 use masonry::app::RenderRoot;
-#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-use super::Popup;
-#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-use crate::i18n::t;
-#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-use crate::ui::dialog::ConfirmDialog;
-#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-use crate::video::tools_package_probe::{probe_installed_video_tools, ToolsDiscovery};
-#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-use masonry::kurbo::Point;
+#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))] use super::Popup;
+#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))] use crate::i18n::t;
+#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))] use crate::ui::dialog::ConfirmDialog;
+#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))] use crate::video::optional_ytdlp::{self, Status};
+#[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))] use masonry::kurbo::Point;
 
 #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
-fn notice_keys(status: ToolsDiscovery) -> (&'static str, &'static str) {
+fn notice_keys(status: &Status) -> (&'static str, &'static str) {
     match status {
-        ToolsDiscovery::Missing => ("editor.videoToolsMissingTitle", "editor.videoToolsMissing"),
-        ToolsDiscovery::Unsafe => ("editor.videoToolsUnsafeTitle", "editor.videoToolsUnsafe"),
-        ToolsDiscovery::PublisherNotApproved => ("editor.videoToolsUnapprovedTitle", "editor.videoToolsUnapproved"),
-        ToolsDiscovery::IncompatibleVersion => ("editor.videoToolsIncompatibleTitle", "editor.videoToolsIncompatible"),
-        ToolsDiscovery::ReadOnlyAttested => ("editor.videoToolsAttestedTitle", "editor.videoToolsAttested"),
+        Status::Missing => ("editor.videoToolsMissingTitle", "editor.videoToolsMissing"),
+        Status::Downloading(_) => ("editor.videoToolsDownloadingTitle", "editor.videoToolsDownloading"),
+        Status::Invalid => ("editor.videoToolsUnsafeTitle", "editor.videoToolsUnsafe"),
+        Status::Failed(_) => ("editor.videoToolsDownloadFailedTitle", "editor.videoToolsDownloadFailed"),
+        Status::Installed => ("editor.videoToolsAttestedTitle", "editor.videoToolsAttested"),
     }
 }
 
@@ -28,9 +22,14 @@ impl App {
     pub(super) fn optional_video_tools_notice(&mut self, root: &mut RenderRoot) -> bool {
         #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
         {
-            // OS-known protected Program Files product, checked natively.
-            // ReadOnlyAttested is diagnostic only; no process gets queued.
-            let (title, body) = notice_keys(probe_installed_video_tools());
+            // A real, fixed, SHA-256-verified local optional file can proceed.
+            // PATH, env-selected executables, old package signatures and
+            // CI-only bypasses never authorize an installed download.
+            let state = optional_ytdlp::status(&self.workspace.data_dir);
+            if matches!(state, Status::Installed) {
+                return false;
+            }
+            let (title, body) = notice_keys(&state);
             let (widget, dialog) = ConfirmDialog::new(
                 &t(title), &t(body),
                 &t("editor.table.studyClose"),
@@ -52,14 +51,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_five_native_states_show_distinct_russian_and_english_status() {
+    fn optional_download_states_have_real_localized_messages() {
         let states = [
-            ToolsDiscovery::Missing, ToolsDiscovery::Unsafe,
-            ToolsDiscovery::PublisherNotApproved,
-            ToolsDiscovery::IncompatibleVersion, ToolsDiscovery::ReadOnlyAttested,
+            Status::Missing, Status::Downloading(1), Status::Invalid,
+            Status::Failed("network".into()), Status::Installed,
         ];
         let mut distinct = std::collections::HashSet::new();
-        for state in states {
+        for state in &states {
             let (title, body) = notice_keys(state);
             assert!(distinct.insert((title, body)));
             for raw in [
@@ -70,7 +68,7 @@ mod tests {
                 for key in [title, body] {
                     let leaf = key.strip_prefix("editor.").unwrap();
                     assert!(!locale["editor"][leaf].as_str().unwrap_or("").is_empty(),
-                        "missing Video Tools translation: {key}");
+                        "missing video tool translation: {key}");
                 }
             }
         }

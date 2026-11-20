@@ -55,7 +55,7 @@ fn templates_and_attachments_share_one_section_and_search_tuning_lives_with_bm25
     let config = AppConfig::default();
     let ctx = Context::new(1.0);
     let titles: Vec<String> = blocks(Section::Data, &config, &ctx).into_iter().map(|b| b.title).collect();
-    assert_eq!(titles, [t("settings.templates.section"), t("settings.files.section")]);
+    assert!(titles.len() == 2 && ["Шаблоны заметок", "Note templates"].contains(&titles[0].as_str()) && ["Файлы и вложения", "Files and attachments"].contains(&titles[1].as_str()));
     for old in ["templates", "files", "data"] {
         assert_eq!(Section::from_key(old), Some(Section::Data), "сохранённый раздел «{old}» открывает общий раздел");
     }
@@ -65,11 +65,11 @@ fn templates_and_attachments_share_one_section_and_search_tuning_lives_with_bm25
     assert_eq!(Section::from_key("sync"), Some(Section::Sync));
 
     let rows = |config: &AppConfig| blocks(Section::Analysis, config, &ctx).into_iter().flat_map(|b| b.rows).map(|r| r.label).collect::<Vec<_>>();
-    let pool = t("settings.search.candidatePool");
-    assert!(rows(&config).contains(&pool), "настройки подбора похожих заметок стоят среди параметров BM25F");
+    let pool = ["Сколько заметок сравнивать", "How many notes to compare"];
+    assert!(rows(&config).iter().any(|r| pool.contains(&r.as_str())), "BM25F candidate pool setting is present");
     let mut off = AppConfig::default();
     off.analysis.enable_bm25f = false;
-    assert!(!rows(&off).contains(&pool), "без BM25F этих настроек нет");
+    assert!(!rows(&off).iter().any(|r| pool.contains(&r.as_str())), "BM25F candidate pool disabled");
 }
 
 
@@ -100,7 +100,7 @@ fn m1dd_native_recovery_settings_are_read_only_for_every_state() {
     ] {
         context.sync_recovery = state.clone();
         let all = blocks(Section::Sync, &config, &context);
-        assert_eq!(all.len(), 2);
+        assert_eq!(all.len(), 2 + usize::from(cfg!(feature = "dropbox-readonly-preview")) + usize::from(cfg!(feature = "yandex-disk-readonly-preview")));
         let rows = &all[1].rows;
         assert!(rows.len() >= 3);
         assert!(rows.iter().all(|row| row.setter.is_none()));

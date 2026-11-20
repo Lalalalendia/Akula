@@ -67,7 +67,7 @@ impl App {
             copied,
             trash_page,
             autostart: crate::autostart::available().then(crate::autostart::enabled),
-            update: crate::updater::available().then(|| self.updater.status()),
+            update: crate::updater::available().then(|| self.updater.status()), #[cfg(windows)] optional_ytdlp: crate::video::optional_ytdlp::status(&self.workspace.data_dir),
         }
     }
 }

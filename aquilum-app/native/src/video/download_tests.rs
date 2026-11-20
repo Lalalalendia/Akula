@@ -13,13 +13,13 @@ use super::*;
         let args: Vec<String> = command_args(
             "https://youtu.be/dQw4w9WgXcQ", Path::new("/tmp/private"), SINGLE_VIDEO_MAX
         ).iter().map(|s| s.to_string_lossy().into_owned()).collect();
-        for needed in ["--ignore-config", "--no-playlist", "--no-exec", "--restrict-filenames", "--max-filesize"] {
+        for needed in ["--ignore-config", "--no-plugin-dirs", "--no-remote-components", "--no-playlist", "--no-exec", "--restrict-filenames", "--max-filesize"] {
             assert!(args.contains(&needed.to_owned()), "{needed}");
         }
         assert_eq!(args.last().unwrap(), "https://youtu.be/dQw4w9WgXcQ");
         assert!(args.contains(&"home:/tmp/private".to_string()));
         assert_eq!(args.windows(2).find(|pair| pair[0] == "--format").map(|pair| pair[1].as_str()),
-            Some("bv[vcodec^=avc1][height<=720]+ba[acodec^=mp4a]/b[vcodec^=avc1][acodec^=mp4a][height<=720]"),
+            Some("b[vcodec^=avc1][acodec^=mp4a][height<=720]/b[ext=mp4][height<=720]"),
             "native Windows decoder needs AVC/AAC; an MP4 extension alone does not ensure playback");
         assert!(args.contains(&"--no-cookies".to_owned()));
         assert!(!args.iter().any(|s| s == "--cookies" || s == "--cookies-from-browser" || s.starts_with("--cookies=")));

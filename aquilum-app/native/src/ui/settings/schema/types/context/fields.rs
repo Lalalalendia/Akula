@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-use aquilum_core::mcp::McpStatus;
+use std::path::PathBuf; use aquilum_core::mcp::McpStatus;
 use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryCasePreview};
 pub struct Context {
     pub workspace: Option<PathBuf>,
@@ -26,5 +25,5 @@ pub struct Context {
     pub copied: Option<usize>,
     pub trash_page: usize,
     pub autostart: Option<bool>,
-    pub update: Option<crate::updater::Status>,
+    pub update: Option<crate::updater::Status>, #[cfg(windows)] pub optional_ytdlp: crate::video::optional_ytdlp::Status,
 }
