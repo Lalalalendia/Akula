@@ -300,7 +300,14 @@ mod tests {
         }
         assert!(ok, "pinned yt-dlp must be installed after user consent in CI lab");
         let binary = verified_executable(&profile).unwrap();
-        assert_eq!(fs::metadata(binary).unwrap().len(), BYTES);
+        assert_eq!(fs::metadata(&binary).unwrap().len(), BYTES);
+        // This CI-only test exercises the exact pinned executable, not
+        // arbitrary PATH tools. Installation itself never executes it.
+        let version = std::process::Command::new(&binary)
+            .args(["--ignore-config", "--no-plugin-dirs", "--no-js-runtimes", "--version"])
+            .output().expect("verified official yt-dlp should launch on Windows");
+        assert!(version.status.success(), "verified yt-dlp --version failed");
+        assert_eq!(String::from_utf8_lossy(&version.stdout).trim(), VERSION);
         remove(&profile).unwrap();
         assert_eq!(status(&profile), Status::Missing);
         assert!(!local_root(&profile).unwrap().join(FILENAME).exists());
