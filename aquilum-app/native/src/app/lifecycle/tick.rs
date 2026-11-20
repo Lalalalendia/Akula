@@ -1,5 +1,4 @@
-use super::super::*;
-#[cfg(windows)] #[path = "tick_video_tools.rs"] mod video_tools;
+use super::super::*; #[cfg(windows)] #[path = "tick_video_tools.rs"] mod video_tools;
 impl App {
     pub fn tick(&mut self, root: &mut RenderRoot, now: Instant) {
         // Drain background S3 and SSH observations without network I/O on the GUI thread.
@@ -17,8 +16,7 @@ impl App {
             self.refresh_settings(root);
         }
         #[cfg(windows)] self.poll_optional_video_tool(root);
-        #[cfg(all(windows, feature = "server-readonly-preflight"))]
-        self.on_server_probe(root);
+        #[cfg(all(windows, feature = "server-readonly-preflight"))] self.on_server_probe(root);
         if self.view_due.is_some_and(|t| t <= now) {
             self.flush_view();
         }
