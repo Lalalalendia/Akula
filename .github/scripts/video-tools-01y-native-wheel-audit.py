@@ -278,7 +278,8 @@ def audit(allow_path, ytroot, exe_path, output_path):
                 "wheel_bytes": len(wheel_bytes),
                 "wheel_bytes_uploaded_or_executed": False,
                 "candidate_selected_by_historical_pip_log": False,
-                "candidate_is_relevant_to_exact_frozen_exe": False,
+                "candidate_native_payload_byte_overlap_proven": bool(comparison["byte_matches"]),
+                "candidate_whole_wheel_installed_proven": False,
                 "native_comparison": comparison,
             })
             total_wheels += 1
