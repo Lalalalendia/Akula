@@ -2,20 +2,20 @@
 //! three-executable bundle HOLD into shipping authority.
 //!
 //! The installed Windows queue has already obtained the exact SHA-pinned
-//! optional executable from Settings; use the single-file legacy adapter,
-//! not the experimental 3-EXE mux path (which remains on release HOLD).
 pub(super) fn download_one(
     library: &super::library::Library,
     executable: &std::ffi::OsStr,
-    url: &str,
+    quickjs: Option<&std::ffi::OsStr>, url: &str,
     on_progress: impl FnMut(super::download::Progress),
 ) -> Result<std::path::PathBuf, String> {
     #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
     {
-        super::download::download_one(library, executable, url, on_progress)
+        let runtime = quickjs.ok_or("Install verified QuickJS in Settings > System")?;
+        super::download::download_one_with_js(library, executable, runtime, url, on_progress)
     }
     #[cfg(not(all(windows, feature = "installed", not(feature = "video-ui-e2e"))))]
     {
+        let _ = quickjs;
         super::light::download_one_or_legacy(library, executable, url, on_progress)
     }
 }
