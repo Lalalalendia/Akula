@@ -647,13 +647,35 @@ mod tests {
                 },
             ],
             links: vec![
-                Link { a: 0, b: 1, rate_mib_per_slot: 2 },
-                Link { a: 1, b: 2, rate_mib_per_slot: 2 },
+                Link {
+                    a: 0,
+                    b: 1,
+                    rate_mib_per_slot: 2,
+                },
+                Link {
+                    a: 1,
+                    b: 2,
+                    rate_mib_per_slot: 2,
+                },
             ],
-            requests: vec![Request { receiver: 2, chunk: 0, last_slot: 2 }],
+            requests: vec![Request {
+                receiver: 2,
+                chunk: 0,
+                last_slot: 2,
+            }],
         };
-        let actual = network.nodes.iter().map(|n| n.online.clone()).collect::<Vec<_>>();
-        assert_eq!(simulate(&network, &actual, Policy::ForecastDirect).unwrap().metrics.completed, 0);
+        let actual = network
+            .nodes
+            .iter()
+            .map(|n| n.online.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            simulate(&network, &actual, Policy::ForecastDirect)
+                .unwrap()
+                .metrics
+                .completed,
+            0
+        );
         let plan = simulate(&network, &actual, Policy::AdaptiveRelay).unwrap();
         assert_eq!(plan.metrics.completed, 1);
         assert_eq!(plan.metrics.prefetched_mib, 2);
@@ -666,7 +688,10 @@ mod tests {
         revoked.nodes[1].prefetch_opt_in = false;
         assert!(plan.verify(&revoked, &actual).is_err());
         assert_eq!(
-            simulate(&revoked, &actual, Policy::AdaptiveRelay).unwrap().metrics.completed,
+            simulate(&revoked, &actual, Policy::AdaptiveRelay)
+                .unwrap()
+                .metrics
+                .completed,
             0
         );
     }
