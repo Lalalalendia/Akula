@@ -30,9 +30,7 @@ fn make_scenario(rng: &mut Rng, id: usize) -> Scenario {
     let horizon = 5 + rng.pick(10);
     let peers = (0..n)
         .map(|peer_id| Peer {
-            online: (0..horizon)
-                .map(|_| rng.chance(2 + (id % 2), 4))
-                .collect(),
+            online: (0..horizon).map(|_| rng.chance(2 + (id % 2), 4)).collect(),
             cached: (0..chunks)
                 .map(|chunk| (peer_id == chunk % n) || rng.chance(1, 8))
                 .collect(),
@@ -177,7 +175,9 @@ fn main() -> Result<(), String> {
         let exact = exact_one_chunk(&s)?;
         let temporal = schedule(&s, Strategy::TemporalRoute)?;
         if temporal.completed > exact.completed {
-            return Err(format!("heuristic exceeded exact optimum in tiny case {id}"));
+            return Err(format!(
+                "heuristic exceeded exact optimum in tiny case {id}"
+            ));
         }
         optimum_sum += exact.completed;
         temporal_sum += temporal.completed;
