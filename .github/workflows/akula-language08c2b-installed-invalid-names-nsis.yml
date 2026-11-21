@@ -32,6 +32,19 @@ jobs:
           $tokens=$null;$errors=$null
           $ast=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
           if($errors.Count -ne 0){throw ('LANG-08c PowerShell parse errors: '+($errors|Out-String))}
+          # The shared Windows NSIS baseline runs DESK-15's 100k-line recovery
+          # before this LANG-08 installed witness. Fail early on syntax drift
+          # in its atomic-shadow enumeration guard, not after compiling NSIS.
+          $largeRecovery=Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-beta-recovery-large.ps1'
+          $recoveryTokens=$null;$recoveryErrors=$null
+          $recoveryAst=[System.Management.Automation.Language.Parser]::ParseFile($largeRecovery,[ref]$recoveryTokens,[ref]$recoveryErrors)
+          if($recoveryErrors.Count -ne 0){throw ('DESK-15 recovery PowerShell parse errors: '+($recoveryErrors|Out-String))}
+          $recoverySource=[IO.File]::ReadAllText($largeRecovery)
+          if(!$recoverySource.Contains('AKULA_WINDOWS_DESK15_LARGE_RECOVERY_PASS') -or
+             !$recoverySource.Contains('ReadAllBytes') -or
+             !$recoverySource.Contains('MethodInvocationException')){
+            throw 'LANG-08c baseline recovery must keep the exact 100k acceptance and bounded retired-shadow guard'
+          }
           $source=[IO.File]::ReadAllText($path)
           foreach($needle in @('AKULA_LANG08B_INSTALLED_EXPORT_PASS','AKULA_LANG08B_INSTALLED_IMPORT_HOLD_PASS',
              'AKULA_LANG08B_INSTALLED_REBIND_PASS','AKULA_LANG08B_INSTALLED_RESTART_PASS',
