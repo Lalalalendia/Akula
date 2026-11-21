@@ -17,6 +17,14 @@ pub enum Policy {
     AdaptiveRelay,
 }
 
+/// Controlled A/B factor. Both modes use the identical policy and network.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PartialMode {
+    KeepVerified,
+    /// Drop incomplete progress after any idle slot or a source change.
+    RestartInterrupted,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Segment {
     pub slot: usize,
@@ -36,19 +44,22 @@ pub struct Metrics {
     pub source_switches: usize,
     pub prefetched_mib: usize,
     pub incomplete_mib: usize,
+    /// Already transferred but discarded MiB; added to transmitted bytes.
+    pub wasted_mib: usize,
 }
 
 #[derive(Clone, Debug)]
 pub struct Plan {
     pub segments: Vec<Segment>,
     pub metrics: Metrics,
+    pub partial_mode: PartialMode,
 }
 
 impl Plan {
     /// Replays all segment transfers against the observed trace and quotas.
     /// Checks source ownership at slot start, consent, capacities and metrics.
     pub fn verify(&self, network: &Network, actual: &[Vec<bool>]) -> Result<(), String> {
-        let mut state = Working::new(network, actual)?;
+        let mut state = Working::new(network, actual, self.partial_mode)?;
         let mut ordered = self.segments.clone();
         ordered.sort_by_key(|x| (x.slot, x.to, x.chunk));
         if self
@@ -60,6 +71,7 @@ impl Plan {
         }
         let mut cursor = 0;
         for slot in 0..network.steps {
+            state.expire_interrupted(slot);
             let owners = state.full_snapshot();
             let mut budget = Budget::new(network);
             while cursor < ordered.len() && ordered[cursor].slot == slot {
@@ -111,6 +123,9 @@ struct Working<'a> {
     received: Vec<Vec<usize>>,
     completed_at: Vec<Vec<Option<usize>>>,
     prior_source: Vec<Vec<Option<Source>>>,
+    last_segment_slot: Vec<Vec<Option<usize>>>,
+    partial_mode: PartialMode,
+    wasted_mib: usize,
     segments: Vec<Segment>,
     switches: usize,
     prefetch_mib: usize,
@@ -119,7 +134,11 @@ struct Working<'a> {
 }
 
 impl<'a> Working<'a> {
-    fn new(network: &'a Network, actual: &'a [Vec<bool>]) -> Result<Self, String> {
+    fn new(
+        network: &'a Network,
+        actual: &'a [Vec<bool>],
+        partial_mode: PartialMode,
+    ) -> Result<Self, String> {
         network.validate()?;
         if actual.len() != network.nodes.len() || actual.iter().any(|x| x.len() != network.steps) {
             return Err("invalid observed online-trace dimensions".into());
@@ -168,12 +187,48 @@ impl<'a> Working<'a> {
             received,
             completed_at,
             prior_source: vec![vec![None; network.sizes_mib.len()]; network.nodes.len()],
+            last_segment_slot: vec![vec![None; network.sizes_mib.len()]; network.nodes.len()],
+            partial_mode,
+            wasted_mib: 0,
             segments: Vec::new(),
             switches: 0,
             prefetch_mib: 0,
             s3_mib: 0,
             p2p_mib: 0,
         })
+    }
+
+    /// In the no-resume control, any gap loses only the incomplete prefix.
+    /// Completed chunks are unaffected and remain shareable.
+    fn expire_interrupted(&mut self, slot: usize) {
+        if self.partial_mode != PartialMode::RestartInterrupted || slot == 0 {
+            return;
+        }
+        for peer in 0..self.received.len() {
+            for chunk in 0..self.received[peer].len() {
+                let progress = self.received[peer][chunk];
+                if progress > 0
+                    && progress < self.network.sizes_mib[chunk]
+                    && self.last_segment_slot[peer][chunk] != Some(slot - 1)
+                {
+                    self.wasted_mib += progress;
+                    self.received[peer][chunk] = 0;
+                    self.prior_source[peer][chunk] = None;
+                }
+            }
+        }
+    }
+
+    /// Switching source forces a fresh chunk only in the control arm.
+    fn effective_progress(&self, from: Source, to: usize, chunk: usize) -> usize {
+        if self.partial_mode == PartialMode::RestartInterrupted
+            && self.prior_source[to][chunk].is_some_and(|old| old != from)
+            && self.received[to][chunk] < self.network.sizes_mib[chunk]
+        {
+            0
+        } else {
+            self.received[to][chunk]
+        }
     }
 
     fn full_snapshot(&self) -> Vec<Vec<bool>> {
@@ -258,7 +313,7 @@ impl<'a> Working<'a> {
                 rate
             }
         };
-        Some(rate.min(self.network.sizes_mib[chunk] - self.received[to][chunk]))
+        Some(rate.min(self.network.sizes_mib[chunk] - self.effective_progress(from, to, chunk)))
     }
 
     fn record(&mut self, transfer: Segment, budget: &mut Budget) -> Result<(), String> {
@@ -276,8 +331,13 @@ impl<'a> Working<'a> {
             && self.prior_source[to][chunk].is_some_and(|prior| prior != from)
         {
             self.switches += 1;
+            if self.partial_mode == PartialMode::RestartInterrupted {
+                self.wasted_mib += self.received[to][chunk];
+                self.received[to][chunk] = 0;
+            }
         }
         self.prior_source[to][chunk] = Some(from);
+        self.last_segment_slot[to][chunk] = Some(slot);
         self.received[to][chunk] += mib;
         if self.received[to][chunk] > self.network.sizes_mib[chunk] {
             return Err("overcomplete chunk".into());
@@ -331,6 +391,7 @@ impl<'a> Working<'a> {
             source_switches: self.switches,
             prefetched_mib: self.prefetch_mib,
             incomplete_mib: incomplete,
+            wasted_mib: self.wasted_mib,
         }
     }
 
@@ -345,7 +406,7 @@ impl<'a> Working<'a> {
         let Some(rate) = self.rate(from, to) else {
             return usize::MAX;
         };
-        let mut remaining = self.network.sizes_mib[chunk] - self.received[to][chunk];
+        let mut remaining = self.network.sizes_mib[chunk] - self.effective_progress(from, to, chunk);
         for t in slot..=last_slot {
             // The present slot is observed; never peek at a future actual state.
             let available = if t == slot {
@@ -456,10 +517,21 @@ impl<'a> Working<'a> {
 /// This is a simplified independent-MiB-verification model, not a transport
 /// implementation, Bao proof verifier, or grant.
 pub fn simulate(network: &Network, actual: &[Vec<bool>], policy: Policy) -> Result<Plan, String> {
-    let mut state = Working::new(network, actual)?;
+    simulate_with_mode(network, actual, policy, PartialMode::KeepVerified)
+}
+
+/// Same source-ranking logic, same observed slots. Only partial retention changes.
+pub fn simulate_with_mode(
+    network: &Network,
+    actual: &[Vec<bool>],
+    policy: Policy,
+    partial_mode: PartialMode,
+) -> Result<Plan, String> {
+    let mut state = Working::new(network, actual, partial_mode)?;
     let mut requests = network.requests.clone();
     requests.sort_by_key(|r| (r.last_slot, r.receiver, r.chunk));
     for slot in 0..network.steps {
+        state.expire_interrupted(slot);
         let owners = state.full_snapshot();
         let mut budget = Budget::new(network);
         // Requested parts have priority over speculative relay prefetch.
@@ -510,6 +582,7 @@ pub fn simulate(network: &Network, actual: &[Vec<bool>], policy: Policy) -> Resu
     let result = Plan {
         metrics: state.summary(),
         segments: state.segments,
+        partial_mode,
     };
     result.verify(network, actual)?;
     Ok(result)
