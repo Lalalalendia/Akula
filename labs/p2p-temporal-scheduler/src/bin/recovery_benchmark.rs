@@ -7,7 +7,9 @@ use akula_p2p_temporal_scheduler_lab::duration::{
     evaluate_observed, schedule as fixed_schedule, Link, Network, Node, Request,
     Strategy as FixedStrategy,
 };
-use akula_p2p_temporal_scheduler_lab::recovery::{simulate, Policy};
+use akula_p2p_temporal_scheduler_lab::recovery::{
+    simulate, simulate_with_mode, PartialMode, Policy,
+};
 
 struct Rng(u64);
 
@@ -114,6 +116,7 @@ struct Totals {
     changed_source: usize,
     prefetched_mib: usize,
     incomplete_mib: usize,
+    wasted_mib: usize,
     timing: Vec<u128>,
 }
 
@@ -125,6 +128,26 @@ fn main() -> Result<(), String> {
         ("adaptive_relay_resume", Policy::AdaptiveRelay),
     ];
     let levels = [0usize, 10, 25];
+    // Paired experiment: the same reactive policy and same observed trace.
+    // The sole switched rule is whether independently verified partial MiB
+    // persist across a pause or change of source.
+    let compared_policies = [
+        ("peer_first", Policy::PeerFirst),
+        ("forecast_direct", Policy::ForecastDirect),
+        ("adaptive_relay", Policy::AdaptiveRelay),
+    ];
+    let retention_modes = [
+        ("keep_verified", PartialMode::KeepVerified),
+        ("restart_interrupted", PartialMode::RestartInterrupted),
+    ];
+    let mut paired: Vec<Vec<Vec<Totals>>> = (0..levels.len())
+        .map(|_| {
+            (0..compared_policies.len())
+                .map(|_| (0..retention_modes.len()).map(|_| Totals::default()).collect())
+                .collect()
+        })
+        .collect();
+    let mut paired_wins = vec![vec![[0usize; 3]; compared_policies.len()]; levels.len()];
     let mut totals: Vec<Vec<Totals>> = (0..levels.len())
         .map(|_| (0..policies.len()).map(|_| Totals::default()).collect())
         .collect();
@@ -156,6 +179,35 @@ fn main() -> Result<(), String> {
                 group.incomplete_mib += plan.metrics.incomplete_mib;
                 group.timing.push(duration);
             }
+
+            for (policy_id, (_, policy)) in compared_policies.iter().enumerate() {
+                let mut pair_results = [0usize; 2];
+                for (mode_id, (_, mode)) in retention_modes.iter().enumerate() {
+                    let started = Instant::now();
+                    let plan = simulate_with_mode(&n, &actual, *policy, *mode)?;
+                    let elapsed = started.elapsed().as_micros();
+                    plan.verify(&n, &actual)?;
+                    pair_results[mode_id] = plan.metrics.completed;
+                    let group = &mut paired[level_id][policy_id][mode_id];
+                    group.completed += plan.metrics.completed;
+                    group.total += plan.metrics.total;
+                    group.s3_mib += plan.metrics.s3_mib;
+                    group.peer_mib += plan.metrics.p2p_mib;
+                    group.changed_source += plan.metrics.source_switches;
+                    group.prefetched_mib += plan.metrics.prefetched_mib;
+                    group.incomplete_mib += plan.metrics.incomplete_mib;
+                    group.wasted_mib += plan.metrics.wasted_mib;
+                    group.timing.push(elapsed);
+                }
+                let outcome = if pair_results[0] > pair_results[1] {
+                    0
+                } else if pair_results[0] == pair_results[1] {
+                    1
+                } else {
+                    2
+                };
+                paired_wins[level_id][policy_id][outcome] += 1;
+            }
         }
     }
     println!("RECOVERY_SIM_CASES={CASES}");
@@ -183,6 +235,33 @@ fn main() -> Result<(), String> {
                 t.prefetched_mib,
                 t.incomplete_mib,
                 p95,
+            );
+        }
+    }
+    println!("PAIRED_RETENTION_AB_CASES={CASES}");
+    println!("Only mode varies within a pair: retain verified partial MiB vs restart on interruption or source change");
+    println!("offline_pct,policy,mode,completed,total,s3_mib,p2p_mib,wasted_mib,source_switches,p95_calc_us");
+    for (level_id, level) in levels.iter().enumerate() {
+        for (policy_id, (name, _)) in compared_policies.iter().enumerate() {
+            for (mode_id, (mode_name, _)) in retention_modes.iter().enumerate() {
+                let t = &mut paired[level_id][policy_id][mode_id];
+                t.timing.sort_unstable();
+                let p95 = t.timing[t.timing.len() * 95 / 100];
+                println!(
+                    "{level},{name},{mode_name},{},{},{},{},{},{},{}",
+                    t.completed,
+                    t.total,
+                    t.s3_mib,
+                    t.peer_mib,
+                    t.wasted_mib,
+                    t.changed_source,
+                    p95,
+                );
+            }
+            let w = paired_wins[level_id][policy_id];
+            println!(
+                "PAIRED_CASES offline_pct={level} policy={name} keep_better={} equal={} restart_better={}",
+                w[0], w[1], w[2]
             );
         }
     }
