@@ -651,6 +651,71 @@ mod tests {
     }
 
     #[test]
+    fn only_retention_changes_after_a_source_switch() {
+        let (network, actual) = interrupted_peer();
+        let keep = simulate_with_mode(&network, &actual, Policy::PeerFirst, PartialMode::KeepVerified)
+            .unwrap();
+        let restart = simulate_with_mode(
+            &network,
+            &actual,
+            Policy::PeerFirst,
+            PartialMode::RestartInterrupted,
+        )
+        .unwrap();
+        assert_eq!(keep.metrics.completed, 1);
+        assert_eq!(restart.metrics.completed, 0);
+        assert_eq!(keep.metrics.wasted_mib, 0);
+        assert_eq!(restart.metrics.wasted_mib, 4);
+        assert_eq!(restart.metrics.p2p_mib, 4);
+        assert_eq!(restart.metrics.s3_mib, 3);
+        assert_eq!(keep.metrics.s3_mib, 1);
+        keep.verify(&network, &actual).unwrap();
+        restart.verify(&network, &actual).unwrap();
+        let mut wrong_mode = keep.clone();
+        wrong_mode.partial_mode = PartialMode::RestartInterrupted;
+        assert!(wrong_mode.verify(&network, &actual).is_err());
+    }
+
+    #[test]
+    fn an_idle_gap_drops_only_incomplete_progress_in_restart_mode() {
+        let (mut network, mut actual) = interrupted_peer();
+        network.s3_parallel = 0;
+        network.requests[0].last_slot = 3;
+        actual[0] = vec![true, false, true, true, true];
+        let keep = simulate_with_mode(&network, &actual, Policy::PeerFirst, PartialMode::KeepVerified)
+            .unwrap();
+        let restart = simulate_with_mode(
+            &network,
+            &actual,
+            Policy::PeerFirst,
+            PartialMode::RestartInterrupted,
+        )
+        .unwrap();
+        assert_eq!(keep.metrics.completed, 1);
+        assert_eq!(restart.metrics.completed, 0);
+        assert_eq!(restart.metrics.wasted_mib, 2);
+        assert_eq!(restart.metrics.p2p_mib, 6);
+    }
+
+    #[test]
+    fn both_arms_agree_with_no_interruptions() {
+        let (network, _) = interrupted_peer();
+        let actual = network.nodes.iter().map(|node| node.online.clone()).collect::<Vec<_>>();
+        let keep = simulate_with_mode(&network, &actual, Policy::PeerFirst, PartialMode::KeepVerified)
+            .unwrap();
+        let restart = simulate_with_mode(
+            &network,
+            &actual,
+            Policy::PeerFirst,
+            PartialMode::RestartInterrupted,
+        )
+        .unwrap();
+        assert_eq!(keep.metrics.completed, 1);
+        assert_eq!(keep.metrics, restart.metrics);
+        assert_eq!(keep.segments, restart.segments);
+    }
+
+    #[test]
     fn no_same_slot_relay_of_incomplete_or_newly_complete_chunk() {
         let mut network = interrupted_peer().0;
         network.steps = 2;
