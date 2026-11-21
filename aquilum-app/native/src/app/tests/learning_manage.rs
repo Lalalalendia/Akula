@@ -122,6 +122,41 @@ fn lang02_stale_collection_menu_refuses_delete_without_changing_sources() {
     assert_eq!(latest.state.registry.collections[0].id, "botany");
     assert_eq!(std::fs::read(source).unwrap(), source_bytes);
     eprintln!("AKULA_LANG02_STALE_PASS=revision_guard,source_unchanged");
+
+    // The same session must observe the externally committed name after the
+    // stale delete notice is dismissed; a fresh user confirmation can then
+    // delete this collection without damaging source bindings or Markdown.
+    assert!(matches!(&h.app.popup, Some(Popup::StudyPreview { .. })),
+        "stale delete must leave a native conflict notice");
+    notice_close(&mut h);
+    h.app.open_study_manage(&mut h.root);
+    let fresh_menu = match &h.app.popup {
+        Some(Popup::StudyManage { layer, revision, actions }) => {
+            assert_eq!(*revision, latest.revision);
+            assert_eq!(actions.len(), 2);
+            assert_eq!(actions[1].0, "botany");
+            assert_eq!(actions[1].1, "Botany");
+            assert!(actions[1].2);
+            *layer
+        }
+        _ => panic!("same-session delete menu must reopen after stale conflict"),
+    };
+    h.act(fresh_menu, MenuChoice::Item(1));
+    let fresh_delete = match &h.app.popup {
+        Some(Popup::StudyDelete { dialog, revision, .. }) => {
+            assert_eq!(*revision, latest.revision);
+            dialog.layer
+        }
+        _ => panic!("fresh delete needs native user confirmation"),
+    };
+    h.act(fresh_delete, DialogAnswer::Confirm);
+    let deleted = StudyStore::open(&db).unwrap().load().unwrap();
+    assert_eq!(deleted.revision, latest.revision + 1);
+    assert!(deleted.state.registry.collections.is_empty());
+    assert_eq!(deleted.state.registry.tables, latest.state.registry.tables);
+    assert_eq!(deleted.state.anchors, latest.state.anchors);
+    assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+    eprintln!("AKULA_LANG02_STALE_DELETE_SAME_SESSION_PASS=notice_closed,new_revision,source_unchanged");
 }
 
 #[test]
