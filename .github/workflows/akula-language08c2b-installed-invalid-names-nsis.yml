@@ -59,6 +59,8 @@ jobs:
              'AKULA_LANG08C2B5_SYNTHETIC_DEBOUNCE_CONFIG_PASS','saveDebounceMs',
              'Synthetic-AdvanceStudyName','Assert-StudyChangedNotice',
              'AKULA_LANG08C2B6_INSTALLED_STALE_RENAME_PASS','AKULA_LANG08C2B6_INSTALLED_STALE_DELETE_PASS',
+             'AKULA_LANG08C2B6_INSTALLED_REOPEN_AFTER_RENAME_PASS',
+             'AKULA_LANG08C2B6_INSTALLED_REOPEN_AFTER_DELETE_PASS',
              'Wait-FileDialog','Choose-FileThroughNativeDialog','Get-AnnotationSnapshot',
              'RUNNER_ENVIRONMENT','github-hosted','GetForegroundWindow','GetWindowThreadProcessId',
              'SendInput','compiled_executable_sha256','SQLite format 3','backupExport','backupImport',
@@ -311,5 +313,9 @@ jobs:
           additionally holds installed rename/delete dialogs while an
           independent disposable SQLite CAS writer wins; stale confirmations
           must refuse and preserve winner metadata, anchors and Markdown.
-          RUNNER_TEMP only, non-release and no user vault.
+          After each external CAS, the native same-session test verifies menu
+          re-entry, while the genuine NSIS/UIA test restarts the disposable
+          profile, validates exact source/registry hashes, and reopens a fresh
+          Rename/Delete dialog against the persisted winner. No user vault.
+          RUNNER_TEMP only, non-release and no signing.
           '@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
