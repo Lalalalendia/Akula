@@ -37,6 +37,7 @@ fn make_scenario(rng: &mut Rng, id: usize) -> Scenario {
             upload_slots: 1 + rng.pick(3),
             download_slots: 1 + rng.pick(2),
             share_enabled: rng.chance(4, 5),
+            prefetch_opt_in: rng.chance(1, 2),
         })
         .collect();
 
