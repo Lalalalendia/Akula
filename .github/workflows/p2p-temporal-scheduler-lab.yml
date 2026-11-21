@@ -26,3 +26,5 @@ jobs:
         run: cargo test --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --offline
       - name: Demo
         run: cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --offline --quiet
+      - name: Exact-oracle and seeded 120-case benchmark
+        run: cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --offline --quiet --bin benchmark
