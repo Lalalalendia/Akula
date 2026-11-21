@@ -35,3 +35,5 @@ jobs:
         run: cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --offline --quiet --bin benchmark
       - name: Duration/bandwidth/forecast experiment (120 deterministic cases)
         run: cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --offline --quiet --bin duration_benchmark
+      - name: Verified-segment resume and replanning (120 deterministic cases)
+        run: cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --offline --quiet --bin recovery_benchmark
