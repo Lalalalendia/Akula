@@ -143,7 +143,11 @@ fn main() -> Result<(), String> {
     let mut paired: Vec<Vec<Vec<Totals>>> = (0..levels.len())
         .map(|_| {
             (0..compared_policies.len())
-                .map(|_| (0..retention_modes.len()).map(|_| Totals::default()).collect())
+                .map(|_| {
+                    (0..retention_modes.len())
+                        .map(|_| Totals::default())
+                        .collect()
+                })
                 .collect()
         })
         .collect();
@@ -249,13 +253,7 @@ fn main() -> Result<(), String> {
                 let p95 = t.timing[t.timing.len() * 95 / 100];
                 println!(
                     "{level},{name},{mode_name},{},{},{},{},{},{},{}",
-                    t.completed,
-                    t.total,
-                    t.s3_mib,
-                    t.peer_mib,
-                    t.wasted_mib,
-                    t.changed_source,
-                    p95,
+                    t.completed, t.total, t.s3_mib, t.peer_mib, t.wasted_mib, t.changed_source, p95,
                 );
             }
             let w = paired_wins[level_id][policy_id];
