@@ -251,14 +251,16 @@ mod tests {
                     }
                 }
             }
-            let demands = (0..n)
-                .filter(|_| rnd(&mut seed, 3) != 0)
-                .map(|receiver| crate::Demand {
-                    receiver,
-                    chunk: 0,
-                    deadline: rnd(&mut seed, h),
-                })
-                .collect();
+            let mut demands = Vec::new();
+            for receiver in 0..n {
+                if rnd(&mut seed, 3) != 0 {
+                    demands.push(crate::Demand {
+                        receiver,
+                        chunk: 0,
+                        deadline: rnd(&mut seed, h),
+                    });
+                }
+            }
             let s = Scenario {
                 peers,
                 links,
