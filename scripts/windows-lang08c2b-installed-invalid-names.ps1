@@ -1181,7 +1181,31 @@ if result is None or result[0]!=0:
   Write-Host 'AKULA_LANG08C2B6_INSTALLED_STALE_RENAME_PASS os_dialog=1 competing_sqlite_cas=1 native_refusal=1 winner_preserved=1'
   Close-StudyNotice -Window $window -Process $proc
 
-  # The refreshed installed menu must still permit an ordinary new rename.
+  # The native same-session regression independently verifies that a conflict
+  # notice does not poison the next management menu. This installed OS/UIA
+  # fixture verifies the stronger persistence boundary: close the real NSIS
+  # process, reopen the SAME disposable note/profile, and require the exact
+  # independently committed winner to survive before a fresh user action.
+  # No synthetic app state reset or SQLite fixture replacement is permitted.
+  Close-Note -Process $proc;$proc=$null
+  if((Read-StudyStateHash -Path $studyDb) -cne $winnerHash -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b6 stale rename winner changed during installed restart'
+  }
+  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08C Collections'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $studyText
+  $reopenedWinner=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-Concurrent'
+  if($reopenedWinner.revision -ne ($created.revision+1) -or
+     (Read-StudyStateHash -Path $studyDb) -cne $winnerHash){
+    throw 'LANG-08c2b6 stale rename winner was lost across GUI restart'
+  }
+  Write-Host 'AKULA_LANG08C2B6_INSTALLED_REOPEN_AFTER_RENAME_PASS nsis_restart=1 concurrent_winner=1 markdown_sha256=1'
+
+  # The fresh installed session must permit an ordinary new rename.
   Open-StudyCollectionMenu -Window $window -Process $proc
   Study-Choose -Window $window -Process $proc -Names $labels.studyManage
   Study-Choose -Window $window -Process $proc -Names @('Rename: LANG08C-Concurrent')
@@ -1235,6 +1259,26 @@ if result is None or result[0]!=0:
   }
   Write-Host 'AKULA_LANG08C2B6_INSTALLED_STALE_DELETE_PASS os_confirmation=1 competing_sqlite_cas=1 native_refusal=1 winner_preserved=1'
   Close-StudyNotice -Window $window -Process $proc
+
+  # Cross-session persistence after a stale Delete refusal: the winner must
+  # survive process shutdown, vault reopen, and a complete GUI readback.
+  Close-Note -Process $proc;$proc=$null
+  if((Read-StudyStateHash -Path $studyDb) -cne $deleteWinnerHash -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b6 stale delete winner changed during installed restart'
+  }
+  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08C Collections'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $studyText
+  $reopenedDeleteWinner=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-DeleteWinner'
+  if($reopenedDeleteWinner.revision -ne ($renamed.revision+1) -or
+     (Read-StudyStateHash -Path $studyDb) -cne $deleteWinnerHash){
+    throw 'LANG-08c2b6 stale delete winner was lost across GUI restart'
+  }
+  Write-Host 'AKULA_LANG08C2B6_INSTALLED_REOPEN_AFTER_DELETE_PASS nsis_restart=1 concurrent_winner=1 markdown_sha256=1'
 
   # Only a freshly opened native confirmation can delete the current group.
   Open-StudyCollectionMenu -Window $window -Process $proc
