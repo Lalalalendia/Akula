@@ -51,8 +51,8 @@ impl Plan {
         let mut state = Working::new(network, actual)?;
         let mut ordered = self.segments.clone();
         ordered.sort_by_key(|x| (x.slot, x.to, x.chunk));
-        if ordered != self.segments {
-            return Err("segment transfers must be ordered by slot and receiver".into());
+        if self.segments.windows(2).any(|pair| pair[0].slot > pair[1].slot) {
+            return Err("segment slots must be nondecreasing".into());
         }
         let mut cursor = 0;
         for slot in 0..network.steps {
