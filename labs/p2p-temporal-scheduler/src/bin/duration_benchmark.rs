@@ -59,7 +59,8 @@ fn instance(rng: &mut Rng) -> Network {
         let pair = (a.min(b), a.max(b));
         if seen.insert(pair) {
             links.push(Link {
-                a, b,
+                a,
+                b,
                 rate_mib_per_slot: [1, 2, 4, 8][rng.pick(4)],
             });
         }
@@ -69,7 +70,8 @@ fn instance(rng: &mut Rng) -> Network {
             let pair = (a.min(b), a.max(b));
             if seen.insert(pair) && rng.chance(1, 3) {
                 links.push(Link {
-                    a, b,
+                    a,
+                    b,
                     rate_mib_per_slot: [1, 2, 4, 8][rng.pick(4)],
                 });
             }
@@ -107,11 +109,16 @@ fn instance(rng: &mut Rng) -> Network {
 
 /// Same realized trace for all strategies on a given case and outage level.
 fn observed(network: &Network, rng: &mut Rng, outage_percent: usize) -> Vec<Vec<bool>> {
-    network.nodes.iter().map(|node| {
-        node.online.iter().map(|&available| {
-            available && !rng.chance(outage_percent, 100)
-        }).collect()
-    }).collect()
+    network
+        .nodes
+        .iter()
+        .map(|node| {
+            node.online
+                .iter()
+                .map(|&available| available && !rng.chance(outage_percent, 100))
+                .collect()
+        })
+        .collect()
 }
 
 #[derive(Default)]
