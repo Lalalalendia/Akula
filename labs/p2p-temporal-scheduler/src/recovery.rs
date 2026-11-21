@@ -51,7 +51,11 @@ impl Plan {
         let mut state = Working::new(network, actual)?;
         let mut ordered = self.segments.clone();
         ordered.sort_by_key(|x| (x.slot, x.to, x.chunk));
-        if self.segments.windows(2).any(|pair| pair[0].slot > pair[1].slot) {
+        if self
+            .segments
+            .windows(2)
+            .any(|pair| pair[0].slot > pair[1].slot)
+        {
             return Err("segment slots must be nondecreasing".into());
         }
         let mut cursor = 0;
@@ -117,9 +121,7 @@ struct Working<'a> {
 impl<'a> Working<'a> {
     fn new(network: &'a Network, actual: &'a [Vec<bool>]) -> Result<Self, String> {
         network.validate()?;
-        if actual.len() != network.nodes.len()
-            || actual.iter().any(|x| x.len() != network.steps)
-        {
+        if actual.len() != network.nodes.len() || actual.iter().any(|x| x.len() != network.steps) {
             return Err("invalid observed online-trace dimensions".into());
         }
         let mut adjacency = vec![Vec::new(); network.nodes.len()];
@@ -137,16 +139,27 @@ impl<'a> Working<'a> {
                 node.cached
                     .iter()
                     .enumerate()
-                    .map(|(chunk, &cached)| {
-                        if cached { network.sizes_mib[chunk] } else { 0 }
-                    })
+                    .map(
+                        |(chunk, &cached)| {
+                            if cached {
+                                network.sizes_mib[chunk]
+                            } else {
+                                0
+                            }
+                        },
+                    )
                     .collect()
             })
             .collect();
         let completed_at = network
             .nodes
             .iter()
-            .map(|node| node.cached.iter().map(|&cached| cached.then_some(0)).collect())
+            .map(|node| {
+                node.cached
+                    .iter()
+                    .map(|&cached| cached.then_some(0))
+                    .collect()
+            })
             .collect();
         Ok(Self {
             network,
@@ -176,7 +189,11 @@ impl<'a> Working<'a> {
     }
 
     fn link(&self, source: usize, to: usize) -> Option<(usize, usize)> {
-        let &(_, index) = self.adjacency.get(source)?.iter().find(|(peer, _)| *peer == to)?;
+        let &(_, index) = self
+            .adjacency
+            .get(source)?
+            .iter()
+            .find(|(peer, _)| *peer == to)?;
         Some((index, self.network.links[index].rate_mib_per_slot))
     }
 
@@ -214,9 +231,7 @@ impl<'a> Working<'a> {
         {
             return None;
         }
-        if self.demand_deadline(to, chunk).is_none()
-            && !self.network.nodes[to].prefetch_opt_in
-        {
+        if self.demand_deadline(to, chunk).is_none() && !self.network.nodes[to].prefetch_opt_in {
             return None;
         }
         let rate = match from {
@@ -247,7 +262,13 @@ impl<'a> Working<'a> {
     }
 
     fn record(&mut self, transfer: Segment, budget: &mut Budget) -> Result<(), String> {
-        let Segment { slot, from, to, chunk, mib } = transfer;
+        let Segment {
+            slot,
+            from,
+            to,
+            chunk,
+            mib,
+        } = transfer;
         if mib == 0 || to >= self.received.len() || chunk >= self.network.sizes_mib.len() {
             return Err("zero-sized or invalid transfer".into());
         }
@@ -297,9 +318,7 @@ impl<'a> Working<'a> {
         let mut incomplete = 0;
         for (peer, row) in self.received.iter().enumerate() {
             for (chunk, &mib) in row.iter().enumerate() {
-                if !self.network.nodes[peer].cached[chunk]
-                    && mib < self.network.sizes_mib[chunk]
-                {
+                if !self.network.nodes[peer].cached[chunk] && mib < self.network.sizes_mib[chunk] {
                     incomplete += mib;
                 }
             }
@@ -391,7 +410,13 @@ impl<'a> Working<'a> {
                     id,
                 ),
             };
-            let seg = Segment { slot, from: source, to, chunk, mib };
+            let seg = Segment {
+                slot,
+                from: source,
+                to,
+                chunk,
+                mib,
+            };
             if best.as_ref().is_none_or(|(old, _)| key < *old) {
                 best = Some((key, seg));
             }
@@ -399,7 +424,13 @@ impl<'a> Working<'a> {
         best.map(|(_, seg)| seg)
     }
 
-    fn relays_for(&self, receiver: usize, chunk: usize, slot: usize, deadline: usize) -> Vec<usize> {
+    fn relays_for(
+        &self,
+        receiver: usize,
+        chunk: usize,
+        slot: usize,
+        deadline: usize,
+    ) -> Vec<usize> {
         self.adjacency[receiver]
             .iter()
             .map(|&(peer, _)| peer)
@@ -424,11 +455,7 @@ impl<'a> Working<'a> {
 /// It treats already-received verified MiB as persistent across interruptions.
 /// This is a simplified independent-MiB-verification model, not a transport
 /// implementation, Bao proof verifier, or grant.
-pub fn simulate(
-    network: &Network,
-    actual: &[Vec<bool>],
-    policy: Policy,
-) -> Result<Plan, String> {
+pub fn simulate(network: &Network, actual: &[Vec<bool>], policy: Policy) -> Result<Plan, String> {
     let mut state = Working::new(network, actual)?;
     let mut requests = network.requests.clone();
     requests.sort_by_key(|r| (r.last_slot, r.receiver, r.chunk));
@@ -480,7 +507,10 @@ pub fn simulate(
             }
         }
     }
-    let result = Plan { metrics: state.summary(), segments: state.segments };
+    let result = Plan {
+        metrics: state.summary(),
+        segments: state.segments,
+    };
     result.verify(network, actual)?;
     Ok(result)
 }
@@ -514,10 +544,22 @@ mod tests {
                     prefetch_opt_in: false,
                 },
             ],
-            links: vec![Link { a: 0, b: 1, rate_mib_per_slot: 2 }],
-            requests: vec![Request { receiver: 1, chunk: 0, last_slot: 4 }],
+            links: vec![Link {
+                a: 0,
+                b: 1,
+                rate_mib_per_slot: 2,
+            }],
+            requests: vec![Request {
+                receiver: 1,
+                chunk: 0,
+                last_slot: 4,
+            }],
         };
-        let mut actual = network.nodes.iter().map(|n| n.online.clone()).collect::<Vec<_>>();
+        let mut actual = network
+            .nodes
+            .iter()
+            .map(|n| n.online.clone())
+            .collect::<Vec<_>>();
         actual[0][2] = false;
         actual[0][3] = false;
         actual[0][4] = false;
@@ -539,7 +581,9 @@ mod tests {
     fn no_same_slot_relay_of_incomplete_or_newly_complete_chunk() {
         let mut network = interrupted_peer().0;
         network.steps = 2;
-        for n in &mut network.nodes { n.online.truncate(2); }
+        for n in &mut network.nodes {
+            n.online.truncate(2);
+        }
         network.nodes.push(Node {
             online: vec![true; 2],
             cached: vec![false],
@@ -548,11 +592,23 @@ mod tests {
             share_enabled: false,
             prefetch_opt_in: false,
         });
-        network.links.push(Link { a: 1, b: 2, rate_mib_per_slot: 5 });
+        network.links.push(Link {
+            a: 1,
+            b: 2,
+            rate_mib_per_slot: 5,
+        });
         network.nodes[1].prefetch_opt_in = true;
-        network.requests = vec![Request { receiver: 2, chunk: 0, last_slot: 1 }];
+        network.requests = vec![Request {
+            receiver: 2,
+            chunk: 0,
+            last_slot: 1,
+        }];
         network.s3_parallel = 0;
-        let actual = network.nodes.iter().map(|n| n.online.clone()).collect::<Vec<_>>();
+        let actual = network
+            .nodes
+            .iter()
+            .map(|n| n.online.clone())
+            .collect::<Vec<_>>();
         let result = simulate(&network, &actual, Policy::AdaptiveRelay).unwrap();
         assert_eq!(result.metrics.completed, 0);
     }
@@ -568,9 +624,21 @@ mod tests {
             share_enabled: true,
             prefetch_opt_in: false,
         });
-        network.links.push(Link { a: 0, b: 2, rate_mib_per_slot: 5 });
-        network.links.push(Link { a: 2, b: 1, rate_mib_per_slot: 5 });
-        let actual = network.nodes.iter().map(|n| n.online.clone()).collect::<Vec<_>>();
+        network.links.push(Link {
+            a: 0,
+            b: 2,
+            rate_mib_per_slot: 5,
+        });
+        network.links.push(Link {
+            a: 2,
+            b: 1,
+            rate_mib_per_slot: 5,
+        });
+        let actual = network
+            .nodes
+            .iter()
+            .map(|n| n.online.clone())
+            .collect::<Vec<_>>();
         let result = simulate(&network, &actual, Policy::AdaptiveRelay).unwrap();
         assert!(result.segments.iter().all(|tr| tr.to != 2));
     }
