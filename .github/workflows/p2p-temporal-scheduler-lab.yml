@@ -16,8 +16,13 @@ concurrency:
 
 jobs:
   offline-scheduler:
-    runs-on: ubuntu-latest
+    name: Offline scheduler / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - name: Rustfmt
@@ -28,3 +33,5 @@ jobs:
         run: cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --offline --quiet --bin akula-p2p-temporal-scheduler-lab
       - name: Exact-oracle and seeded 120-case benchmark
         run: cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --offline --quiet --bin benchmark
+      - name: Duration/bandwidth/forecast experiment (120 deterministic cases)
+        run: cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --offline --quiet --bin duration_benchmark
