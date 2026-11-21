@@ -549,6 +549,7 @@ mod tests {
             prefetch_opt_in: false,
         });
         network.links.push(Link { a: 1, b: 2, rate_mib_per_slot: 5 });
+        network.nodes[1].prefetch_opt_in = true;
         network.requests = vec![Request { receiver: 2, chunk: 0, last_slot: 1 }];
         network.s3_parallel = 0;
         let actual = network.nodes.iter().map(|n| n.online.clone()).collect::<Vec<_>>();
