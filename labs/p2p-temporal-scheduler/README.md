@@ -14,7 +14,8 @@ on-demand peer-first baselines.
 
 ```sh
 cargo test --manifest-path labs/p2p-temporal-scheduler/Cargo.toml
-cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml
+cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --bin akula-p2p-temporal-scheduler-lab
+cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --bin benchmark
 ```
 
 Fixture: A has a verified chunk at slot 0, bridge R is online at slots 0 and
@@ -30,8 +31,11 @@ last-minute on-demand delivery. Synthetic outcome is not a production benchmark.
   quotas and receiver deadlines are perfectly known (clairvoyant model).
 - No file sizes, per-link rates, variable durations, churn, relay cost,
   malicious peers, real content verification or measured bandwidth.
-- `share_enabled` controls whether a peer may upload; presence of a chunk is
-  never authorization.
+- `share_enabled` controls uploads; `prefetch_opt_in` is required
+  to stage any chunk that the receiver did not explicitly demand. A user demand
+  only authorizes reception of its own exact chunk in this synthetic model.
+  Neither boolean is a cryptographic capability or production authorization.
+  Merely having a chunk never grants sharing rights.
 - S3 is the authoritative fallback, available to online receivers only,
   with a shared per-slot transfer cap.
 - The objective favors timely completion and only weakly penalizes S3
@@ -41,14 +45,25 @@ last-minute on-demand delivery. Synthetic outcome is not a production benchmark.
 
 ## Next gates, before any integration
 
-1. Green exact-head Rustfmt, unit tests, and clippy on Linux and Windows.
-2. Randomized small-case tests against an exact scheduling oracle.
-3. Variable transfer durations, chunk size and network bandwidth.
-4. Reproducible >=100 scenario comparison of completed demands, S3 bytes,
-   peer overhead, latency, CPU and forecast error.
-5. Integrate only through a default-off advisor after the P2P Beta completes;
+1. Pass exact-head Rustfmt and unit tests on Linux; add independent Windows CI.
+2. Keep seeded small-case tests checked against a single-chunk exact oracle.
+3. Extend beyond equal-size unit-slot transfers to variable durations/bandwidth.
+4. Benchmark 120 seeded scenarios; repeat with real traces, sizes and forecast error.
+5. Add a fully specified cost objective including transfer volume, relay
+   overhead, peer energy and opt-in quotas.
+6. Integrate only through a default-off advisor after the P2P Beta completes;
    never bypass independent identity/consent, File Gate or signed manifests.
 
 Related Notion specifications:
 - https://app.notion.com/p/40332a84beec81c0a1bbd9e5c02c7de0
 - https://app.notion.com/p/40132a84beec81d196dee3fcb26ff8e6
+
+## Measurement caveat
+
+The `benchmark` binary reports deterministic outcome counts, and noisy
+machine-specific calculation timings. A single favorable bridge fixture is
+not evidence of a global improvement. Benchmark peers have **perfect knowledge
+of future availability**; the on-demand comparator does not act on that
+knowledge. The gap is not a controlled estimate of live-world benefit.
+A numerical gain of one or two synthetic requests is not enough to justify
+a shipping planner.
