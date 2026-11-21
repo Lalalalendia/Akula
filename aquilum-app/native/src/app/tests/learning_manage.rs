@@ -178,4 +178,43 @@ fn lang02_stale_rename_dialog_refuses_concurrent_update_without_losing_sources()
     assert_eq!(std::fs::read(&source).unwrap(), source_bytes,
         "stale rename must not modify Markdown");
     eprintln!("AKULA_LANG02_STALE_RENAME_PASS=dialog_cas,concurrent_winner,source_unchanged");
+
+    // A conflict refusal must not leave a stale popup or stale collection
+    // snapshot behind: the very same native session must list the external
+    // winner and accept a new confirmation at the updated revision.
+    notice_close(&mut h);
+    h.app.open_study_manage(&mut h.root);
+    let current_layer = match &h.app.popup {
+        Some(Popup::StudyManage { layer, revision, actions }) => {
+            assert_eq!(*revision, committed_revision);
+            assert_eq!(actions.len(), 2);
+            assert_eq!(actions[0].0, "botany");
+            assert_eq!(actions[0].1, "Concurrent winner");
+            assert!(!actions[0].2);
+            *layer
+        }
+        _ => panic!("same-session management must reopen after stale rename refusal"),
+    };
+    h.act(current_layer, MenuChoice::Item(0));
+    let field = match &h.app.popup {
+        Some(Popup::StudyRename { field, revision, .. }) => {
+            assert_eq!(*revision, committed_revision);
+            field.id()
+        }
+        _ => panic!("fresh rename must expose a native editable dialog"),
+    };
+    h.act(field, TextAction::Changed("Current winner".into()));
+    let fresh_dialog = match &h.app.popup {
+        Some(Popup::StudyRename { dialog, .. }) => dialog.layer,
+        _ => panic!("fresh rename confirmation missing after conflict"),
+    };
+    h.act(fresh_dialog, DialogAnswer::Confirm);
+    let after_recovery = StudyStore::open(&db).unwrap().load().unwrap();
+    assert_eq!(after_recovery.revision, committed_revision + 1);
+    assert_eq!(after_recovery.state.registry.collections[0].id, "botany");
+    assert_eq!(after_recovery.state.registry.collections[0].name, "Current winner");
+    assert_eq!(after_recovery.state.registry.tables, before_stale.state.registry.tables);
+    assert_eq!(after_recovery.state.anchors, before_stale.state.anchors);
+    assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+    eprintln!("AKULA_LANG02_STALE_RENAME_SAME_SESSION_PASS=notice_closed,new_revision,source_unchanged");
 }
