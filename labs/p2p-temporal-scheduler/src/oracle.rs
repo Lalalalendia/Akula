@@ -94,7 +94,11 @@ impl Oracle<'_> {
 
         let bit = 1u32 << target;
         let receiver = &self.s.peers[target];
-        if old_mask & bit != 0 || !receiver.online[slot] || receiver.download_slots == 0 {
+        if old_mask & bit != 0
+            || !receiver.online[slot]
+            || receiver.download_slots == 0
+            || (!receiver.prefetch_opt_in && self.deadlines[target].is_none())
+        {
             return;
         }
 
@@ -230,6 +234,7 @@ mod tests {
                     upload_slots: rnd(&mut seed, 3),
                     download_slots: 1,
                     share_enabled: rnd(&mut seed, 4) != 0,
+                    prefetch_opt_in: rnd(&mut seed, 2) != 0,
                 });
             }
             let mut links = Vec::new();
