@@ -92,7 +92,7 @@ fn lang02_rename_and_delete_require_native_confirmation_and_preserve_note() {
     assert!(state.state.registry.collections.is_empty());
     assert_eq!(state.state.registry.tables.len(), 1, "do not erase source mappings");
     assert_eq!(state.state.anchors.len(), 1, "do not erase table anchors");
-    assert_eq!(std::fs::read(source).unwrap(), source_bytes);
+    assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
     eprintln!("AKULA_LANG02_MANAGE_PASS=rename,confirm_cancel,delete,source_unchanged");
 }
 
