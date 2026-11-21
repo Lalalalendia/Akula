@@ -406,7 +406,8 @@ impl<'a> Working<'a> {
         let Some(rate) = self.rate(from, to) else {
             return usize::MAX;
         };
-        let mut remaining = self.network.sizes_mib[chunk] - self.effective_progress(from, to, chunk);
+        let mut remaining =
+            self.network.sizes_mib[chunk] - self.effective_progress(from, to, chunk);
         for t in slot..=last_slot {
             // The present slot is observed; never peek at a future actual state.
             let available = if t == slot {
@@ -653,8 +654,13 @@ mod tests {
     #[test]
     fn only_retention_changes_after_a_source_switch() {
         let (network, actual) = interrupted_peer();
-        let keep = simulate_with_mode(&network, &actual, Policy::PeerFirst, PartialMode::KeepVerified)
-            .unwrap();
+        let keep = simulate_with_mode(
+            &network,
+            &actual,
+            Policy::PeerFirst,
+            PartialMode::KeepVerified,
+        )
+        .unwrap();
         let restart = simulate_with_mode(
             &network,
             &actual,
@@ -682,8 +688,13 @@ mod tests {
         network.s3_parallel = 0;
         network.requests[0].last_slot = 3;
         actual[0] = vec![true, false, true, true, true];
-        let keep = simulate_with_mode(&network, &actual, Policy::PeerFirst, PartialMode::KeepVerified)
-            .unwrap();
+        let keep = simulate_with_mode(
+            &network,
+            &actual,
+            Policy::PeerFirst,
+            PartialMode::KeepVerified,
+        )
+        .unwrap();
         let restart = simulate_with_mode(
             &network,
             &actual,
@@ -700,9 +711,18 @@ mod tests {
     #[test]
     fn both_arms_agree_with_no_interruptions() {
         let (network, _) = interrupted_peer();
-        let actual = network.nodes.iter().map(|node| node.online.clone()).collect::<Vec<_>>();
-        let keep = simulate_with_mode(&network, &actual, Policy::PeerFirst, PartialMode::KeepVerified)
-            .unwrap();
+        let actual = network
+            .nodes
+            .iter()
+            .map(|node| node.online.clone())
+            .collect::<Vec<_>>();
+        let keep = simulate_with_mode(
+            &network,
+            &actual,
+            Policy::PeerFirst,
+            PartialMode::KeepVerified,
+        )
+        .unwrap();
         let restart = simulate_with_mode(
             &network,
             &actual,
