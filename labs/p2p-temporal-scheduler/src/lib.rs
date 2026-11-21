@@ -3,6 +3,7 @@
 //! It has no network, filesystem, authorization or S3 APIs.
 pub mod duration;
 pub mod oracle;
+pub mod recovery;
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
