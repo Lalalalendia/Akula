@@ -18,6 +18,9 @@ pub struct Peer {
     pub download_slots: usize,
     /// Only a consenting peer may upload.
     pub share_enabled: bool,
+    /// Whether this peer explicitly accepts unsolicited public-chunk prefetching.
+    /// A user-requested Demand authorizes receiving only that demanded chunk.
+    pub prefetch_opt_in: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -185,6 +188,11 @@ impl Working {
             || !s.peers[tr.to].online[tr.slot]
             || self.downloads[tr.to][tr.slot] >= s.peers[tr.to].download_slots
             || self.ready[tr.to][tr.chunk].is_some()
+            || (!s.peers[tr.to].prefetch_opt_in
+                && !s
+                    .demands
+                    .iter()
+                    .any(|d| d.receiver == tr.to && d.chunk == tr.chunk))
         {
             return false;
         }
@@ -407,6 +415,7 @@ pub fn bridge_demo() -> Scenario {
                 upload_slots: 1,
                 download_slots: 1,
                 share_enabled: true,
+                prefetch_opt_in: false,
             },
             Peer {
                 online: vec![true, false, true, false],
@@ -414,6 +423,7 @@ pub fn bridge_demo() -> Scenario {
                 upload_slots: 2,
                 download_slots: 1,
                 share_enabled: true,
+                prefetch_opt_in: true,
             },
             Peer {
                 online: vec![false, false, true, false],
@@ -421,6 +431,7 @@ pub fn bridge_demo() -> Scenario {
                 upload_slots: 0,
                 download_slots: 1,
                 share_enabled: false,
+                prefetch_opt_in: false,
             },
             Peer {
                 online: vec![false, false, true, false],
@@ -428,6 +439,7 @@ pub fn bridge_demo() -> Scenario {
                 upload_slots: 0,
                 download_slots: 1,
                 share_enabled: false,
+                prefetch_opt_in: false,
             },
         ],
         links: vec![(0, 1), (1, 2), (1, 3)],
@@ -481,6 +493,14 @@ mod tests {
     fn consent_is_not_inferred_from_a_cached_chunk() {
         let mut s = bridge_demo();
         s.peers[0].share_enabled = false;
+        s.s3_upload_slots = 0;
+        assert_eq!(schedule(&s, Strategy::TemporalRoute).unwrap().completed, 0);
+    }
+
+    #[test]
+    fn a_bridge_must_opt_in_to_unsolicited_prefetch() {
+        let mut s = bridge_demo();
+        s.peers[1].prefetch_opt_in = false;
         s.s3_upload_slots = 0;
         assert_eq!(schedule(&s, Strategy::TemporalRoute).unwrap().completed, 0);
     }
