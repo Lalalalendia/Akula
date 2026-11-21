@@ -1,0 +1,24 @@
+name: P2P Temporal Scheduler Lab
+
+on:
+  pull_request:
+    paths:
+      - 'labs/p2p-temporal-scheduler/**'
+      - '.github/workflows/p2p-temporal-scheduler-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-scheduler:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rustfmt
+        run: cargo fmt --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --all -- --check
+      - name: Tests
+        run: cargo test --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --offline
+      - name: Demo
+        run: cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --offline --quiet
