@@ -17,6 +17,7 @@ cargo test --manifest-path labs/p2p-temporal-scheduler/Cargo.toml
 cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --bin akula-p2p-temporal-scheduler-lab
 cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --bin benchmark
 cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --bin duration_benchmark
+cargo run --manifest-path labs/p2p-temporal-scheduler/Cargo.toml --bin recovery_benchmark
 ```
 
 Fixture: A has a verified chunk at slot 0, bridge R is online at slots 0 and
@@ -72,13 +73,55 @@ packet loss, rate fluctuations inside a transfer, segment resume, relay and
 battery costs, actual link availability, encryption, manifest validation,
 and commercial traffic charges are **not** modeled.
 
+## Bounded verified-segment recovery experiment (separate \`recovery.rs\`)
+
+The opt-in **offline model** represents an immutable, public chunk as individually
+verifiable 1-MiB segments. A recipient can preserve a verified prefix after
+any observed offline slot, select a different permitted source, and request
+only the missing suffix. A peer may upload a chunk **only when the full chunk
+was verified at the beginning of that slot**. Same-slot forwarding and sharing
+incomplete copies are prohibited. The underlying software does **not** verify
+Merkle/Bao proofs or perform real disk/network operations; segment verification
+is an assumption of the synthetic simulator, not security evidence.
+
+The scheduler reads the observed availability **only at the present slot**.
+It uses the common forecast from the network input for any future lookahead.
+All policies get the same observed trace, deadlines, source inventories,
+consent and per-slot link/upload/download limits. Comparison modes:
+
+- \`S3Only\`: incremental S3 delivery with resume.
+- \`PeerFirst\`: incremental P2P peer-first, then S3 fallback.
+- \`ForecastDirect\`: at every slot, select a direct source by predicted
+  completion time with a preference for P2P when tied.
+- \`AdaptiveRelay\`: same direct policy plus optional P2P-only prefetch to an
+  explicitly consenting and sharing relay when the recipient has a later
+  predicted contact window.
+
+The \`recovery_benchmark\` repeats these policies over **120 fixed-seed
+synthetic networks**, each under forecast-perfect, 10%-missing and 25%-missing
+availability conditions. It also reports the old \`duration::TemporalRoute\`
+with a fixed, non-resumable plan as a **separate reference**: those policies
+are not identical except for resume, so any observed improvement is *not*
+a causal estimate of resume alone. Newly received MiB are counted as verified
+without transmission-header/proof overhead. S3 volumes represent the number of
+simulated successfully transferred MiB, **not billed egress**. No transport
+deadlines, bandwidth sharing beyond configured quotas, packet loss within
+a slot, segment-proof size, auth grants, power use, storage wear or privacy
+impact is measured.
+
+**Important:** Permission to share (\`share_enabled\`) is distinct from
+permission to receive unsolicited content (\`prefetch_opt_in\`). Both are
+test-only booleans and provide no Akula authorization. Only existing trusted
+Akula enrollment, immutable-root grants, pinned access and File Gate checks
+could ever admit actual bytes to transfer.
+
 ## Next gates, before any integration
 
 1. Keep exact-head Linux and Windows Rustfmt/unit/benchmark checks green.
 2. Keep the single-chunk unit-slot exact oracle as a separate scope; duration
    results are **not** certified globally optimal.
-3. Compare with recorded, consented network traces, packet loss and
-   interrupted/continued transfers; include uncertainty-aware replanning.
+3. Recovery has passed synthetic interruption scenarios; next compare with
+   recorded **consented** network traces and actual transport resume/proof checks.
 4. Add a bounded, explicit cost objective for actual S3 egress, relay,
    peer energy, device uplink quotas and transport overhead.
 5. Integrate only through a default-off advisor after the P2P Beta completes;
