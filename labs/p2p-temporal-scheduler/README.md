@@ -115,6 +115,47 @@ test-only booleans and provide no Akula authorization. Only existing trusted
 Akula enrollment, immutable-root grants, pinned access and File Gate checks
 could ever admit actual bytes to transfer.
 
+## Controlled A/B: partial-chunk retention only
+
+The updated `recovery_benchmark` runs the **same** `PeerFirst`,
+`ForecastDirect`, and `AdaptiveRelay` reactive selection policies against
+identical predicted/observed online traces with one switched factor:
+
+- `PartialMode::KeepVerified`: retain independently verified partial MiB
+  across interruptions and source changes.
+- `PartialMode::RestartInterrupted`: discard incomplete progress after a
+  skipped slot or source change, but **retain fully verified chunks**.
+
+The no-resume control accounts for already transferred but discarded MiB in
+`wasted_mib`. This is not billed S3 or transport overhead. Both variants
+obey the same consent, source-ownership, upload/download quotas and deadlines.
+Independent replay verifies the mode-specific progress and the transferred
+segment sizes. Three focused regressions check a 4/5-MiB P2P-to-S3 handoff,
+a gap with the same sender, and an uninterrupted transfer.
+
+Observed Linux CI (120 seeded networks, 1,250 receiver/chunk requests):
+
+| Unexpected offline slots | ForecastDirect: restart | ForecastDirect: keep | Extra completed with keep |
+| --- | ---: | ---: | ---: |
+| 0% | 964 | 1,032 | 68 |
+| 10% | 895 | 990 | 95 |
+| 25% | 819 | 941 | 122 |
+
+At 25% observed outages, the keep mode transmitted **2,407 MiB S3 +
+1,886 MiB P2P**, compared with **2,894 MiB S3 + 2,246 MiB P2P**
+in the restart arm. That is 487 fewer synthetic MiB from S3 and
+360 fewer synthetic MiB peer-to-peer. The restart arm discarded 2,427
+already transferred MiB. Keep completed strictly more requests in 62
+networks and tied in 58; restart had no network-level wins.
+
+Interpretation: the controlled **retention rule** is valuable in this model;
+this does **not** measure production throughput or guarantee that the
+difference generalizes to real segment sizes, network conditions or
+file-integrity proofs. Even at 0% surprise outages, forecasted on/off
+windows and changed senders can cause interruptions. Replanning policies
+may choose different sources **because** the retained progress differs,
+which is part of the retention intervention.
+
 ## Next gates, before any integration
 
 1. Keep exact-head Linux and Windows Rustfmt/unit/benchmark checks green.
