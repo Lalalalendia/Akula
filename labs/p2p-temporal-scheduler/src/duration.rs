@@ -48,7 +48,9 @@ pub struct Network {
 
 impl Network {
     pub fn validate(&self) -> Result<(), String> {
-        if self.nodes.is_empty() || self.steps == 0 || self.sizes_mib.is_empty()
+        if self.nodes.is_empty()
+            || self.steps == 0
+            || self.sizes_mib.is_empty()
             || self.s3_rate_mib_per_slot == 0
             || self.sizes_mib.contains(&0)
         {
@@ -95,10 +97,19 @@ impl Network {
         adj
     }
 
-    fn duration(&self, from: Source, to: usize, chunk: usize, adj: &[Vec<(usize, usize)>]) -> Option<usize> {
+    fn duration(
+        &self,
+        from: Source,
+        to: usize,
+        chunk: usize,
+        adj: &[Vec<(usize, usize)>],
+    ) -> Option<usize> {
         let speed = match from {
             Source::S3 => self.s3_rate_mib_per_slot,
-            Source::Peer(src) => adj.get(src)?.iter().find(|&&(peer, _)| peer == to)
+            Source::Peer(src) => adj
+                .get(src)?
+                .iter()
+                .find(|&&(peer, _)| peer == to)
                 .map(|&(_, edge)| self.links[edge].rate_mib_per_slot)?,
         };
         Some(self.sizes_mib[chunk].div_ceil(speed))
@@ -107,14 +118,20 @@ impl Network {
     fn link_id(&self, from: Source, to: usize, adj: &[Vec<(usize, usize)>]) -> Option<usize> {
         match from {
             Source::S3 => None,
-            Source::Peer(src) => adj.get(src)?.iter().find(|&&(peer, _)| peer == to)
+            Source::Peer(src) => adj
+                .get(src)?
+                .iter()
+                .find(|&&(peer, _)| peer == to)
                 .map(|&(_, edge)| edge),
         }
     }
 
     fn inbound_allowed(&self, to: usize, chunk: usize) -> bool {
         self.nodes[to].prefetch_opt_in
-            || self.requests.iter().any(|r| r.receiver == to && r.chunk == chunk)
+            || self
+                .requests
+                .iter()
+                .any(|r| r.receiver == to && r.chunk == chunk)
     }
 }
 
@@ -193,9 +210,16 @@ struct State {
 impl State {
     fn new(network: &Network) -> Self {
         Self {
-            ready: network.nodes.iter().map(|n| {
-                n.cached.iter().map(|&present| present.then_some(0)).collect()
-            }).collect(),
+            ready: network
+                .nodes
+                .iter()
+                .map(|n| {
+                    n.cached
+                        .iter()
+                        .map(|&present| present.then_some(0))
+                        .collect()
+                })
+                .collect(),
             outgoing: vec![vec![0; network.steps]; network.nodes.len()],
             incoming: vec![vec![0; network.steps]; network.nodes.len()],
             edge_busy: vec![vec![0; network.steps]; network.links.len()],
@@ -207,8 +231,12 @@ impl State {
     fn source_ready(&self, from: Source, chunk: usize, start: usize) -> bool {
         match from {
             Source::S3 => true,
-            Source::Peer(src) => self.ready.get(src).and_then(|row| row.get(chunk))
-                .and_then(|&ready| ready).is_some_and(|ready| ready <= start),
+            Source::Peer(src) => self
+                .ready
+                .get(src)
+                .and_then(|row| row.get(chunk))
+                .and_then(|&ready| ready)
+                .is_some_and(|ready| ready <= start),
         }
     }
 
@@ -301,7 +329,8 @@ impl State {
             if let Some(ready) = self.ready[r.receiver][r.chunk] {
                 if ready <= r.last_slot + 1 {
                     m.completed += 1;
-                    m.last_delivery = Some(m.last_delivery.map_or(ready, |old: usize| old.max(ready)));
+                    m.last_delivery =
+                        Some(m.last_delivery.map_or(ready, |old: usize| old.max(ready)));
                 }
             }
         }
@@ -314,7 +343,12 @@ impl State {
         m
     }
 
-    fn route(&self, network: &Network, adj: &[Vec<(usize, usize)>], req: Request) -> Option<Vec<Transfer>> {
+    fn route(
+        &self,
+        network: &Network,
+        adj: &[Vec<(usize, usize)>],
+        req: Request,
+    ) -> Option<Vec<Transfer>> {
         let peer_count = network.nodes.len();
         let count = peer_count + 1;
         let s3 = peer_count;
@@ -366,7 +400,11 @@ impl State {
                 heap.push(Reverse((dist[wait], t + 1, node)));
             }
 
-            let source = if node == s3 { Source::S3 } else { Source::Peer(node) };
+            let source = if node == s3 {
+                Source::S3
+            } else {
+                Source::Peer(node)
+            };
             let mut visit = |target: usize| {
                 let Some(duration) = network.duration(source, target, req.chunk, adj) else {
                     return;
@@ -377,7 +415,13 @@ impl State {
                 if end > req.last_slot + 1 {
                     return;
                 }
-                let transfer = Transfer { start: t, end, from: source, to: target, chunk: req.chunk };
+                let transfer = Transfer {
+                    start: t,
+                    end,
+                    from: source,
+                    to: target,
+                    chunk: req.chunk,
+                };
                 if !self.can_fit(network, adj, transfer) {
                     return;
                 }
@@ -441,30 +485,43 @@ pub fn schedule(network: &Network, strategy: Strategy) -> Result<Plan, String> {
                 let mut best: Option<(usize, bool, usize, usize, Transfer)> = None;
                 for start in 0..=req.last_slot {
                     let sources = std::iter::once(Source::S3).chain(
-                        adj[req.receiver].iter().map(|&(peer, _)| Source::Peer(peer))
+                        adj[req.receiver]
+                            .iter()
+                            .map(|&(peer, _)| Source::Peer(peer)),
                     );
                     for source in sources {
                         if !state.source_ready(source, req.chunk, start) {
                             continue;
                         }
-                        let Some(duration) = network.duration(source, req.receiver, req.chunk, &adj) else {
+                        let Some(duration) =
+                            network.duration(source, req.receiver, req.chunk, &adj)
+                        else {
                             continue;
                         };
                         let end = start + duration;
                         if end > req.last_slot + 1 {
                             continue;
                         }
-                        let tr = Transfer { start, end, from: source, to: req.receiver, chunk: req.chunk };
+                        let tr = Transfer {
+                            start,
+                            end,
+                            from: source,
+                            to: req.receiver,
+                            chunk: req.chunk,
+                        };
                         if state.can_fit(network, &adj, tr) {
-                            let key = (end, source == Source::S3, start, match source {
-                                Source::Peer(peer) => peer,
-                                Source::S3 => network.nodes.len(),
-                            }, tr);
+                            let key = (
+                                end,
+                                source == Source::S3,
+                                start,
+                                match source {
+                                    Source::Peer(peer) => peer,
+                                    Source::S3 => network.nodes.len(),
+                                },
+                                tr,
+                            );
                             let score = (key.0, key.1, key.2, key.3);
-                            if best
-                                .as_ref()
-                                .is_none_or(|b| score < (b.0, b.1, b.2, b.3))
-                            {
+                            if best.as_ref().is_none_or(|b| score < (b.0, b.1, b.2, b.3)) {
                                 best = Some(key);
                             }
                         }
@@ -488,12 +545,20 @@ pub fn schedule(network: &Network, strategy: Strategy) -> Result<Plan, String> {
                             if !state.source_ready(source, req.chunk, start) {
                                 continue;
                             }
-                            let Some(duration) = network.duration(source, req.receiver, req.chunk, &adj) else {
+                            let Some(duration) =
+                                network.duration(source, req.receiver, req.chunk, &adj)
+                            else {
                                 continue;
                             };
                             let end = start + duration;
                             if end <= req.last_slot + 1 {
-                                let tr = Transfer { start, end, from: source, to: req.receiver, chunk: req.chunk };
+                                let tr = Transfer {
+                                    start,
+                                    end,
+                                    from: source,
+                                    to: req.receiver,
+                                    chunk: req.chunk,
+                                };
                                 if state.can_fit(network, &adj, tr) {
                                     chosen = Some(tr);
                                     break;
@@ -502,9 +567,16 @@ pub fn schedule(network: &Network, strategy: Strategy) -> Result<Plan, String> {
                         }
                     }
                     if chosen.is_none() {
-                        let end = start + network.sizes_mib[req.chunk].div_ceil(network.s3_rate_mib_per_slot);
+                        let end = start
+                            + network.sizes_mib[req.chunk].div_ceil(network.s3_rate_mib_per_slot);
                         if end <= req.last_slot + 1 {
-                            let tr = Transfer { start, end, from: Source::S3, to: req.receiver, chunk: req.chunk };
+                            let tr = Transfer {
+                                start,
+                                end,
+                                from: Source::S3,
+                                to: req.receiver,
+                                chunk: req.chunk,
+                            };
                             if state.can_fit(network, &adj, tr) {
                                 chosen = Some(tr);
                             }
@@ -517,7 +589,10 @@ pub fn schedule(network: &Network, strategy: Strategy) -> Result<Plan, String> {
             }
         }
     }
-    let plan = Plan { metrics: state.metrics(network), transfers: state.transfers };
+    let plan = Plan {
+        metrics: state.metrics(network),
+        transfers: state.transfers,
+    };
     plan.verify(network)?;
     Ok(plan)
 }
@@ -546,16 +621,29 @@ pub fn evaluate_observed(
 ) -> Result<Realized, String> {
     plan.verify(network)?;
     if observed_online.len() != network.nodes.len()
-        || observed_online.iter().any(|online| online.len() != network.steps)
+        || observed_online
+            .iter()
+            .any(|online| online.len() != network.steps)
     {
         return Err("invalid actual online trace".into());
     }
-    let mut ready: Vec<Vec<Option<usize>>> = network.nodes.iter().map(|node| {
-        node.cached.iter().map(|&cached| cached.then_some(0)).collect()
-    }).collect();
+    let mut ready: Vec<Vec<Option<usize>>> = network
+        .nodes
+        .iter()
+        .map(|node| {
+            node.cached
+                .iter()
+                .map(|&cached| cached.then_some(0))
+                .collect()
+        })
+        .collect();
     let mut transfers = plan.transfers.clone();
     transfers.sort_by_key(|tr| (tr.start, tr.end, tr.to, tr.chunk));
-    let mut result = Realized { total: network.requests.len(), planned_transfers: transfers.len(), ..Realized::default() };
+    let mut result = Realized {
+        total: network.requests.len(),
+        planned_transfers: transfers.len(),
+        ..Realized::default()
+    };
     for tr in transfers {
         let size = network.sizes_mib[tr.chunk];
         match tr.from {
@@ -605,19 +693,67 @@ pub fn duration_bridge_demo() -> Network {
         s3_parallel: 1,
         s3_rate_mib_per_slot: 2,
         nodes: vec![
-            Node { online: vec![true, false, false, false, false, false], cached: vec![true], upload_parallel: 1, download_parallel: 1, share_enabled: true, prefetch_opt_in: false },
-            Node { online: vec![true, false, false, true, true, false], cached: vec![false], upload_parallel: 2, download_parallel: 1, share_enabled: true, prefetch_opt_in: true },
-            Node { online: vec![false, false, false, true, true, false], cached: vec![false], upload_parallel: 0, download_parallel: 1, share_enabled: false, prefetch_opt_in: false },
-            Node { online: vec![false, false, false, true, true, false], cached: vec![false], upload_parallel: 0, download_parallel: 1, share_enabled: false, prefetch_opt_in: false },
+            Node {
+                online: vec![true, false, false, false, false, false],
+                cached: vec![true],
+                upload_parallel: 1,
+                download_parallel: 1,
+                share_enabled: true,
+                prefetch_opt_in: false,
+            },
+            Node {
+                online: vec![true, false, false, true, true, false],
+                cached: vec![false],
+                upload_parallel: 2,
+                download_parallel: 1,
+                share_enabled: true,
+                prefetch_opt_in: true,
+            },
+            Node {
+                online: vec![false, false, false, true, true, false],
+                cached: vec![false],
+                upload_parallel: 0,
+                download_parallel: 1,
+                share_enabled: false,
+                prefetch_opt_in: false,
+            },
+            Node {
+                online: vec![false, false, false, true, true, false],
+                cached: vec![false],
+                upload_parallel: 0,
+                download_parallel: 1,
+                share_enabled: false,
+                prefetch_opt_in: false,
+            },
         ],
         links: vec![
-            Link { a: 0, b: 1, rate_mib_per_slot: 4 },
-            Link { a: 1, b: 2, rate_mib_per_slot: 2 },
-            Link { a: 1, b: 3, rate_mib_per_slot: 2 },
+            Link {
+                a: 0,
+                b: 1,
+                rate_mib_per_slot: 4,
+            },
+            Link {
+                a: 1,
+                b: 2,
+                rate_mib_per_slot: 2,
+            },
+            Link {
+                a: 1,
+                b: 3,
+                rate_mib_per_slot: 2,
+            },
         ],
         requests: vec![
-            Request { receiver: 2, chunk: 0, last_slot: 4 },
-            Request { receiver: 3, chunk: 0, last_slot: 4 },
+            Request {
+                receiver: 2,
+                chunk: 0,
+                last_slot: 4,
+            },
+            Request {
+                receiver: 3,
+                chunk: 0,
+                last_slot: 4,
+            },
         ],
     }
 }
