@@ -695,6 +695,69 @@ print(str(row[0])+":"+hashlib.sha256(row[1]).hexdigest())
   return $out
 }
 
+
+# Second writer changes only a disposable study collection while a real
+# installed Windows modal is open; sources, anchors and members are retained.
+function Synthetic-AdvanceStudyName {
+  param([string]$Path,[int]$ExpectedRevision,[string]$ExpectedName,[string]$NextName)
+  $full=[IO.Path]::GetFullPath($Path)
+  if(!$full.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -or
+     [IO.Path]::GetFileName($full) -cne 'language-study.sqlite' -or
+     !(Test-Path -LiteralPath $full -PathType Leaf) -or
+     ((Get-Item -LiteralPath $full).Attributes -band [IO.FileAttributes]::ReparsePoint)){
+    throw 'LANG-08c2b6 refuses external SQLite writer target'
+  }
+  foreach($name in @($ExpectedName,$NextName)){
+    if($name -cnotmatch '^LANG08C-[A-Za-z-]+$' -or $name.Length -gt 64){
+      throw 'LANG-08c2b6 refuses non-synthetic name'
+    }
+  }
+  $code=@'
+import hashlib,json,os,sqlite3,sys
+from pathlib import Path
+db=Path(sys.argv[1]).resolve()
+if Path(os.environ["RUNNER_TEMP"]).resolve() not in db.parents or db.name!="language-study.sqlite":
+    raise ValueError("External study SQLite target")
+rev=int(sys.argv[2]); old=sys.argv[3]; new=sys.argv[4]
+if old==new or not old.startswith("LANG08C-") or not new.startswith("LANG08C-"):
+    raise ValueError("Invalid second-writer names")
+with sqlite3.connect(db,timeout=10) as c:
+    c.execute("BEGIN IMMEDIATE")
+    row=c.execute("SELECT revision,payload FROM language_study_state WHERE id=1").fetchone()
+    if row is None or row[0]!=rev or rev<0:
+        raise ValueError("Concurrent revision precondition failed")
+    obj=json.loads(row[1])
+    if obj.get("version")!=1:
+        raise ValueError("Wrong study state version")
+    state=obj["state"]; reg=state["registry"]; groups=reg["collections"]
+    if len(groups)!=1 or groups[0]["name"]!=old or groups[0]["id"]=="common":
+        raise ValueError("Unexpected synthetic collection")
+    protected=json.dumps([reg["tables"],state["anchors"],groups[0]["members"]],sort_keys=True)
+    groups[0]["name"]=new
+    if json.dumps([reg["tables"],state["anchors"],groups[0]["members"]],sort_keys=True)!=protected:
+        raise ValueError("Second writer changed mappings, anchors or members")
+    body=json.dumps(obj,ensure_ascii=False,separators=(",",":")).encode("utf8")
+    if len(body)>1024*1024:
+        raise ValueError("Unbounded study payload")
+    cursor=c.execute("UPDATE language_study_state SET revision=?,payload=? WHERE id=1 AND revision=?",
+                     (rev+1,sqlite3.Binary(body),rev))
+    if cursor.rowcount!=1:
+        raise ValueError("Concurrent CAS did not update one row")
+    c.commit()
+print(str(rev+1)+":"+hashlib.sha256(body).hexdigest())
+'@
+  $out=($code | & python - $full ([string]$ExpectedRevision) $ExpectedName $NextName | Out-String).Trim()
+  if($LASTEXITCODE -ne 0 -or $out -notmatch '^\d+:[a-f0-9]{64}$' -or
+     (Read-StudyStateHash -Path $full) -cne $out){
+    throw 'LANG-08c2b6 independent writer failed its SQLite CAS witness'
+  }
+  return $out
+}
+function Assert-StudyChangedNotice {
+  param([Windows.Automation.AutomationElement]$Window)
+  [void](Wait-Visible -Root $Window -Names $labels.studyManageChanged -Type ([Windows.Automation.ControlType]::Text))
+}
+
 function Assert-SyntheticUnchanged {
   param([string]$Markdown,[string]$ExpectedHash,[string]$Backup,[string]$BackupHash)
   if((Get-FileHash -LiteralPath $Markdown -Algorithm SHA256).Hash -cne $ExpectedHash -or
@@ -707,7 +770,7 @@ function Assert-SyntheticUnchanged {
 foreach($lang in @('en','ru')){
   $p=Join-Path $workspace ("aquilum-app\native\assets\locales\"+$lang+".json")
   $l=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)|ConvertFrom-Json
-  foreach($k in @('studyAdd','studyNew','studyCreate','studyManage','studyRenameSave','studyDeleteConfirm')){
+  foreach($k in @('studyAdd','studyNew','studyCreate','studyManage','studyRenameSave','studyDeleteConfirm','studyManageChanged')){
     $value=[string]$l.editor.table.$k
     if([string]::IsNullOrWhiteSpace($value)){throw "LANG-08c missing native locale $lang/$k"}
     if(!$labels.ContainsKey($k)){$labels[$k]=@()}
@@ -1093,9 +1156,59 @@ if result is None or result[0]!=0:
   $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
   $window=$ready.Window
   Readback-Selected -Process $proc -Expected $studyText
+  # Hold an installed rename modal open while a second, disposable SQLite
+  # writer wins the revision CAS. The stale GUI must show the exact native
+  # "collection changed" message, not overwrite the concurrent winner.
   Open-StudyCollectionMenu -Window $window -Process $proc
   Study-Choose -Window $window -Process $proc -Names $labels.studyManage
   Study-Choose -Window $window -Process $proc -Names @('Rename: LANG08C-Biology')
+  [void](Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button))
+  Type-StudyName -Process $proc -Name 'LANG08C-StaleRename'
+  $winnerHash=Synthetic-AdvanceStudyName -Path $studyDb -ExpectedRevision $created.revision -ExpectedName 'LANG08C-Biology' -NextName 'LANG08C-Concurrent'
+  $staleRenameSave=Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $staleRenameSave -Window $window -Process $proc
+  Assert-StudyChangedNotice -Window $window
+  $staleRenamed=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-Concurrent'
+  if($staleRenamed.revision -ne ($created.revision+1) -or
+     $staleRenamed.id -cne $created.id -or
+     $staleRenamed.members -ne $created.members -or
+     $staleRenamed.table_count -ne $created.table_count -or
+     $staleRenamed.anchor_count -ne $created.anchor_count -or
+     (Read-StudyStateHash -Path $studyDb) -cne $winnerHash -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b6 stale installed rename overwrote competing writer or source'
+  }
+  Write-Host 'AKULA_LANG08C2B6_INSTALLED_STALE_RENAME_PASS os_dialog=1 competing_sqlite_cas=1 native_refusal=1 winner_preserved=1'
+  Close-StudyNotice -Window $window -Process $proc
+
+  # The native same-session regression independently verifies that a conflict
+  # notice does not poison the next management menu. This installed OS/UIA
+  # fixture verifies the stronger persistence boundary: close the real NSIS
+  # process, reopen the SAME disposable note/profile, and require the exact
+  # independently committed winner to survive before a fresh user action.
+  # No synthetic app state reset or SQLite fixture replacement is permitted.
+  Close-Note -Process $proc;$proc=$null
+  if((Read-StudyStateHash -Path $studyDb) -cne $winnerHash -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b6 stale rename winner changed during installed restart'
+  }
+  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08C Collections'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $studyText
+  $reopenedWinner=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-Concurrent'
+  if($reopenedWinner.revision -ne ($created.revision+1) -or
+     (Read-StudyStateHash -Path $studyDb) -cne $winnerHash){
+    throw 'LANG-08c2b6 stale rename winner was lost across GUI restart'
+  }
+  Write-Host 'AKULA_LANG08C2B6_INSTALLED_REOPEN_AFTER_RENAME_PASS nsis_restart=1 concurrent_winner=1 markdown_sha256=1'
+
+  # The fresh installed session must permit an ordinary new rename.
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyManage
+  Study-Choose -Window $window -Process $proc -Names @('Rename: LANG08C-Concurrent')
   [void](Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button))
   Type-StudyName -Process $proc -Name 'LANG08C-Botany'
   $save=Wait-Visible -Root $window -Names $labels.studyRenameSave -Type ([Windows.Automation.ControlType]::Button)
@@ -1123,9 +1236,54 @@ if result is None or result[0]!=0:
   Write-Host 'AKULA_LANG08C_INSTALLED_CANCEL_PASS native_confirmation=1 sqlite_unchanged=1'
   Start-Sleep -Milliseconds 400
 
+  # Hold a genuine installed Delete confirmation, then let the disposable
+  # second writer advance the collection revision. The stale confirmation
+  # must not remove or rename the competing writer's live metadata.
   Open-StudyCollectionMenu -Window $window -Process $proc
   Study-Choose -Window $window -Process $proc -Names $labels.studyManage
   Study-Choose -Window $window -Process $proc -Names @('Delete: LANG08C-Botany')
+  [void](Wait-Visible -Root $window -Names $labels.studyDeleteConfirm -Type ([Windows.Automation.ControlType]::Button))
+  $deleteWinnerHash=Synthetic-AdvanceStudyName -Path $studyDb -ExpectedRevision $renamed.revision -ExpectedName 'LANG08C-Botany' -NextName 'LANG08C-DeleteWinner'
+  $staleDelete=Wait-Visible -Root $window -Names $labels.studyDeleteConfirm -Type ([Windows.Automation.ControlType]::Button)
+  Click-Visible -Target $staleDelete -Window $window -Process $proc
+  Assert-StudyChangedNotice -Window $window
+  $staleDeleted=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-DeleteWinner'
+  if($staleDeleted.revision -ne ($renamed.revision+1) -or
+     $staleDeleted.id -cne $renamed.id -or
+     $staleDeleted.members -ne $renamed.members -or
+     $staleDeleted.table_count -ne $renamed.table_count -or
+     $staleDeleted.anchor_count -ne $renamed.anchor_count -or
+     (Read-StudyStateHash -Path $studyDb) -cne $deleteWinnerHash -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b6 stale installed delete removed concurrent winner or source'
+  }
+  Write-Host 'AKULA_LANG08C2B6_INSTALLED_STALE_DELETE_PASS os_confirmation=1 competing_sqlite_cas=1 native_refusal=1 winner_preserved=1'
+  Close-StudyNotice -Window $window -Process $proc
+
+  # Cross-session persistence after a stale Delete refusal: the winner must
+  # survive process shutdown, vault reopen, and a complete GUI readback.
+  Close-Note -Process $proc;$proc=$null
+  if((Read-StudyStateHash -Path $studyDb) -cne $deleteWinnerHash -or
+     (Get-FileHash -LiteralPath $studyNote -Algorithm SHA256).Hash -cne $studyHash){
+    throw 'LANG-08c2b6 stale delete winner changed during installed restart'
+  }
+  $proc=Open-Note -Note $studyNote -Vault $vault -Data $data
+  Wait-Window -Process $proc -Needle 'LANG08C Collections'
+  Focus-Akula -Process $proc
+  $ready=Wait-EditorBody -Process $proc -Needle 'LANG08C Collections'
+  $window=$ready.Window
+  Readback-Selected -Process $proc -Expected $studyText
+  $reopenedDeleteWinner=Require-StudySnapshot -Path $studyDb -Count 1 -Name 'LANG08C-DeleteWinner'
+  if($reopenedDeleteWinner.revision -ne ($renamed.revision+1) -or
+     (Read-StudyStateHash -Path $studyDb) -cne $deleteWinnerHash){
+    throw 'LANG-08c2b6 stale delete winner was lost across GUI restart'
+  }
+  Write-Host 'AKULA_LANG08C2B6_INSTALLED_REOPEN_AFTER_DELETE_PASS nsis_restart=1 concurrent_winner=1 markdown_sha256=1'
+
+  # Only a freshly opened native confirmation can delete the current group.
+  Open-StudyCollectionMenu -Window $window -Process $proc
+  Study-Choose -Window $window -Process $proc -Names $labels.studyManage
+  Study-Choose -Window $window -Process $proc -Names @('Delete: LANG08C-DeleteWinner')
   $confirm=Wait-Visible -Root $window -Names $labels.studyDeleteConfirm -Type ([Windows.Automation.ControlType]::Button)
   Click-Visible -Target $confirm -Window $window -Process $proc
   $deleted=Require-StudySnapshot -Path $studyDb -Count 0 -Name $null

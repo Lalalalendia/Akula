@@ -92,7 +92,7 @@ fn lang02_rename_and_delete_require_native_confirmation_and_preserve_note() {
     assert!(state.state.registry.collections.is_empty());
     assert_eq!(state.state.registry.tables.len(), 1, "do not erase source mappings");
     assert_eq!(state.state.anchors.len(), 1, "do not erase table anchors");
-    assert_eq!(std::fs::read(source).unwrap(), source_bytes);
+    assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
     eprintln!("AKULA_LANG02_MANAGE_PASS=rename,confirm_cancel,delete,source_unchanged");
 }
 
@@ -120,8 +120,43 @@ fn lang02_stale_collection_menu_refuses_delete_without_changing_sources() {
     let latest = StudyStore::open(&db).unwrap().load().unwrap();
     assert_eq!(latest.state.registry.collections[0].name, "Botany");
     assert_eq!(latest.state.registry.collections[0].id, "botany");
-    assert_eq!(std::fs::read(source).unwrap(), source_bytes);
+    assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
     eprintln!("AKULA_LANG02_STALE_PASS=revision_guard,source_unchanged");
+
+    // The same session must observe the externally committed name after the
+    // stale delete notice is dismissed; a fresh user confirmation can then
+    // delete this collection without damaging source bindings or Markdown.
+    assert!(matches!(&h.app.popup, Some(Popup::StudyPreview { .. })),
+        "stale delete must leave a native conflict notice");
+    notice_close(&mut h);
+    h.app.open_study_manage(&mut h.root);
+    let fresh_menu = match &h.app.popup {
+        Some(Popup::StudyManage { layer, revision, actions }) => {
+            assert_eq!(*revision, latest.revision);
+            assert_eq!(actions.len(), 2);
+            assert_eq!(actions[1].0, "botany");
+            assert_eq!(actions[1].1, "Botany");
+            assert!(actions[1].2);
+            *layer
+        }
+        _ => panic!("same-session delete menu must reopen after stale conflict"),
+    };
+    h.act(fresh_menu, MenuChoice::Item(1));
+    let fresh_delete = match &h.app.popup {
+        Some(Popup::StudyDelete { dialog, revision, .. }) => {
+            assert_eq!(*revision, latest.revision);
+            dialog.layer
+        }
+        _ => panic!("fresh delete needs native user confirmation"),
+    };
+    h.act(fresh_delete, DialogAnswer::Confirm);
+    let deleted = StudyStore::open(&db).unwrap().load().unwrap();
+    assert_eq!(deleted.revision, latest.revision + 1);
+    assert!(deleted.state.registry.collections.is_empty());
+    assert_eq!(deleted.state.registry.tables, latest.state.registry.tables);
+    assert_eq!(deleted.state.anchors, latest.state.anchors);
+    assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+    eprintln!("AKULA_LANG02_STALE_DELETE_SAME_SESSION_PASS=notice_closed,new_revision,source_unchanged");
 }
 
 #[test]
@@ -178,4 +213,43 @@ fn lang02_stale_rename_dialog_refuses_concurrent_update_without_losing_sources()
     assert_eq!(std::fs::read(&source).unwrap(), source_bytes,
         "stale rename must not modify Markdown");
     eprintln!("AKULA_LANG02_STALE_RENAME_PASS=dialog_cas,concurrent_winner,source_unchanged");
+
+    // A conflict refusal must not leave a stale popup or stale collection
+    // snapshot behind: the very same native session must list the external
+    // winner and accept a new confirmation at the updated revision.
+    notice_close(&mut h);
+    h.app.open_study_manage(&mut h.root);
+    let current_layer = match &h.app.popup {
+        Some(Popup::StudyManage { layer, revision, actions }) => {
+            assert_eq!(*revision, committed_revision);
+            assert_eq!(actions.len(), 2);
+            assert_eq!(actions[0].0, "botany");
+            assert_eq!(actions[0].1, "Concurrent winner");
+            assert!(!actions[0].2);
+            *layer
+        }
+        _ => panic!("same-session management must reopen after stale rename refusal"),
+    };
+    h.act(current_layer, MenuChoice::Item(0));
+    let field = match &h.app.popup {
+        Some(Popup::StudyRename { field, revision, .. }) => {
+            assert_eq!(*revision, committed_revision);
+            field.id()
+        }
+        _ => panic!("fresh rename must expose a native editable dialog"),
+    };
+    h.act(field, TextAction::Changed("Current winner".into()));
+    let fresh_dialog = match &h.app.popup {
+        Some(Popup::StudyRename { dialog, .. }) => dialog.layer,
+        _ => panic!("fresh rename confirmation missing after conflict"),
+    };
+    h.act(fresh_dialog, DialogAnswer::Confirm);
+    let after_recovery = StudyStore::open(&db).unwrap().load().unwrap();
+    assert_eq!(after_recovery.revision, committed_revision + 1);
+    assert_eq!(after_recovery.state.registry.collections[0].id, "botany");
+    assert_eq!(after_recovery.state.registry.collections[0].name, "Current winner");
+    assert_eq!(after_recovery.state.registry.tables, before_stale.state.registry.tables);
+    assert_eq!(after_recovery.state.anchors, before_stale.state.anchors);
+    assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+    eprintln!("AKULA_LANG02_STALE_RENAME_SAME_SESSION_PASS=notice_closed,new_revision,source_unchanged");
 }
