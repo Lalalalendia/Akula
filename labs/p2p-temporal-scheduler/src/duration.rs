@@ -460,7 +460,11 @@ pub fn schedule(network: &Network, strategy: Strategy) -> Result<Plan, String> {
                                 Source::Peer(peer) => peer,
                                 Source::S3 => network.nodes.len(),
                             }, tr);
-                            if best.as_ref().is_none_or(|b| key.0..=key.3 < b.0..=b.3) {
+                            let score = (key.0, key.1, key.2, key.3);
+                            if best
+                                .as_ref()
+                                .is_none_or(|b| score < (b.0, b.1, b.2, b.3))
+                            {
                                 best = Some(key);
                             }
                         }
