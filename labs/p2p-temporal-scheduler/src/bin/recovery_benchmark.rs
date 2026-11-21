@@ -167,8 +167,7 @@ fn main() -> Result<(), String> {
     for (level_id, level) in levels.iter().enumerate() {
         println!(
             "{level},fixed_temporal_no_resume,{},{},,,,,,,",
-            fixed_completed[level_id],
-            fixed_total[level_id],
+            fixed_completed[level_id], fixed_total[level_id],
         );
         for (id, (label, _)) in policies.iter().enumerate() {
             let t = &mut totals[level_id][id];
