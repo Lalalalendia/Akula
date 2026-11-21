@@ -44,15 +44,7 @@ impl Oracle<'_> {
             completed: 0,
             s3_chunks: usize::MAX,
         };
-        self.enumerate(
-            slot,
-            mask,
-            0,
-            mask,
-            0,
-            &mut used_uploads,
-            &mut best,
-        );
+        self.enumerate(slot, mask, 0, mask, 0, &mut used_uploads, &mut best);
         self.cache.insert((slot, mask), best);
         best
     }
@@ -102,10 +94,7 @@ impl Oracle<'_> {
 
         let bit = 1u32 << target;
         let receiver = &self.s.peers[target];
-        if old_mask & bit != 0
-            || !receiver.online[slot]
-            || receiver.download_slots == 0
-        {
+        if old_mask & bit != 0 || !receiver.online[slot] || receiver.download_slots == 0 {
             return;
         }
 
