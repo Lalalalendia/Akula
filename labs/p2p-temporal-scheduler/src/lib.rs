@@ -138,8 +138,12 @@ impl Outcome {
             working.commit(tr);
         }
         let checked = working.outcome(s);
-        if (checked.completed, checked.total, checked.s3_chunks, checked.peer_chunks)
-            != (self.completed, self.total, self.s3_chunks, self.peer_chunks)
+        if (
+            checked.completed,
+            checked.total,
+            checked.s3_chunks,
+            checked.peer_chunks,
+        ) != (self.completed, self.total, self.s3_chunks, self.peer_chunks)
             || checked.last_completion != self.last_completion
         {
             return Err("reported outcome does not match replay".into());
@@ -332,9 +336,7 @@ pub fn schedule(s: &Scenario, strategy: Strategy) -> Result<Outcome, String> {
     match strategy {
         Strategy::TemporalRoute => {
             for d in demands {
-                if working.ready[d.receiver][d.chunk]
-                    .is_some_and(|at| at <= d.deadline + 1)
-                {
+                if working.ready[d.receiver][d.chunk].is_some_and(|at| at <= d.deadline + 1) {
                     continue;
                 }
                 if let Some(route) = working.route(s, &adj, d) {
