@@ -120,7 +120,7 @@ fn lang02_stale_collection_menu_refuses_delete_without_changing_sources() {
     let latest = StudyStore::open(&db).unwrap().load().unwrap();
     assert_eq!(latest.state.registry.collections[0].name, "Botany");
     assert_eq!(latest.state.registry.collections[0].id, "botany");
-    assert_eq!(std::fs::read(source).unwrap(), source_bytes);
+    assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
     eprintln!("AKULA_LANG02_STALE_PASS=revision_guard,source_unchanged");
 
     // The same session must observe the externally committed name after the
