@@ -1,6 +1,8 @@
 //! Synthetic, offline-only experiment for scheduling verified public P2P chunks.
 //! This crate is deliberately outside the shipping Akula workspace.
 //! It has no network, filesystem, authorization or S3 APIs.
+pub mod oracle;
+
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
 
