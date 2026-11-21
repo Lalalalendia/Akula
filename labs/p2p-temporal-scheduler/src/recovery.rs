@@ -614,6 +614,64 @@ mod tests {
     }
 
     #[test]
+    fn consenting_bridge_carries_verified_segments_across_disjoint_windows() {
+        let network = Network {
+            steps: 3,
+            sizes_mib: vec![2],
+            s3_rate_mib_per_slot: 2,
+            s3_parallel: 0,
+            nodes: vec![
+                Node {
+                    online: vec![true, false, false],
+                    cached: vec![true],
+                    upload_parallel: 1,
+                    download_parallel: 1,
+                    share_enabled: true,
+                    prefetch_opt_in: false,
+                },
+                Node {
+                    online: vec![true, false, true],
+                    cached: vec![false],
+                    upload_parallel: 1,
+                    download_parallel: 1,
+                    share_enabled: true,
+                    prefetch_opt_in: true,
+                },
+                Node {
+                    online: vec![false, false, true],
+                    cached: vec![false],
+                    upload_parallel: 1,
+                    download_parallel: 1,
+                    share_enabled: false,
+                    prefetch_opt_in: false,
+                },
+            ],
+            links: vec![
+                Link { a: 0, b: 1, rate_mib_per_slot: 2 },
+                Link { a: 1, b: 2, rate_mib_per_slot: 2 },
+            ],
+            requests: vec![Request { receiver: 2, chunk: 0, last_slot: 2 }],
+        };
+        let actual = network.nodes.iter().map(|n| n.online.clone()).collect::<Vec<_>>();
+        assert_eq!(simulate(&network, &actual, Policy::ForecastDirect).unwrap().metrics.completed, 0);
+        let plan = simulate(&network, &actual, Policy::AdaptiveRelay).unwrap();
+        assert_eq!(plan.metrics.completed, 1);
+        assert_eq!(plan.metrics.prefetched_mib, 2);
+        assert_eq!(plan.metrics.p2p_mib, 4);
+        assert_eq!(plan.segments[0].slot, 0);
+        assert_eq!(plan.segments[1].slot, 2);
+        plan.verify(&network, &actual).unwrap();
+
+        let mut revoked = network.clone();
+        revoked.nodes[1].prefetch_opt_in = false;
+        assert!(plan.verify(&revoked, &actual).is_err());
+        assert_eq!(
+            simulate(&revoked, &actual, Policy::AdaptiveRelay).unwrap().metrics.completed,
+            0
+        );
+    }
+
+    #[test]
     fn no_prefetch_without_optin() {
         let mut network = interrupted_peer().0;
         network.nodes.push(Node {
