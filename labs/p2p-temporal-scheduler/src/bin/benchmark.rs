@@ -163,14 +163,17 @@ fn main() -> Result<(), String> {
             peer.online.truncate(s.horizon);
             peer.cached.truncate(1);
         }
-        s.demands = (0..n)
-            .filter(|_| tiny.chance(2, 3))
-            .map(|receiver| Demand {
-                receiver,
-                chunk: 0,
-                deadline: tiny.pick(s.horizon),
-            })
-            .collect();
+        let mut demands = Vec::new();
+        for receiver in 0..n {
+            if tiny.chance(2, 3) {
+                demands.push(Demand {
+                    receiver,
+                    chunk: 0,
+                    deadline: tiny.pick(s.horizon),
+                });
+            }
+        }
+        s.demands = demands;
         let exact = exact_one_chunk(&s)?;
         let temporal = schedule(&s, Strategy::TemporalRoute)?;
         if temporal.completed > exact.completed {
