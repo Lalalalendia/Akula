@@ -76,45 +76,20 @@ impl AnchorStore {
     /// app_data_file must be a host-controlled dedicated app-data path.
     /// A caller cannot use a note path or user-supplied file path here.
     pub fn open(app_data_file: &Path) -> Result<Self, AnchorStoreError> {
-        let mut connection =
-            Connection::open(app_data_file).map_err(|_| AnchorStoreError::Storage)?;
-        connection.execute_batch(
-            "PRAGMA foreign_keys=ON;
-             PRAGMA journal_mode=WAL;
-             PRAGMA synchronous=FULL;
-             PRAGMA busy_timeout=3000;",
-        ).map_err(|_| AnchorStoreError::Storage)?;
-        let schema: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))
-            .map_err(|_| AnchorStoreError::Storage)?;
-        if schema == 0 {
-            let existing_tables: i64 = connection.query_row(
-                "SELECT COUNT(*) FROM sqlite_master
-                 WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-                [], |row| row.get(0),
-            ).map_err(|_| AnchorStoreError::Storage)?;
-            if existing_tables != 0 {
-                return Err(AnchorStoreError::UnsupportedSchema);
-            }
-            let empty = serialize(&[])?;
-            let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)
-                .map_err(|_| AnchorStoreError::Storage)?;
-            transaction.execute_batch(
-                "CREATE TABLE language_anchors (
+        let connection = super::sqlite_store::open(
+            app_data_file, SCHEMA_VERSION,
+            "CREATE TABLE language_anchors (
                     id INTEGER PRIMARY KEY CHECK(id=1),
                     revision INTEGER NOT NULL CHECK(revision>=0),
                     payload BLOB NOT NULL
                  );",
-            ).map_err(|_| AnchorStoreError::Storage)?;
-            transaction.execute(
-                "INSERT INTO language_anchors(id,revision,payload) VALUES(1,0,?1)",
-                params![empty],
-            ).map_err(|_| AnchorStoreError::Storage)?;
-            transaction.execute_batch("PRAGMA user_version=1;")
-                .map_err(|_| AnchorStoreError::Storage)?;
-            transaction.commit().map_err(|_| AnchorStoreError::Storage)?;
-        } else if schema != SCHEMA_VERSION {
-            return Err(AnchorStoreError::UnsupportedSchema);
-        }
+            "INSERT INTO language_anchors(id,revision,payload) VALUES(1,0,?1)",
+            || serialize(&[]),
+        ).map_err(|error| match error {
+            super::sqlite_store::OpenError::Storage => AnchorStoreError::Storage,
+            super::sqlite_store::OpenError::UnsupportedSchema => AnchorStoreError::UnsupportedSchema,
+            super::sqlite_store::OpenError::Payload(error) => error,
+        })?;
         let store = Self { connection };
         // Never silently erase malformed, truncated or future-version data.
         store.load()?;

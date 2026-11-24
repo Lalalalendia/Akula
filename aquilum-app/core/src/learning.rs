@@ -12,7 +12,7 @@ pub mod editor_snapshot;
 pub mod table_anchors;
 pub mod anchor_store;
 pub mod activation; pub mod practice; pub mod host_read; pub mod answer_check;
-pub mod state;
+pub mod state; mod sqlite_store;
 use std::collections::BTreeSet;
 /// Explicit column roles chosen for each source table.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
