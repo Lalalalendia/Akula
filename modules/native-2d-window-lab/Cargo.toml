@@ -1,0 +1,26 @@
+[package]
+name = "akula-game2d-window-lab"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
+description = "Isolated window test of Akula's existing BGRA Canvas and Output"
+
+[features]
+memory-probe = []
+
+[dependencies]
+winit = "=0.31.0-beta.3"
+aq_trace = { path = "../../aquilum-app/native/vendor/aq_trace" }
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+softbuffer = "0.4.8"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common"
+] }
