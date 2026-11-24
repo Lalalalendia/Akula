@@ -191,9 +191,12 @@ test('specialized PR CI isolates obsolete PR runs and preserves manual jobs',()=
     'core-server-bootstrap-b1b4b1-witness-ipc.yml',
     'sync-text-delta-rust.yml',
   ];
-  // These two workflows were deliberately centralized as workflow_call;
-  // the required PR gate owns their PR routing now.
+  // These workflows were deliberately centralized as workflow_call;
+  // the required PR gate owns their PR routing now. B1c0's full old
+  // path ownership and fail-closed caller are covered by the explicit
+  // B1c0 contract in ci-shared-routing-contract.test.cjs.
   const centrallyRouted=new Set([
+    'core-server-bootstrap-b1c0-fixed-node.yml',
     'sync-installed-os-owner-witness.yml',
     'sync-text-delta-rust.yml',
   ]);
