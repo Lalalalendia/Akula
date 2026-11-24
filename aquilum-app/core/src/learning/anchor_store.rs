@@ -11,7 +11,8 @@
 
 use std::path::Path;
 
-use rusqlite::{Connection, TransactionBehavior, params};
+use rusqlite::Connection;
+#[cfg(test)] use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::table_anchors::{AnchorError, NoteAnchors, validate_anchors};
@@ -112,29 +113,19 @@ impl AnchorStore {
         expected_revision: u64,
         notes: &[NoteAnchors],
     ) -> Result<u64, AnchorStoreError> {
-        let next_payload = serialize(notes)?;
-        let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|_| AnchorStoreError::Storage)?;
-        let (revision, existing_payload): (i64, Vec<u8>) = transaction.query_row(
+        let payload = serialize(notes)?;
+        super::sqlite_replace::replace(
+            &mut self.connection, expected_revision, payload,
             "SELECT revision,payload FROM language_anchors WHERE id=1",
-            [], |row| Ok((row.get(0)?, row.get(1)?)),
-        ).map_err(|_| AnchorStoreError::CorruptStore)?;
-        // Do not let a valid replacement overwrite corrupted incumbent state.
-        deserialize(&existing_payload)?;
-        if u64::try_from(revision).map_err(|_| AnchorStoreError::CorruptStore)? != expected_revision {
-            return Err(AnchorStoreError::StaleRevision);
-        }
-        let next = revision.checked_add(1).ok_or(AnchorStoreError::RevisionExhausted)?;
-        let changed = transaction.execute(
             "UPDATE language_anchors SET revision=?1,payload=?2
              WHERE id=1 AND revision=?3",
-            params![next, next_payload, revision],
-        ).map_err(|_| AnchorStoreError::Storage)?;
-        if changed != 1 {
-            return Err(AnchorStoreError::StaleRevision);
-        }
-        transaction.commit().map_err(|_| AnchorStoreError::Storage)?;
-        u64::try_from(next).map_err(|_| AnchorStoreError::RevisionExhausted)
+            deserialize, |error| match error {
+                super::sqlite_replace::ReplaceError::Storage => AnchorStoreError::Storage,
+                super::sqlite_replace::ReplaceError::Corrupt => AnchorStoreError::CorruptStore,
+                super::sqlite_replace::ReplaceError::Stale => AnchorStoreError::StaleRevision,
+                super::sqlite_replace::ReplaceError::Exhausted => AnchorStoreError::RevisionExhausted,
+            },
+        )
     }
 }
 

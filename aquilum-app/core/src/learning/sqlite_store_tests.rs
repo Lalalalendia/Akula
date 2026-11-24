@@ -133,3 +133,101 @@ fn each_real_store_reopens_legacy_v1_bytes_and_keeps_its_own_schema() {
         assert_eq!(saved.1.as_slice(), *payload);
     }
 }
+
+fn verify_full_replacement_guards<S, E: std::fmt::Debug + PartialEq + Clone>(
+    table: &str, future_payload: &[u8],
+    open_store: impl Fn(&Path) -> S,
+    save: impl Fn(&mut S, u64) -> Result<u64, E>,
+    errors: [E; 5],
+) {
+    let [stale, corrupt, future, exhausted, storage] = errors;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replace.sqlite");
+    let mut store = open_store(&path);
+    let mut second = open_store(&path);
+    let db = Connection::open(&path).unwrap();
+    let read_sql = format!("SELECT revision,payload FROM {table} WHERE id=1");
+    let read = || -> (i64, Vec<u8>) {
+        db.query_row(&read_sql, [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap()
+    };
+    let update_sql = format!("UPDATE {table} SET revision=?1,payload=?2 WHERE id=1");
+    let valid = read().1;
+    let set = |revision: i64, payload: &[u8]| {
+        db.execute(&update_sql, params![revision, payload]).unwrap();
+    };
+
+    // Full replacement increments even for identical valid payloads.
+    assert_eq!(save(&mut store, 0), Ok(1));
+    assert_eq!(save(&mut second, 0), Err(stale.clone()));
+    assert_eq!(read(), (1, valid.clone()));
+    assert_eq!(save(&mut second, 1), Ok(2));
+    assert_eq!(read(), (2, valid.clone()));
+
+    // Incumbent decoding precedes revision comparison; never repair corruption.
+    set(2, future_payload);
+    assert_eq!(save(&mut store, 0), Err(future));
+    assert_eq!(read(), (2, future_payload.to_vec()));
+    set(2, b"not-json");
+    assert_eq!(save(&mut store, 0), Err(corrupt.clone()));
+    assert_eq!(read(), (2, b"not-json".to_vec()));
+
+    set(i64::MAX, &valid);
+    assert_eq!(save(&mut store, 0), Err(stale.clone()));
+    assert_eq!(save(&mut store, i64::MAX as u64), Err(exhausted));
+    assert_eq!(read(), (i64::MAX, valid.clone()));
+    db.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
+    set(-1, &valid);
+    db.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
+    assert_eq!(save(&mut store, 0), Err(corrupt.clone()));
+    assert_eq!(read(), (-1, valid.clone()));
+
+    set(2, &valid);
+    // Force the two distinct SQL failure paths without changing the incumbent.
+    db.execute_batch(&format!(
+        "CREATE TRIGGER block_write BEFORE UPDATE ON {table}
+         BEGIN SELECT RAISE(IGNORE); END;"
+    )).unwrap();
+    assert_eq!(save(&mut store, 2), Err(stale));
+    assert_eq!(read(), (2, valid.clone()));
+    db.execute_batch(&format!(
+        "DROP TRIGGER block_write;
+         CREATE TRIGGER block_write BEFORE UPDATE ON {table}
+         BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;"
+    )).unwrap();
+    assert_eq!(save(&mut store, 2), Err(storage));
+    assert_eq!(read(), (2, valid.clone()));
+    db.execute_batch("DROP TRIGGER block_write;").unwrap();
+    // Failed transactions must release the write lock.
+    assert_eq!(save(&mut second, 2), Ok(3));
+    assert_eq!(read(), (3, valid));
+
+    db.execute(&format!("DELETE FROM {table} WHERE id=1"), []).unwrap();
+    assert_eq!(save(&mut store, 3), Err(corrupt));
+    let count: i64 = db.query_row(
+        &format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn anchor_full_replacement_preserves_revision_guards_and_failure_order() {
+    use AnchorStoreError::*;
+    verify_full_replacement_guards(
+        "language_anchors", br#"{"version":2,"notes":[]}"#,
+        |path| AnchorStore::open(path).unwrap(),
+        |store, revision| store.save(revision, &[]),
+        [StaleRevision, CorruptStore, UnsupportedSchema, RevisionExhausted, Storage],
+    );
+}
+
+#[test]
+fn registry_full_replacement_preserves_revision_guards_and_failure_order() {
+    use StoreError::*;
+    let empty = super::super::collections::Registry { collections: vec![], tables: vec![] };
+    verify_full_replacement_guards(
+        "language_registry", br#"{"version":2,"registry":{"collections":[],"tables":[]}}"#,
+        |path| RegistryStore::open(path).unwrap(),
+        |store, revision| store.save(revision, &empty),
+        [StaleRevision, CorruptStore, UnsupportedSchema, RevisionExhausted, Storage],
+    );
+}
