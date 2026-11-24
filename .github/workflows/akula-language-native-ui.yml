@@ -12,9 +12,7 @@ on:
       - 'aquilum-app/native/src/app/editor_requests/study_choice.rs'
       - 'aquilum-app/native/src/app/editor_requests/study_create.rs'
       - 'aquilum-app/native/src/app/editor_requests/study_live.rs'
-      - 'aquilum-app/native/src/app/editor_requests/study_manage.rs'
       - 'aquilum-app/native/src/app/editor_requests/study_match.rs'
-      - 'aquilum-app/native/src/app/editor_requests/study_name_dialog.rs'
       - 'aquilum-app/native/src/app/tests/learning.rs'
       - 'aquilum-app/native/src/app/tests/learning_annotation_manual_rebind.rs'
       - 'aquilum-app/native/src/app/tests/learning_cards.rs'
@@ -73,7 +71,7 @@ jobs:
           const assert = require('node:assert/strict');
           const fs = require('node:fs');
           const cp = require('node:child_process');
-          const owners = {"lang02":["aquilum-app/native/src/app/tests/learning.rs","aquilum-app/native/src/app/tests/learning_manage.rs","aquilum-app/native/src/app/tests/mod.rs","aquilum-app/native/src/app/editor_requests/study_create.rs","aquilum-app/native/src/app/editor_requests/study_manage.rs","aquilum-app/native/src/app/editor_requests/study_name_dialog.rs"],"lang03":["aquilum-app/native/src/app/editor_requests/annotation_manual_rebind_ui.rs","aquilum-app/native/src/app/tests/learning_annotation_manual_rebind.rs","aquilum-app/native/src/app/tests/mod.rs"],"lang05":["aquilum-app/native/src/app/tests/learning_cards.rs","aquilum-app/native/src/app/tests/learning_global.rs","aquilum-app/native/src/app/tests/learning_choice.rs","aquilum-app/native/src/app/tests/learning_match.rs","aquilum-app/native/src/app/tests/learning_live.rs","aquilum-app/native/src/app/editor_requests/study_live.rs","aquilum-app/native/src/note/study.rs","aquilum-app/native/src/app/tests/learning_multi.rs","aquilum-app/native/src/app/tests/mod.rs","aquilum-app/native/src/app/editor_requests/study_cards.rs","aquilum-app/native/src/app/editor_requests/study_choice.rs","aquilum-app/native/src/app/editor_requests/study_match.rs","aquilum-app/native/assets/locales/en.json","aquilum-app/native/assets/locales/ru.json"]};
+          const owners = {"lang02":["aquilum-app/native/src/app/tests/learning.rs","aquilum-app/native/src/app/tests/learning_manage.rs","aquilum-app/native/src/app/tests/mod.rs","aquilum-app/native/src/app/editor_requests/study_create.rs"],"lang03":["aquilum-app/native/src/app/editor_requests/annotation_manual_rebind_ui.rs","aquilum-app/native/src/app/tests/learning_annotation_manual_rebind.rs","aquilum-app/native/src/app/tests/mod.rs"],"lang05":["aquilum-app/native/src/app/tests/learning_cards.rs","aquilum-app/native/src/app/tests/learning_global.rs","aquilum-app/native/src/app/tests/learning_choice.rs","aquilum-app/native/src/app/tests/learning_match.rs","aquilum-app/native/src/app/tests/learning_live.rs","aquilum-app/native/src/app/editor_requests/study_live.rs","aquilum-app/native/src/note/study.rs","aquilum-app/native/src/app/tests/learning_multi.rs","aquilum-app/native/src/app/tests/mod.rs","aquilum-app/native/src/app/editor_requests/study_cards.rs","aquilum-app/native/src/app/editor_requests/study_choice.rs","aquilum-app/native/src/app/editor_requests/study_match.rs","aquilum-app/native/assets/locales/en.json","aquilum-app/native/assets/locales/ru.json"]};
           const wrappers = [".github/workflows/akula-language-native-ui.yml",".github/workflows/akula-language-annotation-rebind-native-ui.yml",".github/workflows/akula-language-flashcards-native-ui.yml"];
           const ids = Object.keys(owners);
           function select(paths) {

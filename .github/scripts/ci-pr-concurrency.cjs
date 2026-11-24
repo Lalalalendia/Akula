@@ -412,7 +412,7 @@ const NATIVE_LANG_OLD_BLOBS=Object.freeze({
   ".github/workflows/akula-language-flashcards-native-ui.yml": "e1a92f9a6493678a162524c27b3927b35f936685"
 });
 const NATIVE_LANG_REPLACEMENT=".github/workflows/akula-language-native-ui.yml";
-const NATIVE_LANG_NEW_BLOB="775949558efd7655f213a918fdf6e5f5ef3c02fc";
+const NATIVE_LANG_NEW_BLOB="3d398844a6d9921035b668dca42e52a0578856c3";
 const NATIVE_LANG_PRESERVED=Object.freeze([
   "aquilum-app/native/assets/locales/en.json",
   "aquilum-app/native/assets/locales/ru.json",
