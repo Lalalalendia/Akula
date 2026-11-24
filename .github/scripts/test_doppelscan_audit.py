@@ -1,9 +1,11 @@
 import hashlib
+import json
 import importlib.util
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location("audit", Path(__file__).with_name("doppelscan-audit.py"))
 audit = importlib.util.module_from_spec(spec)
@@ -200,6 +202,54 @@ class AuditTests(unittest.TestCase):
         groups[-1]["occurrences"][1]["file"] = "/src/outside.rs"
         with self.assertRaises(ValueError):
             audit.validate_report(data, manifest)
+
+
+    def test_scan_sandbox_preserves_readonly_source_and_tool_boundaries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, tools, report = [root / name for name in ("src", "bin", "report")]
+            for directory in (source, tools, report):
+                directory.mkdir()
+            image = "sha256:" + "a" * 64
+            with mock.patch.object(audit.subprocess, "run",
+                                   return_value=subprocess.CompletedProcess([], 0)) as run:
+                audit.run_mode("exact", audit.MODES["exact"], source, tools, image, report)
+            self.assertEqual(run.call_count, 2)
+            cmd = run.call_args_list[0].args[0]
+            self.assertEqual(cmd[:2], ["docker", "run"])
+            self.assertEqual(cmd[cmd.index("--network") + 1], "none")
+            self.assertIn("--read-only", cmd)
+            self.assertEqual(cmd[cmd.index("--cap-drop") + 1], "ALL")
+            self.assertEqual(cmd[cmd.index("--security-opt") + 1], "no-new-privileges")
+            self.assertEqual([cmd[i + 1] for i, value in enumerate(cmd) if value == "-v"],
+                             [str(source) + ":/src:ro", str(tools) + ":/tools:ro"])
+            self.assertEqual(cmd[-(len(audit.MODES["exact"]) + 2):],
+                             [image, "/tools/doppelscan", *audit.MODES["exact"]])
+            self.assertEqual(run.call_args_list[0].kwargs["timeout"], 300)
+            self.assertEqual(run.call_args_list[1].args[0],
+                             ["docker", "rm", "-f", cmd[cmd.index("--name") + 1]])
+            status = json.loads((report / "status.jsonl").read_text())
+            self.assertEqual((status["mode"], status["exit"]), ("exact", 0))
+
+    def test_failed_or_timed_out_scan_records_exit_and_cleans_container(self):
+        for outcome, expected in (
+            (subprocess.CompletedProcess([], 7), 7),
+            (subprocess.TimeoutExpired(["docker"], 300), 124),
+        ):
+            with self.subTest(exit=expected), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                with mock.patch.object(audit.subprocess, "run", side_effect=[
+                    outcome, subprocess.CompletedProcess([], 0)
+                ]) as run:
+                    with self.assertRaisesRegex(RuntimeError, f"near failed: exit {expected}"):
+                        audit.run_mode("near", audit.MODES["near"], root / "src",
+                                       root / "bin", "sha256:" + "b" * 64, root)
+                self.assertEqual(run.call_count, 2)
+                cmd = run.call_args_list[0].args[0]
+                self.assertEqual(run.call_args_list[1].args[0],
+                                 ["docker", "rm", "-f", cmd[cmd.index("--name") + 1]])
+                status = json.loads((root / "status.jsonl").read_text())
+                self.assertEqual((status["mode"], status["exit"]), ("near", expected))
 
 
 if __name__ == "__main__":
