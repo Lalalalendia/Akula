@@ -6,7 +6,7 @@ use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
 
 use super::super::{App, Popup};
-use super::study_name_dialog::open_name_dialog;
+use super::text_input_dialog::open_input_dialog;
 use super::study_add::PendingColumns;
 use crate::i18n::{t, t_with};
 use crate::ui::dialog::{DialogAnswer, DialogIds};
@@ -37,7 +37,7 @@ impl App {
     ) {
         let title = t("editor.table.studyCreateTitle");
         let (dialog, field, placeholder) =
-            open_name_dialog(root, &title, "", "editor.table.studyCreate");
+            open_input_dialog(root, &title, "", "editor.table.studyNameHint", "editor.table.studyClose", "editor.table.studyCreate");
         self.popup = Some(Popup::StudyNewCollection { dialog, field, placeholder, pending, value: String::new() });
     }
 

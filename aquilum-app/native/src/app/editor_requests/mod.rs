@@ -1,6 +1,6 @@
 pub mod menu;
 pub mod suggest;
-mod video; mod video_stock_admission; mod study; mod study_entry; pub(super) mod study_add; mod study_create; mod study_manage; mod study_name_dialog; pub(in crate::app) mod study_load; mod study_live; mod study_cards; pub(in crate::app) mod study_choice; pub(in crate::app) mod study_match; pub(in crate::app) mod study_typed; pub(in crate::app) mod annotation_ui; pub(in crate::app) mod annotation_explain; pub(in crate::app) mod annotation_preview; pub(in crate::app) mod annotation_click; pub(in crate::app) mod annotation_autoshow; pub(in crate::app) mod annotation_save_bridge; pub(in crate::app) mod annotation_backup_ui; pub(in crate::app) mod annotation_manual_rebind_ui;
+mod video; mod video_stock_admission; mod study; mod study_entry; pub(super) mod study_add; mod study_create; mod study_manage; mod text_input_dialog; pub(in crate::app) mod study_load; mod study_live; mod study_cards; pub(in crate::app) mod study_choice; pub(in crate::app) mod study_match; pub(in crate::app) mod study_typed; pub(in crate::app) mod annotation_ui; pub(in crate::app) mod annotation_explain; pub(in crate::app) mod annotation_preview; pub(in crate::app) mod annotation_click; pub(in crate::app) mod annotation_autoshow; pub(in crate::app) mod annotation_save_bridge; pub(in crate::app) mod annotation_backup_ui; pub(in crate::app) mod annotation_manual_rebind_ui;
 pub use menu::EditorCommand;
 use std::sync::Arc;
 

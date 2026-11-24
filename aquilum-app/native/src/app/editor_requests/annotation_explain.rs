@@ -8,25 +8,17 @@ use aquilum_core::text::annotations::{reattach, Reattachment, TextAnchor};
 use aquilum_core::text::annotation_store::{
     AnnotationRecord, AnnotationStore, BindingStatus, Snapshot, StoreError,
 };
-use masonry::accesskit::Role;
 use masonry::app::RenderRoot;
-use masonry::core::{ErasedAction, NewWidget, PropertySet, WidgetId};
-use masonry::kurbo::{Axis, Point};
-use masonry::layout::Length;
-use masonry::properties::types::{CrossAxisAlignment, MainAxisAlignment};
-use masonry::properties::{Gap, Padding};
-use masonry::widgets::Flex;
+use masonry::core::{ErasedAction, WidgetId};
+
 
 use super::super::{App, Popup};
 use super::annotation_ui::AuthorizedEditor;
 use crate::i18n::t;
-use crate::ui::dialog::{self, CardSize, DialogAnswer, DialogIds, Modal};
+use crate::ui::dialog::{DialogAnswer, DialogIds};
 use crate::ui::editor::{TextAction, TextEditor};
 use crate::ui::handle::Handle;
-use crate::ui::search::{self, Placeholder};
-use crate::ui::theme;
-use crate::ui::tokens::size;
-use crate::ui::widgets::{Rule, TextButton, Variant};
+use crate::ui::search::Placeholder;
 
 pub(in crate::app) struct PendingExplanation {
     source: AuthorizedEditor,
@@ -119,36 +111,10 @@ impl App {
             source, anchor: record.anchor.clone(), revision: snapshot.revision,
         };
         let title = t("editor.annotation.explainTitle");
-        let header = dialog::header(&title, None::<NewWidget<Flex>>);
-        let (entry, field, placeholder) =
-            search::field(&previous, t("editor.annotation.explainHint"));
-        let content = NewWidget::new(Flex::column()
-            .cross_axis_alignment(CrossAxisAlignment::Stretch).with_fixed(entry))
-            .with_props(PropertySet::new()
-                .with(Padding::all(Length::px(size::SPACE_24))));
-        let cancel = NewWidget::new(TextButton::new(
-            t("editor.annotation.cancel"), Variant::Ghost,
-        ));
-        let confirm = NewWidget::new(TextButton::new(
-            t("editor.annotation.saveNote"), Variant::Primary,
-        ));
-        let ids = (cancel.id(), confirm.id());
-        let footer = NewWidget::new(Flex::row()
-            .main_axis_alignment(MainAxisAlignment::End)
-            .with_fixed(cancel).with_fixed(confirm))
-            .with_props(PropertySet::new()
-                .with(Gap::new(Length::px(size::DIALOG_GAP)))
-                .with(Padding::all(Length::px(size::DIALOG_PADDING))));
-        let border = || Rule::new(Axis::Horizontal, || theme::current().border_default);
-        let card = NewWidget::new(Flex::column()
-            .cross_axis_alignment(CrossAxisAlignment::Stretch)
-            .with_fixed(header).with_fixed(border())
-            .with_fixed(content).with_fixed(border()).with_fixed(footer));
-        let modal = Modal::new(card, &title,
-            CardSize::Fit(size::CONFIRM_DIALOG_WIDTH), Role::Dialog, true);
-        let dialog = DialogIds::of(&modal, ids);
-        root.add_layer(modal, Point::ORIGIN);
-        root.focus_on(Some(field.id()));
+        let (dialog, field, placeholder) = super::text_input_dialog::open_input_dialog(
+            root, &title, &previous, "editor.annotation.explainHint",
+            "editor.annotation.cancel", "editor.annotation.saveNote",
+        );
         self.popup = Some(Popup::AnnotationExplanation {
             dialog, field, placeholder, pending, value: previous,
         });

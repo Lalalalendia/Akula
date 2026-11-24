@@ -8,7 +8,7 @@ use masonry::core::{ErasedAction, WidgetId};
 use masonry::kurbo::Point;
 
 use super::super::{App, Popup};
-use super::study_name_dialog::open_name_dialog;
+use super::text_input_dialog::open_input_dialog;
 use crate::i18n::{t, t_with};
 use crate::ui::dialog::{DialogAnswer, DialogIds, ConfirmDialog};
 use crate::ui::editor::{TextAction, TextEditor};
@@ -98,7 +98,7 @@ impl App {
     ) {
         let title = t("editor.table.studyRenameTitle");
         let (dialog, field, placeholder) =
-            open_name_dialog(root, &title, &original, "editor.table.studyRenameSave");
+            open_input_dialog(root, &title, &original, "editor.table.studyNameHint", "editor.table.studyClose", "editor.table.studyRenameSave");
         self.popup = Some(Popup::StudyRename {
             dialog, field, placeholder, collection_id, revision, value: original,
         });
