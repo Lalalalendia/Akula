@@ -404,6 +404,49 @@ function changedWorkflows(base, head = 'HEAD', cwd = process.cwd()) {
   return records;
 }
 
+// CI-LANG-02: exact three-to-one native workflow replacement, no generic deletion exemption.
+// The original test step bodies/transcript names are retained and the selected outcomes fail closed.
+const NATIVE_LANG_OLD_BLOBS=Object.freeze({
+  ".github/workflows/akula-language-native-ui.yml": "cbe58389924cb85834a756a7cde9529afd20a7e5",
+  ".github/workflows/akula-language-annotation-rebind-native-ui.yml": "36debedaa69d5c67c2662b483b57b3313e0ff54c",
+  ".github/workflows/akula-language-flashcards-native-ui.yml": "e1a92f9a6493678a162524c27b3927b35f936685"
+});
+const NATIVE_LANG_REPLACEMENT=".github/workflows/akula-language-native-ui.yml";
+const NATIVE_LANG_NEW_BLOB="775949558efd7655f213a918fdf6e5f5ef3c02fc";
+const NATIVE_LANG_PRESERVED=Object.freeze([
+  "aquilum-app/native/assets/locales/en.json",
+  "aquilum-app/native/assets/locales/ru.json",
+  "aquilum-app/native/src/app/editor_requests/annotation_manual_rebind_ui.rs",
+  "aquilum-app/native/src/app/editor_requests/study_cards.rs",
+  "aquilum-app/native/src/app/editor_requests/study_choice.rs",
+  "aquilum-app/native/src/app/editor_requests/study_create.rs",
+  "aquilum-app/native/src/app/editor_requests/study_live.rs",
+  "aquilum-app/native/src/app/editor_requests/study_manage.rs",
+  "aquilum-app/native/src/app/editor_requests/study_match.rs",
+  "aquilum-app/native/src/app/editor_requests/study_name_dialog.rs",
+  "aquilum-app/native/src/app/tests/learning.rs",
+  "aquilum-app/native/src/app/tests/learning_annotation_manual_rebind.rs",
+  "aquilum-app/native/src/app/tests/learning_cards.rs",
+  "aquilum-app/native/src/app/tests/learning_choice.rs",
+  "aquilum-app/native/src/app/tests/learning_global.rs",
+  "aquilum-app/native/src/app/tests/learning_live.rs",
+  "aquilum-app/native/src/app/tests/learning_manage.rs",
+  "aquilum-app/native/src/app/tests/learning_match.rs",
+  "aquilum-app/native/src/app/tests/learning_multi.rs",
+  "aquilum-app/native/src/app/tests/mod.rs",
+  "aquilum-app/native/src/note/study.rs"
+]);
+function allowedNativeLangConsolidation(path,records,baseBlob,headBlob){
+  if(path===NATIVE_LANG_REPLACEMENT || !Object.hasOwn(NATIVE_LANG_OLD_BLOBS,path))return false;
+  const expected=Object.keys(NATIVE_LANG_OLD_BLOBS).map(p=>({path:p,status:p===NATIVE_LANG_REPLACEMENT?'M':'D'}));
+  if(records.length!==expected.length || !expected.every(e=>records.some(r=>r.path===e.path&&r.status===e.status)))return false;
+  try {
+    if(!Object.entries(NATIVE_LANG_OLD_BLOBS).every(([p,id])=>baseBlob(p)===id))return false;
+    if(headBlob(NATIVE_LANG_REPLACEMENT)!==NATIVE_LANG_NEW_BLOB)return false;
+    return NATIVE_LANG_PRESERVED.every(p=>{const old=baseBlob(p);return /^[0-9a-f]{40}$/.test(old||'')&&headBlob(p)===old;});
+  }catch{return false;}
+}
+
 function audit(base, head = 'HEAD', cwd = process.cwd()) {
   const records = changedWorkflows(base, head, cwd);
   const errors = [];
@@ -416,7 +459,9 @@ function audit(base, head = 'HEAD', cwd = process.cwd()) {
       const before = git(cwd, 'show', base + ':' + record.path);
       if (prTrigger(before) && topBlock(before, 'concurrency').length > 0) {
         protectedModified++;
-        errors.push(record.path + ': deleted previously protected PR workflow');
+        const blob=(ref,path)=>git(cwd,'rev-parse','--verify',ref+':'+path).trim();
+        if(!allowedNativeLangConsolidation(record.path,records,p=>blob(base,p),p=>blob(head,p)))
+          errors.push(record.path + ': deleted previously protected PR workflow');
       }
       continue;
     }
@@ -490,4 +535,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { topBlock, prEvents, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, allowedTextDeltaMigration, allowedB1b2bMigration, allowedB1b3cMigration, allowedB1c0Migration, changedWorkflows, audit, main };
+module.exports = { topBlock, prEvents, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, allowedTextDeltaMigration, allowedB1b2bMigration, allowedB1b3cMigration, allowedB1c0Migration, allowedNativeLangConsolidation, changedWorkflows, audit, main };

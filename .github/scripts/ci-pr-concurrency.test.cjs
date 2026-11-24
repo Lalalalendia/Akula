@@ -390,3 +390,27 @@ test('Text Delta PR owner may migrate only to a proven required Main gate',()=>{
     assert.equal(allowedTextDeltaMigration(before,after,p=>p===appPath?app.replace(from,to):read(p)),false,label);
   }
 });
+
+test('native LANG wrapper deletion requires exact replacement and unchanged source witnesses',()=>{
+  const {allowedNativeLangConsolidation}=require('./ci-pr-concurrency.cjs');
+  const old={".github/workflows/akula-language-native-ui.yml":"cbe58389924cb85834a756a7cde9529afd20a7e5",".github/workflows/akula-language-annotation-rebind-native-ui.yml":"36debedaa69d5c67c2662b483b57b3313e0ff54c",".github/workflows/akula-language-flashcards-native-ui.yml":"e1a92f9a6493678a162524c27b3927b35f936685"};
+  const replacement=".github/workflows/akula-language-native-ui.yml";
+  const deleted=".github/workflows/akula-language-annotation-rebind-native-ui.yml";
+  const preserved=["aquilum-app/native/assets/locales/en.json","aquilum-app/native/assets/locales/ru.json","aquilum-app/native/src/app/editor_requests/annotation_manual_rebind_ui.rs","aquilum-app/native/src/app/editor_requests/study_cards.rs","aquilum-app/native/src/app/editor_requests/study_choice.rs","aquilum-app/native/src/app/editor_requests/study_create.rs","aquilum-app/native/src/app/editor_requests/study_live.rs","aquilum-app/native/src/app/editor_requests/study_manage.rs","aquilum-app/native/src/app/editor_requests/study_match.rs","aquilum-app/native/src/app/editor_requests/study_name_dialog.rs","aquilum-app/native/src/app/tests/learning.rs","aquilum-app/native/src/app/tests/learning_annotation_manual_rebind.rs","aquilum-app/native/src/app/tests/learning_cards.rs","aquilum-app/native/src/app/tests/learning_choice.rs","aquilum-app/native/src/app/tests/learning_global.rs","aquilum-app/native/src/app/tests/learning_live.rs","aquilum-app/native/src/app/tests/learning_manage.rs","aquilum-app/native/src/app/tests/learning_match.rs","aquilum-app/native/src/app/tests/learning_multi.rs","aquilum-app/native/src/app/tests/mod.rs","aquilum-app/native/src/note/study.rs"];
+  const records=Object.keys(old).map(path=>({path,status:path===replacement?'M':'D'}));
+  const before={...old,...Object.fromEntries(preserved.map(p=>[p,'a'.repeat(40)]))};
+  const after={...Object.fromEntries(preserved.map(p=>[p,'a'.repeat(40)])),[replacement]:"775949558efd7655f213a918fdf6e5f5ef3c02fc"};
+  const check=(path,changes=records,b=before,h=after)=>allowedNativeLangConsolidation(path,changes,p=>b[p],p=>h[p]);
+  for(const path of Object.keys(old).filter(p=>p!==replacement))assert.equal(check(path),true);
+  assert.equal(check(replacement),false);
+  assert.equal(check('.github/workflows/unrelated.yml'),false);
+  assert.equal(check(deleted,records.slice(1)),false);
+  assert.equal(check(deleted,[...records,{path:'.github/workflows/other.yml',status:'D'}]),false);
+  assert.equal(check(deleted,records,{...before,[deleted]:'b'.repeat(40)}),false);
+  assert.equal(check(deleted,records,before,{...after,[replacement]:'b'.repeat(40)}),false);
+  for(const path of preserved){
+    assert.equal(check(deleted,records,before,{...after,[path]:'b'.repeat(40)}),false);
+    assert.equal(check(deleted,records,{...before,[path]:undefined},after),false);
+  }
+  assert.equal(allowedNativeLangConsolidation(deleted,records,()=>{throw Error('missing tree evidence');},p=>after[p]),false);
+});
