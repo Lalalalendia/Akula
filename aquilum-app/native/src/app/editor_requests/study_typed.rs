@@ -4,25 +4,17 @@
 //! Ambiguous meanings are explicitly ungraded. All scores stay in memory.
 
 use aquilum_core::learning::answer_check::{check_typed_answer, TypedVerdict};
-use masonry::accesskit::Role;
 use masonry::app::RenderRoot;
-use masonry::core::{ErasedAction, NewWidget, PropertySet, WidgetId};
-use masonry::kurbo::{Axis, Point};
-use masonry::layout::Length;
-use masonry::properties::types::{CrossAxisAlignment, MainAxisAlignment};
-use masonry::properties::{Gap, Padding};
-use masonry::widgets::Flex;
+use masonry::core::{ErasedAction, WidgetId};
+use masonry::kurbo::Point;
 
 use super::super::{App, Popup};
 use super::study_load::StudyDeckSnapshot;
 use crate::i18n::{t, t_with};
-use crate::ui::dialog::{self, CardSize, ConfirmDialog, DialogAnswer, DialogIds, Modal};
+use crate::ui::dialog::{ConfirmDialog, DialogAnswer, DialogIds};
 use crate::ui::editor::{TextAction, TextEditor};
 use crate::ui::handle::Handle;
-use crate::ui::search::{self, Placeholder};
-use crate::ui::theme;
-use crate::ui::tokens::size;
-use crate::ui::widgets::{Rule, TextButton, Variant};
+use crate::ui::search::Placeholder;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) struct TypedProgress {
@@ -63,38 +55,10 @@ impl App {
             ("question", &short(&card.question)),
             ("context", &card.context.as_deref().map(short).unwrap_or_default()),
         ]);
-        let header = dialog::header(&title, None::<NewWidget<Flex>>);
-        let (entry, field, placeholder) = search::field(
-            "", t("editor.table.studyTypedHint"),
+        let (dialog, field, placeholder) = super::text_input_dialog::open_input_dialog(
+            root, &title, "", "editor.table.studyTypedHint",
+            "editor.table.studyClose", "editor.table.studyTypedCheck",
         );
-        let content = NewWidget::new(
-            Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch)
-                .with_fixed(entry)
-        ).with_props(PropertySet::new().with(Padding::all(Length::px(size::SPACE_24))));
-        let cancel = NewWidget::new(TextButton::new(
-            t("editor.table.studyClose"), Variant::Ghost,
-        ));
-        let confirm = NewWidget::new(TextButton::new(
-            t("editor.table.studyTypedCheck"), Variant::Primary,
-        ));
-        let ids = (cancel.id(), confirm.id());
-        let footer = NewWidget::new(
-            Flex::row().main_axis_alignment(MainAxisAlignment::End)
-                .with_fixed(cancel).with_fixed(confirm)
-        ).with_props(PropertySet::new()
-            .with(Gap::new(Length::px(size::DIALOG_GAP)))
-            .with(Padding::all(Length::px(size::DIALOG_PADDING))));
-        let border = || Rule::new(Axis::Horizontal, || theme::current().border_default);
-        let card = NewWidget::new(Flex::column()
-            .cross_axis_alignment(CrossAxisAlignment::Stretch)
-            .with_fixed(header).with_fixed(border())
-            .with_fixed(content).with_fixed(border()).with_fixed(footer));
-        let modal = Modal::new(card, &title, CardSize::Fit(
-            size::CONFIRM_DIALOG_WIDTH,
-        ), Role::Dialog, true);
-        let dialog = DialogIds::of(&modal, ids);
-        root.add_layer(modal, Point::ORIGIN);
-        root.focus_on(Some(field.id()));
         self.popup = Some(Popup::StudyTypedEntry {
             dialog, field, placeholder, snapshot, index, progress, value: String::new(),
         });

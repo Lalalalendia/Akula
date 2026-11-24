@@ -49,7 +49,10 @@ fn lang02_rename_and_delete_require_native_confirmation_and_preserve_note() {
     h.act(layer, MenuChoice::Item(0));
 
     let field = match &h.app.popup {
-        Some(Popup::StudyRename { field, .. }) => field.id(),
+        Some(Popup::StudyRename { field, .. }) => {
+            assert_eq!(field.get(&h.root).unwrap().inner().text(), "Ботаника");
+            field.id()
+        }
         _ => panic!("rename should open a native name dialog"),
     };
     h.act(field, TextAction::Changed("  Биология  ".into()));

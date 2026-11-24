@@ -42,6 +42,7 @@ fn lang05_typed_native_correct_wrong_and_no_persistent_grades_or_md_writes() {
             field, dialog, snapshot, index, progress, ..
         }) => {
             assert_eq!(*index, 0);
+            assert!(field.get(&h.root).unwrap().inner().text().is_empty());
             assert_eq!(snapshot.deck.cards.len(), 3);
             assert_eq!(progress.answered, 0);
             // Source identities are UUIDs, not a stable exercise ordering.
