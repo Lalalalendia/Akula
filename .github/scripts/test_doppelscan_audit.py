@@ -93,5 +93,44 @@ class AuditTests(unittest.TestCase):
                             for flags in audit.MODES.values()))
 
 
+    def test_pinned_comparable_scan_settings(self):
+        # Do not accidentally compare clone counts across different tools,
+        # thresholds, output limits or scopes.
+        common = ["--format", "json", "--limit", "0", "--only", "rust",
+                  "--min-tokens", "50"]
+        self.assertEqual(audit.VERSION, "0.9.0")
+        self.assertEqual(audit.TOOL_SHA256,
+                         "e5d5abd63abfb74dddfc52d60d58144f402218aa49b3b6b6e610d1e3171f355f")
+        self.assertEqual(audit.MODES, {
+            "exact": common + ["--strict"],
+            "renamed": common,
+            "near": ["near"] + common + ["--similarity", "0.8"],
+        })
+
+    def test_clone_group_rejects_invalid_occurrence_evidence(self):
+        path = "aquilum-app/core/src/lib.rs"
+        manifest = {path: "digest"}
+        valid = {"file": "/src/" + path, "start_line": 1, "end_line": 4}
+        def check(occurrences):
+            return audit.validate_report({
+                "summary": {"files": 1, "groups": 1},
+                "groups": [{"id": 1, "tokens": 50, "score": 50,
+                            "occurrences": occurrences}]
+            }, manifest)
+        result = check([valid, {**valid, "file": "./" + path,
+                                "start_line": 5, "end_line": 8}])
+        self.assertEqual(result["unscanned_count"], 0)
+        self.assertEqual(result["top"][0]["copies"], 2)
+        self.assertEqual(result["top"][0]["locations"][0]["file"], path)
+        with self.assertRaises(ValueError):
+            check([valid])
+        for bad in ({"start_line": 0}, {"end_line": 0},
+                    {"start_line": 5, "end_line": 4},
+                    {"start_line": True}, {"end_line": "4"},
+                    {"file": "/src/../outside.rs"}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                check([valid, {**valid, **bad}])
+
+
 if __name__ == "__main__":
     unittest.main()
