@@ -158,7 +158,20 @@ try {
         if (!(Test-Path -LiteralPath $shadowBase)) { continue }
         $records = @(Get-ChildItem -LiteralPath $shadowBase -Filter '*.shadow' -File -Recurse -ErrorAction Stop)
         foreach ($record in $records) {
-            $wire = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($record.FullName))
+            # Recovery files may be atomically replaced/retired after the
+            # directory enumeration. A vanished candidate is NOT evidence of
+            # a valid draft: skip it and continue bounded polling for a real
+            # fsynced shadow with the exact marker and header.
+            try {
+                $bytes = [IO.File]::ReadAllBytes($record.FullName)
+            } catch [System.Management.Automation.MethodInvocationException] {
+                $missing = $_.Exception.InnerException -is [IO.FileNotFoundException]
+                if (!$missing -or (Test-Path -LiteralPath $record.FullName -PathType Leaf)) {
+                    throw
+                }
+                continue
+            }
+            $wire = [Text.Encoding]::UTF8.GetString($bytes)
             if ($wire.Contains($marker) -and $wire.StartsWith('AKULA-NOTE-SHADOW-V1')) {
                 $shadowOk = $true
                 $shadowFile=$record.FullName
