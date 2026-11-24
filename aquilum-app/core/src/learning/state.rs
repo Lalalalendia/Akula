@@ -228,43 +228,20 @@ pub struct StudyStore {
 impl StudyStore {
     /// Must be called only with a host-owned app-data path.
     pub fn open(path: &Path) -> Result<Self, StateError> {
-        let mut connection = Connection::open(path).map_err(|_| StateError::Storage)?;
-        connection.execute_batch(
-            "PRAGMA foreign_keys=ON;
-             PRAGMA journal_mode=WAL;
-             PRAGMA synchronous=FULL;
-             PRAGMA busy_timeout=3000;",
-        ).map_err(|_| StateError::Storage)?;
-        let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))
-            .map_err(|_| StateError::Storage)?;
-        if version == 0 {
-            let existing: i64 = connection.query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-                [], |row| row.get(0),
-            ).map_err(|_| StateError::Storage)?;
-            if existing != 0 {
-                return Err(StateError::UnsupportedVersion);
-            }
-            let empty = encode(&StudyState::default())?;
-            let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)
-                .map_err(|_| StateError::Storage)?;
-            tx.execute_batch(
-                "CREATE TABLE language_study_state (
+        let connection = super::sqlite_store::open(
+            path, VERSION,
+            "CREATE TABLE language_study_state (
                     id INTEGER PRIMARY KEY CHECK(id=1),
                     revision INTEGER NOT NULL CHECK(revision>=0),
                     payload BLOB NOT NULL
                  );",
-            ).map_err(|_| StateError::Storage)?;
-            tx.execute(
-                "INSERT INTO language_study_state(id,revision,payload) VALUES(1,0,?1)",
-                params![empty],
-            ).map_err(|_| StateError::Storage)?;
-            tx.execute_batch("PRAGMA user_version=1;")
-                .map_err(|_| StateError::Storage)?;
-            tx.commit().map_err(|_| StateError::Storage)?;
-        } else if version != VERSION {
-            return Err(StateError::UnsupportedVersion);
-        }
+            "INSERT INTO language_study_state(id,revision,payload) VALUES(1,0,?1)",
+            || encode(&StudyState::default()),
+        ).map_err(|error| match error {
+            super::sqlite_store::OpenError::Storage => StateError::Storage,
+            super::sqlite_store::OpenError::UnsupportedSchema => StateError::UnsupportedVersion,
+            super::sqlite_store::OpenError::Payload(error) => error,
+        })?;
         let store = Self { connection };
         store.load()?;
         Ok(store)
