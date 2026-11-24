@@ -1,5 +1,8 @@
 use super::model::{DEFAULT_COL, DEFAULT_ROW, Range2, Table};
 
+#[derive(Clone, Copy)]
+enum DeleteAxis { Row, Column }
+
 impl Table {
     pub fn add_row(&mut self) {
         let cols = self.cols();
@@ -16,56 +19,43 @@ impl Table {
     }
 
     pub fn delete_row(&mut self, index: usize) -> bool {
-        if index >= self.rows() || self.rows() <= 2 {
-            return false;
-        }
-        let values: Vec<(Range2, String)> = self.merges.iter().map(|m| (*m, self.cells[m.top][m.left].clone())).collect();
-        self.cells.remove(index);
-        self.heights.remove(index);
-        let mut merges = Vec::new();
-        for (m, v) in values {
-            let r = if index < m.top {
-                Range2 { top: m.top - 1, bottom: m.bottom - 1, ..m }
-            } else if index <= m.bottom {
-                if m.top == m.bottom {
-                    continue;
-                }
-                Range2 { bottom: m.bottom - 1, ..m }
-            } else {
-                m
-            };
-            if !r.single() {
-                self.cells[r.top][r.left] = v;
-                merges.push(r);
-            }
-        }
-        self.merges = merges;
-        self.sync();
-        true
+        self.delete_axis(index, DeleteAxis::Row)
     }
 
     pub fn delete_col(&mut self, index: usize) -> bool {
-        if index >= self.cols() || self.cols() <= 1 {
+        self.delete_axis(index, DeleteAxis::Column)
+    }
+
+    fn delete_axis(&mut self, index: usize, axis: DeleteAxis) -> bool {
+        let (len, minimum) = match axis {
+            DeleteAxis::Row => (self.rows(), 2),
+            DeleteAxis::Column => (self.cols(), 1),
+        };
+        if index >= len || len <= minimum {
             return false;
         }
         let values: Vec<(Range2, String)> = self.merges.iter().map(|m| (*m, self.cells[m.top][m.left].clone())).collect();
-        for row in &mut self.cells {
-            row.remove(index);
+        match axis {
+            DeleteAxis::Row => { self.cells.remove(index); self.heights.remove(index); }
+            DeleteAxis::Column => {
+                for row in &mut self.cells { row.remove(index); }
+                self.aligns.remove(index);
+                self.widths.remove(index);
+            }
         }
-        self.aligns.remove(index);
-        self.widths.remove(index);
         let mut merges = Vec::new();
-        for (m, v) in values {
-            let r = if index < m.left {
-                Range2 { left: m.left - 1, right: m.right - 1, ..m }
-            } else if index <= m.right {
-                if m.left == m.right {
-                    continue;
-                }
-                Range2 { right: m.right - 1, ..m }
-            } else {
-                m
+        for (mut r, v) in values {
+            let (start, end) = match axis {
+                DeleteAxis::Row => (&mut r.top, &mut r.bottom),
+                DeleteAxis::Column => (&mut r.left, &mut r.right),
             };
+            if index < *start {
+                *start -= 1;
+                *end -= 1;
+            } else if index <= *end {
+                if *start == *end { continue; }
+                *end -= 1;
+            }
             if !r.single() {
                 self.cells[r.top][r.left] = v;
                 merges.push(r);
