@@ -8,6 +8,8 @@ on:
 
       - "aquilum-app/core/src/server_bootstrap_lab.rs"
       - "aquilum-app/core/src/server_bootstrap_ssh_lab.rs"
+      - "aquilum-app/core/src/server_bootstrap_ssh_common.rs"
+      - "aquilum-app/core/src/server_bootstrap_ssh_common_tests.rs"
       - "aquilum-app/core/tests/server_bootstrap_b0b.rs"
       - "scripts/ci/akula-b0b-local-sshd.sh"
       - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0B.md"
@@ -33,6 +35,12 @@ jobs:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           shared-key: akula-server-bootstrap-b0b-v1
           cache-workspace-crates: true
+      - name: Verify shared SSH parser without network access
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features server-bootstrap-b0-openssh-lab --lib shared_ssh_parser_ -- --nocapture
       - name: Real signed KEX and forged-host rejection on disposable localhost SSH
         shell: bash
         run: bash scripts/ci/akula-b0b-local-sshd.sh

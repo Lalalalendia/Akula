@@ -118,6 +118,8 @@ const OWNED_SUITES=Object.freeze({
   ],
   "owned_b0c_ssh": [
     "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs",
+    "aquilum-app/core/src/server_bootstrap_ssh_common.rs",
+    "aquilum-app/core/src/server_bootstrap_ssh_common_tests.rs",
     "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs",
     "aquilum-app/core/src/server_bootstrap_modules.rs",
     "aquilum-app/core/tests/server_bootstrap_b0c_windows.rs",

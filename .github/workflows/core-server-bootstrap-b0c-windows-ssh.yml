@@ -6,6 +6,8 @@ on:
     branches-ignore: [main]
     paths:
       - "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs"
+      - "aquilum-app/core/src/server_bootstrap_ssh_common.rs"
+      - "aquilum-app/core/src/server_bootstrap_ssh_common_tests.rs"
       - "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs"
       - "aquilum-app/core/src/server_bootstrap_modules.rs"
       - "aquilum-app/core/tests/server_bootstrap_b0c_windows.rs"
@@ -55,6 +57,13 @@ jobs:
           & $exe -V
           rustfmt --edition 2024 aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs aquilum-app/core/tests/server_bootstrap_b0c_windows.rs
           python -m py_compile scripts/ci/akula-b0c-windows-loopback-sshd.py
+      - name: Verify shared SSH parser without network access
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --locked -p aquilum-core --features server-bootstrap-b0-openssh-lab --lib shared_ssh_parser_ -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "Shared SSH parser tests failed" }
       - name: Real Windows OpenSSH signed KEX, forged pin rejection and B0 preview
         shell: pwsh
         run: |
