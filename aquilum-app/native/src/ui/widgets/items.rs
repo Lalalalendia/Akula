@@ -11,6 +11,7 @@ use masonry::peniko::Color;
 
 use crate::ui::icons::Icon;
 use crate::ui::tokens::size;
+use crate::ui::widgets::press::{submit_pointer, submit_access, update_button_line};
 use crate::ui::{text, theme};
 
 use super::{Press, Pressed};
@@ -76,26 +77,15 @@ impl Widget for Chip {
     type Action = Pressed;
 
     fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        if self.press.pointer(ctx, event) {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
+        submit_pointer(&mut self.press, ctx, event);
     }
 
     fn on_access_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &AccessEvent) {
-        if event.action == Action::Click {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
+        submit_access(ctx, event);
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
-        match event {
-            Update::HoveredChanged(_) => ctx.request_paint_only(),
-            Update::FontsChanged => {
-                self.line.clear();
-                ctx.request_layout();
-            }
-            _ => {}
-        }
+        update_button_line(&mut self.line, ctx, event);
     }
 
     fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
