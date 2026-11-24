@@ -391,6 +391,37 @@ test('Text Delta PR owner may migrate only to a proven required Main gate',()=>{
   }
 });
 
+test('LANG-08 protected wrapper deletion requires exact entire replacement and unchanged witnesses',()=>{
+  const {allowedLang08Consolidation}=require('./ci-pr-concurrency.cjs');
+  const old={
+  ".github/workflows/akula-language08-installed-annotations-nsis.yml": "4bcc3c9a4f8142422fd53639ad6a0c63e8f674f9",
+  ".github/workflows/akula-language08b-installed-backup-nsis.yml": "f5d8934d3b0f7d698dcded269460b60a608a3363",
+  ".github/workflows/akula-language08c-installed-collections-nsis.yml": "648de9edde1499ca5452c2564ef0355f00a9bfcf",
+  ".github/workflows/akula-language08c2-installed-negative-names-nsis.yml": "8f955946e7f2436af60ca9fc7bcf7688e2480cef",
+  ".github/workflows/akula-language08c2b-installed-invalid-names-nsis.yml": "f119146d135fdfbe37dc1c6e671d6255fa8a7213"
+};
+  const target='.github/workflows/akula-language08c2b-installed-invalid-names-nsis.yml';
+  const replacement='6e27800605e1447e350d01d4e26fef0fb6515ea8';
+  const preserved=["scripts/windows-lang08-installed-annotations.ps1","scripts/windows-lang08b-installed-backup.ps1","scripts/windows-lang08c-installed-collections.ps1","scripts/windows-lang08c2-installed-negative-names.ps1","scripts/windows-lang08c2b-installed-invalid-names.ps1",".github/workflows/windows-beta.yml","scripts/windows-beta-recovery-large.ps1"];
+  const records=Object.keys(old).map(path=>({path,status:path===target?'M':'D'}));
+  const before={...old,...Object.fromEntries(preserved.map(p=>[p,'a'.repeat(40)]))};
+  const after={[target]:replacement,...Object.fromEntries(preserved.map(p=>[p,'a'.repeat(40)]))};
+  const check=(path,changes=records,b=before,h=after)=>allowedLang08Consolidation(path,changes,p=>b[p],p=>h[p]);
+  for(const {path,status} of records)if(status==='D')assert.equal(check(path),true,path);
+  const deleted=records.find(r=>r.status==='D').path;
+  assert.equal(check(target),false,'no exception for deleting the replacement');
+  assert.equal(check('.github/workflows/other.yml'),false,'no unrelated deletion');
+  assert.equal(check(deleted,records.slice(1)),false,'all wrappers must move together');
+  assert.equal(check(deleted,[...records,{path:'.github/workflows/other.yml',status:'D'}]),false,'no mixed workflow deletion');
+  assert.equal(check(deleted,records,{...before,[deleted]:'b'.repeat(40)}),false,'old body changed');
+  assert.equal(check(deleted,records,before,{...after,[target]:'b'.repeat(40)}),false,'replacement tampered');
+  for(const p of preserved){
+    assert.equal(check(deleted,records,before,{...after,[p]:'b'.repeat(40)}),false,'changed witness '+p);
+    assert.equal(check(deleted,records,before,{...after,[p]:undefined}),false,'missing witness '+p);
+  }
+  assert.equal(allowedLang08Consolidation(deleted,records,()=>{throw Error('missing tree evidence');},p=>after[p]),false);
+});
+
 test('native LANG wrapper deletion requires exact replacement and unchanged source witnesses',()=>{
   const {allowedNativeLangConsolidation}=require('./ci-pr-concurrency.cjs');
   const old={".github/workflows/akula-language-native-ui.yml":"cbe58389924cb85834a756a7cde9529afd20a7e5",".github/workflows/akula-language-annotation-rebind-native-ui.yml":"36debedaa69d5c67c2662b483b57b3313e0ff54c",".github/workflows/akula-language-flashcards-native-ui.yml":"e1a92f9a6493678a162524c27b3927b35f936685"};
