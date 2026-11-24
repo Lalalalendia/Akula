@@ -1,13 +1,13 @@
 use super::*;
 use crate::frontmatter::PAGES;
 use crate::vault_files::{self, Source};
-use masonry::app::RenderRoot;
-use std::path::PathBuf;
 impl App {
     pub(in crate::app) fn on_picked(&mut self, root: &mut RenderRoot, picked: Picked) -> bool {
-        let current = |note: &PathBuf| self.note.as_ref().is_some_and(|n| n.is(note));
+        let current = |note: &std::path::PathBuf| self.note.as_ref().is_some_and(|n| n.is(note));
         match picked {
             Picked::Workspace(path) => return self.switch_workspace(root, path).title,
+            Picked::WorkspaceCreated(result) => return self.on_workspace_created(root, result),
+            Picked::WorkspaceDuplicated(result) => return self.on_workspace_duplicated(root, result),
             Picked::PdfChosen(file) => self.prompt_pdf_preview(root, file),
             #[cfg(feature = "dicom-preview")]
             Picked::DicomExternal(path) => return self.open_dicom_external(root, path),
