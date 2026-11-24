@@ -132,5 +132,75 @@ class AuditTests(unittest.TestCase):
                 check([valid, {**valid, **bad}])
 
 
+    def test_manifest_delta_across_committed_source_rename_and_edits(self):
+        # A comparable audit must distinguish moved paths, changed bytes, and
+        # excluded test-only edits instead of attributing all deltas to reuse.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            repo.mkdir()
+            def git(*args):
+                return subprocess.check_output(["git", "-C", str(repo), *args],
+                                               stderr=subprocess.DEVNULL).decode().strip()
+            git("init")
+            git("config", "user.name", "Fixture")
+            git("config", "user.email", "fixture@example.invalid")
+            prefix = "aquilum-app/core/src/"
+            source = repo / prefix
+            source.mkdir(parents=True)
+            files = {"old.rs": b"fn moved() {}\n",
+                     "edit.rs": b"fn before() {}\n",
+                     "removed.rs": b"fn removed() {}\n",
+                     "ignored_tests.rs": b"fn test_before() {}\n"}
+            for name, data in files.items():
+                (source / name).write_bytes(data)
+            git("add", ".")
+            git("commit", "-m", "before")
+            before = git("rev-parse", "HEAD")
+            git("mv", prefix + "old.rs", prefix + "new.rs")
+            (source / "edit.rs").write_bytes(b"fn after() {}\n")
+            git("rm", prefix + "removed.rs")
+            (source / "added.rs").write_bytes(b"fn added() {}\n")
+            (source / "ignored_tests.rs").write_bytes(b"fn test_after() {}\n")
+            git("add", ".")
+            git("commit", "-m", "after")
+            after = git("rev-parse", "HEAD")
+            def manifest(sha, name):
+                dest = root / name
+                dest.mkdir()
+                return audit.snapshot(repo, sha, dest)
+            old = manifest(before, "old")
+            new = manifest(after, "new")
+            self.assertEqual(set(old) - set(new),
+                             {prefix + "old.rs", prefix + "removed.rs"})
+            self.assertEqual(set(new) - set(old),
+                             {prefix + "new.rs", prefix + "added.rs"})
+            self.assertEqual(old[prefix + "old.rs"], new[prefix + "new.rs"])
+            self.assertNotEqual(old[prefix + "edit.rs"], new[prefix + "edit.rs"])
+            self.assertNotIn(prefix + "ignored_tests.rs", old)
+            self.assertNotIn(prefix + "ignored_tests.rs", new)
+            self.assertEqual(old, manifest(before, "old_again"))
+            self.assertEqual(new, manifest(after, "new_again"))
+
+    def test_report_validation_checks_groups_beyond_log_preview(self):
+        path = "aquilum-app/core/src/lib.rs"
+        manifest = {path: "digest"}
+        groups = []
+        for index in range(6):
+            start = index * 10 + 1
+            groups.append({"id": index + 1, "tokens": 50, "score": 50,
+                           "occurrences": [
+                               {"file": path, "start_line": start, "end_line": start + 3},
+                               {"file": path, "start_line": start + 4, "end_line": start + 7},
+                           ]})
+        data = {"summary": {"files": 1, "groups": 6}, "groups": groups}
+        report = audit.validate_report(data, manifest)
+        self.assertEqual(len(report["top"]), 5)
+        self.assertEqual(report["stats"]["groups"], 6)
+        groups[-1]["occurrences"][1]["file"] = "/src/outside.rs"
+        with self.assertRaises(ValueError):
+            audit.validate_report(data, manifest)
+
+
 if __name__ == "__main__":
     unittest.main()
