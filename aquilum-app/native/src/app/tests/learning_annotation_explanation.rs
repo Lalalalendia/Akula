@@ -101,3 +101,37 @@ fn lang03_note_explanation_escape_closes_without_changes() {
     ).unwrap();
     assert_eq!(store.load().unwrap().revision, 1);
 }
+
+#[test]
+fn lang03_note_explanation_prefills_existing_text_and_cancel_preserves_it() {
+    let mut h = Harness::new();
+    let (a, _) = bind_fixture(&mut h);
+    let before = std::fs::read(&a).unwrap();
+    assert!(h.app.open(&mut h.root, a.clone()));
+    highlight_eat(&mut h);
+    let mut store = AnnotationStore::open(
+        &h.app.workspace.data_dir.join("text-annotations.sqlite"),
+    ).unwrap();
+    let mut snapshot = store.load().unwrap();
+    snapshot.records[0].explanation = Some("Сохранённое пояснение".into());
+    store.replace(snapshot.revision, &snapshot.records).unwrap();
+    let saved = store.load().unwrap();
+    drop(store);
+    let (_, layer) = open_note_editor(&mut h);
+    match &h.app.popup {
+        Some(Popup::AnnotationExplanation { field, value, .. }) => {
+            assert_eq!(value, "Сохранённое пояснение");
+            assert_eq!(field.get(&h.root).unwrap().inner().text(), value.as_str());
+        }
+        _ => panic!("annotation input must open with its original value"),
+    }
+    h.act(layer, DialogAnswer::Cancel);
+    assert!(h.app.popup.is_none());
+    let after = AnnotationStore::open(
+        &h.app.workspace.data_dir.join("text-annotations.sqlite"),
+    ).unwrap().load().unwrap();
+    assert_eq!(after.revision, saved.revision);
+    assert_eq!(after.records[0].explanation, saved.records[0].explanation);
+    assert_eq!(std::fs::read(&a).unwrap(), before);
+    eprintln!("AKULA_LANG03_NOTE_PREFILL_PASS=existing_text,cancel,no_write");
+}

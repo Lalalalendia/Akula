@@ -1,4 +1,4 @@
-//! Shared native name input for creating and renaming a study collection.
+//! Shared native text input for study names, typed answers and annotation notes.
 //! The callers retain their independent persistence and conflict policies.
 
 use masonry::accesskit::Role;
@@ -19,15 +19,15 @@ use crate::ui::theme;
 use crate::ui::tokens::size;
 use crate::ui::widgets::{Rule, TextButton, Variant};
 
-pub(super) fn open_name_dialog(
-    root: &mut RenderRoot, title: &str, initial: &str, confirm_key: &str,
+pub(super) fn open_input_dialog(
+    root: &mut RenderRoot, title: &str, initial: &str, hint_key: &str, cancel_key: &str, confirm_key: &str,
 ) -> (DialogIds, Handle<TextEditor>, Handle<Placeholder>) {
     let header = dialog::header(title, None::<NewWidget<Flex>>);
-    let (entry, field, placeholder) = search::field(initial, t("editor.table.studyNameHint"));
+    let (entry, field, placeholder) = search::field(initial, t(hint_key));
     let content = NewWidget::new(
         Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch).with_fixed(entry)
     ).with_props(PropertySet::new().with(Padding::all(Length::px(size::SPACE_24))));
-    let cancel = NewWidget::new(TextButton::new(t("editor.table.studyClose"), Variant::Ghost));
+    let cancel = NewWidget::new(TextButton::new(t(cancel_key), Variant::Ghost));
     let confirm = NewWidget::new(TextButton::new(t(confirm_key), Variant::Primary));
     let ids = (cancel.id(), confirm.id());
     let footer = NewWidget::new(

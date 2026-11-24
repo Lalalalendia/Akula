@@ -54,7 +54,10 @@ fn lang02_named_collection_native_gui_persists_without_mutating_markdown() {
     };
     h.act(group_menu, MenuChoice::Item(new_index));
     let field = match &h.app.popup {
-        Some(Popup::StudyNewCollection { field, .. }) => field.id(),
+        Some(Popup::StudyNewCollection { field, .. }) => {
+            assert!(field.get(&h.root).unwrap().inner().text().is_empty());
+            field.id()
+        }
         _ => panic!("New collection must open an editable native dialog"),
     };
     h.act(field, TextAction::Changed("  Физика / термины  ".into()));
