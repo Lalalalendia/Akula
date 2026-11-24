@@ -130,7 +130,7 @@ test('owned tests run once via gate on source-only and mixed manifest diffs',()=
 
 test('B0c Windows owner route is fail-closed for source-only and mixed Cargo without broad version-only routing',()=>{
   const owners=owned.OWNED_SUITES.owned_b0c_ssh;
-  assert.equal(owners.length,14);
+  assert.equal(owners.length,16);
   assert.ok(owners.includes('.github/workflows/core-server-bootstrap-b0c-windows-ssh.yml'));
   assert.ok(owners.includes('aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs'));
   assert.equal(owned.assess({paths:[NATIVE]}).owned_b0c_ssh,false,
