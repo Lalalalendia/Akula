@@ -27,9 +27,21 @@ pub struct EmbedLine {
 fn embeddable(source: &str) -> bool {
     images::kind(source).is_some() || images::extension(source).is_none()
 }
+// Only standalone HTTPS single-video links become media, not arbitrary
+// inline links, surrounding prose, or URLs embedded in untrusted labels.
+fn youtube_source(line: &str) -> Option<&str> {
+    let video_id = crate::video::youtube::video_id;
+    if video_id(line).is_some() { return Some(line); }
+    let (label, url) = line.strip_prefix('[')?.strip_suffix(')')?.split_once("](")?;
+    if label.contains(['[', ']']) || url.contains(['(', ')', '<', '>', '[', ']']) || url.trim() != url {
+        return None;
+    }
+    video_id(url).map(|_| url)
+}
+
 pub fn is_embed(line: &str) -> bool {
     let line = line.trim();
-    if crate::video::youtube::video_id(line).is_some() { return true; }
+    if youtube_source(line).is_some() { return true; }
     if let Some(inner) = line.strip_prefix("![[").and_then(|l| l.strip_suffix("]]")) {
         return !inner.contains(['[', ']']) && images::kind(split(inner).note).is_some();
     }
@@ -67,8 +79,8 @@ pub fn is_html_image(text: &str) -> bool {
 pub fn parse(line: &str) -> EmbedLine {
     let line = line.trim();
     let wiki = line.starts_with("![[");
-    let (src, params, title) = if crate::video::youtube::video_id(line).is_some() {
-        (line.to_owned(), Vec::new(), "")
+    let (src, params, title) = if let Some(source) = youtube_source(line) {
+        (source.to_owned(), Vec::new(), "")
     } else if is_html_image(line) {
         let size = [attribute(line, "width"), attribute(line, "height")].map(|v| v.unwrap_or_default().trim_end_matches("px"));
         let params = if size[0].is_empty() { Vec::new() } else { vec![if size[1].is_empty() { size[0].to_owned() } else { size.join("x") }] };
@@ -149,54 +161,5 @@ pub fn media_line(src: &str, width: Option<f64>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn round_trips_both_forms() {
-        for line in ["![601|left](<Files/image 6.png>)", "![[file.png|520|right|crop=10,12.5,90,80]]", "![](Files/a.png)"] {
-            assert_eq!(format(&parse(line)), line);
-        }
-        let e = parse("![alt text|300](a.png)");
-        assert_eq!(e.params.width, Some(300.0));
-        assert_eq!(format(&e), "![300](a.png)");
-    }
-
-    #[test]
-    fn title_is_not_part_of_the_address() {
-        for (line, src) in [("![x](https://e.com/a.png?t=1 \"Подсказка\")", "https://e.com/a.png?t=1"), ("![x](<Files/image 6.png> 'Подсказка')", "Files/image 6.png")] {
-            let e = parse(line);
-            assert_eq!(e.src, src);
-            assert_eq!(format(&e), line.replacen("![x]", "![]", 1), "заголовок потерялся при пересборке строки");
-        }
-    }
-
-    #[test]
-    fn only_decodable_images_and_playable_videos_are_embeds() {
-        for line in ["![[a.png]]", "![[a.PNG|300]]", "![[clip.mp4]]", "![[a.png#x|10]]", "![](a.jpg)", "![](https://x.io/photo)", "![alt](<Files/a b.webp> \"t\")"] {
-            assert!(is_embed(line), "{line}");
-        }
-        for line in ["![[a.svg]]", "![[a.avif|200]]", "![[doc.pdf]]", "![[Заметка]]", "![](a.svg)", "![](https://x.io/a.avif?w=1)", "![](a.png", "![](a.pdf)"] {
-            assert!(!is_embed(line), "{line}");
-        }
-    }
-
-    #[test]
-    fn width_by_height_and_html_images_keep_their_size() {
-        let e = parse("![[a.png|300x200]]");
-        assert_eq!((e.params.width, e.params.height), (Some(300.0), Some(200.0)));
-        assert_eq!(format(&e), "![[a.png|300x200]]");
-        let mut resized = e.params.clone();
-        resized.resize(150.0);
-        assert_eq!((resized.width, resized.height), (Some(150.0), Some(100.0)));
-        let html = parse(r#"<img alt="x" src="Files/a b.png" width="150px" data-src="no" />"#);
-        assert_eq!((html.src.as_str(), html.wiki, html.params.width, html.params.height), ("Files/a b.png", false, Some(150.0), None));
-        assert!(is_html_image("<IMG src=a.png>") && !is_html_image("<image>x"));
-    }
-
-    #[test]
-    fn wiki_address_loses_anchor_and_label() {
-        let e = parse("![[ a.png # p | 300 | left ]]");
-        assert_eq!((e.src.as_str(), e.params.width, e.params.align), ("a.png", Some(300.0), Alignment::Start));
-    }
-}
+#[path = "markdown_tests.rs"]
+mod tests;

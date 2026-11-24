@@ -134,3 +134,20 @@ fn lang05_note_actions_menu_starts_study_without_changing_existing_action_positi
     assert!(matches!(h.app.popup, Some(Popup::StudyPicker { .. })),
         "Study flashcards action must open the collection picker");
 }
+
+#[test]
+fn lang05_help_action_is_available_without_selecting_a_collection() {
+    let mut h = Harness::new();
+    bind_fixture(&mut h);
+    h.app.open_study_picker(&mut h.root);
+    let (layer, help_index) = match &h.app.popup {
+        Some(Popup::StudyPicker { layer, choices, selected }) => {
+            assert!(selected.is_empty());
+            (*layer, choices.len() + 4)
+        }
+        _ => panic!("picker must offer study help"),
+    };
+    h.act(layer, MenuChoice::Item(help_index));
+    assert!(matches!(&h.app.popup, Some(Popup::StudyPreview { .. })),
+        "help must open an instruction dialog, not a quiz");
+}
