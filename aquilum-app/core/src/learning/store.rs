@@ -10,7 +10,8 @@
 
 use std::path::Path;
 
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::Connection;
+#[cfg(test)] use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::collections::{self, CollectionError, Registry};
@@ -139,27 +140,17 @@ impl RegistryStore {
     /// the revision obtained from load(), not invent a new one.
     pub fn save(&mut self, expected_revision: u64, registry: &Registry) -> Result<u64, StoreError> {
         let payload = encode(registry)?;
-        let tx = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|_| StoreError::Storage)?;
-        let (current, previous_payload): (i64, Vec<u8>) = tx.query_row(
+        super::sqlite_replace::replace(
+            &mut self.connection, expected_revision, payload,
             "SELECT revision,payload FROM language_registry WHERE id=1",
-            [], |r| Ok((r.get(0)?, r.get(1)?)),
-        ).map_err(|_| StoreError::CorruptStore)?;
-        // Refuse to replace data corrupted after this connection was opened.
-        decode(&previous_payload)?;
-        if u64::try_from(current).map_err(|_| StoreError::CorruptStore)? != expected_revision {
-            return Err(StoreError::StaleRevision);
-        }
-        let next = current.checked_add(1).ok_or(StoreError::RevisionExhausted)?;
-        let updated = tx.execute(
             "UPDATE language_registry SET revision=?1,payload=?2 WHERE id=1 AND revision=?3",
-            params![next, payload, current],
-        ).map_err(|_| StoreError::Storage)?;
-        if updated != 1 {
-            return Err(StoreError::StaleRevision);
-        }
-        tx.commit().map_err(|_| StoreError::Storage)?;
-        u64::try_from(next).map_err(|_| StoreError::RevisionExhausted)
+            decode, |error| match error {
+                super::sqlite_replace::ReplaceError::Storage => StoreError::Storage,
+                super::sqlite_replace::ReplaceError::Corrupt => StoreError::CorruptStore,
+                super::sqlite_replace::ReplaceError::Stale => StoreError::StaleRevision,
+                super::sqlite_replace::ReplaceError::Exhausted => StoreError::RevisionExhausted,
+            },
+        )
     }
 }
 
