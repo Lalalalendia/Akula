@@ -2,25 +2,17 @@
 //! Markdown, granting file access or copying source vocabulary to metadata.
 
 use aquilum_core::learning::state::{StateError, StudyStore};
-use masonry::accesskit::Role;
 use masonry::app::RenderRoot;
-use masonry::core::{ErasedAction, NewWidget, PropertySet, WidgetId};
-use masonry::kurbo::{Axis, Point};
-use masonry::layout::Length;
-use masonry::properties::types::{CrossAxisAlignment, MainAxisAlignment};
-use masonry::properties::{Gap, Padding};
-use masonry::widgets::Flex;
+use masonry::core::{ErasedAction, WidgetId};
 
 use super::super::{App, Popup};
+use super::study_name_dialog::open_name_dialog;
 use super::study_add::PendingColumns;
 use crate::i18n::{t, t_with};
-use crate::ui::dialog::{self, CardSize, DialogAnswer, DialogIds, Modal};
+use crate::ui::dialog::{DialogAnswer, DialogIds};
 use crate::ui::editor::{TextAction, TextEditor};
 use crate::ui::handle::Handle;
-use crate::ui::search::{self, Placeholder};
-use crate::ui::theme;
-use crate::ui::tokens::size;
-use crate::ui::widgets::{Rule, TextButton, Variant};
+use crate::ui::search::Placeholder;
 
 fn clean_name(raw: &str) -> Option<String> {
     if raw.len() > 256 { return None; }
@@ -44,29 +36,8 @@ impl App {
         &mut self, root: &mut RenderRoot, pending: PendingColumns,
     ) {
         let title = t("editor.table.studyCreateTitle");
-        let header = dialog::header(&title, None::<NewWidget<Flex>>);
-        let (entry, field, placeholder) = search::field("", t("editor.table.studyNameHint"));
-        let content = NewWidget::new(
-            Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch).with_fixed(entry)
-        ).with_props(PropertySet::new().with(Padding::all(Length::px(size::SPACE_24))));
-        let cancel = NewWidget::new(TextButton::new(t("editor.table.studyClose"), Variant::Ghost));
-        let confirm = NewWidget::new(TextButton::new(t("editor.table.studyCreate"), Variant::Primary));
-        let ids = (cancel.id(), confirm.id());
-        let footer = NewWidget::new(
-            Flex::row().main_axis_alignment(MainAxisAlignment::End)
-                .with_fixed(cancel).with_fixed(confirm)
-        ).with_props(PropertySet::new()
-            .with(Gap::new(Length::px(size::DIALOG_GAP)))
-            .with(Padding::all(Length::px(size::DIALOG_PADDING))));
-        let border = || Rule::new(Axis::Horizontal, || theme::current().border_default);
-        let card = NewWidget::new(Flex::column()
-            .cross_axis_alignment(CrossAxisAlignment::Stretch)
-            .with_fixed(header).with_fixed(border())
-            .with_fixed(content).with_fixed(border()).with_fixed(footer));
-        let modal = Modal::new(card, &title, CardSize::Fit(size::CONFIRM_DIALOG_WIDTH), Role::Dialog, true);
-        let dialog = DialogIds::of(&modal, ids);
-        root.add_layer(modal, Point::ORIGIN);
-        root.focus_on(Some(field.id()));
+        let (dialog, field, placeholder) =
+            open_name_dialog(root, &title, "", "editor.table.studyCreate");
         self.popup = Some(Popup::StudyNewCollection { dialog, field, placeholder, pending, value: String::new() });
     }
 

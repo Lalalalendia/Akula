@@ -3,25 +3,18 @@
 
 use aquilum_core::learning::state::{StateError, StudyStore};
 use aquilum_core::learning::state::manage::CollectionEditError;
-use masonry::accesskit::Role;
 use masonry::app::RenderRoot;
-use masonry::core::{ErasedAction, NewWidget, PropertySet, WidgetId};
-use masonry::kurbo::{Axis, Point};
-use masonry::layout::Length;
-use masonry::properties::types::{CrossAxisAlignment, MainAxisAlignment};
-use masonry::properties::{Gap, Padding};
-use masonry::widgets::Flex;
+use masonry::core::{ErasedAction, WidgetId};
+use masonry::kurbo::Point;
 
 use super::super::{App, Popup};
+use super::study_name_dialog::open_name_dialog;
 use crate::i18n::{t, t_with};
-use crate::ui::dialog::{self, CardSize, DialogAnswer, DialogIds, Modal, ConfirmDialog};
+use crate::ui::dialog::{DialogAnswer, DialogIds, ConfirmDialog};
 use crate::ui::editor::{TextAction, TextEditor};
 use crate::ui::handle::Handle;
 use crate::ui::menu::MenuChoice;
-use crate::ui::search::{self, Placeholder};
-use crate::ui::theme;
-use crate::ui::tokens::size;
-use crate::ui::widgets::{Rule, TextButton, Variant};
+use crate::ui::search::Placeholder;
 
 type ManageAction = (String, String, bool); // id, displayed name, delete?
 
@@ -104,30 +97,8 @@ impl App {
         original: String, revision: u64,
     ) {
         let title = t("editor.table.studyRenameTitle");
-        let header = dialog::header(&title, None::<NewWidget<Flex>>);
-        let (entry, field, placeholder) =
-            search::field(&original, t("editor.table.studyNameHint"));
-        let content = NewWidget::new(
-            Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch).with_fixed(entry)
-        ).with_props(PropertySet::new().with(Padding::all(Length::px(size::SPACE_24))));
-        let cancel = NewWidget::new(TextButton::new(t("editor.table.studyClose"), Variant::Ghost));
-        let confirm = NewWidget::new(TextButton::new(t("editor.table.studyRenameSave"), Variant::Primary));
-        let ids = (cancel.id(), confirm.id());
-        let footer = NewWidget::new(
-            Flex::row().main_axis_alignment(MainAxisAlignment::End)
-                .with_fixed(cancel).with_fixed(confirm)
-        ).with_props(PropertySet::new()
-            .with(Gap::new(Length::px(size::DIALOG_GAP)))
-            .with(Padding::all(Length::px(size::DIALOG_PADDING))));
-        let border = || Rule::new(Axis::Horizontal, || theme::current().border_default);
-        let card = NewWidget::new(Flex::column()
-            .cross_axis_alignment(CrossAxisAlignment::Stretch)
-            .with_fixed(header).with_fixed(border())
-            .with_fixed(content).with_fixed(border()).with_fixed(footer));
-        let modal = Modal::new(card, &title, CardSize::Fit(size::CONFIRM_DIALOG_WIDTH), Role::Dialog, true);
-        let dialog = DialogIds::of(&modal, ids);
-        root.add_layer(modal, Point::ORIGIN);
-        root.focus_on(Some(field.id()));
+        let (dialog, field, placeholder) =
+            open_name_dialog(root, &title, &original, "editor.table.studyRenameSave");
         self.popup = Some(Popup::StudyRename {
             dialog, field, placeholder, collection_id, revision, value: original,
         });
