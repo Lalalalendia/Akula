@@ -1,15 +1,40 @@
-name: Akula LANG-02 named study collection native GUI journey
+# CI-LANG-02: preserve the three native Windows acceptance journeys, share setup.
+name: Akula native language GUI acceptance (non-release)
 
 on:
   pull_request:
     branches: [main]
     paths:
-      - 'aquilum-app/native/src/app/tests/learning.rs'
-      - 'aquilum-app/native/src/app/tests/learning_manage.rs'
-      - 'aquilum-app/native/src/app/tests/mod.rs'
+      - 'aquilum-app/native/assets/locales/en.json'
+      - 'aquilum-app/native/assets/locales/ru.json'
+      - 'aquilum-app/native/src/app/editor_requests/annotation_manual_rebind_ui.rs'
+      - 'aquilum-app/native/src/app/editor_requests/study_cards.rs'
+      - 'aquilum-app/native/src/app/editor_requests/study_choice.rs'
       - 'aquilum-app/native/src/app/editor_requests/study_create.rs'
+      - 'aquilum-app/native/src/app/editor_requests/study_live.rs'
+      - 'aquilum-app/native/src/app/editor_requests/study_match.rs'
+      - 'aquilum-app/native/src/app/tests/learning.rs'
+      - 'aquilum-app/native/src/app/tests/learning_annotation_manual_rebind.rs'
+      - 'aquilum-app/native/src/app/tests/learning_cards.rs'
+      - 'aquilum-app/native/src/app/tests/learning_choice.rs'
+      - 'aquilum-app/native/src/app/tests/learning_global.rs'
+      - 'aquilum-app/native/src/app/tests/learning_live.rs'
+      - 'aquilum-app/native/src/app/tests/learning_manage.rs'
+      - 'aquilum-app/native/src/app/tests/learning_match.rs'
+      - 'aquilum-app/native/src/app/tests/learning_multi.rs'
+      - 'aquilum-app/native/src/app/tests/mod.rs'
+      - 'aquilum-app/native/src/note/study.rs'
       - '.github/workflows/akula-language-native-ui.yml'
+      - '.github/workflows/akula-language-annotation-rebind-native-ui.yml'
+      - '.github/workflows/akula-language-flashcards-native-ui.yml'
   workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'Native acceptance scenario (former LANG-02 or LANG-05 manual run, LANG-03, or all)'
+        type: choice
+        required: true
+        default: lang02
+        options: [lang02, lang03, lang05, all]
 
 permissions:
   contents: read
@@ -19,22 +44,126 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  windows-native-dialog:
-    name: Windows native RenderRoot dialog, durable SQLite and unchanged source
-    runs-on: windows-2022
-    timeout-minutes: 90
+  route:
+    name: Select exact native LANG scenarios
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      lang02: ${{ steps.route.outputs.lang02 }}
+      lang03: ${{ steps.route.outputs.lang03 }}
+      lang05: ${{ steps.route.outputs.lang05 }}
+      cache: ${{ steps.route.outputs.cache }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify routing and select by exact PR diff or manual choice
+        id: route
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          MANUAL_SCENARIO: ${{ inputs.scenario }}
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const cp = require('node:child_process');
+          const owners = {"lang02":["aquilum-app/native/src/app/tests/learning.rs","aquilum-app/native/src/app/tests/learning_manage.rs","aquilum-app/native/src/app/tests/mod.rs","aquilum-app/native/src/app/editor_requests/study_create.rs"],"lang03":["aquilum-app/native/src/app/editor_requests/annotation_manual_rebind_ui.rs","aquilum-app/native/src/app/tests/learning_annotation_manual_rebind.rs","aquilum-app/native/src/app/tests/mod.rs"],"lang05":["aquilum-app/native/src/app/tests/learning_cards.rs","aquilum-app/native/src/app/tests/learning_global.rs","aquilum-app/native/src/app/tests/learning_choice.rs","aquilum-app/native/src/app/tests/learning_match.rs","aquilum-app/native/src/app/tests/learning_live.rs","aquilum-app/native/src/app/editor_requests/study_live.rs","aquilum-app/native/src/note/study.rs","aquilum-app/native/src/app/tests/learning_multi.rs","aquilum-app/native/src/app/tests/mod.rs","aquilum-app/native/src/app/editor_requests/study_cards.rs","aquilum-app/native/src/app/editor_requests/study_choice.rs","aquilum-app/native/src/app/editor_requests/study_match.rs","aquilum-app/native/assets/locales/en.json","aquilum-app/native/assets/locales/ru.json"]};
+          const wrappers = [".github/workflows/akula-language-native-ui.yml",".github/workflows/akula-language-annotation-rebind-native-ui.yml",".github/workflows/akula-language-flashcards-native-ui.yml"];
+          const ids = Object.keys(owners);
+          function select(paths) {
+            const all = paths.some(p => wrappers.includes(p));
+            return Object.fromEntries(ids.map(id => [id, all || paths.some(p => owners[id].includes(p))]));
+          }
+          function manual(scenario) {
+            assert.ok(['all', ...ids].includes(scenario), 'Unknown manual LANG scenario');
+            return Object.fromEntries(ids.map(id => [id, scenario === 'all' || scenario === id]));
+          }
+          for (const path of new Set(Object.values(owners).flat())) {
+            const actual = select([path]);
+            for (const id of ids) assert.equal(actual[id], owners[id].includes(path));
+          }
+          for (const path of wrappers) assert.ok(Object.values(select([path])).every(Boolean));
+          assert.ok(Object.values(select(['README.md'])).every(v => !v));
+          assert.ok(Object.values(select(Object.values(owners).flat())).every(Boolean));
+          assert.ok(Object.values(manual('all')).every(Boolean));
+          for (const id of ids) assert.deepEqual(manual(id), Object.fromEntries(ids.map(key => [key, key === id])));
+          assert.throws(() => manual('invalid'));
+          const { BASE_SHA, HEAD_SHA, GITHUB_OUTPUT, GITHUB_EVENT_NAME, MANUAL_SCENARIO } = process.env;
+          assert.match(HEAD_SHA, /^[a-f0-9]{40}$/);
+          assert.equal(cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(), HEAD_SHA);
+          let selected;
+          if (GITHUB_EVENT_NAME === 'pull_request') {
+            assert.match(BASE_SHA, /^[a-f0-9]{40}$/);
+            const paths = cp.execFileSync('git',['diff','--no-renames','--name-only','-z',BASE_SHA+'...'+HEAD_SHA],{encoding:'utf8',maxBuffer:16*1024*1024}).split('\0').filter(Boolean);
+            selected = select(paths);
+          } else {
+            assert.equal(GITHUB_EVENT_NAME, 'workflow_dispatch');
+            selected = manual(MANUAL_SCENARIO);
+          }
+          assert.ok(Object.values(selected).some(Boolean), 'Native LANG workflow triggered without recognized scenario');
+          const cache = selected.lang02 ? 'lang02-native-windows-v1' : selected.lang03 ? 'lang03-manual-hold-windows-v1' : 'lang05-native-windows-v1';
+          for (const [key, value] of Object.entries({...selected,cache})) fs.appendFileSync(GITHUB_OUTPUT,key+'='+value+'\n');
+          console.log('Native LANG selection:', JSON.stringify(selected));
+          NODE
+
+  windows-native:
+    name: Shared Windows native LANG acceptance
+    needs: route
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        id: checkout
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+        id: toolchain
       - uses: Swatinem/rust-cache@v2
+        id: cache
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
-          key: lang02-native-windows-v1
+          key: ${{ needs.route.outputs.cache }}
           save-if: false
+      - name: Validate manual rebind CAS and fail-closed Core policy
+        id: lang03_core
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' && steps.cache.outcome == 'success' && needs.route.outputs.lang03 == 'true' }}
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core annotation_manual_rebind -- --nocapture
+      - name: Exercise the actual native editor menu with disposable Markdown and SQLite
+        id: lang03_native
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' && steps.cache.outcome == 'success' && needs.route.outputs.lang03 == 'true' && steps.lang03_core.outcome == 'success' }}
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --bin aquilum-native \
+            lang03_native_ -- --nocapture --test-threads=1 2>&1 | tee ../lang03-native-manual-windows.log
+          for marker in \
+            AKULA_LANG03_MANUAL_REBIND_PASS= \
+            AKULA_LANG03_MANUAL_REBIND_AMBIGUOUS= \
+            AKULA_LANG03_MANUAL_REBIND_STALE=; do
+            grep -F "$marker" ../lang03-native-manual-windows.log >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Preserve synthetic Windows native test transcript
+        id: lang03_transcript
+        if: ${{ always() && needs.route.outputs.lang03 == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lang03-native-manual-windows
+          path: lang03-native-manual-windows.log
+          retention-days: 10
+          if-no-files-found: warn
       - name: Native dialog journey through actual RenderRoot and SQLite
+        id: lang02_journey
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' && steps.cache.outcome == 'success' && needs.route.outputs.lang02 == 'true' }}
         shell: bash
         working-directory: aquilum-app
         run: |
@@ -44,6 +173,8 @@ jobs:
             -- --nocapture --test-threads=1 2>&1 | tee ../lang02-native-windows.log
           grep -F 'AKULA_LANG02_NATIVE_JOURNEY_PASS=' ../lang02-native-windows.log >> "$GITHUB_STEP_SUMMARY"
       - name: Native unsaved Markdown must refuse collection binding without SQLite writes
+        id: lang02_dirty
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' && steps.cache.outcome == 'success' && needs.route.outputs.lang02 == 'true' && steps.lang02_journey.outcome == 'success' }}
         shell: bash
         working-directory: aquilum-app
         run: |
@@ -53,7 +184,8 @@ jobs:
             -- --nocapture --test-threads=1 2>&1 | tee ../lang08-dirty-native-windows.log
           grep -F 'AKULA_LANG08_DIRTY_NATIVE_REFUSAL_PASS=' ../lang08-dirty-native-windows.log >> "$GITHUB_STEP_SUMMARY"
       - name: Save synthetic test transcript
-        if: always()
+        id: lang02_transcript
+        if: ${{ always() && needs.route.outputs.lang02 == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: lang02-native-dialog-windows
@@ -62,3 +194,48 @@ jobs:
             lang08-dirty-native-windows.log
           retention-days: 10
           if-no-files-found: warn
+      - name: Exercise the native dialog with actual widget events
+        id: lang05_native
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' && steps.cache.outcome == 'success' && needs.route.outputs.lang05 == 'true' }}
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --bin aquilum-native \
+            lang05_ \
+            -- --nocapture --test-threads=1 2>&1 | tee ../lang05-native-windows.log
+          grep -F 'AKULA_LANG05_NATIVE_CARDS_PASS=' ../lang05-native-windows.log >> "$GITHUB_STEP_SUMMARY"
+          grep -F 'AKULA_LANG05_STALE_PASS=' ../lang05-native-windows.log >> "$GITHUB_STEP_SUMMARY"
+      - name: Save synthetic test transcript
+        id: lang05_transcript
+        if: ${{ always() && needs.route.outputs.lang05 == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lang05-native-cards-windows
+          path: lang05-native-windows.log
+          retention-days: 10
+          if-no-files-found: warn
+      - name: Verify every selected native journey and transcript
+        if: always()
+        shell: bash
+        env:
+          LANG02: ${{ needs.route.outputs.lang02 }}
+          LANG03: ${{ needs.route.outputs.lang03 }}
+          LANG05: ${{ needs.route.outputs.lang05 }}
+          STEP_RESULTS: ${{ toJSON(steps) }}
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const steps = JSON.parse(process.env.STEP_RESULTS);
+          const groups = {"lang02":["lang02_journey","lang02_dirty","lang02_transcript"],"lang03":["lang03_core","lang03_native","lang03_transcript"],"lang05":["lang05_native","lang05_transcript"]};
+          for (const id of ['checkout','toolchain','cache']) assert.equal(steps[id]?.outcome,'success',id);
+          let selected = 0;
+          for (const [id, members] of Object.entries(groups)) {
+            const flag = process.env[id.toUpperCase()];
+            assert.ok(['true','false'].includes(flag),id);
+            if (flag === 'true') selected++;
+            for (const member of members) assert.equal(steps[member]?.outcome,flag === 'true' ? 'success' : 'skipped',member);
+          }
+          assert.ok(selected > 0);
+          console.log('AKULA_NATIVE_LANG_ACCEPTANCE_PASS selected='+selected);
+          NODE

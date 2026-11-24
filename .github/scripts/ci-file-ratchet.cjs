@@ -2,6 +2,7 @@
 const cp=require('node:child_process');
 const {own,metrics}=require('./architecture-budget.cjs');
 const fs=require('node:fs');
+const {changedWorkflows,allowedNativeLangConsolidation}=require('./ci-pr-concurrency.cjs');
 const g=(cwd,...args)=>cp.execFileSync('git',args,{cwd,encoding:'utf8',maxBuffer:64000000});
 const show=(cwd,ref,p)=>{try{return g(cwd,'show',ref+':'+p)}catch(e){if(e.status===128)return null;throw e}};
 const ls=(cwd,ref)=>g(cwd,'ls-tree','-r','--name-only',ref).split('\n').filter(Boolean);
@@ -83,6 +84,17 @@ function matches(pol,file){
  }
  return matched;
 }
+// Only a separately verified exact CI-LANG-02 replacement may transfer an
+// existing consumer. This never waives fanout growth or source-size limits.
+const NATIVE_LANG_REPLACEMENT='.github/workflows/akula-language-native-ui.yml';
+const NATIVE_LANG_REMOVED=[
+ '.github/workflows/akula-language-annotation-rebind-native-ui.yml',
+ '.github/workflows/akula-language-flashcards-native-ui.yml'
+];
+function approvedNativeConsumerTransfer(prior,extra,verified){
+ return verified===true && extra.length===1 && extra[0]===NATIVE_LANG_REPLACEMENT &&
+   prior.some(p=>NATIVE_LANG_REMOVED.includes(p));
+}
 function audit(cwd,base,head){
  const bs=ls(cwd,base),hs=ls(cwd,head),old=new Set(bs),now=new Set(hs),errors=[];
  const diff=g(cwd,'diff','--name-status','-z','--find-renames',base,head).split('\0').filter(Boolean);
@@ -102,6 +114,13 @@ function audit(cwd,base,head){
    if(d.from&&d.from!==d.to&&source(d.from)&&count(head,newwf,d.to)>count(base,oldwf,d.from))errors.push('RENAMED FANOUT '+d.to);
  }
  const workflowChanges=ch.filter(d=>[d.from,d.to].some(x=>x&&wf(x)));
+ // Use no-renames tree records and the same exact old/new workflow blob and
+ // preserved witness checks as the deletion audit, not a general path allowlist.
+ const records=workflowChanges.length?changedWorkflows(base,head,cwd):[];
+ const blob=(ref,p)=>g(cwd,'rev-parse','--verify',ref+':'+p).trim();
+ const nativeLangTransfer=NATIVE_LANG_REMOVED.every(p=>
+   records.some(r=>r.path===p&&r.status==='D')&&
+   allowedNativeLangConsolidation(p,records,q=>blob(base,q),q=>blob(head,q)));
  for(const d of workflowChanges)if(d.to&&policy(head,d.to).t==='global'&&(!d.from||policy(base,d.from).t!=='global'))errors.push('NEW GLOBAL PR WORKFLOW '+d.to);
  if(workflowChanges.length)for(const f of bs)if(now.has(f)&&source(f)){
    const b=workflowChanges.filter(d=>d.from&&matches(policy(base,d.from),f)).length;
@@ -110,7 +129,7 @@ function audit(cwd,base,head){
    else if(n===b&&n>0){
      const prior=workflowChanges.filter(d=>d.from&&matches(policy(base,d.from),f)).map(d=>d.from);
      const extra=workflowChanges.filter(d=>d.to&&matches(policy(head,d.to),f)&&!prior.includes(d.to));
-     if(extra.length)errors.push('NEW WORKFLOW CONSUMER '+f+': '+extra.join(', '));
+     if(extra.length&&!approvedNativeConsumerTransfer(prior,extra.map(d=>d.to),nativeLangTransfer))errors.push('NEW WORKFLOW CONSUMER '+f+': '+extra.map(d=>d.to).join(', '));
    }
    if(errors.length>60)break;
  }
@@ -126,4 +145,4 @@ if(require.main===module){
    if(r.errors.length)process.exitCode=1;
  }catch(e){console.error(e.message);process.exitCode=1}
 }
-module.exports={parse,matches,audit,source};
+module.exports={parse,matches,audit,source,approvedNativeConsumerTransfer};
