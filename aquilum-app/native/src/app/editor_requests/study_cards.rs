@@ -52,7 +52,6 @@ impl App {
         }
         self.show_study_picker(root, choices, BTreeSet::new());
     }
-
     fn show_study_picker(
         &mut self, root: &mut RenderRoot, choices: Vec<(String, String)>,
         selected: BTreeSet<String>,
@@ -66,6 +65,7 @@ impl App {
         )));
         entries.push((entries.len(), t("editor.table.studyChoiceStart")));
         entries.push((entries.len(), t("editor.table.studyMatchStart"))); entries.push((entries.len(), t("editor.table.studyTypedStart")));
+        entries.push((entries.len(), t("editor.table.studyPracticeHelpAction")));
         let layer = self.study_menu(root, &t("editor.table.studyPracticeSelect"), &entries);
         self.popup = Some(Popup::StudyPicker { layer, choices, selected });
     }
@@ -100,6 +100,8 @@ impl App {
                 Ok(_) => self.study_notice(root, &t("editor.table.studyPracticeNoCards")),
                 Err(_) => self.study_notice(root, &t("editor.table.studyPracticeChanged")),
             }
+        } else if *index == choices.len() + 4 {
+            self.study_notice(root, &t("editor.table.studyPracticeHelp"));
         } else if let Some((id, _)) = choices.get(*index) {
             if !selected.remove(id) { selected.insert(id.clone()); }
             self.show_study_picker(root, choices, selected);
@@ -168,9 +170,7 @@ impl App {
                     self.show_study_card(root, snapshot, next, !revealed && next == index);
                 }
             }
-            None => self.popup = Some(Popup::StudyCard {
-                dialog, snapshot, index, revealed,
-            }),
+            None => self.popup = Some(Popup::StudyCard { dialog, snapshot, index, revealed }),
         }
     }
 }
