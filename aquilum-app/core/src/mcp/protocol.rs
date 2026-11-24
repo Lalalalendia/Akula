@@ -74,8 +74,16 @@ fn parallel_read_member(message: &Value) -> bool {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ToolVisibility {
+    Full,
+    None,
+    #[cfg(test)]
+    ScopedReadFixture,
+}
+
 pub fn handle_message(body: &str, call: ToolCaller<'_>) -> Option<String> {
-    handle_with_scope(body, call, false)
+    handle_with_scope(body, call, ToolVisibility::Full)
 }
 
 /// A newly authenticated agent has no note, metadata or tool authority until
@@ -85,10 +93,21 @@ pub(crate) fn handle_without_tools(body: &str) -> Option<String> {
     let never_call = |_name: &str, _args: &Value| -> Result<Value, String> {
         Err("MCP_AGENT_SCOPE_DENIED".to_owned())
     };
-    handle_with_scope(body, &never_call, true)
+    handle_with_scope(body, &never_call, ToolVisibility::None)
 }
 
-fn handle_with_scope(body: &str, call: ToolCaller<'_>, deny_tools: bool) -> Option<String> {
+/// An actual MCP request/reply, but ONLY with a disposable test-only
+/// registration and no installed issuer or production MCP listener.
+#[cfg(test)]
+pub(crate) fn handle_fixture_scoped_read(body: &str, call: ToolCaller<'_>) -> Option<String> {
+    handle_with_scope(body, call, ToolVisibility::ScopedReadFixture)
+}
+
+fn handle_with_scope(
+    body: &str,
+    call: ToolCaller<'_>,
+    visibility: ToolVisibility,
+) -> Option<String> {
     let message = match serde_json::from_str::<Value>(body) {
         Ok(value) => value,
         Err(error) => {
@@ -100,22 +119,26 @@ fn handle_with_scope(body: &str, call: ToolCaller<'_>, deny_tools: bool) -> Opti
         Value::Array(items) => {
             let responses = items
                 .into_iter()
-                .filter_map(|item| handle_single(item, call, deny_tools))
+                .filter_map(|item| handle_single(item, call, visibility))
                 .collect::<Vec<_>>();
             (!responses.is_empty()).then(|| Value::Array(responses).to_string())
         }
-        single => handle_single(single, call, deny_tools).map(|value| value.to_string()),
+        single => handle_single(single, call, visibility).map(|value| value.to_string()),
     }
 }
 
-fn handle_single(message: Value, call: ToolCaller<'_>, deny_tools: bool) -> Option<Value> {
+fn handle_single(
+    message: Value,
+    call: ToolCaller<'_>,
+    visibility: ToolVisibility,
+) -> Option<Value> {
     let request = match serde_json::from_value::<RpcRequest>(message) {
         Ok(request) => request,
         Err(error) => return Some(failure(Value::Null, PARSE_ERROR, &error.to_string())),
     };
     let id = request.id.filter(|id| !id.is_null())?;
 
-    Some(match dispatch(&request.method, request.params, call, deny_tools) {
+    Some(match dispatch(&request.method, request.params, call, visibility) {
         Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
         Err((code, message)) => failure(id, code, &message),
     })
@@ -125,7 +148,7 @@ fn dispatch(
     method: &str,
     params: Option<Value>,
     call: ToolCaller<'_>,
-    deny_tools: bool,
+    visibility: ToolVisibility,
 ) -> Result<Value, (i32, String)> {
     match method {
         "initialize" => {
@@ -150,24 +173,52 @@ fn dispatch(
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": { "tools": { "listChanged": false } },
                 "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
-                "instructions": if deny_tools {
-                    "Authenticated MCP agent. No tools are authorized. Request access from the Akula host."
-                } else {
-                    tools::INSTRUCTIONS
+                "instructions": match visibility {
+                    ToolVisibility::None => {
+                        "Authenticated MCP agent. No tools are authorized. Request access from the Akula host."
+                    }
+                    ToolVisibility::Full => tools::INSTRUCTIONS,
+                    #[cfg(test)]
+                    ToolVisibility::ScopedReadFixture => {
+                        "Disposable CI-only scoped read fixture. Not an installed host issuer."
+                    }
                 },
             }))
         }
         "ping" => Ok(json!({})),
         "tools/list" => {
-            let visible = if deny_tools { Vec::new() } else { tools::definitions() };
+            let visible = match visibility {
+                ToolVisibility::None => Vec::new(),
+                ToolVisibility::Full => tools::definitions(),
+                #[cfg(test)]
+                ToolVisibility::ScopedReadFixture => vec![json!({
+                    "name": "read_note",
+                    "description": "Disposable exact-path scoped-read fixture",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "vaultId": {"type": "string"},
+                            "note": {"type": "string"}
+                        },
+                        "required": ["vaultId", "note"],
+                        "additionalProperties": false
+                    }
+                })],
+            };
             Ok(json!({ "tools": visible }))
         }
         "tools/call" => {
-            if deny_tools {
+            if matches!(visibility, ToolVisibility::None) {
                 return Ok(tool_result(Err("MCP_AGENT_SCOPE_DENIED".to_owned())));
             }
             let request = serde_json::from_value::<ToolCall>(params.unwrap_or(Value::Null))
                 .map_err(|error| (INVALID_PARAMS, error.to_string()))?;
+            #[cfg(test)]
+            if matches!(visibility, ToolVisibility::ScopedReadFixture)
+                && request.name != "read_note"
+            {
+                return Ok(tool_result(Err("MCP_AGENT_SCOPE_DENIED".to_owned())));
+            }
             Ok(tool_result(call(&request.name, &request.arguments)))
         }
         _ => Err((METHOD_NOT_FOUND, format!("Неизвестный метод: {method}"))),

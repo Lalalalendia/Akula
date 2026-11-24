@@ -123,7 +123,7 @@ impl HostPinnedReadRoot {
     // The future installer-witness adapter must obtain this from independently
     // protected custody, without self-certifying from the same candidate root.
     #[cfg(test)]
-    fn from_test_host_claim(
+    pub(crate) fn from_test_host_claim(
         root_path: &Path,
         receipt: HostVaultRegistration,
         expected_root_identity: (u64, u64),
