@@ -58,7 +58,7 @@ pub mod node_replica_auth_lab;
 pub mod node_v1;
 // Optional, inert P2P offer/consent laboratory; not file authorization.
 #[cfg(feature = "p2p-offer-lab")]
-pub mod p2p_offer_lab;
+pub mod p2p_offer_lab; #[cfg(feature = "screen-damage-lab")] pub mod screen_damage_lab;
 #[cfg(feature = "p2p-inbox-lab")]
 pub mod p2p_inbox_lab;
 #[cfg(feature = "p2p-device-identity")]

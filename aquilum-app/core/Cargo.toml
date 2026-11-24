@@ -11,6 +11,8 @@ workspace = ".."
 default = []
 # Offline two-replica JSON Canvas research only: no transport, File Gate or native UI.
 canvas-crdt-lab = []
+# Offline BGRA damage/ROI experiment only: no OS capture, codec, QUIC or UI.
+screen-damage-lab = []
 # Opt-in pure messaging state machine; no network, storage, UI or workers.
 messaging-core-lab = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
