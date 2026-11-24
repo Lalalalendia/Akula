@@ -1,0 +1,55 @@
+name: Akula VIDEO-04 pinned FFmpeg and Deno Windows lab (non-release)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/akula-video-deps-ffmpeg-deno-lab.ps1'
+      - '.github/workflows/akula-video-ffmpeg-deno-lab.yml'
+      - 'testdata/video-toolchain/avc_aac_2s.mp4'
+      - 'docs/release/video-local-toolchain.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  pinned-mux:
+    name: Pinned LGPL FFmpeg mux and Deno JS runtime without external video
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Reject unpinned and non-reproducible toolchain changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Get-Content 'scripts/akula-video-deps-ffmpeg-deno-lab.ps1' -Raw
+          foreach ($required in @(
+            'd4c2a42673917b4a97104a3e9f082729a9730796b98664e37c0b7eba6c6c613d',
+            'cba84b26e0df5ae7f74fc66b86a95b866872a86292ebd84fa1e959927edd93bf',
+            'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d',
+            'Assert-PinnedHash $Path $Expected',
+            'VIDEO04_FFMPEG_REMUX_PASS',
+            'VIDEO04_DENO_RUNTIME_PASS',
+            'VIDEO04_NOT_ACCEPTED',
+            '-c copy -movflags +faststart'
+          )) {
+            if (!$source.Contains($required)) { throw "Missing pinned non-release guard: $required" }
+          }
+          if ($source -match 'youtu\.be/|youtube\.com/watch|--remote-components') {
+            throw 'VIDEO-04 must not fetch video or JS code from external sites'
+          }
+          if (!(Test-Path 'testdata/video-toolchain/avc_aac_2s.mp4')) {
+            throw 'Original synthetic AVC/AAC fixture is unavailable'
+          }
+          Write-Host 'VIDEO04_PRECHECK_PASS expected_archives=3 fixture=present release=disabled'
+      - name: Verify downloads, Deno JS evaluation and real AVC/AAC stream-copy remux
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/akula-video-deps-ffmpeg-deno-lab.ps1 -ScratchRoot $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'VIDEO04 pinned toolchain lab failed' }
+          Write-Host 'VIDEO04_FFMPEG_DENO_WINDOWS_PASS no_release=1'
