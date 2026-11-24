@@ -10,6 +10,8 @@ on:
       - '.github/scripts/pr-queue-budget.test.cjs'
       - '.github/scripts/ci-run-budget.cjs'
       - '.github/scripts/ci-run-budget.test.cjs'
+      - '.github/scripts/doppelscan-audit.py'
+      - '.github/scripts/test_doppelscan_audit.py'
   pull_request_target:
     types: [opened, reopened, closed]
   push:
@@ -124,3 +126,45 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CI_JOB_TIMING_SAMPLE: '1'
         run: node .github/scripts/ci-run-budget.cjs
+
+  # Never execute the third-party scanner in the privileged prune job.
+  # Advisory only: scoped tooling PRs, weekly audit, explicit audit dispatch.
+  doppelscan:
+    name: Doppelscan Rust reuse audit (advisory)
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'schedule' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'audit')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: akula-doppelscan-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    env:
+      SCAN_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SCAN_SHA }}
+          persist-credentials: false
+      - name: Verify exact checkout and snapshot/report tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SCAN_SHA"
+          python3 -m unittest discover -s .github/scripts -p test_doppelscan_audit.py -v
+      - name: Run pinned analyzer on immutable source, offline and bounded
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/doppelscan-audit.py --ref "$SCAN_SHA" --report "$RUNNER_TEMP/akula-doppelscan-report"
+      - name: Retain audit evidence (no source snapshot)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-doppelscan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/akula-doppelscan-report/
+          retention-days: 7
+          if-no-files-found: warn
