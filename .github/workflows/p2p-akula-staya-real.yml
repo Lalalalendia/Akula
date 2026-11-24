@@ -8,6 +8,7 @@ on:
       - feature/akula-staya-consent-provider-boundary-20261022
     paths:
       - 'interop/akula-staya/**'
+      - 'aquilum-app/core/src/call_signaling_lab.rs'
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
       - '.github/workflows/p2p-akula-staya-real.yml'
   workflow_dispatch:
@@ -49,6 +50,11 @@ jobs:
       - name: Compile and test actual Akula and Staya queue linkage
         shell: bash
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features sender-arm-lab,p2p-live-identity --lib -- --nocapture
+      - name: AK-CALL-01 real Iroh QUIC two-process call and reconnect
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features call-quic-lab --test call_quic_two_process -- --nocapture
       - name: Rust formatting for exact opt-in inbox Core
         shell: bash
         run: rustfmt --edition 2021 --check aquilum-app/core/src/p2p_inbox_lab.rs
@@ -59,7 +65,7 @@ jobs:
         shell: bash
         env:
           AKULA_P2P_OS_PIN_CI: '1'
-        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity --test live_identity -- --nocapture
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features call-live-identity-lab --test live_identity -- --nocapture
       - name: Compile opt-in OS-protected real LAN QUIC probe
         shell: bash
         run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features os-pinned-lan-probe --bin akula-p2p-lan
