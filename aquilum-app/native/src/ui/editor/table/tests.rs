@@ -80,3 +80,99 @@ fn borders_are_found_where_they_are_painted_after_the_table_narrows() {
     let Line::Col(x, _) = painted else { panic!("нет линии границы") };
     assert_eq!(view.hit(Point::new(x, 60.0), scroll), Hit::ColumnBorder(0));
 }
+
+fn deletion_fixture() -> Table {
+    let mut table = Table::empty(4, 4);
+    for row in 0..4 {
+        for col in 0..4 {
+            table.cells[row][col] = format!("{row}:{col}");
+        }
+    }
+    table.heights = vec![40.0, 45.0, 50.0, 55.0];
+    table.widths = vec![60.0, 70.0, 80.0, 90.0];
+    table.aligns = vec![None, Some(Align::Left), Some(Align::Center), Some(Align::Right)];
+    table.explicit = true;
+    table
+}
+
+// Independent oracle for a synchronized table: project the surviving cells
+// and original merge rectangles onto retained row/column coordinates.
+fn projected_deletion(original: &Table, row: bool, index: usize) -> Table {
+    let rows: Vec<_> = (0..original.rows()).filter(|&i| !row || i != index).collect();
+    let cols: Vec<_> = (0..original.cols()).filter(|&i| row || i != index).collect();
+    let mut result = Table {
+        cells: rows.iter().map(|&r| cols.iter().map(|&c| original.cells[r][c].clone()).collect()).collect(),
+        merges: Vec::new(),
+        aligns: cols.iter().map(|&c| original.aligns[c]).collect(),
+        heights: rows.iter().map(|&r| original.heights[r]).collect(),
+        widths: cols.iter().map(|&c| original.widths[c]).collect(),
+        explicit: original.explicit,
+    };
+    for m in &original.merges {
+        let covered_rows: Vec<_> = rows.iter().enumerate()
+            .filter_map(|(new, old)| (m.top..=m.bottom).contains(old).then_some(new)).collect();
+        let covered_cols: Vec<_> = cols.iter().enumerate()
+            .filter_map(|(new, old)| (m.left..=m.right).contains(old).then_some(new)).collect();
+        if let (Some(&top), Some(&bottom), Some(&left), Some(&right)) =
+            (covered_rows.first(), covered_rows.last(), covered_cols.first(), covered_cols.last())
+        {
+            let projected = Range2 { top, bottom, left, right };
+            if !projected.single() { result.merges.push(projected); }
+        }
+    }
+    result
+}
+
+fn check_all_deletions(original: &Table) {
+    for row in [true, false] {
+        for index in 0..4 {
+            let mut actual = original.clone();
+            let expected = projected_deletion(original, row, index);
+            assert!(if row { actual.delete_row(index) } else { actual.delete_col(index) });
+            assert_eq!(actual, expected, "row={row}, index={index}, merges={:?}", original.merges);
+        }
+    }
+}
+
+#[test]
+fn deleting_axes_preserves_every_valid_merge_projection() {
+    let original = deletion_fixture();
+    check_all_deletions(&original);
+    let mut cases = 0;
+    for top in 0..4 {
+        for bottom in top..4 {
+            for left in 0..4 {
+                for right in left..4 {
+                    let range = Range2 { top, bottom, left, right };
+                    if range.single() { continue; }
+                    let mut table = original.clone();
+                    assert!(table.merge(range));
+                    check_all_deletions(&table);
+                    cases += 8;
+                }
+            }
+        }
+    }
+    assert_eq!(cases, 672);
+    let mut table = original;
+    assert!(table.merge(Range2::span((0, 0), (1, 1))));
+    assert!(table.merge(Range2::span((2, 2), (3, 3))));
+    check_all_deletions(&table);
+}
+
+#[test]
+fn invalid_axis_deletions_are_no_ops() {
+    let mut minimum = Table::empty(1, 2);
+    let before = minimum.clone();
+    assert!(!minimum.delete_row(0));
+    assert!(!minimum.delete_col(0));
+    assert_eq!(minimum, before);
+    let mut table = deletion_fixture();
+    assert!(table.merge(Range2::span((0, 0), (2, 2))));
+    let before = table.clone();
+    for index in [4, usize::MAX] {
+        assert!(!table.delete_row(index));
+        assert!(!table.delete_col(index));
+        assert_eq!(table, before);
+    }
+}
