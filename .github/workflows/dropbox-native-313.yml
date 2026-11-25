@@ -8,6 +8,7 @@ on:
       # Only new Dropbox implementation files; existing source files are
       # already covered by Application checks, without a new CI consumer.
       - 'aquilum-app/native/src/app/dropbox_preview.rs'
+      - 'modules/secret-store-common/src/native_backend.rs'
       - 'aquilum-app/native/src/app/dropbox_provider.rs'
       - 'aquilum-app/native/src/ui/settings/schema/sync/dropbox.rs'
       - 'aquilum-app/native/Cargo.toml'
