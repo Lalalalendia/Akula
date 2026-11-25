@@ -420,3 +420,63 @@ fn read_write_policy_rotation_precedes_untrusted_request_checks() {
     assert!(reloaded.admit_read(&f.roster, &f.read, peer).is_ok());
     assert!(reloaded.admit_put(&f.roster, &f.put, peer).is_ok());
 }
+
+fn pending_challenges(db: &rusqlite::Connection) -> (i64, i64) {
+    db.query_row(
+        "SELECT (SELECT COUNT(*) FROM issued), (SELECT COUNT(*) FROM put_issued)",
+        [], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap()
+}
+
+#[test]
+fn read_write_challenges_share_quota_and_expiration() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut f = fixture(temp.path());
+    let peer = f.put.device_public_key;
+    let read = f.host.trust.admit_read(&f.roster, &f.read, peer).unwrap();
+    let put = f.host.trust.admit_put(&f.roster, &f.put, peer).unwrap();
+    let db = rusqlite::Connection::open(f.state.join("node-challenges.sqlite")).unwrap();
+    let old_read = f.host.ledger.issue(&read).unwrap();
+    let old_put = f.host.ledger.issue_put(&put).unwrap();
+    for _ in 1..32 {
+        f.host.ledger.issue(&read).unwrap();
+        f.host.ledger.issue_put(&put).unwrap();
+    }
+    assert_eq!(pending_challenges(&db), (32, 32));
+    expect_hold(f.host.ledger.issue(&read), "Node challenge quota exhausted");
+    expect_hold(f.host.ledger.issue_put(&put), "Node challenge quota exhausted");
+    assert_eq!(pending_challenges(&db), (32, 32));
+
+    // Change only expiry in the temporary ledger; the real issuance path
+    // must prune both tables atomically and retain the operation boundary.
+    db.execute_batch("UPDATE issued SET expires_at = 1; UPDATE put_issued SET expires_at = 1;").unwrap();
+    let new_read = f.host.ledger.issue(&read).unwrap();
+    assert_eq!(pending_challenges(&db), (1, 0));
+    let new_put = f.host.ledger.issue_put(&put).unwrap();
+    assert_eq!(pending_challenges(&db), (1, 1));
+    assert!(!f.host.ledger.consume_once(peer, read.grant_digest(), old_read).unwrap());
+    assert!(!f.host.ledger.consume_put(&put, old_put).unwrap());
+    assert!(!f.host.ledger.consume_put(&put, new_read).unwrap());
+    assert!(!f.host.ledger.consume_once(peer, read.grant_digest(), new_put).unwrap());
+    assert!(f.host.ledger.consume_once(peer, read.grant_digest(), new_read).unwrap());
+    assert!(f.host.ledger.consume_put(&put, new_put).unwrap());
+    assert_eq!(pending_challenges(&db), (0, 0));
+}
+
+#[test]
+fn read_write_challenge_clock_rollback_denies_without_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut f = fixture(temp.path());
+    let peer = f.put.device_public_key;
+    let read = f.host.trust.admit_read(&f.roster, &f.read, peer).unwrap();
+    let put = f.host.trust.admit_put(&f.roster, &f.put, peer).unwrap();
+    f.host.ledger.issue(&read).unwrap();
+    f.host.ledger.issue_put(&put).unwrap();
+    let db = rusqlite::Connection::open(f.state.join("node-challenges.sqlite")).unwrap();
+    db.execute("UPDATE clock_guard SET seen = ?1 WHERE id = 1", [i64::MAX]).unwrap();
+    expect_hold(f.host.ledger.issue(&read), "clock rollback: challenge ledger HOLD");
+    expect_hold(f.host.ledger.issue_put(&put), "clock rollback: challenge ledger HOLD");
+    assert_eq!(pending_challenges(&db), (1, 1));
+    let seen: i64 = db.query_row("SELECT seen FROM clock_guard WHERE id = 1", [], |row| row.get(0)).unwrap();
+    assert_eq!(seen, i64::MAX);
+}
