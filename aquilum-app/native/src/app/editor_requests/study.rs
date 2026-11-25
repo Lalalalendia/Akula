@@ -16,13 +16,10 @@ const PREVIEW_ROWS: usize = 64;
 const SHOWN_EXAMPLES: usize = 5;
 const SHOWN_CHARS: usize = 72;
 
-fn compact(value: &str) -> String {
-    let mut visible = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if visible.chars().count() > SHOWN_CHARS {
-        visible = visible.chars().take(SHOWN_CHARS).collect::<String>() + "…";
-    }
-    visible
-}
+#[path = "study_common.rs"]
+mod common;
+pub(super) use common::{bounded_text, feedback_answer};
+fn compact(value: &str) -> String { bounded_text(value, SHOWN_CHARS) }
 
 pub(super) fn labels(snapshot: &EditorTableSnapshot, skip: Option<usize>) -> Vec<(usize, String)> {
     snapshot.cells[0].iter().enumerate().filter_map(|(index, header)| {

@@ -10,7 +10,7 @@ use masonry::core::{ErasedAction, WidgetId};
 use masonry::kurbo::Point;
 use super::super::{App, Popup};
 use super::study::labels;
-use crate::i18n::{t, t_with};
+use crate::i18n::t;
 use crate::ui::dialog::ConfirmDialog;
 
 pub(crate) struct PendingTable {
@@ -106,14 +106,7 @@ impl App {
             |(pending, choices)| Popup::StudyAddCollection { layer, pending, choices }) else { return };
         let Some((id, name)) = choices.get(index) else { return };
         if id.is_empty() { self.open_study_new_collection(root, pending); return; } if id == "__manage__" { self.open_study_manage(root); return; }
-        match self.bind_live_table(root, &pending, id, name) {
-            Ok(()) => self.study_add_notice(root, &t_with("editor.table.studySaved", &[("name", name)]), true),
-            Err(StateError::DuplicateTable | StateError::NeedsRebind) =>
-                self.study_add_notice(root, &t("editor.table.studyHold"), false),
-            Err(StateError::InvalidSelection) =>
-                self.study_add_notice(root, &t("editor.table.studyStillChanged"), false),
-            Err(_) => self.study_add_notice(root, &t("editor.table.studySaveFailed"), false),
-        }
+        self.bind_live_table_with_notice(root, &pending, id, name);
     }
 
     pub(super) fn bind_live_table(
