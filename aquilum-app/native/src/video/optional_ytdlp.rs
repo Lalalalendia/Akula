@@ -28,18 +28,60 @@ pub(crate) enum Status {
     Invalid,
     Failed(String),
 }
-static STATES: OnceLock<Mutex<HashMap<PathBuf, Status>>> = OnceLock::new();
-static REVISION: AtomicU64 = AtomicU64::new(0);
+// Each optional tool owns its own state and revision. Never share a map
+// between yt-dlp and QuickJS, even for the same local profile.
+struct ToolState {
+    states: OnceLock<Mutex<HashMap<PathBuf, Status>>>,
+    revision: AtomicU64,
+}
 
-fn states() -> &'static Mutex<HashMap<PathBuf, Status>> {
-    STATES.get_or_init(|| Mutex::new(HashMap::new()))
+impl ToolState {
+    const fn new() -> Self {
+        Self { states: OnceLock::new(), revision: AtomicU64::new(0) }
+    }
+
+    fn states(&self) -> &Mutex<HashMap<PathBuf, Status>> {
+        self.states.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    fn revision(&self) -> u64 { self.revision.load(Ordering::Relaxed) }
+
+    fn set_state(&self, key: &Path, state: Status, wake: &Arc<dyn Fn() + Send + Sync>) {
+        self.states().lock().unwrap_or_else(|e| e.into_inner()).insert(key.to_path_buf(), state);
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        wake();
+    }
+
+    fn start(&'static self, profile: PathBuf, wake: Arc<dyn Fn() + Send + Sync>,
+        status_disk: fn(&Path) -> Status,
+        fetch: impl FnOnce(&Path, &Arc<dyn Fn() + Send + Sync>) -> Result<(), String> + Send + 'static,
+        [busy, installed]: [&str; 2],
+    ) -> Result<(), String> {
+        {
+            let mut lock = self.states().lock().unwrap_or_else(|e| e.into_inner());
+            if matches!(lock.get(&profile), Some(Status::Downloading(_))) {
+                return Err(busy.into());
+            }
+            if matches!(status_disk(&profile), Status::Installed) {
+                return Err(installed.into());
+            }
+            lock.insert(profile.clone(), Status::Downloading(0));
+        }
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        wake();
+        std::thread::spawn(move || {
+            let next = match fetch(&profile, &wake) {
+                Ok(()) => Status::Installed,
+                Err(reason) => Status::Failed(reason),
+            };
+            self.set_state(&profile, next, &wake);
+        });
+        Ok(())
+    }
 }
-pub(crate) fn revision() -> u64 { REVISION.load(Ordering::Relaxed) }
-fn set_state(key: &Path, state: Status, wake: &Arc<dyn Fn() + Send + Sync>) {
-    states().lock().unwrap_or_else(|e| e.into_inner()).insert(key.to_path_buf(), state);
-    REVISION.fetch_add(1, Ordering::Relaxed);
-    wake();
-}
+
+static STATE: ToolState = ToolState::new();
+pub(crate) fn revision() -> u64 { STATE.revision() }
 
 fn local_root(app_data: &Path) -> Result<PathBuf, String> {
     // Reuse the native video library's existing Windows local-data selection,
@@ -105,12 +147,12 @@ pub(crate) fn verified_executable(app_data: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 pub(crate) fn status(app_data: &Path) -> Status {
-    if let Some(Status::Downloading(n)) = states().lock().unwrap_or_else(|e| e.into_inner())
+    if let Some(Status::Downloading(n)) = STATE.states().lock().unwrap_or_else(|e| e.into_inner())
         .get(app_data).cloned()
     {
         return Status::Downloading(n);
     }
-    let prior = states().lock().unwrap_or_else(|e| e.into_inner())
+    let prior = STATE.states().lock().unwrap_or_else(|e| e.into_inner())
         .get(app_data).cloned();
     match verified_executable(app_data) {
         Ok(_) => Status::Installed,
@@ -151,7 +193,7 @@ fn fetch(app_data: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), Stri
             "yt-dlp temporary flush failed",
             "official yt-dlp size or SHA-256 mismatch; refusing installation",
         ],
-    }.download(dest, |done| set_state(app_data, Status::Downloading(done), wake))?;
+    }.download(dest, |done| STATE.set_state(app_data, Status::Downloading(done), wake))?;
     // Atomic, same-volume, no-clobber publication; the temp is always deleted.
     fs::hard_link(&stage.0, &target)
         .map_err(|e| format!("cannot commit yt-dlp without overwriting another file: {e}"))?;
@@ -161,27 +203,10 @@ fn fetch(app_data: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), Stri
 
 /// Called exclusively by the Settings confirmation button; no startup fetch.
 pub(crate) fn start(app_data: PathBuf, wake: Arc<dyn Fn() + Send + Sync>) -> Result<(), String> {
-    {
-        let mut lock = states().lock().unwrap_or_else(|e| e.into_inner());
-        if matches!(lock.get(&app_data), Some(Status::Downloading(_))) {
-            return Err("yt-dlp download is already in progress".into());
-        }
-        if matches!(status_disk(&app_data), Status::Installed) {
-            return Err("the pinned yt-dlp version is already installed".into());
-        }
-        lock.insert(app_data.clone(), Status::Downloading(0));
-    }
-    REVISION.fetch_add(1, Ordering::Relaxed);
-    wake();
-    std::thread::spawn(move || {
-        let outcome = fetch(&app_data, &wake);
-        let next = match outcome {
-            Ok(()) => Status::Installed,
-            Err(err) => Status::Failed(err),
-        };
-        set_state(&app_data, next, &wake);
-    });
-    Ok(())
+    STATE.start(app_data, wake, status_disk, fetch, [
+        "yt-dlp download is already in progress",
+        "the pinned yt-dlp version is already installed",
+    ])
 }
 fn status_disk(app_data: &Path) -> Status {
     match verified_executable(app_data) {
@@ -191,7 +216,7 @@ fn status_disk(app_data: &Path) -> Status {
     }
 }
 pub(crate) fn remove(app_data: &Path) -> Result<(), String> {
-    let mut lock = states().lock().unwrap_or_else(|e| e.into_inner());
+    let mut lock = STATE.states().lock().unwrap_or_else(|e| e.into_inner());
     if matches!(lock.get(app_data), Some(Status::Downloading(_))) {
         return Err("cannot remove yt-dlp during an active download".into());
     }
@@ -202,7 +227,7 @@ pub(crate) fn remove(app_data: &Path) -> Result<(), String> {
         fs::remove_file(&path).map_err(|e| format!("cannot remove optional yt-dlp: {e}"))?;
     }
     lock.remove(app_data);
-    REVISION.fetch_add(1, Ordering::Relaxed);
+    STATE.revision.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 #[cfg(test)]
