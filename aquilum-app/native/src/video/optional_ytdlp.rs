@@ -4,7 +4,7 @@
 //! the Akula updater or authorizes the old 3-EXE Video Tools package.
 //! Download only after a Settings confirmation; no PATH/env executable input.
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicU64, Ordering}};
@@ -18,6 +18,7 @@ pub(crate) const SHA256: &str =
 pub(super) const URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe";
 const FILENAME: &str = "yt-dlp-2026.10.26.exe";
+#[path = "optional_tool_verify.rs"] mod pinned_file;
 #[path = "light_windows_version.rs"]
 mod version_gate; #[path = "optional_quickjs.rs"] pub(crate) mod quickjs;
 
@@ -92,31 +93,13 @@ fn ensure_directory(path: &Path) -> Result<(), String> {
     Ok(())
 }
 fn verified(path: &Path) -> Result<(), String> {
-    check_ancestors(path.parent().ok_or("tool has no parent")?)?;
-    checked_path(path, false)?;
-    let mut file = File::open(path).map_err(|e| e.to_string())?;
-    if file.metadata().map_err(|e| e.to_string())?.len() != BYTES {
-        return Err("yt-dlp executable length does not match the pinned release".into());
-    }
-    let mut digest = Sha256::new();
-    let mut read_total = 0u64;
-    let mut buffer = [0u8; 65_536];
-    loop {
-        let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
-        if n == 0 { break; }
-        read_total += n as u64;
-        if read_total > BYTES { return Err("yt-dlp executable grew during verification".into()); }
-        digest.update(&buffer[..n]);
-    }
-    let hex = digest.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>();
-    if read_total != BYTES || hex != SHA256 {
-        return Err("yt-dlp SHA-256 differs from the pinned official release".into());
-    }
-    checked_path(path, false)?;
-    if file.metadata().map_err(|e| e.to_string())?.len() != BYTES {
-        return Err("yt-dlp executable changed during verification".into());
-    }
-    Ok(())
+    pinned_file::verify(path, BYTES, SHA256, [
+        "tool has no parent",
+        "yt-dlp executable length does not match the pinned release",
+        "yt-dlp executable grew during verification",
+        "yt-dlp SHA-256 differs from the pinned official release",
+        "yt-dlp executable changed during verification",
+    ])
 }
 pub(crate) fn verified_executable(app_data: &Path) -> Result<PathBuf, String> {
     let path = executable(app_data)?;
