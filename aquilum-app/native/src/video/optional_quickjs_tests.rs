@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 #[test]
 fn upstream_pin_and_local_root_are_not_arbitrary() {
     assert_eq!(VERSION, "0.18.0");

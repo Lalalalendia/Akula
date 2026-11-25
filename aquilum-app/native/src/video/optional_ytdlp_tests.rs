@@ -1,5 +1,5 @@
 use super::*;
-use std::fs::File;
+use std::{fs::File, time::Duration};
 #[test]
 fn official_release_pin_is_fixed_and_distinct_from_user_paths() {
     assert_eq!(VERSION, "2026.10.26");
@@ -105,4 +105,56 @@ fn refuses_wrong_length_hash_and_non_file() {
         "yt-dlp executable length does not match the pinned release",
         "yt-dlp SHA-256 differs from the pinned official release",
     ]);
+}
+
+fn transfer_fixture(bytes: u64, sha256: &str, notice_every: u64) -> pinned_transfer::Transfer<'_> {
+    pinned_transfer::Transfer {
+        url: "unused in offline test", bytes, sha256, notice_every,
+        errors: ["request", "status", "read", "oversize", "write", "flush", "mismatch"],
+    }
+}
+
+#[test]
+fn shared_transfer_accepts_exact_bytes_and_reports_progress() {
+    // Known SHA-256 of "abc"; no executable or network request involved.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("stage.part");
+    let mut notices = Vec::new();
+    transfer_fixture(3, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", 2)
+        .copy_checked(&mut &b"abc"[..], File::create(&path).unwrap(), |n| notices.push(n))
+        .unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"abc");
+    assert_eq!(notices, vec![3]);
+}
+
+#[test]
+fn shared_transfer_rejects_truncated_oversize_and_same_length_tampered_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("stage.part");
+    let pin = transfer_fixture(3, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", 2);
+    for (bytes, error, written) in [
+        (&b"ab"[..], "mismatch", &b"ab"[..]),
+        (&b"abcd"[..], "oversize", &b""[..]),
+        (&b"abd"[..], "mismatch", &b"abd"[..]),
+    ] {
+        let mut stream = bytes;
+        assert_eq!(pin.copy_checked(&mut stream, File::create(&path).unwrap(), |_| {}).unwrap_err(), error);
+        assert_eq!(fs::read(&path).unwrap(), written);
+    }
+}
+
+#[test]
+fn shared_transfer_preserves_stream_and_write_failures() {
+    struct Broken;
+    impl std::io::Read for Broken {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("synthetic interrupted transfer"))
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("stage.part");
+    let pin = transfer_fixture(3, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", 2);
+    assert_eq!(pin.copy_checked(&mut Broken, File::create(&path).unwrap(), |_| {}).unwrap_err(),
+        "read: synthetic interrupted transfer");
+    assert!(pin.copy_checked(&mut &b"abc"[..], File::open(&path).unwrap(), |_| {}).unwrap_err().starts_with("write: "));
 }

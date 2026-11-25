@@ -4,11 +4,8 @@
 use super::{Status, Partial, checked_path, check_ancestors, ensure_directory, version_gate};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicU64, Ordering}};
-use std::time::Duration;
-use sha2::{Digest, Sha256};
 
 pub(crate) const VERSION: &str = "0.18.0";
 pub(crate) const BYTES: u64 = 1_873_152;
@@ -77,40 +74,20 @@ fn fetch(profile: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), Strin
         return Err("QuickJS already exists; remove invalid file before reinstalling".into());
     }
     let stage = Partial(root.join(format!(".quickjs-{}.part", uuid::Uuid::new_v4())));
-    let mut dest = OpenOptions::new().write(true).create_new(true).open(&stage.0)
+    let dest = OpenOptions::new().write(true).create_new(true).open(&stage.0)
         .map_err(|e| format!("cannot stage optional QuickJS: {e}"))?;
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(20))
-        .timeout_read(Duration::from_secs(30))
-        .build();
-    let reply = agent.get(URL).call()
-        .map_err(|e| format!("official QuickJS download failed: {e}"))?;
-    if reply.status() != 200 {
-        return Err("official QuickJS release returned a non-200 response".into());
-    }
-    let mut stream = reply.into_reader();
-    let mut digest = Sha256::new();
-    let mut done = 0u64;
-    let mut last_notice = 0u64;
-    let mut buffer = [0u8; 65_536];
-    loop {
-        let n = stream.read(&mut buffer).map_err(|e| format!("QuickJS fetch interrupted: {e}"))?;
-        if n == 0 { break; }
-        done = done.saturating_add(n as u64);
-        if done > BYTES { return Err("QuickJS exceeded pinned size".into()); }
-        digest.update(&buffer[..n]);
-        dest.write_all(&buffer[..n]).map_err(|e| format!("QuickJS temporary write failed: {e}"))?;
-        if done.saturating_sub(last_notice) >= 262_144 {
-            last_notice = done;
-            set_state(profile, Status::Downloading(done), wake);
-        }
-    }
-    dest.sync_all().map_err(|e| format!("QuickJS temporary flush failed: {e}"))?;
-    drop(dest);
-    let hash = digest.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>();
-    if done != BYTES || hash != SHA256 {
-        return Err("QuickJS download size or SHA-256 mismatch; refusing install".into());
-    }
+    super::pinned_transfer::Transfer {
+        url: URL, bytes: BYTES, sha256: SHA256, notice_every: 262_144,
+        errors: [
+            "official QuickJS download failed",
+            "official QuickJS release returned a non-200 response",
+            "QuickJS fetch interrupted",
+            "QuickJS exceeded pinned size",
+            "QuickJS temporary write failed",
+            "QuickJS temporary flush failed",
+            "QuickJS download size or SHA-256 mismatch; refusing install",
+        ],
+    }.download(dest, |done| set_state(profile, Status::Downloading(done), wake))?;
     fs::hard_link(&stage.0, &target)
         .map_err(|e| format!("cannot publish QuickJS without overwrite: {e}"))?;
     verify(&target)?;

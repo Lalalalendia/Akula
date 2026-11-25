@@ -5,11 +5,8 @@
 //! Download only after a Settings confirmation; no PATH/env executable input.
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicU64, Ordering}};
-use std::time::Duration;
-use sha2::{Digest, Sha256};
 
 pub(crate) const VERSION: &str = "2026.10.26";
 pub(crate) const BYTES: u64 = 23_575_744;
@@ -19,6 +16,7 @@ pub(super) const URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe";
 const FILENAME: &str = "yt-dlp-2026.10.26.exe";
 #[path = "optional_tool_verify.rs"] mod pinned_file;
+#[path = "optional_tool_transfer.rs"] mod pinned_transfer;
 #[path = "light_windows_version.rs"]
 mod version_gate; #[path = "optional_quickjs.rs"] pub(crate) mod quickjs;
 
@@ -140,42 +138,20 @@ fn fetch(app_data: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), Stri
         return Err("yt-dlp already exists; remove the invalid file before reinstalling".into());
     }
     let stage = Partial(root.join(format!(".yt-dlp-{}.part", uuid::Uuid::new_v4())));
-    let mut dest = OpenOptions::new().write(true).create_new(true).open(&stage.0)
+    let dest = OpenOptions::new().write(true).create_new(true).open(&stage.0)
         .map_err(|e| format!("cannot stage the optional downloader: {e}"))?;
-    // This URL is pinned. Redirects on GitHub may use release-assets hosts,
-    // but no downloaded byte is usable until SHA-256 and exact size verify.
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(20))
-        .timeout_read(Duration::from_secs(30))
-        .build();
-    let reply = agent.get(URL).call()
-        .map_err(|e| format!("official yt-dlp download failed: {e}"))?;
-    if reply.status() != 200 {
-        return Err("official yt-dlp release returned a non-200 response".into());
-    }
-    let mut stream = reply.into_reader();
-    let mut sha = Sha256::new();
-    let mut done = 0u64;
-    let mut last_notice = 0u64;
-    let mut buf = [0u8; 65_536];
-    loop {
-        let n = stream.read(&mut buf).map_err(|e| format!("yt-dlp download interrupted: {e}"))?;
-        if n == 0 { break; }
-        done = done.saturating_add(n as u64);
-        if done > BYTES { return Err("yt-dlp downloaded bytes exceed the pinned length".into()); }
-        sha.update(&buf[..n]);
-        dest.write_all(&buf[..n]).map_err(|e| format!("yt-dlp temporary write failed: {e}"))?;
-        if done.saturating_sub(last_notice) >= 1_048_576 {
-            last_notice = done;
-            set_state(app_data, Status::Downloading(done), wake);
-        }
-    }
-    dest.sync_all().map_err(|e| format!("yt-dlp temporary flush failed: {e}"))?;
-    drop(dest);
-    let hash = sha.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>();
-    if done != BYTES || hash != SHA256 {
-        return Err("official yt-dlp size or SHA-256 mismatch; refusing installation".into());
-    }
+    pinned_transfer::Transfer {
+        url: URL, bytes: BYTES, sha256: SHA256, notice_every: 1_048_576,
+        errors: [
+            "official yt-dlp download failed",
+            "official yt-dlp release returned a non-200 response",
+            "yt-dlp download interrupted",
+            "yt-dlp downloaded bytes exceed the pinned length",
+            "yt-dlp temporary write failed",
+            "yt-dlp temporary flush failed",
+            "official yt-dlp size or SHA-256 mismatch; refusing installation",
+        ],
+    }.download(dest, |done| set_state(app_data, Status::Downloading(done), wake))?;
     // Atomic, same-volume, no-clobber publication; the temp is always deleted.
     fs::hard_link(&stage.0, &target)
         .map_err(|e| format!("cannot commit yt-dlp without overwriting another file: {e}"))?;
