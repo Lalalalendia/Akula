@@ -8,7 +8,7 @@ use masonry::core::{ErasedAction, WidgetId};
 use super::super::{App, Popup};
 use super::text_input_dialog::open_input_dialog;
 use super::study_add::PendingColumns;
-use crate::i18n::{t, t_with};
+use crate::i18n::t;
 use crate::ui::dialog::{DialogAnswer, DialogIds};
 use crate::ui::editor::{TextAction, TextEditor};
 use crate::ui::handle::Handle;
@@ -82,14 +82,7 @@ impl App {
             Ok(true) => {}
         }
         let id = uuid::Uuid::new_v4().to_string();
-        match self.bind_live_table(root, &pending, &id, &name) {
-            Ok(()) => self.study_add_notice(root, &t_with("editor.table.studySaved", &[("name", &name)]), true),
-            Err(StateError::DuplicateTable | StateError::NeedsRebind) =>
-                self.study_add_notice(root, &t("editor.table.studyHold"), false),
-            Err(StateError::InvalidSelection) =>
-                self.study_add_notice(root, &t("editor.table.studyStillChanged"), false),
-            Err(_) => self.study_add_notice(root, &t("editor.table.studySaveFailed"), false),
-        }
+        self.bind_live_table_with_notice(root, &pending, &id, &name);
     }
 }
 

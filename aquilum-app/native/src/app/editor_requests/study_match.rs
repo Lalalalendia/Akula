@@ -11,6 +11,7 @@ use masonry::kurbo::Point;
 
 use super::super::{App, Popup};
 use super::study_load::StudyDeckSnapshot;
+use super::study::{bounded_text, feedback_answer};
 use crate::i18n::{t, t_with};
 use crate::ui::dialog::{ConfirmDialog, DialogAnswer, DialogIds};
 use crate::ui::menu::MenuChoice;
@@ -23,12 +24,7 @@ pub(in crate::app) struct MatchRound {
     pub mistakes: usize,
 }
 
-fn compact(value: &str) -> String {
-    let text = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text.chars().count() > 180 {
-        text.chars().take(180).collect::<String>() + "…"
-    } else { text }
-}
+fn compact(value: &str) -> String { bounded_text(value, 180) }
 
 impl App {
     pub(in crate::app) fn start_study_matching(
@@ -155,13 +151,8 @@ impl App {
         &mut self, root: &mut RenderRoot, id: WidgetId,
         dialog: DialogIds, state: Box<MatchRound>, action: &ErasedAction,
     ) {
-        if action.downcast_ref::<DialogAnswer>() == Some(&DialogAnswer::Closed) {
-            root.remove_layer(dialog.layer);
-            return;
-        }
-        match dialog.answer(id, action) {
+        match feedback_answer(root, id, &dialog, action) {
             Some(answer) => {
-                root.remove_layer(dialog.layer);
                 if answer == DialogAnswer::Confirm {
                     self.show_study_match_question(root, state);
                 }
