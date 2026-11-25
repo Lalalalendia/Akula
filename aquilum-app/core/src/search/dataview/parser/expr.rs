@@ -15,24 +15,28 @@ pub fn expression(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
     or_level(cursor)
 }
 
-fn or_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
-    let mut left = and_level(cursor)?;
-    loop {
-        if !cursor.take_symbol(Symbol::PipePipe) && !cursor.take_word("or") {
-            return Ok(left);
-        }
-        left = binary(BinaryOp::Or, left, and_level(cursor)?);
+// All four repeating precedence levels fold left. Comparison deliberately
+// stays separate: its grammar accepts only a single comparison operator.
+fn left_chain(
+    cursor: &mut Cursor<'_>,
+    operand: impl Fn(&mut Cursor<'_>) -> Result<Expr, String>,
+    operators: &[(Symbol, Option<&str>, BinaryOp)],
+) -> Result<Expr, String> {
+    let mut left = operand(cursor)?;
+    while let Some(operator) = operators.iter().find_map(|&(symbol, word, op)| {
+        (cursor.take_symbol(symbol) || word.is_some_and(|w| cursor.take_word(w))).then_some(op)
+    }) {
+        left = binary(operator, left, operand(cursor)?);
     }
+    Ok(left)
+}
+
+fn or_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
+    left_chain(cursor, and_level, &[(Symbol::PipePipe, Some("or"), BinaryOp::Or)])
 }
 
 fn and_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
-    let mut left = compare_level(cursor)?;
-    loop {
-        if !cursor.take_symbol(Symbol::AmpAmp) && !cursor.take_word("and") {
-            return Ok(left);
-        }
-        left = binary(BinaryOp::And, left, compare_level(cursor)?);
-    }
+    left_chain(cursor, compare_level, &[(Symbol::AmpAmp, Some("and"), BinaryOp::And)])
 }
 
 fn compare_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
@@ -56,33 +60,18 @@ fn compare_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
 }
 
 fn additive_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
-    let mut left = multiplicative_level(cursor)?;
-    loop {
-        let operator = if cursor.take_symbol(Symbol::Plus) {
-            BinaryOp::Add
-        } else if cursor.take_symbol(Symbol::Minus) {
-            BinaryOp::Subtract
-        } else {
-            return Ok(left);
-        };
-        left = binary(operator, left, multiplicative_level(cursor)?);
-    }
+    left_chain(cursor, multiplicative_level, &[
+        (Symbol::Plus, None, BinaryOp::Add),
+        (Symbol::Minus, None, BinaryOp::Subtract),
+    ])
 }
 
 fn multiplicative_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
-    let mut left = unary_level(cursor)?;
-    loop {
-        let operator = if cursor.take_symbol(Symbol::Star) {
-            BinaryOp::Multiply
-        } else if cursor.take_symbol(Symbol::Slash) {
-            BinaryOp::Divide
-        } else if cursor.take_symbol(Symbol::Percent) {
-            BinaryOp::Modulo
-        } else {
-            return Ok(left);
-        };
-        left = binary(operator, left, unary_level(cursor)?);
-    }
+    left_chain(cursor, unary_level, &[
+        (Symbol::Star, None, BinaryOp::Multiply),
+        (Symbol::Slash, None, BinaryOp::Divide),
+        (Symbol::Percent, None, BinaryOp::Modulo),
+    ])
 }
 
 fn unary_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
