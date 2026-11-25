@@ -3,7 +3,7 @@
 //! The Akula installer does not bundle yt-dlp, and this code never updates
 //! the Akula updater or authorizes the old 3-EXE Video Tools package.
 //! Download only after a Settings confirmation; no PATH/env executable input.
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, atomic::Ordering};
 
@@ -17,6 +17,7 @@ const FILENAME: &str = "yt-dlp-2026.10.26.exe";
 #[path = "optional_tool_verify.rs"] mod pinned_file;
 #[path = "optional_tool_transfer.rs"] mod pinned_transfer;
 #[path = "optional_tool_state.rs"] mod tool_state;
+#[path = "optional_tool_install.rs"] mod pinned_install;
 use tool_state::ToolState;
 #[path = "light_windows_version.rs"]
 mod version_gate; #[path = "optional_quickjs.rs"] pub(crate) mod quickjs;
@@ -116,22 +117,14 @@ pub(crate) fn status(app_data: &Path) -> Status {
         }
     }
 }
-struct Partial(PathBuf);
-impl Drop for Partial {
-    fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
-}
 fn fetch(app_data: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), String> {
     version_gate::require_pinned_windows_video_runtime()?;
     let root = local_root(app_data)?;
-    ensure_directory(&root)?;
-    let target = root.join(FILENAME);
-    if target.exists() {
-        return Err("yt-dlp already exists; remove the invalid file before reinstalling".into());
-    }
-    let stage = Partial(root.join(format!(".yt-dlp-{}.part", uuid::Uuid::new_v4())));
-    let dest = OpenOptions::new().write(true).create_new(true).open(&stage.0)
-        .map_err(|e| format!("cannot stage the optional downloader: {e}"))?;
-    pinned_transfer::Transfer {
+    pinned_install::install(&root, FILENAME, "yt-dlp", [
+        "yt-dlp already exists; remove the invalid file before reinstalling",
+        "cannot stage the optional downloader",
+        "cannot commit yt-dlp without overwriting another file",
+    ], |dest| pinned_transfer::Transfer {
         url: URL, bytes: BYTES, sha256: SHA256, notice_every: 1_048_576,
         errors: [
             "official yt-dlp download failed",
@@ -142,12 +135,7 @@ fn fetch(app_data: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), Stri
             "yt-dlp temporary flush failed",
             "official yt-dlp size or SHA-256 mismatch; refusing installation",
         ],
-    }.download(dest, |done| STATE.set_state(app_data, Status::Downloading(done), wake))?;
-    // Atomic, same-volume, no-clobber publication; the temp is always deleted.
-    fs::hard_link(&stage.0, &target)
-        .map_err(|e| format!("cannot commit yt-dlp without overwriting another file: {e}"))?;
-    verified(&target)?;
-    Ok(())
+    }.download(dest, |done| STATE.set_state(app_data, Status::Downloading(done), wake)), verified)
 }
 
 /// Called exclusively by the Settings confirmation button; no startup fetch.

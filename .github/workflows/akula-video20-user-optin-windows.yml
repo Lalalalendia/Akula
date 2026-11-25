@@ -8,6 +8,7 @@ on:
       - 'aquilum-app/native/src/video/optional_tool_verify.rs'
       - 'aquilum-app/native/src/video/optional_tool_transfer.rs'
       - 'aquilum-app/native/src/video/optional_tool_state.rs'
+      - 'aquilum-app/native/src/video/optional_tool_install.rs'
       - 'aquilum-app/native/src/video/optional_ytdlp_tests.rs'
       - 'aquilum-app/native/src/video/optional_quickjs_tests.rs'
       - 'aquilum-app/native/src/video/download_video21_tests.rs'
@@ -44,8 +45,13 @@ jobs:
           source=Path("aquilum-app/native/src/video/optional_ytdlp.rs").read_text()
           assert 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe' in source
           assert 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d' in source
-          assert "23_575_744" in source and ".create_new(true)" in source
-          assert "fs::hard_link" in source and "SHA256" in source
+          assert "23_575_744" in source and "SHA256" in source
+          assert 'pinned_install::install(&root, FILENAME, "yt-dlp"' in source
+          assert 'pinned_transfer::Transfer {' in source and 'sha256: SHA256' in source
+          assert '.download(dest,' in source and ', verified)' in source
+          shared=Path("aquilum-app/native/src/video/optional_tool_install.rs").read_text()
+          assert "ensure_directory(root)?" in shared and ".create_new(true)" in shared and "fs::hard_link" in shared
+          assert shared.index("ensure_directory(root)?") < shared.index(".create_new(true)") < shared.index("let stage = Partial(path)") < shared.index("transfer(dest)?") < shared.index("fs::hard_link") < shared.index("verify(&target)")
           settings=Path("aquilum-app/native/src/app/settings/press.rs").read_text()
           assert "Action::InstallYtDlp" in settings and "MessageButtons::YesNo" in settings
           assert "Action::RemoveYtDlp" in settings
@@ -58,8 +64,10 @@ jobs:
           quickjs=Path("aquilum-app/native/src/video/optional_quickjs.rs").read_text()
           assert 'https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe' in quickjs
           assert 'ff03398d74ea6e6bd3a8e58058f7003225abcac229d7d57775b7aaae812a49c7' in quickjs
-          assert '1_873_152' in quickjs and 'fs::hard_link' in quickjs
-          assert '.create_new(true)' in quickjs and 'check_ancestors' in quickjs
+          assert '1_873_152' in quickjs and 'check_ancestors' in quickjs
+          assert 'pinned_install::install(&root, FILENAME, "quickjs"' in quickjs
+          assert 'pinned_transfer::Transfer {' in quickjs and 'sha256: SHA256' in quickjs
+          assert '.download(dest,' in quickjs and ', verify)' in quickjs
           assert 'quickjs::verified_executable' in queue
           assert queue.index('quickjs::verified_executable') < queue.index('Library::new(')
           installed=Path("aquilum-app/native/src/video/download.rs").read_text()
