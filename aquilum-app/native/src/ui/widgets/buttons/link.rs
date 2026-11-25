@@ -1,7 +1,6 @@
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::{
-    AccessCtx, AccessEvent, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, Update,
-    UpdateCtx, Widget, render_text,
+    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PropertiesRef, RegisterCtx, Widget, render_text,
 };
 use masonry::imaging::Painter;
 use masonry::kurbo::{Affine, Axis, Line, Point, Size, Stroke};
@@ -9,7 +8,7 @@ use masonry::layout::{LenReq, Length};
 
 use crate::ui::tokens::{number, size};
 use crate::ui::widgets::{Press, Pressed};
-use crate::ui::widgets::press::{submit_pointer, submit_access, update_button_line};
+use crate::ui::widgets::press::press_events;
 use crate::ui::{text, theme};
 
 pub struct LinkButton {
@@ -31,17 +30,7 @@ impl LinkButton {
 impl Widget for LinkButton {
     type Action = Pressed;
 
-    fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        submit_pointer(&mut self.press, ctx, event);
-    }
-
-    fn on_access_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &AccessEvent) {
-        submit_access(ctx, event);
-    }
-
-    fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
-        update_button_line(&mut self.line, ctx, event);
-    }
+    press_events!(line);
 
     fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
 

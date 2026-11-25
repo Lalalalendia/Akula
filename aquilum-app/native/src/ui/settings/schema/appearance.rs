@@ -62,6 +62,10 @@ pub(super) fn ui(config: &AppConfig, ctx: &Context) -> Vec<Block> {
     ]
 }
 
+fn hinted_switch(section: &str, key: &str, on: bool, set: fn(&mut AppConfig, &Value)) -> Row {
+    row(t(&format!("settings.{section}.{key}")), Some(t(&format!("settings.{section}.{key}Hint"))), Control::Switch(on), set)
+}
+
 pub(super) fn editor(config: &AppConfig) -> Vec<Block> {
     let e = &config.editor;
     let mut fonts = font_rows(
@@ -77,9 +81,6 @@ pub(super) fn editor(config: &AppConfig) -> Vec<Block> {
         Control::Number(Number::new(f64::from(e.line_height), 1.2, 2.0, 0.05)),
         |c, v| c.editor.line_height = number(v) as f32,
     ));
-    let switch = |key: &str, on: bool, set: fn(&mut AppConfig, &Value)| {
-        row(t(&format!("settings.editor.{key}")), Some(t(&format!("settings.editor.{key}Hint"))), Control::Switch(on), set)
-    };
     vec![
         Block { title: t("settings.font.section"), rows: fonts },
         Block {
@@ -94,17 +95,17 @@ pub(super) fn editor(config: &AppConfig) -> Vec<Block> {
         Block {
             title: t("settings.editor.input"),
             rows: vec![
-                switch("smartDashes", e.smart_dashes, |c, v| c.editor.smart_dashes = flag(v)),
-                switch("listCallouts", e.list_callouts, |c, v| c.editor.list_callouts = flag(v)),
-                switch("coloredTags", e.colored_tags, |c, v| c.editor.colored_tags = flag(v)),
-                switch("selectionMatches", e.selection_matches, |c, v| c.editor.selection_matches = flag(v)),
-                switch("autoLinkTitle", e.auto_link_title, |c, v| c.editor.auto_link_title = flag(v)),
+                hinted_switch("editor", "smartDashes", e.smart_dashes, |c, v| c.editor.smart_dashes = flag(v)),
+                hinted_switch("editor", "listCallouts", e.list_callouts, |c, v| c.editor.list_callouts = flag(v)),
+                hinted_switch("editor", "coloredTags", e.colored_tags, |c, v| c.editor.colored_tags = flag(v)),
+                hinted_switch("editor", "selectionMatches", e.selection_matches, |c, v| c.editor.selection_matches = flag(v)),
+                hinted_switch("editor", "autoLinkTitle", e.auto_link_title, |c, v| c.editor.auto_link_title = flag(v)),
             ],
         },
         Block {
             title: t("settings.editor.completion"),
             rows: vec![
-                switch("linkSuggest", e.link_suggest, |c, v| c.editor.link_suggest = flag(v)),
+                hinted_switch("editor", "linkSuggest", e.link_suggest, |c, v| c.editor.link_suggest = flag(v)),
                 row(
                     t("settings.editor.minChars"),
                     Some(t("settings.editor.minCharsHint")),
@@ -140,9 +141,6 @@ pub(super) fn reader(config: &AppConfig) -> Vec<Block> {
         Control::Number(Number::new(f64::from(r.line_height), 1.2, 2.4, 0.05)),
         |c, v| c.reader.line_height = number(v) as f32,
     ));
-    let switch = |key: &str, on: bool, set: fn(&mut AppConfig, &Value)| {
-        row(t(&format!("settings.reader.{key}")), Some(t(&format!("settings.reader.{key}Hint"))), Control::Switch(on), set)
-    };
     vec![
         Block { title: t("settings.font.section"), rows: fonts },
         Block {
@@ -174,8 +172,8 @@ pub(super) fn reader(config: &AppConfig) -> Vec<Block> {
         Block {
             title: t("settings.reader.typesetting"),
             rows: vec![
-                switch("justify", r.justify, |c, v| c.reader.justify = flag(v)),
-                switch("hyphenate", r.hyphenate, |c, v| c.reader.hyphenate = flag(v)),
+                hinted_switch("reader", "justify", r.justify, |c, v| c.reader.justify = flag(v)),
+                hinted_switch("reader", "hyphenate", r.hyphenate, |c, v| c.reader.hyphenate = flag(v)),
             ],
         },
     ]

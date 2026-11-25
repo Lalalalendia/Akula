@@ -21,14 +21,7 @@ impl TextEditor {
     // Indented-code normalization is not yet covered by our Markdown tests.
     // Restrict the copy action to fenced blocks where the body is unambiguous.
     fn fenced_code_body(&self, index: usize) -> Option<String> {
-        if !self.doc.block(index).is_code() {
-            return None;
-        }
-        let (first, _) = self.run(index, Block::is_code, |block| matches!(block, Block::Code { first: true, .. }));
-        if !matches!(self.doc.block(first), Block::Code { first: true, fence: true, .. }) {
-            return None;
-        }
-        let opener = self.doc.paragraph(first).start;
+        let opener = self.fenced_code_start(index)?;
         self.doc.copy_fenced_body(opener)
     }
 
@@ -39,7 +32,6 @@ impl TextEditor {
         {
             return None;
         }
-        self.fenced_code_start(index)?;
         self.fenced_code_body(index)
     }
 

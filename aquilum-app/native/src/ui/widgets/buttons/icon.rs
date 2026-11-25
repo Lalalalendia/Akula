@@ -1,6 +1,6 @@
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::{
-    AccessCtx, AccessEvent, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, Update, UpdateCtx,
+    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, PaintCtx, PropertiesMut, PropertiesRef, RegisterCtx, Update, UpdateCtx,
     Widget, WidgetMut,
 };
 use masonry::imaging::Painter;
@@ -11,7 +11,7 @@ use crate::ui::icons::{self, Icon};
 use crate::ui::theme;
 use crate::ui::tokens::size;
 use crate::ui::widgets::{Press, Pressed};
-use crate::ui::widgets::press::{submit_pointer, submit_access};
+use crate::ui::widgets::press::press_events;
 
 pub struct IconButton {
     icon: Icon,
@@ -62,13 +62,7 @@ impl IconButton {
 impl Widget for IconButton {
     type Action = Pressed;
 
-    fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        submit_pointer(&mut self.press, ctx, event);
-    }
-
-    fn on_access_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &AccessEvent) {
-        submit_access(ctx, event);
-    }
+    press_events!();
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
         if matches!(event, Update::HoveredChanged(_)) {

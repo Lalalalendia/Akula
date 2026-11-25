@@ -1,9 +1,6 @@
-use masonry::accesskit::Action;
 use masonry::core::{
-    AccessEvent, EventCtx, PointerButton, PointerButtonEvent, PointerEvent, Update, UpdateCtx,
+    EventCtx, PointerButton, PointerButtonEvent, PointerEvent,
 };
-
-use crate::ui::text;
 
 /// Нажатие кнопки.
 #[derive(Debug)]
@@ -42,30 +39,9 @@ impl Press {
     }
 }
 
-// Shared by ItemButton, LinkButton, TextButton and Chip. The action and
-// invalidation contracts stay identical; each widget owns its appearance.
-pub(in crate::ui) fn submit_pointer(press: &mut Press, ctx: &mut EventCtx<'_>, event: &PointerEvent) {
-    if press.pointer(ctx, event) {
-        ctx.submit_action::<Pressed>(Pressed);
-    }
-}
-
-pub(in crate::ui) fn submit_access(ctx: &mut EventCtx<'_>, event: &AccessEvent) {
-    if event.action == Action::Click {
-        ctx.submit_action::<Pressed>(Pressed);
-    }
-}
-
-pub(in crate::ui) fn update_button_line(line: &mut text::Line, ctx: &mut UpdateCtx<'_>, event: &Update) {
-    match event {
-        Update::HoveredChanged(_) => ctx.request_paint_only(),
-        Update::FontsChanged => {
-            line.clear();
-            ctx.request_layout();
-        }
-        _ => {}
-    }
-}
+#[path = "press_contract.rs"]
+mod contract;
+pub(in crate::ui) use contract::{press_events, submit_pointer, submit_access, update_button_line};
 
 #[cfg(test)]
 #[path = "press_tests.rs"]
