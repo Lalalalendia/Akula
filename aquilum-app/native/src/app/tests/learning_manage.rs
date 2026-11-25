@@ -46,6 +46,9 @@ fn lang02_rename_and_delete_require_native_confirmation_and_preserve_note() {
         }
         _ => panic!("named collections should have a manage menu"),
     };
+    h.act(layer, MenuChoice::Hover(0));
+    assert!(matches!(&h.app.popup, Some(Popup::StudyManage { layer: current, actions, .. })
+        if *current == layer && actions.len() == 2 && actions[0].0 == "botany"));
     h.act(layer, MenuChoice::Item(0));
 
     let field = match &h.app.popup {

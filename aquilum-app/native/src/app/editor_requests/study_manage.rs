@@ -13,7 +13,6 @@ use crate::i18n::{t, t_with};
 use crate::ui::dialog::{DialogAnswer, DialogIds, ConfirmDialog};
 use crate::ui::editor::{TextAction, TextEditor};
 use crate::ui::handle::Handle;
-use crate::ui::menu::MenuChoice;
 use crate::ui::search::Placeholder;
 
 type ManageAction = (String, String, bool); // id, displayed name, delete?
@@ -73,18 +72,9 @@ impl App {
         actions: Vec<ManageAction>,
         action: &ErasedAction,
     ) {
-        let Some(choice) = action.downcast_ref::<MenuChoice>() else {
-            self.popup = Some(Popup::StudyManage { layer, revision, actions });
-            return;
-        };
-        let MenuChoice::Item(index) = choice else {
-            if matches!(choice, MenuChoice::Hover(_)) {
-                self.popup = Some(Popup::StudyManage { layer, revision, actions });
-            }
-            return;
-        };
-        root.remove_layer(layer);
-        let Some((id, name, delete)) = actions.get(*index).cloned() else { return };
+        let Some((index, actions)) = self.study_menu_item(root, layer, actions, action,
+            |actions| Popup::StudyManage { layer, revision, actions }) else { return };
+        let Some((id, name, delete)) = actions.get(index).cloned() else { return };
         if delete {
             self.open_study_delete(root, id, name, revision);
         } else {
