@@ -1,11 +1,10 @@
 //! VIDEO-21: explicit, SHA-pinned QuickJS-NG installation for yt-dlp EJS.
 //! This is not a Video Tools bundle, updater input, or synchronized attachment.
 //! Never trust PATH, user configuration, or an arbitrary executable.
-use super::{Status, Partial, checked_path, check_ancestors, ensure_directory, version_gate};
-use std::collections::HashMap;
+use super::{Status, ToolState, Partial, checked_path, check_ancestors, ensure_directory, version_gate};
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicU64, Ordering}};
+use std::sync::{Arc, atomic::Ordering};
 
 pub(crate) const VERSION: &str = "0.18.0";
 pub(crate) const BYTES: u64 = 1_873_152;
@@ -14,18 +13,8 @@ pub(crate) const SHA256: &str =
 pub(crate) const URL: &str =
     "https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-windows-x86_64.exe";
 const FILENAME: &str = "qjs.exe";
-static STATES: OnceLock<Mutex<HashMap<PathBuf, Status>>> = OnceLock::new();
-static REVISION: AtomicU64 = AtomicU64::new(0);
-
-fn states() -> &'static Mutex<HashMap<PathBuf, Status>> {
-    STATES.get_or_init(|| Mutex::new(HashMap::new()))
-}
-pub(crate) fn revision() -> u64 { REVISION.load(Ordering::Relaxed) }
-fn set_state(profile: &Path, next: Status, wake: &Arc<dyn Fn() + Send + Sync>) {
-    states().lock().unwrap_or_else(|e| e.into_inner()).insert(profile.to_path_buf(), next);
-    REVISION.fetch_add(1, Ordering::Relaxed);
-    wake();
-}
+static STATE: ToolState = ToolState::new();
+pub(crate) fn revision() -> u64 { STATE.revision() }
 fn local_root(profile: &Path) -> Result<PathBuf, String> {
     Ok(super::local_root(profile)?.parent()
         .ok_or("optional tool parent directory unavailable")?.join("quickjs"))
@@ -55,7 +44,7 @@ fn status_disk(profile: &Path) -> Status {
     }
 }
 pub(crate) fn status(profile: &Path) -> Status {
-    let prior = states().lock().unwrap_or_else(|e| e.into_inner()).get(profile).cloned();
+    let prior = STATE.states().lock().unwrap_or_else(|e| e.into_inner()).get(profile).cloned();
     if let Some(Status::Downloading(n)) = prior { return Status::Downloading(n); }
     match status_disk(profile) {
         Status::Missing => match prior {
@@ -87,36 +76,20 @@ fn fetch(profile: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), Strin
             "QuickJS temporary flush failed",
             "QuickJS download size or SHA-256 mismatch; refusing install",
         ],
-    }.download(dest, |done| set_state(profile, Status::Downloading(done), wake))?;
+    }.download(dest, |done| STATE.set_state(profile, Status::Downloading(done), wake))?;
     fs::hard_link(&stage.0, &target)
         .map_err(|e| format!("cannot publish QuickJS without overwrite: {e}"))?;
     verify(&target)?;
     Ok(())
 }
 pub(crate) fn start(profile: PathBuf, wake: Arc<dyn Fn() + Send + Sync>) -> Result<(), String> {
-    {
-        let mut lock = states().lock().unwrap_or_else(|e| e.into_inner());
-        if matches!(lock.get(&profile), Some(Status::Downloading(_))) {
-            return Err("QuickJS download already in progress".into());
-        }
-        if matches!(status_disk(&profile), Status::Installed) {
-            return Err("pinned QuickJS already installed".into());
-        }
-        lock.insert(profile.clone(), Status::Downloading(0));
-    }
-    REVISION.fetch_add(1, Ordering::Relaxed);
-    wake();
-    std::thread::spawn(move || {
-        let next = match fetch(&profile, &wake) {
-            Ok(()) => Status::Installed,
-            Err(reason) => Status::Failed(reason),
-        };
-        set_state(&profile, next, &wake);
-    });
-    Ok(())
+    STATE.start(profile, wake, status_disk, fetch, [
+        "QuickJS download already in progress",
+        "pinned QuickJS already installed",
+    ])
 }
 pub(crate) fn remove(profile: &Path) -> Result<(), String> {
-    let mut lock = states().lock().unwrap_or_else(|e| e.into_inner());
+    let mut lock = STATE.states().lock().unwrap_or_else(|e| e.into_inner());
     if matches!(lock.get(profile), Some(Status::Downloading(_))) {
         return Err("cannot remove QuickJS during download".into());
     }
@@ -127,7 +100,7 @@ pub(crate) fn remove(profile: &Path) -> Result<(), String> {
         fs::remove_file(&path).map_err(|e| format!("cannot remove QuickJS: {e}"))?;
     }
     lock.remove(profile);
-    REVISION.fetch_add(1, Ordering::Relaxed);
+    STATE.revision.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 #[cfg(test)]

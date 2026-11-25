@@ -158,3 +158,53 @@ fn shared_transfer_preserves_stream_and_write_failures() {
         "read: synthetic interrupted transfer");
     assert!(pin.copy_checked(&mut &b"abc"[..], File::open(&path).unwrap(), |_| {}).unwrap_err().starts_with("write: "));
 }
+
+#[test]
+fn shared_lifecycle_rejects_duplicate_start_and_keeps_tool_and_profile_state_separate() {
+    static FIRST: ToolState = ToolState::new();
+    static SECOND: ToolState = ToolState::new();
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile");
+    let other = dir.path().join("other");
+    let (release, wait) = std::sync::mpsc::channel();
+    let (notify, notices) = std::sync::mpsc::channel();
+    let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || { let _ = notify.send(()); });
+    FIRST.start(profile.clone(), wake.clone(), |_| Status::Missing, move |_, _| {
+        wait.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())?;
+        Ok(())
+    }, ["busy", "installed"]).unwrap();
+    notices.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(FIRST.revision(), 1);
+    assert_eq!(FIRST.states().lock().unwrap().get(&profile), Some(&Status::Downloading(0)));
+    assert!(!FIRST.states().lock().unwrap().contains_key(&other));
+    assert!(!SECOND.states().lock().unwrap().contains_key(&profile));
+    assert_eq!(SECOND.revision(), 0);
+    assert_eq!(FIRST.start(profile.clone(), wake, |_| panic!("busy must stop before disk check"),
+        |_, _| panic!("busy must not spawn"), ["busy", "installed"]).unwrap_err(), "busy");
+    assert_eq!(FIRST.revision(), 1);
+    release.send(()).unwrap();
+    notices.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(FIRST.states().lock().unwrap().get(&profile), Some(&Status::Installed));
+    assert_eq!(FIRST.revision(), 2);
+    assert_eq!(SECOND.revision(), 0);
+}
+
+#[test]
+fn shared_lifecycle_rejects_already_installed_and_reports_fetch_failure() {
+    static TOOL: ToolState = ToolState::new();
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile");
+    let (notify, notices) = std::sync::mpsc::channel();
+    let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || { let _ = notify.send(()); });
+    assert_eq!(TOOL.start(profile.clone(), wake.clone(), |_| Status::Installed,
+        |_, _| panic!("installed must not spawn"), ["busy", "installed"]).unwrap_err(), "installed");
+    assert_eq!(TOOL.revision(), 0);
+    assert!(!TOOL.states().lock().unwrap().contains_key(&profile));
+    assert!(notices.try_recv().is_err());
+    TOOL.start(profile.clone(), wake, |_| Status::Missing, |_, _| Err("synthetic failure".into()),
+        ["busy", "installed"]).unwrap();
+    for _ in 0..2 { notices.recv_timeout(Duration::from_secs(10)).unwrap(); }
+    assert_eq!(TOOL.states().lock().unwrap().get(&profile),
+        Some(&Status::Failed("synthetic failure".into())));
+    assert_eq!(TOOL.revision(), 2);
+}

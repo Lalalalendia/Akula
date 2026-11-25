@@ -3,10 +3,9 @@
 //! The Akula installer does not bundle yt-dlp, and this code never updates
 //! the Akula updater or authorizes the old 3-EXE Video Tools package.
 //! Download only after a Settings confirmation; no PATH/env executable input.
-use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicU64, Ordering}};
+use std::sync::{Arc, atomic::Ordering};
 
 pub(crate) const VERSION: &str = "2026.10.26";
 pub(crate) const BYTES: u64 = 23_575_744;
@@ -17,6 +16,8 @@ pub(super) const URL: &str =
 const FILENAME: &str = "yt-dlp-2026.10.26.exe";
 #[path = "optional_tool_verify.rs"] mod pinned_file;
 #[path = "optional_tool_transfer.rs"] mod pinned_transfer;
+#[path = "optional_tool_state.rs"] mod tool_state;
+use tool_state::ToolState;
 #[path = "light_windows_version.rs"]
 mod version_gate; #[path = "optional_quickjs.rs"] pub(crate) mod quickjs;
 
@@ -28,18 +29,8 @@ pub(crate) enum Status {
     Invalid,
     Failed(String),
 }
-static STATES: OnceLock<Mutex<HashMap<PathBuf, Status>>> = OnceLock::new();
-static REVISION: AtomicU64 = AtomicU64::new(0);
-
-fn states() -> &'static Mutex<HashMap<PathBuf, Status>> {
-    STATES.get_or_init(|| Mutex::new(HashMap::new()))
-}
-pub(crate) fn revision() -> u64 { REVISION.load(Ordering::Relaxed) }
-fn set_state(key: &Path, state: Status, wake: &Arc<dyn Fn() + Send + Sync>) {
-    states().lock().unwrap_or_else(|e| e.into_inner()).insert(key.to_path_buf(), state);
-    REVISION.fetch_add(1, Ordering::Relaxed);
-    wake();
-}
+static STATE: ToolState = ToolState::new();
+pub(crate) fn revision() -> u64 { STATE.revision() }
 
 fn local_root(app_data: &Path) -> Result<PathBuf, String> {
     // Reuse the native video library's existing Windows local-data selection,
@@ -105,12 +96,12 @@ pub(crate) fn verified_executable(app_data: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 pub(crate) fn status(app_data: &Path) -> Status {
-    if let Some(Status::Downloading(n)) = states().lock().unwrap_or_else(|e| e.into_inner())
+    if let Some(Status::Downloading(n)) = STATE.states().lock().unwrap_or_else(|e| e.into_inner())
         .get(app_data).cloned()
     {
         return Status::Downloading(n);
     }
-    let prior = states().lock().unwrap_or_else(|e| e.into_inner())
+    let prior = STATE.states().lock().unwrap_or_else(|e| e.into_inner())
         .get(app_data).cloned();
     match verified_executable(app_data) {
         Ok(_) => Status::Installed,
@@ -151,7 +142,7 @@ fn fetch(app_data: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), Stri
             "yt-dlp temporary flush failed",
             "official yt-dlp size or SHA-256 mismatch; refusing installation",
         ],
-    }.download(dest, |done| set_state(app_data, Status::Downloading(done), wake))?;
+    }.download(dest, |done| STATE.set_state(app_data, Status::Downloading(done), wake))?;
     // Atomic, same-volume, no-clobber publication; the temp is always deleted.
     fs::hard_link(&stage.0, &target)
         .map_err(|e| format!("cannot commit yt-dlp without overwriting another file: {e}"))?;
@@ -161,27 +152,10 @@ fn fetch(app_data: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), Stri
 
 /// Called exclusively by the Settings confirmation button; no startup fetch.
 pub(crate) fn start(app_data: PathBuf, wake: Arc<dyn Fn() + Send + Sync>) -> Result<(), String> {
-    {
-        let mut lock = states().lock().unwrap_or_else(|e| e.into_inner());
-        if matches!(lock.get(&app_data), Some(Status::Downloading(_))) {
-            return Err("yt-dlp download is already in progress".into());
-        }
-        if matches!(status_disk(&app_data), Status::Installed) {
-            return Err("the pinned yt-dlp version is already installed".into());
-        }
-        lock.insert(app_data.clone(), Status::Downloading(0));
-    }
-    REVISION.fetch_add(1, Ordering::Relaxed);
-    wake();
-    std::thread::spawn(move || {
-        let outcome = fetch(&app_data, &wake);
-        let next = match outcome {
-            Ok(()) => Status::Installed,
-            Err(err) => Status::Failed(err),
-        };
-        set_state(&app_data, next, &wake);
-    });
-    Ok(())
+    STATE.start(app_data, wake, status_disk, fetch, [
+        "yt-dlp download is already in progress",
+        "the pinned yt-dlp version is already installed",
+    ])
 }
 fn status_disk(app_data: &Path) -> Status {
     match verified_executable(app_data) {
@@ -191,7 +165,7 @@ fn status_disk(app_data: &Path) -> Status {
     }
 }
 pub(crate) fn remove(app_data: &Path) -> Result<(), String> {
-    let mut lock = states().lock().unwrap_or_else(|e| e.into_inner());
+    let mut lock = STATE.states().lock().unwrap_or_else(|e| e.into_inner());
     if matches!(lock.get(app_data), Some(Status::Downloading(_))) {
         return Err("cannot remove yt-dlp during an active download".into());
     }
@@ -202,7 +176,7 @@ pub(crate) fn remove(app_data: &Path) -> Result<(), String> {
         fs::remove_file(&path).map_err(|e| format!("cannot remove optional yt-dlp: {e}"))?;
     }
     lock.remove(app_data);
-    REVISION.fetch_add(1, Ordering::Relaxed);
+    STATE.revision.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 #[cfg(test)]
