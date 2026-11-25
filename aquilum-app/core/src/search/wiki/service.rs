@@ -4,21 +4,15 @@ use super::{
     backlinks, backlink_source_count, outgoing_links, plan_for_rename, resolve_many, LinkRewrite,
 };
 use crate::search::error::SearchError;
-use crate::search::paths::markdown_files;
+use crate::search::paths::{canonical_path, markdown_files};
 use crate::search::models::{Backlink, OutgoingLink, WikiLinkResolution};
-use crate::search::paths::canonical_path;
 use crate::search::service::SearchService;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
 impl SearchService {
     pub fn backlinks(&self, workspace: &str, document: &str) -> Result<Vec<Backlink>, SearchError> {
-        let (root, metadata_path) = self.index_paths(workspace)?;
-        let document = canonical_path(Path::new(document));
-        if !document.starts_with(&root) {
-            return Err(SearchError::invalid_workspace("Document is outside workspace"));
-        }
-        backlinks(&Connection::open(metadata_path)?, &root, &document)
+        self.document_links(workspace, document, backlinks)
     }
 
     pub fn backlink_counts(
@@ -42,12 +36,18 @@ impl SearchService {
         workspace: &str,
         document: &str,
     ) -> Result<Vec<OutgoingLink>, SearchError> {
+        self.document_links(workspace, document, outgoing_links)
+    }
+
+    fn document_links<T>(&self, workspace: &str, document: &str,
+        query: impl FnOnce(&Connection, &Path, &Path) -> Result<T, SearchError>,
+    ) -> Result<T, SearchError> {
         let (root, metadata_path) = self.index_paths(workspace)?;
         let document = canonical_path(Path::new(document));
         if !document.starts_with(&root) {
             return Err(SearchError::invalid_workspace("Document is outside workspace"));
         }
-        outgoing_links(&Connection::open(metadata_path)?, &root, &document)
+        query(&Connection::open(metadata_path)?, &root, &document)
     }
 
     pub fn resolve_wiki_links(

@@ -1,7 +1,7 @@
 use super::super::ast::{Clause, Column, Direction, Expr, Query, Shape, SortKey, Source};
 use super::super::duration;
 use super::super::lexer::{Piece, Symbol};
-use super::expr::{comma_separated, expression, is_keyword};
+use super::expr::{comma_separated, expression, is_keyword, left_chain};
 use super::Cursor;
 
 pub fn query(cursor: &mut Cursor<'_>) -> Result<Query, String> {
@@ -204,24 +204,16 @@ fn at_clause(cursor: &Cursor<'_>) -> bool {
         || at_every(cursor)
 }
 
+fn source_binary(op: fn(Box<Source>, Box<Source>) -> Source, left: Source, right: Source) -> Source {
+    op(Box::new(left), Box::new(right))
+}
+
 fn source_expression(cursor: &mut Cursor<'_>) -> Result<Source, String> {
-    let mut left = source_and(cursor)?;
-    loop {
-        if !cursor.take_word("or") && !cursor.take_symbol(Symbol::PipePipe) {
-            return Ok(left);
-        }
-        left = Source::Or(Box::new(left), Box::new(source_and(cursor)?));
-    }
+    left_chain(cursor, source_and, &[(Symbol::PipePipe, Some("or"), Source::Or as fn(_, _) -> _)], source_binary)
 }
 
 fn source_and(cursor: &mut Cursor<'_>) -> Result<Source, String> {
-    let mut left = source_atom(cursor)?;
-    loop {
-        if !cursor.take_word("and") && !cursor.take_symbol(Symbol::AmpAmp) {
-            return Ok(left);
-        }
-        left = Source::And(Box::new(left), Box::new(source_atom(cursor)?));
-    }
+    left_chain(cursor, source_atom, &[(Symbol::AmpAmp, Some("and"), Source::And as fn(_, _) -> _)], source_binary)
 }
 
 fn source_atom(cursor: &mut Cursor<'_>) -> Result<Source, String> {
