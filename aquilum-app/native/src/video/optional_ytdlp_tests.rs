@@ -208,3 +208,60 @@ fn shared_lifecycle_rejects_already_installed_and_reports_fetch_failure() {
         Some(&Status::Failed("synthetic failure".into())));
     assert_eq!(TOOL.revision(), 2);
 }
+
+const FIXTURE_INSTALL_HASH: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+const INSTALL_ERRORS: [&str; 3] = ["exists", "stage", "publish"];
+
+#[test]
+fn shared_install_publishes_only_verified_bytes_and_cleans_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("tools");
+    let target = root.join("fixture.exe");
+    let mut verified_after_publish = false;
+    pinned_install::install(&root, "fixture.exe", "fixture", INSTALL_ERRORS, |dest| {
+        assert!(!target.exists());
+        transfer_fixture(3, FIXTURE_INSTALL_HASH, 2).copy_checked(&mut &b"abc"[..], dest, |_| {})
+    }, |path| {
+        assert_eq!(path, target.as_path());
+        verified_after_publish = true;
+        pinned_file::verify(path, 3, FIXTURE_INSTALL_HASH, ["parent", "length", "grew", "hash", "changed"])
+    }).unwrap();
+    assert!(verified_after_publish);
+    assert_eq!(fs::read(&target).unwrap(), b"abc");
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+}
+
+#[test]
+fn shared_install_cleans_failed_transfer_without_publishing() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("tools");
+    for bytes in [&b"ab"[..], &b"abd"[..], &b"abcd"[..]] {
+        let err = pinned_install::install(&root, "fixture.exe", "fixture", INSTALL_ERRORS, |dest| {
+            transfer_fixture(3, FIXTURE_INSTALL_HASH, 2).copy_checked(&mut &bytes[..], dest, |_| {})
+        }, |_| panic!("failed transfer must not publish")).unwrap_err();
+        assert!(err == "mismatch" || err == "oversize");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn shared_install_never_overwrites_an_existing_or_racing_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("tools");
+    fs::create_dir(&root).unwrap();
+    let target = root.join("fixture.exe");
+    fs::write(&target, b"existing").unwrap();
+    assert_eq!(pinned_install::install(&root, "fixture.exe", "fixture", INSTALL_ERRORS,
+        |_| panic!("existing target must stop before transfer"),
+        |_| panic!("existing target must not be published")).unwrap_err(), "exists");
+    assert_eq!(fs::read(&target).unwrap(), b"existing");
+    fs::remove_file(&target).unwrap();
+    let err = pinned_install::install(&root, "fixture.exe", "fixture", INSTALL_ERRORS, |dest| {
+        transfer_fixture(3, FIXTURE_INSTALL_HASH, 2).copy_checked(&mut &b"abc"[..], dest, |_| {})?;
+        fs::write(&target, b"racing writer").unwrap();
+        Ok(())
+    }, |_| panic!("failed no-clobber publication must not verify")).unwrap_err();
+    assert!(err.starts_with("publish: "));
+    assert_eq!(fs::read(&target).unwrap(), b"racing writer");
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+}

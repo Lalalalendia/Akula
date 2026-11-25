@@ -1,8 +1,10 @@
 //! VIDEO-21: explicit, SHA-pinned QuickJS-NG installation for yt-dlp EJS.
 //! This is not a Video Tools bundle, updater input, or synchronized attachment.
 //! Never trust PATH, user configuration, or an arbitrary executable.
-use super::{Status, ToolState, Partial, checked_path, check_ancestors, ensure_directory, version_gate};
-use std::fs::{self, OpenOptions};
+use super::{Status, ToolState, checked_path, check_ancestors, version_gate};
+#[cfg(test)]
+use super::ensure_directory;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, atomic::Ordering};
 
@@ -57,15 +59,11 @@ pub(crate) fn status(profile: &Path) -> Status {
 fn fetch(profile: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), String> {
     version_gate::require_pinned_windows_video_runtime()?;
     let root = local_root(profile)?;
-    ensure_directory(&root)?;
-    let target = root.join(FILENAME);
-    if target.exists() {
-        return Err("QuickJS already exists; remove invalid file before reinstalling".into());
-    }
-    let stage = Partial(root.join(format!(".quickjs-{}.part", uuid::Uuid::new_v4())));
-    let dest = OpenOptions::new().write(true).create_new(true).open(&stage.0)
-        .map_err(|e| format!("cannot stage optional QuickJS: {e}"))?;
-    super::pinned_transfer::Transfer {
+    super::pinned_install::install(&root, FILENAME, "quickjs", [
+        "QuickJS already exists; remove invalid file before reinstalling",
+        "cannot stage optional QuickJS",
+        "cannot publish QuickJS without overwrite",
+    ], |dest| super::pinned_transfer::Transfer {
         url: URL, bytes: BYTES, sha256: SHA256, notice_every: 262_144,
         errors: [
             "official QuickJS download failed",
@@ -76,11 +74,7 @@ fn fetch(profile: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), Strin
             "QuickJS temporary flush failed",
             "QuickJS download size or SHA-256 mismatch; refusing install",
         ],
-    }.download(dest, |done| STATE.set_state(profile, Status::Downloading(done), wake))?;
-    fs::hard_link(&stage.0, &target)
-        .map_err(|e| format!("cannot publish QuickJS without overwrite: {e}"))?;
-    verify(&target)?;
-    Ok(())
+    }.download(dest, |done| STATE.set_state(profile, Status::Downloading(done), wake)), verify)
 }
 pub(crate) fn start(profile: PathBuf, wake: Arc<dyn Fn() + Send + Sync>) -> Result<(), String> {
     STATE.start(profile, wake, status_disk, fetch, [
