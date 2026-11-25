@@ -2,11 +2,11 @@
 //! It cannot mint a grant or authorize a file access. It only consumes a
 //! preissued challenge under the SAME currently protected owner policy.
 
-use super::trust::{AdmittedRead, RootTrust};
+use super::trust::RootTrust;
 
+mod issue;
 mod put;
 use super::NodeV1Error;
-use ring::rand::{SecureRandom, SystemRandom};
 use rusqlite::{params, Connection, Transaction, TransactionBehavior};
 use rustix::fs::{open, openat, Mode, OFlags};
 use std::fs::{self, File};
@@ -147,43 +147,6 @@ impl DurableChallengeFence {
             return Err(NodeV1Error::Hold("corrupt Node challenge clock"));
         }
         Ok(Self { db, trust })
-    }
-
-    /// Issue only after RootTrust::admit_read has authenticated the CURRENT
-    /// owner-signed roster, exact grant and live QUIC peer identity.
-    pub fn issue(&mut self, admission: &AdmittedRead) -> Result<[u8; 32], NodeV1Error> {
-        self.trust.require_current()?;
-        if admission.policy_digest() != self.trust.policy_digest() {
-            return Err(NodeV1Error::Hold("owner policy changed before challenge"));
-        }
-        let now = unix_now()?;
-        let expires = now.checked_add(LIFE_SECONDS)
-            .ok_or(NodeV1Error::Hold("invalid challenge expiry"))?;
-        let mut nonce = [0u8; 32];
-        SystemRandom::new().fill(&mut nonce)
-            .map_err(|_| NodeV1Error::Hold("challenge entropy unavailable"))?;
-        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        guarded_clock(&tx, now)?;
-        tx.execute("DELETE FROM issued WHERE expires_at < ?1", params![now])?;
-        tx.execute("DELETE FROM put_issued WHERE expires_at < ?1", params![now])?;
-        let pending: i64 = tx.query_row(
-            "SELECT (SELECT COUNT(*) FROM issued) + (SELECT COUNT(*) FROM put_issued)",
-            [], |row| row.get(0),
-        )?;
-        if pending >= MAX_PENDING {
-            return Err(NodeV1Error::Hold("Node challenge quota exhausted"));
-        }
-        tx.execute(
-            "INSERT INTO issued(challenge,peer,grant_digest,policy_digest,expires_at)
-             VALUES (?1,?2,?3,?4,?5)",
-            params![
-                nonce.as_slice(), admission.peer().as_slice(),
-                admission.grant_digest().as_slice(),
-                admission.policy_digest().as_slice(), expires
-            ],
-        )?;
-        tx.commit()?;
-        Ok(nonce)
     }
 
     /// Atomically consumes exactly one previously issued tuple. Absent,
