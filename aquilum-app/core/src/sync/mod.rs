@@ -22,11 +22,13 @@ pub(crate) mod host_install_witness;
 mod host_install_unix_root;
 #[cfg(all(test, feature = "host-custody"))]
 mod host_core_epoch_tests;
+#[cfg(all(test, feature = "host-custody-transition-lab"))]
+mod host_core_transition_startup_qa;
 pub(crate) mod guarded_note_write;
 #[cfg(feature = "sync-s3")]
 pub(crate) mod guarded_editor;
 #[cfg(test)]
-mod cooperative_gate_tests;
+mod cooperative_gate_tests; #[cfg(test)] mod workspace_transition_lease_qa;
 pub(crate) mod filegate_lock_probe;
 pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::{PinnedFileIdentity, PinnedReadOnlyRoot};
