@@ -5,7 +5,6 @@ use aquilum_core::Core;
 use aquilum_core::files::gate;
 use aquilum_core::history::Source;
 use masonry::app::RenderRoot;
-use masonry::kurbo::Point;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -215,8 +214,7 @@ impl App {
             "Закрыть",
             "Понятно",
         );
-        root.add_layer(modal, Point::ORIGIN);
-        root.focus_on(Some(dialog.layer));
+        crate::app::ui_actions::mount_modal(root, modal, dialog.layer);
         self.popup = Some(Popup::PdfNotice { dialog });
     }
 
@@ -229,8 +227,7 @@ impl App {
             "Отмена",
             "Извлечь текст",
         );
-        root.add_layer(modal, Point::ORIGIN);
-        root.focus_on(Some(dialog.layer));
+        crate::app::ui_actions::mount_modal(root, modal, dialog.layer);
         self.popup = Some(Popup::PdfImport { dialog, source });
     }
 

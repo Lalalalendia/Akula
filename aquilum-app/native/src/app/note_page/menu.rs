@@ -45,9 +45,7 @@ impl App {
         let (w, h) = (self.window.width, self.window.height);
         let x = if at.x + ACTIONS_MENU_WIDTH > w { (w - ACTIONS_MENU_WIDTH - MENU_MARGIN).max(MENU_MARGIN) } else { at.x };
         let y = if at.y + estimate.height > h { (at.y - estimate.height).max(MENU_MARGIN) } else { at.y };
-        let layer = menu.id();
-        root.add_layer(menu, Point::new(x, y));
-        root.focus_on(Some(layer));
+        let layer = crate::app::ui_actions::mount_menu(root, menu, Point::new(x, y), None);
         self.popup = Some(Popup::NoteActionsMenu { layer });
     }
 

@@ -11,7 +11,6 @@ use aquilum_core::search::models::{SearchIndexStatus, SearchResult};
 use masonry::accesskit::Role;
 use masonry::app::RenderRoot;
 use masonry::core::{NewWidget, WidgetId};
-use masonry::kurbo::Point;
 use masonry::widgets::Flex;
 
 use super::{App, Popup};
@@ -94,9 +93,7 @@ impl App {
         let body_handle = Handle::of(&body);
         let card = search::dialog_card(search_box.widget, body, search::footer());
         let layer = Modal::new(card, &t("search.title"), CardSize::Window(search::card_size), Role::Dialog, false);
-        let layer_id = layer.id();
-        root.add_layer(layer, Point::ORIGIN);
-        root.focus_on(Some(search_box.field.id()));
+        let layer_id = super::ui_actions::mount_modal(root, layer, search_box.field.id());
         let status = self.tree.root().map(|w| self.workspace.core.search.status(Some(&w.to_string_lossy())));
         self.popup = Some(Popup::Search(SearchState {
             layer: layer_id,
@@ -119,10 +116,7 @@ impl App {
 
     fn close_search(&mut self, root: &mut RenderRoot) {
         if let Some(Popup::Search(state)) = self.popup.take() {
-            crate::ui::dialog::close(root, state.layer);
-            if let Some(ids) = &self.note_ids {
-                root.focus_on(Some(ids.body.id()));
-            }
+            self.close_picker(root, state.layer);
         }
     }
 }

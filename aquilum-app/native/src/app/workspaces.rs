@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
-use masonry::kurbo::Point;
 use uuid::Uuid;
 
 use super::{App, Outcome, Popup};
@@ -72,8 +71,7 @@ impl App {
             }
         };
         let (layer, dialog) = workspaces::dialog(&known, self.tree.root(), error.as_deref());
-        root.add_layer(layer, Point::ORIGIN);
-        root.focus_on(Some(dialog.layer));
+        crate::app::ui_actions::mount_modal(root, layer, dialog.layer);
         self.popup = Some(Popup::Workspaces(WorkspacesState { dialog, forget: None }));
     }
 
