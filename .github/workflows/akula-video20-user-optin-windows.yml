@@ -5,6 +5,7 @@ on:
     paths:
       - 'aquilum-app/native/src/video/optional_ytdlp.rs'
       - 'aquilum-app/native/src/video/optional_quickjs.rs'
+      - 'aquilum-app/native/src/video/optional_tool_verify.rs'
       - 'aquilum-app/native/src/video/optional_ytdlp_tests.rs'
       - 'aquilum-app/native/src/video/optional_quickjs_tests.rs'
       - 'aquilum-app/native/src/video/download_video21_tests.rs'

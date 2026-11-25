@@ -3,7 +3,7 @@
 //! Never trust PATH, user configuration, or an arbitrary executable.
 use super::{Status, Partial, checked_path, check_ancestors, ensure_directory, version_gate};
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicU64, Ordering}};
@@ -37,31 +37,13 @@ fn executable(profile: &Path) -> Result<PathBuf, String> {
     Ok(local_root(profile)?.join(FILENAME))
 }
 fn verify(path: &Path) -> Result<(), String> {
-    check_ancestors(path.parent().ok_or("QuickJS executable lacks parent")?)?;
-    checked_path(path, false)?;
-    let mut file = File::open(path).map_err(|e| e.to_string())?;
-    if file.metadata().map_err(|e| e.to_string())?.len() != BYTES {
-        return Err("QuickJS size differs from pinned official executable".into());
-    }
-    let mut hash = Sha256::new();
-    let mut count = 0u64;
-    let mut buffer = [0u8; 65_536];
-    loop {
-        let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
-        if n == 0 { break; }
-        count += n as u64;
-        if count > BYTES { return Err("QuickJS executable grew while verifying".into()); }
-        hash.update(&buffer[..n]);
-    }
-    let digest = hash.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>();
-    if count != BYTES || digest != SHA256 {
-        return Err("QuickJS SHA-256 does not match pinned upstream release".into());
-    }
-    checked_path(path, false)?;
-    if file.metadata().map_err(|e| e.to_string())?.len() != BYTES {
-        return Err("QuickJS size changed while verifying".into());
-    }
-    Ok(())
+    super::pinned_file::verify(path, BYTES, SHA256, [
+        "QuickJS executable lacks parent",
+        "QuickJS size differs from pinned official executable",
+        "QuickJS executable grew while verifying",
+        "QuickJS SHA-256 does not match pinned upstream release",
+        "QuickJS size changed while verifying",
+    ])
 }
 pub(crate) fn verified_executable(profile: &Path) -> Result<PathBuf, String> {
     let path = executable(profile)?;

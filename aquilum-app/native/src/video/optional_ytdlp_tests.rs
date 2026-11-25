@@ -1,4 +1,5 @@
 use super::*;
+use std::fs::File;
 #[test]
 fn official_release_pin_is_fixed_and_distinct_from_user_paths() {
     assert_eq!(VERSION, "2026.10.26");
