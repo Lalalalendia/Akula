@@ -44,13 +44,13 @@ impl Press {
 
 // Shared by ItemButton, LinkButton, TextButton and Chip. The action and
 // invalidation contracts stay identical; each widget owns its appearance.
-pub(super) fn submit_pointer(press: &mut Press, ctx: &mut EventCtx<'_>, event: &PointerEvent) {
+pub(in crate::ui) fn submit_pointer(press: &mut Press, ctx: &mut EventCtx<'_>, event: &PointerEvent) {
     if press.pointer(ctx, event) {
         ctx.submit_action::<Pressed>(Pressed);
     }
 }
 
-pub(super) fn submit_access(ctx: &mut EventCtx<'_>, event: &AccessEvent) {
+pub(in crate::ui) fn submit_access(ctx: &mut EventCtx<'_>, event: &AccessEvent) {
     if event.action == Action::Click {
         ctx.submit_action::<Pressed>(Pressed);
     }
@@ -69,4 +69,4 @@ pub(in crate::ui) fn update_button_line(line: &mut text::Line, ctx: &mut UpdateC
 
 #[cfg(test)]
 #[path = "press_tests.rs"]
-mod tests;
+pub(in crate::ui) mod tests;

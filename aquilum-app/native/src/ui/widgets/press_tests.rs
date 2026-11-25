@@ -17,7 +17,7 @@ use crate::ui::widgets::{Chip, IconButton, ItemButton, LinkButton, TextButton, V
 
 const LABEL: &str = "Reuse event fixture";
 
-fn check_button(widget: NewWidget<impl Widget + ?Sized>) {
+pub(in crate::ui) fn check_button(widget: NewWidget<impl Widget + ?Sized>, label: &str, size: PhysicalSize<u32>) {
     let _theme = theme::test_lock();
     let signals: Rc<RefCell<Vec<RenderRootSignal>>> = Rc::default();
     let sink = signals.clone();
@@ -25,7 +25,7 @@ fn check_button(widget: NewWidget<impl Widget + ?Sized>) {
         default_properties: Arc::new(theme::default_properties()),
         use_system_fonts: true,
         size_policy: WindowSizePolicy::User,
-        size: PhysicalSize::new(400, 60),
+        size,
         scale_factor: 1.0,
         test_font: None,
     };
@@ -35,7 +35,7 @@ fn check_button(widget: NewWidget<impl Widget + ?Sized>) {
     let (_, update) = root.redraw();
     let tree = update.expect("button must publish an accessibility tree");
     let (id, node) = tree.nodes.iter().find(|(_, node)| {
-        node.role() == Role::Button && node.label() == Some(LABEL)
+        node.role() == Role::Button && node.label() == Some(label)
     }).expect("button must keep its own accessible name and role");
     assert!(node.supports_action(Action::Click));
     let actions = || {
@@ -92,25 +92,25 @@ fn check_button(widget: NewWidget<impl Widget + ?Sized>) {
 
 #[test]
 fn item_button_click_and_accessibility_contract() {
-    check_button(NewWidget::new(ItemButton::new(icons::X, LABEL)).erased());
+    check_button(NewWidget::new(ItemButton::new(icons::X, LABEL)).erased(), LABEL, PhysicalSize::new(400, 60));
 }
 
 #[test]
 fn link_button_click_and_accessibility_contract() {
-    check_button(LinkButton::new(LABEL).erased());
+    check_button(LinkButton::new(LABEL).erased(), LABEL, PhysicalSize::new(400, 60));
 }
 
 #[test]
 fn text_button_click_and_accessibility_contract() {
-    check_button(NewWidget::new(TextButton::new(LABEL, Variant::Primary)).erased());
+    check_button(NewWidget::new(TextButton::new(LABEL, Variant::Primary)).erased(), LABEL, PhysicalSize::new(400, 60));
 }
 
 #[test]
 fn chip_click_and_accessibility_contract() {
-    check_button(Chip::new(LABEL, true).erased());
+    check_button(Chip::new(LABEL, true).erased(), LABEL, PhysicalSize::new(400, 60));
 }
 
 #[test]
 fn icon_button_click_and_accessibility_contract() {
-    check_button(NewWidget::new(IconButton::new(icons::X, LABEL)).erased());
+    check_button(NewWidget::new(IconButton::new(icons::X, LABEL)).erased(), LABEL, PhysicalSize::new(400, 60));
 }
