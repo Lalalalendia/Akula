@@ -13,7 +13,7 @@ use masonry::dpi::{PhysicalPosition, PhysicalSize};
 
 use crate::ui::icons;
 use crate::ui::theme;
-use crate::ui::widgets::{Chip, ItemButton, LinkButton, TextButton, Variant};
+use crate::ui::widgets::{Chip, IconButton, ItemButton, LinkButton, TextButton, Variant};
 
 const LABEL: &str = "Reuse event fixture";
 
@@ -108,4 +108,9 @@ fn text_button_click_and_accessibility_contract() {
 #[test]
 fn chip_click_and_accessibility_contract() {
     check_button(Chip::new(LABEL, true).erased());
+}
+
+#[test]
+fn icon_button_click_and_accessibility_contract() {
+    check_button(NewWidget::new(IconButton::new(icons::X, LABEL)).erased());
 }

@@ -25,5 +25,5 @@ pub use layout::*;
 pub use sash::{Edge, Edged, Sash, SashAction};
 pub use visible::Visible;
 
-mod press;
+pub(super) mod press;
 pub use press::{Press, Pressed};
