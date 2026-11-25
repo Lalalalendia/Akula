@@ -1,7 +1,7 @@
 use super::super::ast::{Clause, Column, Direction, Expr, Query, Shape, SortKey, Source};
 use super::super::duration;
 use super::super::lexer::{Piece, Symbol};
-use super::expr::{expression, is_keyword};
+use super::expr::{comma_separated, expression, is_keyword};
 use super::Cursor;
 
 pub fn query(cursor: &mut Cursor<'_>) -> Result<Query, String> {
@@ -130,16 +130,10 @@ fn without_id(cursor: &mut Cursor<'_>) -> Result<bool, String> {
 }
 
 fn columns(cursor: &mut Cursor<'_>) -> Result<Vec<Column>, String> {
-    let mut found = Vec::new();
     if at_clause(cursor) {
-        return Ok(found);
+        return Ok(Vec::new());
     }
-    loop {
-        found.push(column(cursor)?);
-        if !cursor.take_symbol(Symbol::Comma) {
-            return Ok(found);
-        }
-    }
+    comma_separated(cursor, column)
 }
 
 fn column(cursor: &mut Cursor<'_>) -> Result<Column, String> {
@@ -184,8 +178,7 @@ fn is_name_symbol(symbol: char) -> bool {
 }
 
 fn sort_keys(cursor: &mut Cursor<'_>) -> Result<Vec<SortKey>, String> {
-    let mut keys = Vec::new();
-    loop {
+    comma_separated(cursor, |cursor| {
         let value = expression(cursor)?;
         let direction = if cursor.take_word("desc") {
             Direction::Descending
@@ -193,11 +186,8 @@ fn sort_keys(cursor: &mut Cursor<'_>) -> Result<Vec<SortKey>, String> {
             cursor.take_word("asc");
             Direction::Ascending
         };
-        keys.push(SortKey { value, direction });
-        if !cursor.take_symbol(Symbol::Comma) {
-            return Ok(keys);
-        }
-    }
+        Ok(SortKey { value, direction })
+    })
 }
 
 fn limit(cursor: &mut Cursor<'_>) -> Result<usize, String> {

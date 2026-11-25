@@ -111,6 +111,23 @@ fn postfix_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
     }
 }
 
+// Parse a nonempty comma-separated sequence; callers decide when empty is legal.
+pub(super) fn comma_separated<T>(
+    cursor: &mut Cursor<'_>, mut item: impl FnMut(&mut Cursor<'_>) -> Result<T, String>,
+) -> Result<Vec<T>, String> {
+    let mut items = vec![item(cursor)?];
+    while cursor.take_symbol(Symbol::Comma) {
+        items.push(item(cursor)?);
+    }
+    Ok(items)
+}
+
+fn delimited_expressions(cursor: &mut Cursor<'_>, end: Symbol, expected: &str) -> Result<Vec<Expr>, String> {
+    let items = if cursor.at_symbol(end) { Vec::new() } else { comma_separated(cursor, expression)? };
+    cursor.expect_symbol(end, expected)?;
+    Ok(items)
+}
+
 fn primary(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
     if let Some(lambda) = lambda(cursor)? {
         return Ok(lambda);
@@ -121,16 +138,7 @@ fn primary(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
         return Ok(inner);
     }
     if cursor.take_symbol(Symbol::OpenBracket) {
-        let mut items = Vec::new();
-        if !cursor.at_symbol(Symbol::CloseBracket) {
-            loop {
-                items.push(expression(cursor)?);
-                if !cursor.take_symbol(Symbol::Comma) {
-                    break;
-                }
-            }
-        }
-        cursor.expect_symbol(Symbol::CloseBracket, "закрывающая «]»")?;
+        let items = delimited_expressions(cursor, Symbol::CloseBracket, "закрывающая «]»")?;
         return Ok(Expr::Call {
             name: "list".to_owned(),
             arguments: items,
@@ -165,16 +173,7 @@ fn primary(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
                 });
             }
             if cursor.take_symbol(Symbol::OpenParen) {
-                let mut arguments = Vec::new();
-                if !cursor.at_symbol(Symbol::CloseParen) {
-                    loop {
-                        arguments.push(expression(cursor)?);
-                        if !cursor.take_symbol(Symbol::Comma) {
-                            break;
-                        }
-                    }
-                }
-                cursor.expect_symbol(Symbol::CloseParen, "закрывающая «)»")?;
+                let arguments = delimited_expressions(cursor, Symbol::CloseParen, "закрывающая «)»")?;
                 return Ok(Expr::Call {
                     name: word.to_lowercase(),
                     arguments,
