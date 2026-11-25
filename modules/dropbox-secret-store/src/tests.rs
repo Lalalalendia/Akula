@@ -1,6 +1,6 @@
 use super::*;
 use std::{collections::HashMap, sync::Mutex};
-
+#[path = "tests/readback.rs"] mod readback;
 #[derive(Default)]
 struct MemoryBackend {
     entries: Mutex<HashMap<String, Zeroizing<String>>>,
