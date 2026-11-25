@@ -175,15 +175,11 @@ impl Widget for ProviderTile {
     type Action = Pressed;
 
     fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        if self.press.pointer(ctx, event) {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
+        crate::ui::widgets::press::submit_pointer(&mut self.press, ctx, event);
     }
 
     fn on_access_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &AccessEvent) {
-        if event.action == AccessAction::Click {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
+        crate::ui::widgets::press::submit_access(ctx, event);
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {

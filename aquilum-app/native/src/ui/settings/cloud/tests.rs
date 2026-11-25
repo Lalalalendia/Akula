@@ -106,3 +106,13 @@ fn switching_dropbox_account_discards_staged_vault_pin() {
     assert_eq!(popup.dropbox_identity.0, "dbid:bob");
     assert_eq!(popup.dropbox_identity.1, "456");
 }
+
+#[test]
+fn provider_tile_click_and_accessibility_contract() {
+    use crate::ui::widgets::press::tests::check_button;
+    let provider = CloudProvider::Yandex;
+    let health = Health::NotConnected;
+    let label = format!("{} — {}", provider.label(), health.label());
+    check_button(NewWidget::new(ProviderTile::new(provider, health)).erased(),
+        &label, masonry::dpi::PhysicalSize::new(TILE_WIDTH as u32, TILE_HEIGHT as u32));
+}
