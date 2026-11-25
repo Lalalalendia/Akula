@@ -216,6 +216,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "akula-server-staging-b1b0"
+version = "0.1.0"
+dependencies = [
+ "akula-server-release-b1a",
+ "blake3",
+ "ring",
+ "rustix 0.38.44",
+ "serde",
+]
+
+[[package]]
 name = "akula-text-delta-codec"
 version = "0.1.0"
 dependencies = [
@@ -357,6 +368,7 @@ dependencies = [
  "akula-node-catalog",
  "akula-server-bootstrap-b0",
  "akula-server-release-b1a",
+ "akula-server-staging-b1b0",
  "akula-text-delta-codec",
  "atomic-write-file",
  "aws-config",
