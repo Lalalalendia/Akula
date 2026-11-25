@@ -1,9 +1,11 @@
 import hashlib
+import io
 import json
 import importlib.util
 from pathlib import Path
 import subprocess
 import tempfile
+import tarfile
 import unittest
 from unittest import mock
 
@@ -250,6 +252,65 @@ class AuditTests(unittest.TestCase):
                                  ["docker", "rm", "-f", cmd[cmd.index("--name") + 1]])
                 status = json.loads((root / "status.jsonl").read_text())
                 self.assertEqual((status["mode"], status["exit"]), ("near", expected))
+
+
+    def test_tool_archive_digest_is_checked_before_extraction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            def download(cmd, **kwargs):
+                self.assertEqual(cmd[0], "curl")
+                self.assertIn(audit.TOOL_URL, cmd)
+                self.assertTrue(kwargs["check"])
+                Path(cmd[cmd.index("-o") + 1]).write_bytes(b"invalid archive")
+                return subprocess.CompletedProcess(cmd, 0)
+            with mock.patch.object(audit.subprocess, "run", side_effect=download):
+                with self.assertRaisesRegex(ValueError, "archive SHA-256 mismatch"):
+                    audit.install_tool(root)
+            self.assertFalse((root / "bin").exists())
+
+    def test_tool_archive_extracts_only_single_nonempty_regular_analyzer(self):
+        # Synthetic archives only: the checksum override is local to this fixture.
+        def archive_bytes(entries):
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+                for name, data in entries:
+                    member = tarfile.TarInfo(name)
+                    if data is None:
+                        member.type = tarfile.SYMTYPE
+                        member.linkname = "../outside"
+                        tar.addfile(member)
+                    else:
+                        member.size = len(data)
+                        tar.addfile(member, io.BytesIO(data))
+            return buffer.getvalue()
+
+        for entries, valid in (
+            ([("package/doppelscan", b"fixture"), ("../outside", b"ignore"),
+              ("link/doppelscan", None), ("package/README", b"ignore")], True),
+            ([("a/doppelscan", b"one"), ("b/doppelscan", b"two")], False),
+            ([("package/doppelscan", b"")], False),
+            ([("package/doppelscan", None)], False),
+            ([("package/README", b"no analyzer")], False),
+        ):
+            with self.subTest(entries=entries), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                payload = archive_bytes(entries)
+                def download(cmd, **kwargs):
+                    Path(cmd[cmd.index("-o") + 1]).write_bytes(payload)
+                    return subprocess.CompletedProcess(cmd, 0)
+                with mock.patch.object(audit, "TOOL_SHA256", hashlib.sha256(payload).hexdigest()), \
+                     mock.patch.object(audit.subprocess, "run", side_effect=download):
+                    if valid:
+                        directory = audit.install_tool(root)
+                        self.assertEqual(directory, root / "bin")
+                        self.assertEqual([p.name for p in directory.iterdir()], ["doppelscan"])
+                        self.assertEqual((directory / "doppelscan").read_bytes(), b"fixture")
+                        self.assertEqual((directory / "doppelscan").stat().st_mode & 0o777, 0o755)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "unexpected analyzer archive"):
+                            audit.install_tool(root)
+                        self.assertFalse((root / "bin" / "doppelscan").exists())
+                self.assertFalse((root / "outside").exists())
 
 
 if __name__ == "__main__":
