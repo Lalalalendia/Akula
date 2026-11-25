@@ -3,10 +3,9 @@
 //! The Akula installer does not bundle yt-dlp, and this code never updates
 //! the Akula updater or authorizes the old 3-EXE Video Tools package.
 //! Download only after a Settings confirmation; no PATH/env executable input.
-use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicU64, Ordering}};
+use std::sync::{Arc, atomic::Ordering};
 
 pub(crate) const VERSION: &str = "2026.10.26";
 pub(crate) const BYTES: u64 = 23_575_744;
@@ -17,6 +16,8 @@ pub(super) const URL: &str =
 const FILENAME: &str = "yt-dlp-2026.10.26.exe";
 #[path = "optional_tool_verify.rs"] mod pinned_file;
 #[path = "optional_tool_transfer.rs"] mod pinned_transfer;
+#[path = "optional_tool_state.rs"] mod tool_state;
+use tool_state::ToolState;
 #[path = "light_windows_version.rs"]
 mod version_gate; #[path = "optional_quickjs.rs"] pub(crate) mod quickjs;
 
@@ -28,58 +29,6 @@ pub(crate) enum Status {
     Invalid,
     Failed(String),
 }
-// Each optional tool owns its own state and revision. Never share a map
-// between yt-dlp and QuickJS, even for the same local profile.
-struct ToolState {
-    states: OnceLock<Mutex<HashMap<PathBuf, Status>>>,
-    revision: AtomicU64,
-}
-
-impl ToolState {
-    const fn new() -> Self {
-        Self { states: OnceLock::new(), revision: AtomicU64::new(0) }
-    }
-
-    fn states(&self) -> &Mutex<HashMap<PathBuf, Status>> {
-        self.states.get_or_init(|| Mutex::new(HashMap::new()))
-    }
-
-    fn revision(&self) -> u64 { self.revision.load(Ordering::Relaxed) }
-
-    fn set_state(&self, key: &Path, state: Status, wake: &Arc<dyn Fn() + Send + Sync>) {
-        self.states().lock().unwrap_or_else(|e| e.into_inner()).insert(key.to_path_buf(), state);
-        self.revision.fetch_add(1, Ordering::Relaxed);
-        wake();
-    }
-
-    fn start(&'static self, profile: PathBuf, wake: Arc<dyn Fn() + Send + Sync>,
-        status_disk: fn(&Path) -> Status,
-        fetch: impl FnOnce(&Path, &Arc<dyn Fn() + Send + Sync>) -> Result<(), String> + Send + 'static,
-        [busy, installed]: [&str; 2],
-    ) -> Result<(), String> {
-        {
-            let mut lock = self.states().lock().unwrap_or_else(|e| e.into_inner());
-            if matches!(lock.get(&profile), Some(Status::Downloading(_))) {
-                return Err(busy.into());
-            }
-            if matches!(status_disk(&profile), Status::Installed) {
-                return Err(installed.into());
-            }
-            lock.insert(profile.clone(), Status::Downloading(0));
-        }
-        self.revision.fetch_add(1, Ordering::Relaxed);
-        wake();
-        std::thread::spawn(move || {
-            let next = match fetch(&profile, &wake) {
-                Ok(()) => Status::Installed,
-                Err(reason) => Status::Failed(reason),
-            };
-            self.set_state(&profile, next, &wake);
-        });
-        Ok(())
-    }
-}
-
 static STATE: ToolState = ToolState::new();
 pub(crate) fn revision() -> u64 { STATE.revision() }
 
