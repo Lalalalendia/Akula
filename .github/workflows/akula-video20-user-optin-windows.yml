@@ -5,6 +5,8 @@ on:
     paths:
       - 'aquilum-app/native/src/video/optional_ytdlp.rs'
       - 'aquilum-app/native/src/video/optional_quickjs.rs'
+      - 'aquilum-app/native/src/video/optional_ytdlp_tests.rs'
+      - 'aquilum-app/native/src/video/optional_quickjs_tests.rs'
       - 'aquilum-app/native/src/video/download_video21_tests.rs'
       - 'scripts/windows-video20-settings-uia.ps1'
       - '.github/workflows/akula-video20-user-optin-windows.yml'
