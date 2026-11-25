@@ -6,6 +6,7 @@ on:
       - 'modules/dropbox-t0/**'
       - 'modules/dropbox-auth-lab/**'
       - 'modules/dropbox-secret-store/**'
+      - 'modules/secret-store-common/src/native_backend.rs'
       - 'modules/dropbox-connect-lab/**'
       - '.github/workflows/dropbox-t0-isolated.yml'
   workflow_dispatch:

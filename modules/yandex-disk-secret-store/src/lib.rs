@@ -160,46 +160,10 @@ impl YandexCredentialVault {
 }
 
 #[cfg(feature = "system-store")]
-struct NativeBackend {
-    /// Serialize accesses inside one application instance (Windows does
-    /// not guarantee ordering for writes to one credential).
-    operations: std::sync::Mutex<()>,
-}
-
+#[path = "../../secret-store-common/src/native_backend.rs"]
+mod native_backend;
 #[cfg(feature = "system-store")]
-impl NativeBackend {
-    fn new() -> Self { Self { operations: std::sync::Mutex::new(()) } }
-
-    fn entry(&self, username: &str) -> Result<keyring::Entry, SecretError> {
-        keyring::Entry::new(SERVICE, username).map_err(|_| SecretError::StoreUnavailable)
-    }
-}
-
-#[cfg(feature = "system-store")]
-impl Backend for NativeBackend {
-    fn put(&self, username: &str, token: &str) -> Result<(), SecretError> {
-        let _lock = self.operations.lock().map_err(|_| SecretError::StoreFailure)?;
-        self.entry(username)?.set_password(token)
-            .map_err(|_| SecretError::StoreFailure)
-    }
-
-    fn get(&self, username: &str) -> Result<Option<Zeroizing<String>>, SecretError> {
-        let _lock = self.operations.lock().map_err(|_| SecretError::StoreFailure)?;
-        match self.entry(username)?.get_password() {
-            Ok(value) => Ok(Some(Zeroizing::new(value))),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => Err(SecretError::StoreFailure),
-        }
-    }
-
-    fn delete(&self, username: &str) -> Result<(), SecretError> {
-        let _lock = self.operations.lock().map_err(|_| SecretError::StoreFailure)?;
-        match self.entry(username)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err(SecretError::StoreFailure),
-        }
-    }
-}
+use native_backend::NativeBackend;
 
 mod lifecycle;
 pub use lifecycle::StoredRefreshPresence;
