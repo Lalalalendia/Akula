@@ -1,10 +1,11 @@
 //! An account-only OS credential scope; never confused with a Vault token.
 //! This is deliberately independent of the signed Vault/file-sync authority.
 
-use crate::{RefreshToken, SecretError};
+use crate::{validation::valid_label, RefreshToken, SecretError};
 use sha2::{Digest, Sha256};
 use std::fmt;
-use subtle::ConstantTimeEq;
+#[cfg(feature = "system-store")]
+use crate::validation::matches_readback;
 use zeroize::Zeroizing;
 
 const SERVICE: &str = "org.akula.dropbox.account-readonly.v1";
@@ -24,11 +25,7 @@ impl AccountCredentialScope {
         let Some(suffix) = account.strip_prefix("dbid:") else {
             return Err(SecretError::InvalidScope);
         };
-        let label = |s: &str, max: usize| {
-            !s.is_empty() && s.len() <= max && s.bytes().all(|b|
-                b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-        };
-        if !label(app, 128) || !label(suffix, 128)
+        if !valid_label(app, 128) || !valid_label(suffix, 128)
             || root.is_empty() || root.len() > 32
             || !root.bytes().all(|b| b.is_ascii_digit())
         {
@@ -82,9 +79,7 @@ impl AccountCredentialStore {
             entry.set_password(token.as_str()).map_err(|_| SecretError::StoreFailure)?;
             let readback = Zeroizing::new(
                 entry.get_password().map_err(|_| SecretError::VerificationFailed)?);
-            let a = token.as_str().as_bytes();
-            let b = readback.as_bytes();
-            if a.len() != b.len() || !bool::from(a.ct_eq(b)) {
+            if !matches_readback(token.as_str().as_bytes(), readback.as_bytes()) {
                 return Err(SecretError::VerificationFailed);
             }
             Ok(())

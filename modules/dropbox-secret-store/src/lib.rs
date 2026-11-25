@@ -6,7 +6,6 @@
 
 pub mod account; use sha2::{Digest, Sha256};
 use std::fmt;
-use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 const SERVICE: &str = "org.akula.dropbox.readonly.v1";
@@ -26,18 +25,9 @@ pub enum SecretError {
     VerificationFailed,
 }
 
-fn valid_uuid(raw: &str) -> bool {
-    let b = raw.as_bytes();
-    b.len() == 36 && b.iter().enumerate().all(|(i, ch)| {
-        if [8, 13, 18, 23].contains(&i) { *ch == b'-' }
-        else { ch.is_ascii_digit() || (b'a'..=b'f').contains(ch) }
-    })
-}
-
-fn valid_label(label: &str, max: usize) -> bool {
-    !label.is_empty() && label.len() <= max &&
-        label.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
-}
+#[path = "../../secret-store-common/src/validation.rs"]
+mod validation;
+use validation::{matches_readback, valid_label, valid_token, valid_uuid};
 
 /// The identity of a read-only credential in one Akula Vault Sync profile.
 /// The Dropbox OAuth app key is REQUIRED: different App Folder applications
@@ -96,8 +86,7 @@ impl RefreshToken {
         Self::from_protected(Zeroizing::new(text))
     }
     fn from_protected(text: Zeroizing<String>) -> Result<Self, SecretError> {
-        if text.is_empty() || text.len() > MAX_TOKEN_BYTES ||
-            !text.bytes().all(|b| b.is_ascii_graphic())
+        if !valid_token(&text, MAX_TOKEN_BYTES)
         { return Err(SecretError::InvalidToken); }
         Ok(Self(text))
     }
@@ -143,9 +132,7 @@ impl CredentialVault {
         self.backend.put(scope.username(), token.as_str())?;
         let returned = self.backend.get(scope.username())?
             .ok_or(SecretError::VerificationFailed)?;
-        let b = returned.as_bytes();
-        let a = token.as_str().as_bytes();
-        if a.len() != b.len() || !bool::from(a.ct_eq(b)) {
+        if !matches_readback(token.as_str().as_bytes(), returned.as_bytes()) {
             return Err(SecretError::VerificationFailed);
         }
         Ok(())
