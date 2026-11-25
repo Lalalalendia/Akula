@@ -889,3 +889,48 @@ fn repeating_operator_levels_preserve_syntax_failures_and_clause_boundary() {
         "Лишнее в запросе после разбора: «<»");
     eprintln!("AKULA_REUSE15_DATAVIEW_BOUNDARY_PASS");
 }
+
+#[test]
+fn comma_lists_preserve_empty_nested_calls_columns_and_sort_keys() {
+    use super::ast::{Clause, Direction, Expr, Shape, SortKey};
+    use super::value::Value;
+    let parsed = parse("TABLE WITHOUT ID list(), [], LIST(1, 2), [a, f(b, c)], f([a, b], g(), dur(1 week)) AS nested SORT a DESC, b ASC LIMIT 2").unwrap();
+    let Shape::Table { columns, show_path: false } = parsed.shape else { panic!("expected table") };
+    let call = |name: &str, arguments: Vec<Expr>| Expr::Call { name: name.to_owned(), arguments };
+    let var = |name: &str| Expr::Variable(name.to_owned());
+    let num = |n| Expr::Literal(Value::Number(n));
+    assert_eq!(columns.len(), 5);
+    assert_eq!(columns[0].value, call("list", vec![]));
+    assert_eq!(columns[1].value, columns[0].value);
+    assert_eq!(columns[2].value, call("list", vec![num(1.0), num(2.0)]));
+    assert_eq!(columns[3].value, call("list", vec![var("a"), call("f", vec![var("b"), var("c")])]));
+    assert_eq!(columns[4].value, call("f", vec![
+        call("list", vec![var("a"), var("b")]), call("g", vec![]),
+        call("dur", vec![Expr::Literal(Value::Text("1 week".to_owned()))]),
+    ]));
+    assert_eq!(columns[4].title, "nested");
+    assert_eq!(parsed.clauses, vec![Clause::Sort(vec![
+        SortKey { value: var("a"), direction: Direction::Descending },
+        SortKey { value: var("b"), direction: Direction::Ascending },
+    ]), Clause::Limit(2)]);
+    let empty = parse("TABLE WITHOUT ID LIMIT 2").unwrap();
+    assert!(matches!(empty.shape, Shape::Table { columns, show_path: false } if columns.is_empty()));
+    eprintln!("AKULA_REUSE16_DATAVIEW_LISTS_PASS");
+}
+
+#[test]
+fn comma_lists_preserve_delimiter_errors_and_required_items() {
+    for (source, error) in [
+        ("f(a,)", "Здесь ожидается значение, а не «)»"),
+        ("[a,]", "Здесь ожидается значение, а не «]»"),
+        ("f(a", "Запрос кончился, а ожидается закрывающая «)»"),
+        ("[a", "Запрос кончился, а ожидается закрывающая «]»"),
+        ("f(a b)", "Ожидается закрывающая «)», а не «b»"),
+        ("a,", "Запрос кончился там, где ожидается значение"),
+        ("a SORT a,", "Запрос кончился там, где ожидается значение"),
+        ("a SORT", "Запрос кончился там, где ожидается значение"),
+    ] {
+        assert_eq!(parse(&format!("TABLE WITHOUT ID {source}")).unwrap_err(), error, "{source}");
+    }
+    eprintln!("AKULA_REUSE16_DATAVIEW_DELIMITERS_PASS");
+}
