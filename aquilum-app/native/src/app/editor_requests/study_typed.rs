@@ -10,6 +10,7 @@ use masonry::kurbo::Point;
 
 use super::super::{App, Popup};
 use super::study_load::StudyDeckSnapshot;
+use super::study::{bounded_text, feedback_answer};
 use crate::i18n::{t, t_with};
 use crate::ui::dialog::{ConfirmDialog, DialogAnswer, DialogIds};
 use crate::ui::editor::{TextAction, TextEditor};
@@ -23,14 +24,7 @@ pub(in crate::app) struct TypedProgress {
     pub skipped: usize,
 }
 
-fn short(value: &str) -> String {
-    let trimmed = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if trimmed.chars().count() > 120 {
-        trimmed.chars().take(120).collect::<String>() + "…"
-    } else {
-        trimmed
-    }
-}
+fn short(value: &str) -> String { bounded_text(value, 120) }
 
 impl App {
     pub(in crate::app) fn show_study_typed(
@@ -163,13 +157,8 @@ impl App {
         dialog: DialogIds, snapshot: Box<StudyDeckSnapshot>,
         index: usize, progress: TypedProgress, action: &ErasedAction,
     ) {
-        if action.downcast_ref::<DialogAnswer>() == Some(&DialogAnswer::Closed) {
-            root.remove_layer(dialog.layer);
-            return;
-        }
-        match dialog.answer(id, action) {
+        match feedback_answer(root, id, &dialog, action) {
             Some(answer) => {
-                root.remove_layer(dialog.layer);
                 if answer == DialogAnswer::Confirm {
                     self.show_study_typed(root, snapshot, index + 1, progress);
                 }
