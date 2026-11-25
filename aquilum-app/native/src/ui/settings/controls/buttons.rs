@@ -46,14 +46,7 @@ impl Widget for DropdownButton {
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
-        match event {
-            Update::HoveredChanged(_) => ctx.request_paint_only(),
-            Update::FontsChanged => {
-                self.line.clear();
-                ctx.request_layout();
-            }
-            _ => {}
-        }
+        crate::ui::widgets::press::update_button_line(&mut self.line, ctx, event);
     }
 
     fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}

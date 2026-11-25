@@ -56,7 +56,7 @@ pub(super) fn submit_access(ctx: &mut EventCtx<'_>, event: &AccessEvent) {
     }
 }
 
-pub(super) fn update_button_line(line: &mut text::Line, ctx: &mut UpdateCtx<'_>, event: &Update) {
+pub(in crate::ui) fn update_button_line(line: &mut text::Line, ctx: &mut UpdateCtx<'_>, event: &Update) {
     match event {
         Update::HoveredChanged(_) => ctx.request_paint_only(),
         Update::FontsChanged => {
