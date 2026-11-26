@@ -107,7 +107,7 @@ pub(crate) fn retention_expired_candidates(
 fn expired_trash_files(trash: &Path, retention_days: u32) -> Vec<PathBuf> {
     let lifetime = Duration::from_secs(u64::from(retention_days) * 24 * 60 * 60);
     let now = SystemTime::now();
-    trashed_files(trash
+    trashed_files(trash)
         .filter(|(_, metadata)| {
             metadata
                 .modified()
