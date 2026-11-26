@@ -119,10 +119,10 @@ fn optimized_discs_are_byte_identical_to_scalar_baseline() {
         pixel[2] = (i as u8).wrapping_mul(73);
         pixel[3] = 255;
     }
-    for radius in [0.25f32, 0.99, 1.0, 1.01, 1.5, 2.25, 4.0, 16.0, 32.5, 49.0, 64.0] {
+    for radius in [0.25f32, 0.99, 1.0, 1.01, 1.5, 2.25, 4.0, 6.99, 7.0, 7.01, 16.0, 32.5, 49.0, 64.0] {
         for center in [[-1.75, -1.0], [0.5, 63.5], [55.25, 64.25],
             [116.7, 138.5], [68.0, 123.0]] {
-            for inner in [0.0, 0.3 * radius, (radius - 1.25).max(0.0),
+            for inner in [0.0, 0.3 * radius, radius * 0.4999, radius * 0.5, radius * 0.5001, (radius - 1.25).max(0.0),
                 radius * 0.95, radius, radius + 4.0] {
                 for alpha in [0.0, 0.07, 0.5, 1.0] {
                     check_disc_matches_baseline(
