@@ -304,12 +304,16 @@ try {
   }
   if($records.Count -ne 5){throw 'VIDEO18C02B02B_HOLD: not exactly five real PE records'}
   $lockSha=(Get-FileHash -LiteralPath (Join-Path $repo 'aquilum-app/Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant()
+  $currentVersion=@(node (Join-Path $repo 'scripts/akula-version.cjs') check)
+  if($LASTEXITCODE -ne 0 -or $currentVersion.Count -ne 1){
+    throw 'VIDEO18C02B02B_HOLD: canonical source version unavailable'
+  }
   $signed=[ordered]@{
     schema=1
     product='Akula'
     platform='windows-x86_64'
     purpose='protected-video-five-exe'
-    version='0.3.21'
+    version=$currentVersion[0]
     source_commit=$env:EXPECTED_HEAD_SHA
     cargo_lock_sha256=$lockSha
     components=$records

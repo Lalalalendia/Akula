@@ -3,6 +3,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'scripts/akula-version.cjs'
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/native/packaging/akula-windows.json'
@@ -76,10 +77,11 @@ jobs:
             throw 'VIDEO18C02B05_HOLD: real native candidate missing'
           }
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "VIDEO18C02B05_APP=$app"
-      - name: Accept real native 0.3.21 over 0.3.20; deny forged/nonincreasing claims
+      - name: Accept current native PE over the previous published version
         shell: pwsh
         env:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
           if((git rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA){
@@ -91,7 +93,21 @@ jobs:
           $packages=@($info.packages | Where-Object {$_.name -ceq 'aquilum-native'})
           if($packages.Count -ne 1){throw 'VIDEO18C02B05_HOLD: native package ambiguous'}
           $sourceVersion=[string]$packages[0].version
-          if($sourceVersion -cne '0.3.21'){throw 'VIDEO18C02B05_HOLD: actual source version drift'}
+          $tracked=@(node scripts/akula-version.cjs check)
+          if($LASTEXITCODE -ne 0 -or $tracked.Count -ne 1 -or $sourceVersion -cne $tracked[0]){
+            throw 'VIDEO18C02B05_HOLD: actual source version drift'
+          }
+          $tags=@(gh api --paginate "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.draft == false) | .tag_name')
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B05_HOLD: release history unavailable'}
+          $previous=@($tags | ForEach-Object {
+            if($_ -cmatch '^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$'){
+              [version]$_.Substring(1)
+            }
+          } | Where-Object { $_ -lt [version]$sourceVersion } | Sort-Object -Descending | Select-Object -First 1)
+          if($previous.Count -ne 1){throw 'VIDEO18C02B05_HOLD: no older published version'}
+          $previousVersion=$previous[0].ToString()
+          $futureVersion=node scripts/akula-version.cjs next-patch
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B05_HOLD: cannot derive forged label'}
           $exe=Join-Path $env:RUNNER_TEMP 'video18c02b05-verify.exe'
           rustc --edition=2024 labs/video-lite/video18c02b04-native-pe-version.rs -o $exe
           if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B05_HOLD: PE version verifier did not compile'}
@@ -101,13 +117,13 @@ jobs:
           if($identityCode -ne 0 -or !(($identity|Out-String).Contains('VIDEO18C02B04_NATIVE_PE_IDENTITY_PASS'))){
             throw 'VIDEO18C02B05_HOLD: actual PE version differs from tracked Cargo'
           }
-          $positive=@(& $exe --admit $env:VIDEO18C02B05_APP $sourceVersion 0.3.20 0.3.21 2>&1)
+          $positive=@(& $exe --admit $env:VIDEO18C02B05_APP $sourceVersion $previousVersion $sourceVersion 2>&1)
           $positiveCode=$LASTEXITCODE
           $positive | Out-Host
           if($positiveCode -ne 0 -or !(($positive|Out-String).Contains('VIDEO18C02B04_STRICT_VERSION_FLOOR_PASS'))){
             throw 'VIDEO18C02B05_HOLD: real higher native version was rejected'
           }
-          foreach($bad in @(@('0.3.20','0.3.20'),@('0.3.20','0.3.22'),@('0.3.21','0.3.21'))){
+          foreach($bad in @(@($previousVersion,$previousVersion),@($previousVersion,$futureVersion),@($sourceVersion,$sourceVersion))){
             $negative=@(& $exe --admit $env:VIDEO18C02B05_APP $sourceVersion $bad[0] $bad[1] 2>&1)
             $negativeCode=$LASTEXITCODE
             $negative | Out-Host
@@ -116,5 +132,5 @@ jobs:
             }
             $global:LASTEXITCODE=0
           }
-          Write-Host 'VIDEO18C02B05_GENUINE_PE_RAISE_PASS source=0.3.21 pe=0.3.21 previous=0.3.20 negatives=3 release=0'
+          Write-Host "VIDEO18C02B05_GENUINE_PE_RAISE_PASS source=$sourceVersion pe=$sourceVersion previous=$previousVersion negatives=3 release=0"
           Remove-Item -LiteralPath $exe -Force -ErrorAction Stop

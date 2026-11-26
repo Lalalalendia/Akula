@@ -6,16 +6,16 @@ const { load, parts, compare, check, planBump, nextPatch } = require('../../scri
 const files = load();
 const current = check(files);
 
-test('Windows release version is identical in both Cargo manifests, lock and NSIS config', () => {
+test('Windows release version is identical in both Cargo manifests, lock and both NSIS configs', () => {
   assert.match(current, /^\d+\.\d+\.\d+$/);
   assert.equal(check(files), current);
 });
 
-test('single bump changes only four Windows version files and stays locked', () => {
+test('single bump changes only five Windows version files and stays locked', () => {
   const next = nextPatch(current);
   const planned = planBump(files, next);
   assert.equal(check(planned), next);
-  for (const name of ['native', 'core', 'lock', 'windows']) {
+  for (const name of ['native', 'core', 'lock', 'windows', 'videoLab']) {
     assert.notEqual(planned[name], files[name], name);
   }
   assert.equal(planned.linux, files.linux, 'Linux HOLD is a separate release track');
@@ -38,6 +38,7 @@ test('fail closed on every version mirror mismatch or unexpected package identit
     { ...files, lock: files.lock.replace('name = "aquilum-native"', 'name = "other-native"') },
     { ...files, windows: files.windows.replace('"productName": "Akula"', '"productName": "Aquilum"') },
     { ...files, windows: files.windows.replace('"version": "' + current + '"', '"version": "0.0.1"') },
+    { ...files, videoLab: files.videoLab.replace('"version": "' + current + '"', '"version": "0.0.1"') },
   ];
   for (const fixture of fixtures) assert.throws(() => check(fixture));
 });

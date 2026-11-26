@@ -38,11 +38,12 @@ if((git -C $historical rev-parse HEAD).Trim() -cne $oldCommit -or
 }
 # Each generation must state its own genuine Cargo package version.
 $oldCargo=Get-Content -LiteralPath (Join-Path $historical 'aquilum-app/native/Cargo.toml') -Raw
-$newCargo=Get-Content -LiteralPath (Join-Path $repo 'aquilum-app/native/Cargo.toml') -Raw
-if($oldCargo -notmatch '(?ms)^\[package\]\s+name = "aquilum-native"\s+version = "0\.3\.20"' -or
-   $newCargo -notmatch '(?ms)^\[package\]\s+name = "aquilum-native"\s+version = "0\.3\.21"'){
+$currentVersion=@(node (Join-Path $repo 'scripts/akula-version.cjs') check)
+if($LASTEXITCODE -ne 0 -or $currentVersion.Count -ne 1 -or
+   $oldCargo -notmatch '(?ms)^\[package\]\s+name = "aquilum-native"\s+version = "0\.3\.20"'){
   throw 'VIDEO18C02B06_HOLD: source package versions differ from signed generation labels'
 }
+$newVersion=$currentVersion[0]
 $oldExpected=[IO.Path]::GetFullPath((Join-Path $temp 'video18c02b02b02a-old-native/release/aquilum-native.exe'))
 $newExpected=[IO.Path]::GetFullPath((Join-Path $repo '.artifacts/cargo-native/release/aquilum-native.exe'))
 if(![string]::Equals([IO.Path]::GetFullPath($OldAppPath),$oldExpected,[StringComparison]::OrdinalIgnoreCase) -or
@@ -226,14 +227,14 @@ try {
   Write-Host 'VIDEO18C02B02B02B_DISTINCT_INSTALLED_FIVE_PASS old=5 current=5 app_sha_distinct=1 pinned_sources=1 nonrelease=1'
   New-Item -ItemType Directory -Path $trustOld -ErrorAction Stop | Out-Null
   New-Item -ItemType Directory -Path $trustNew -ErrorAction Stop | Out-Null
-  # New generation's REAL PE RT_VERSION must match the signed 0.3.21 claim.
+  # New generation's REAL PE RT_VERSION must match the current signed candidate claim.
   # The witness only accepts the exact new PR source-built path, and the old floor 0.3.20.
   $versionWitness=$env:VIDEO18C02B06_VERSION_WITNESS
   if([string]::IsNullOrWhiteSpace($versionWitness)){
     throw 'VIDEO18C02B06_HOLD: no independent version verifier'
   }
   Assert-RealFile $versionWitness
-  $versionProof=@(& $versionWitness --admit $NewAppPath '0.3.21' '0.3.20' '0.3.21' 2>&1)
+  $versionProof=@(& $versionWitness --admit $NewAppPath $newVersion '0.3.20' $newVersion 2>&1)
   $versionExit=$LASTEXITCODE
   if($versionExit -ne 0 -or !(($versionProof|Out-String).Contains('VIDEO18C02B04_STRICT_VERSION_FLOOR_PASS'))){
     throw 'VIDEO18C02B06_HOLD: unsigned/forged/nonincreasing native version cannot be signed'
@@ -252,7 +253,7 @@ try {
   Copy-Item -LiteralPath $pub -Destination (Join-Path $trustOld 'test-publisher.pub') -ErrorAction Stop
   $manifests=@{}
   foreach($gen in @(@('old',$root,$oldHashes,$oldCommit,'0.3.20',$trustOld,$oldLockSha),
-                    @('new',$current,$newHashes,$env:EXPECTED_HEAD_SHA,'0.3.21',$trustNew,$newLockSha))){
+                    @('new',$current,$newHashes,$env:EXPECTED_HEAD_SHA,$newVersion,$trustNew,$newLockSha))){
     $records=@()
     foreach($name in $names){
       $file=Join-Path $gen[1] ($name+'.exe')
@@ -282,7 +283,7 @@ try {
   Assert-Set $root $oldHashes $true
   Assert-Set $current $newHashes $false
   Write-Host 'VIDEO18C02B02B02B_TWO_MINISIGN_MANIFESTS_PASS distinct_manifests=1 signed_old=1 signed_new=1 cross_signature_denied=1 release=0'
-  Write-Host 'VIDEO18C02B06_SIGNED_REAL_VERSION_PAIR_PASS old_source=0.3.20 new_pe=0.3.21 source_locks_distinct=1 each_lock_signed=1 release=0'
+  Write-Host "VIDEO18C02B06_SIGNED_REAL_VERSION_PAIR_PASS old_source=0.3.20 new_pe=$newVersion source_locks_distinct=1 each_lock_signed=1 release=0"
   $vault=Join-Path $work 'vault'
   $data=Join-Path $work 'data'
   New-Item -ItemType Directory -Path $vault -ErrorAction Stop | Out-Null

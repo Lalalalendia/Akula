@@ -7,3 +7,7 @@ The exact-head hosted Windows PR job builds genuine native Akula with cargo buil
 **Limitations:** This is a version *identity* test, not proof of a real installed cross-version transition. The candidate-version argument is only an unauthenticated lab claim: it is **not owner signing**, not a verified publisher manifest, and not a production updater. Previous #1018 authenticated an ephemeral Minisign lab generation, not production release signing. Repeating its real rar2 ACK→confirm flow using a new genuinely-versioned installed five-PE set, enforcing publisher trust, and testing crash/reboot recovery remain required.
 
 **VIDEO-18 RELEASE HOLD** and VIDEO_FIVE_CHANNEL_READY=false. No users, installers, deployments, owner keys or releases are touched.
+
+The ongoing lane reads the exact checkout version and uses the greatest lower
+published, numeric release tag as the installed floor. The original 0.3.20 to
+0.3.21 run above remains historical evidence.

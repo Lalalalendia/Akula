@@ -2,7 +2,8 @@
 
 Canonical Windows beta version: aquilum-app/native/Cargo.toml, [package].version.
 The core Cargo package, both aquilum-core/aquilum-native lock entries and
-native/packaging/akula-windows.json must have that exact same three-part version.
+both Windows packager configs (stock and VIDEO-17 lab) must have that same
+three-part version. The lab config remains a separate non-release package.
 
 ## After a signed Windows release
 
@@ -14,7 +15,7 @@ Raise the next development version in a small PR:
     node scripts/akula-version.cjs check
 
 Bump validates every target in memory before writing; equal, lower or ambiguous
-versions are rejected. Required Application CI checks all four files.
+versions are rejected. Required Application CI checks all five files.
 No PR merge or main push can publish an Akula release automatically.
 
 The Linux AppImage packager currently stays at its last experimental version
