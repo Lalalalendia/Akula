@@ -191,6 +191,19 @@ fn initial_candidates(blocks: &[Block]) -> Vec<bool> {
     flags
 }
 
+fn text_item(role: Role, layout: &Layout<BrushIndex>, breaks: Vec<(usize, char)>, x: f64, settings: &Settings, em: f64) -> Item {
+    let lines = layout.lines().map(|line| {
+        let (metrics, range) = (line.metrics(), line.text_range());
+        Line { top: f64::from(metrics.block_min_coord), bottom: f64::from(metrics.block_max_coord), start: range.start, end: range.end }
+    }).collect();
+    let (before, after) = spacing(role, font_size(role, settings), em);
+    Item::Text { lines, x, before, after, breaks }
+}
+
+fn image_sizes(blocks: &[Block], images: &mut dyn FnMut(&str) -> Option<(u32, u32)>) -> Vec<Option<(u32, u32)>> {
+    blocks.iter().map(|block| if let Block::Image { src, .. } = block { images(src) } else { None }).collect()
+}
+
 fn layout_blocks_impl(
     blocks: &[Block],
     images: &mut dyn FnMut(&str) -> Option<(u32, u32)>,
@@ -205,20 +218,12 @@ fn layout_blocks_impl(
     let (em, dash) = (f64::from(settings.size), dash_width(fcx, lcx, settings));
     let item = |block: &Block, natural: Option<(u32, u32)>, fcx: &mut FontContext, lcx: &mut LayoutContext<BrushIndex>| match (block, text_layout(block, fcx, lcx, settings, width, dash)) {
         (Block::Text { role, .. }, Some((layout, breaks, x))) => {
-            let lines = layout
-                .lines()
-                .map(|line| {
-                    let (metrics, range) = (line.metrics(), line.text_range());
-                    Line { top: f64::from(metrics.block_min_coord), bottom: f64::from(metrics.block_max_coord), start: range.start, end: range.end }
-                })
-                .collect();
-            let (before, after) = spacing(*role, font_size(*role, settings), em);
-            Item::Text { lines, x, before, after, breaks }
+            text_item(*role, &layout, breaks, x, settings, em)
         }
         (Block::Image { .. }, _) => image_item(natural, width, height, em),
         _ => Item::Rule,
     };
-    let sizes: Vec<Option<(u32, u32)>> = blocks.iter().map(|block| if let Block::Image { src, .. } = block { images(src) } else { None }).collect();
+    let sizes = image_sizes(blocks, images);
     let ranges = layout_ranges(blocks, weighted);
     let contexts: Vec<FontContext> = ranges.iter().map(|_| fcx.clone()).collect();
     let parts: Vec<Vec<Item>> = ranges
@@ -252,9 +257,7 @@ pub fn layout_blocks_with_candidates(
         return (layout_blocks(blocks, images, fcx, lcx, settings, width, height), Vec::new());
     }
     let (em, dash) = (f64::from(settings.size), dash_width(fcx, lcx, settings));
-    let sizes: Vec<Option<(u32, u32)>> = blocks.iter().map(
-        |block| if let Block::Image { src, .. } = block { images(src) } else { None }
-    ).collect();
+    let sizes = image_sizes(blocks, images);
     let ranges = layout_ranges(blocks, true);
     let contexts: Vec<FontContext> = ranges.iter().map(|_| fcx.clone()).collect();
     let parts: Vec<Vec<(Item, Option<Layout<BrushIndex>>)>> = ranges
@@ -270,21 +273,8 @@ pub fn layout_blocks_with_candidates(
                     let index = range.start + offset;
                     match (block, text_layout(block, &mut fcx, &mut lcx, settings, width, dash)) {
                         (Block::Text { role, .. }, Some((layout, breaks, x))) => {
-                            let lines = layout
-                                .lines()
-                                .map(|line| {
-                                    let (metrics, range) = (line.metrics(), line.text_range());
-                                    Line {
-                                        top: f64::from(metrics.block_min_coord),
-                                        bottom: f64::from(metrics.block_max_coord),
-                                        start: range.start,
-                                        end: range.end,
-                                    }
-                                })
-                                .collect();
-                            let (before, after) = spacing(*role, font_size(*role, settings), em);
-                            let retained = candidates[index].then_some(layout);
-                            (Item::Text { lines, x, before, after, breaks }, retained)
+                            let item = text_item(*role, &layout, breaks, x, settings, em);
+                            (item, candidates[index].then_some(layout))
                         }
                         (Block::Image { .. }, _) => (image_item(natural, width, height, em), None),
                         _ => (Item::Rule, None),
