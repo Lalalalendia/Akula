@@ -55,9 +55,19 @@ impl Replay {
     pub fn step(&mut self, now: Instant) -> Option<Step> {
         match self.kind {
             Kind::Scroll | Kind::Fling => return self.scroll(now).map(Step::Wheel),
-            Kind::Focus => return self.focus(now),
+            Kind::Focus => return self.tick(now, Duration::from_secs_f64(FOCUS_SECONDS)).map(|_| Step::Focus),
             Kind::Graph => {}
         }
+        let elapsed = self.tick(now, Duration::from_millis(16))?;
+        let phase = (elapsed.as_secs_f64() % 10.0) / 10.0;
+        Some(match phase {
+            p if p < 0.35 => Step::Pinch(0.02),
+            p if p < 0.65 => Step::Pan(6.0, 3.0),
+            _ => Step::Pinch(-0.02),
+        })
+    }
+
+    fn tick(&mut self, now: Instant, step: Duration) -> Option<Duration> {
         let started = *self.started.get_or_insert(now);
         let next = *self.next.get_or_insert(now);
         if now < next {
@@ -68,27 +78,8 @@ impl Replay {
             self.next = None;
             return None;
         }
-        self.next = Some(next + Duration::from_millis(16));
-        let phase = (elapsed.as_secs_f64() % 10.0) / 10.0;
-        Some(match phase {
-            p if p < 0.35 => Step::Pinch(0.02),
-            p if p < 0.65 => Step::Pan(6.0, 3.0),
-            _ => Step::Pinch(-0.02),
-        })
-    }
-
-    fn focus(&mut self, now: Instant) -> Option<Step> {
-        let started = *self.started.get_or_insert(now);
-        let next = *self.next.get_or_insert(now);
-        if now < next {
-            return None;
-        }
-        if now - started >= self.length {
-            self.next = None;
-            return None;
-        }
-        self.next = Some(next + Duration::from_secs_f64(FOCUS_SECONDS));
-        Some(Step::Focus)
+        self.next = Some(next + step);
+        Some(elapsed)
     }
 
     /// Deterministic image-anchor schedule for a developer-only 6-second
@@ -134,18 +125,8 @@ impl Replay {
     }
 
     fn scroll(&mut self, now: Instant) -> Option<f32> {
-        let started = *self.started.get_or_insert(now);
-        let next = *self.next.get_or_insert(now);
-        if now < next {
-            return None;
-        }
-        let elapsed = now - started;
-        if elapsed >= self.length {
-            self.next = None;
-            return None;
-        }
         let (step, lines) = if self.kind == Kind::Fling { (FLING_STEP, FLING_LINES) } else { (STEP, 1.0) };
-        self.next = Some(next + step);
+        let elapsed = self.tick(now, step)?;
         Some(if elapsed < self.length / 2 { -lines } else { lines })
     }
 
@@ -235,6 +216,22 @@ impl Replay {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_replay_keeps_its_clock_cadence_and_stop_boundary() {
+        for (kind, interval) in [(Kind::Scroll, STEP), (Kind::Fling, FLING_STEP),
+            (Kind::Graph, Duration::from_millis(16)), (Kind::Focus, Duration::from_secs_f64(FOCUS_SECONDS))] {
+            let mut replay = Replay::new(kind, PathBuf::new());
+            let start = Instant::now();
+            assert!(replay.step(start).is_some());
+            assert_eq!(replay.wake(), Some(start + interval));
+            assert!(replay.step(start + interval / 2).is_none());
+            assert!(replay.step(start + interval + interval / 2).is_some());
+            assert_eq!(replay.wake(), Some(start + interval * 2));
+            let end = start + replay.length;
+            assert!(replay.step(end).is_none() && replay.finished());
+        }
+    }
 
     #[test]
     fn image_anchor_scan_dwells_and_visits_both_directions_during_six_second_fling() {
