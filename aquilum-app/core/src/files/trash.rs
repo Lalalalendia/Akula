@@ -84,18 +84,7 @@ pub fn cleanup_trash_impl(
     if retention_days == 0 || !checked_trash_root(&trash)? {
         return Ok(0);
     }
-    let lifetime = Duration::from_secs(u64::from(retention_days) * 24 * 60 * 60);
-    let now = SystemTime::now();
-    let expired = trashed_files(&trash)
-        .filter(|(_, metadata)| {
-            metadata
-                .modified()
-                .ok()
-                .and_then(|modified| now.duration_since(modified).ok())
-                .is_some_and(|age| age > lifetime)
-        })
-        .map(|(path, _)| path)
-        .collect::<Vec<_>>();
+    let expired = expired_trash_files(&trash, retention_days);
     let removed = remove_files(&expired);
     remove_empty_folders(&trash);
     Ok(removed)
@@ -112,9 +101,13 @@ pub(crate) fn retention_expired_candidates(
     if retention_days == 0 || !checked_trash_root(&trash)? {
         return Ok(Vec::new());
     }
+    Ok(expired_trash_files(&trash, retention_days))
+}
+
+fn expired_trash_files(trash: &Path, retention_days: u32) -> Vec<PathBuf> {
     let lifetime = Duration::from_secs(u64::from(retention_days) * 24 * 60 * 60);
     let now = SystemTime::now();
-    Ok(trashed_files(&trash)
+    trashed_files(trash
         .filter(|(_, metadata)| {
             metadata
                 .modified()
@@ -123,7 +116,7 @@ pub(crate) fn retention_expired_candidates(
                 .is_some_and(|age| age > lifetime)
         })
         .map(|(path, _)| path)
-        .collect())
+        .collect()
 }
 
 // Caller MUST hold the process File Gate lock. Re-check a stale scan entry
