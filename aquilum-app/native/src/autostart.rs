@@ -94,10 +94,15 @@ mod platform {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(not(target_os = "windows"))]
 mod platform {
     fn file() -> Option<std::path::PathBuf> {
-        Some(std::path::PathBuf::from(std::env::var_os("HOME")?).join("Library/LaunchAgents").join(format!("{}.plist", super::NAME)))
+        let (directory, extension) = if cfg!(target_os = "macos") {
+            ("Library/LaunchAgents", "plist")
+        } else {
+            (".config/autostart", "desktop")
+        };
+        Some(std::path::PathBuf::from(std::env::var_os("HOME")?).join(directory).join(format!("{}.{extension}", super::NAME)))
     }
 
     pub fn enabled() -> bool {
@@ -109,32 +114,16 @@ mod platform {
         if !on {
             return std::fs::remove_file(&file).is_ok() || !file.exists();
         }
-        let plist = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n  <dict>\n  <key>Label</key>\n  <string>{}</string>\n  <key>ProgramArguments</key>\n  <array><string>{exe}</string></array>\n  <key>RunAtLoad</key>\n  <true/>\n  </dict>\n</plist>",
-            super::NAME
-        );
-        file.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok()) && std::fs::write(&file, plist).is_ok()
-    }
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-mod platform {
-    fn file() -> Option<std::path::PathBuf> {
-        Some(std::path::PathBuf::from(std::env::var_os("HOME")?).join(".config/autostart").join(format!("{}.desktop", super::NAME)))
-    }
-
-    pub fn enabled() -> bool {
-        file().is_some_and(|f| f.exists())
-    }
-
-    pub fn set(on: bool, exe: &str) -> bool {
-        let Some(file) = file() else { return false };
-        if !on {
-            return std::fs::remove_file(&file).is_ok() || !file.exists();
-        }
-        let name = super::NAME;
-        let entry = format!("[Desktop Entry]\nType=Application\nVersion=1.0\nName={name}\nComment={name}startup script\nExec=\"{exe}\"\nStartupNotify=false\nTerminal=false");
-        file.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok()) && std::fs::write(&file, entry).is_ok()
+        let contents = if cfg!(target_os = "macos") {
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n  <dict>\n  <key>Label</key>\n  <string>{}</string>\n  <key>ProgramArguments</key>\n  <array><string>{exe}</string></array>\n  <key>RunAtLoad</key>\n  <true/>\n  </dict>\n</plist>",
+                super::NAME
+            )
+        } else {
+            let name = super::NAME;
+            format!("[Desktop Entry]\nType=Application\nVersion=1.0\nName={name}\nComment={name}startup script\nExec=\"{exe}\"\nStartupNotify=false\nTerminal=false")
+        };
+        file.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok()) && std::fs::write(&file, contents).is_ok()
     }
 }
 
