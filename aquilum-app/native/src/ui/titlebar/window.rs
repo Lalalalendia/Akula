@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui::widgets::layout::contract::leaf_widget;
+use crate::ui::widgets::layout::contract::{leaf_widget, passive_surface};
 
 pub struct DragArea;
 
@@ -23,13 +23,7 @@ impl Widget for DragArea {
         }
     }
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _painter: &mut Painter<'_>) {}
-
-    fn accessibility_role(&self) -> Role {
-        Role::GenericContainer
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
+    passive_surface!();
 
     leaf_widget!();
 }
