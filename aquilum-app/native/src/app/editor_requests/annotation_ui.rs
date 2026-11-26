@@ -212,7 +212,14 @@ impl App {
             self.study_notice(root, &t("editor.annotation.saveFailed"));
             return;
         };
-        let spans = snapshot.records.iter()
+        self.show_verified_annotation_overlay(root, &current, &snapshot.records);
+    }
+
+    // Both callers independently authorize the editor and load their sidecar.
+    pub(super) fn show_verified_annotation_overlay(
+        &self, root: &mut RenderRoot, current: &AuthorizedEditor, records: &[AnnotationRecord],
+    ) {
+        let spans = records.iter()
             .filter(|record| record.anchor.document == current.document
                 && record.status == BindingStatus::Current)
             .filter_map(|record| match reattach(
