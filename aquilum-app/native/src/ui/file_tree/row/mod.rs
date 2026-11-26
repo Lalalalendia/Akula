@@ -1,8 +1,8 @@
 mod paint;
 mod pointer;
 
-pub(super) use crate::ui::widgets::layout::contract::leaf_widget;
-use paint::{Look, Texts, paint as paint_row};
+pub(super) use paint::{Look, Texts, paint as paint_row};
+use crate::ui::widgets::layout::contract::leaf_widget;
 
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
