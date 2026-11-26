@@ -934,3 +934,20 @@ fn comma_lists_preserve_delimiter_errors_and_required_items() {
     }
     eprintln!("AKULA_REUSE16_DATAVIEW_DELIMITERS_PASS");
 }
+
+#[test]
+fn source_chains_reuse_precedence_without_changing_source_grammar() {
+    use super::ast::{Clause, Source};
+    let f = |path: &str| Source::Folder(path.into());
+    let and = |a, b| Source::And(Box::new(a), Box::new(b));
+    let or = |a, b| Source::Or(Box::new(a), Box::new(b));
+    let p = parse(r#"LIST FROM "a" OR "b" || "c" AND "d" && NOT "e" LIMIT 3"#).unwrap();
+    assert_eq!(p.source, Some(or(or(f("a"), f("b")), and(and(f("c"), f("d")), Source::Not(Box::new(f("e")))))));
+    assert_eq!(p.clauses, vec![Clause::Limit(3)]);
+    let p = parse(r#"LIST FROM ("a" OR "b") AND "c""#).unwrap();
+    assert_eq!(p.source, Some(and(or(f("a"), f("b")), f("c"))));
+    for text in [r#"LIST FROM "a" OR"#, r#"LIST FROM "a" &&"#, r#"LIST FROM ("a" OR "b""#] {
+        assert!(parse(text).is_err(), "invalid source chain: {text}");
+    }
+    eprintln!("AKULA_REUSE23_SOURCE_PRECEDENCE_PASS");
+}
