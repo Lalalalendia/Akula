@@ -203,7 +203,7 @@ mod lab {
         let signed=admit_hosted_lab_signature(
             &bytes,&STANDARD.encode(&sig),&STANDARD.encode(&pubbytes),"0.3.20"
         )?;
-        need(signed.version()=="0.3.21" && signed.source_commit()==expected,
+        need(signed.version()==super::gui_launcher::lab::candidate_version()? && signed.source_commit()==expected,
             "candidate signed version/source mismatch")?;
         let locksha=sha(&workspace.join("aquilum-app/Cargo.lock"))?;
         need(signed.cargo_lock_sha256()==locksha,

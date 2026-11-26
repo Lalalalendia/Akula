@@ -26,3 +26,8 @@ The old native source predates the embedded Windows RT_VERSION resource; its ver
 Markers: `VIDEO18C02B06_REAL_NATIVE_FLOOR_PASS`, `VIDEO18C02B06_SIGNED_REAL_VERSION_PAIR_PASS`, and the existing `VIDEO18C02B03_RAR2_REAL_POSITIVE_PASS`. A green Windows CI is required before the stage is accepted.
 
 **VIDEO-18 RELEASE HOLD and VIDEO_FIVE_CHANNEL_READY=false stay unchanged.**
+
+The transported candidate version follows the checked-out Windows source. The
+old side remains pinned to the historical 0.3.20 source without the frame ACK
+implementation so the lab still exercises a distinct fallback. The stock signed
+installer has a separate released-to-candidate upgrade lane.

@@ -1,6 +1,6 @@
 'use strict';
 
-// One Windows beta version: native Cargo is canonical; three mirrors must agree.
+// One Windows beta version: native Cargo is canonical; all Windows mirrors must agree.
 // Linux packaging stays on its separately gated, unpublished version.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,6 +10,7 @@ const PATHS = Object.freeze({
   core: 'aquilum-app/core/Cargo.toml',
   lock: 'aquilum-app/Cargo.lock',
   windows: 'aquilum-app/native/packaging/akula-windows.json',
+  videoLab: 'aquilum-app/native/packaging/akula-windows-video17-lab.json',
   linux: 'aquilum-app/native/packaging/akula-linux.json',
 });
 
@@ -60,6 +61,7 @@ function check(files, requireLinux = false) {
   const windows = JSON.parse(files.windows);
   if (windows.productName !== 'Akula') throw Error('Windows publisher identity differs from Akula');
   mirrors['Akula Windows packager'] = windows.version;
+  mirrors['Akula Windows VIDEO-17 lab packager'] = JSON.parse(files.videoLab).version;
   if (requireLinux) {
     const linux = JSON.parse(files.linux);
     if (linux.productName !== 'Akula') throw Error('Linux publisher identity differs from Akula');
@@ -96,6 +98,7 @@ function planBump(files, target) {
     result.lock = replaceOnce(result.lock, packageMarker('lock', name), previous, target, PATHS.lock);
   }
   result.windows = replaceOnce(files.windows, '"version": "', previous, target, PATHS.windows);
+  result.videoLab = replaceOnce(files.videoLab, '"version": "', previous, target, PATHS.videoLab);
   if (check(result) !== target) throw Error('planned version update failed verification');
   return result;
 }
@@ -126,7 +129,7 @@ function main(args = process.argv.slice(2)) {
   } else {
     const updated = planBump(files, args[1]);
     // Validate every target in memory before touching any tracked file.
-    for (const key of ['native', 'core', 'lock', 'windows']) {
+    for (const key of ['native', 'core', 'lock', 'windows', 'videoLab']) {
       fs.writeFileSync(path.join(ROOT, PATHS[key]), updated[key]);
     }
     process.stdout.write('Akula Windows beta version: ' + version + ' -> ' + args[1] + '\n');
