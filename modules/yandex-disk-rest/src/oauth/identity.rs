@@ -51,6 +51,11 @@ struct WireAccount {
     client_id: String,
 }
 
+fn valid_client_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 fn parse_account(
     body: &[u8],
     expected_client_id: &str,
@@ -58,12 +63,7 @@ fn parse_account(
     if body.len() as u64 > MAX_ACCOUNT_BYTES {
         return Err(YandexAccountError::OversizedResponse);
     }
-    if expected_client_id.is_empty()
-        || expected_client_id.len() > 128
-        || !expected_client_id.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
-        })
-    {
+    if !valid_client_id(expected_client_id) {
         return Err(YandexAccountError::InvalidOAuthClient);
     }
     let account: WireAccount =
@@ -92,12 +92,7 @@ fn read_account(token: &str, expected_client_id: &str) -> Result<YandexAccountId
     {
         return Err(YandexAccountError::InvalidToken);
     }
-    if expected_client_id.is_empty()
-        || expected_client_id.len() > 128
-        || !expected_client_id.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
-        })
-    {
+    if !valid_client_id(expected_client_id) {
         return Err(YandexAccountError::InvalidOAuthClient);
     }
     let header = Zeroizing::new(format!("OAuth {token}"));
