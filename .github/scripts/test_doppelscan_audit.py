@@ -313,5 +313,34 @@ class AuditTests(unittest.TestCase):
                 self.assertFalse((root / "outside").exists())
 
 
+
+    def test_scope_boundary_and_control_characters(self):
+        for path in ("modules/own/src/nested/lib.rs",
+                     "aquilum-app/native/src/ui/testable.rs",
+                     "aquilum-app/core/src/vendorish/mod.rs"):
+            self.assertTrue(audit.included(path), path)
+        for path in ("modules/own/src/nested/vendor/lib.rs",
+                     "modules/own/src/generated/deep/lib.rs",
+                     "modules/own/src/nested/probes/lib.rs",
+                     "modules/own/src/nested/fixtures/lib.rs",
+                     "modules/own/src/nested/test_example.rs",
+                     "modules/own/src/nested/example_generated.rs",
+                     "modules/own/src/nested/a\t.rs",
+                     "modules/own/src/nested/a\x7f.rs",
+                     "modules/own/src/nested/a\x00.rs",
+                     "modules/own/examples/lib.rs",
+                     "aquilum-app/native/src_extra/lib.rs"):
+            self.assertFalse(audit.included(path), repr(path))
+
+    def test_report_rejects_non_integer_scanned_counts(self):
+        path = "modules/own/src/lib.rs"
+        for count in (True, 1.0, "1", -1, 2):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                audit.validate_report(
+                    {"summary": {"files": count, "groups": 0}, "groups": []},
+                    {path: "digest"},
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
