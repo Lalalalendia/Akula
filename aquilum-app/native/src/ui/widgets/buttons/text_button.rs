@@ -1,9 +1,10 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::{
-    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, PaintCtx, PropertiesRef, RegisterCtx, Widget, WidgetMut, render_text,
+    AccessCtx, MeasureCtx, PaintCtx, PropertiesRef, Widget, WidgetMut, render_text,
 };
 use masonry::imaging::{Composite, GroupRef, PaintSink, Painter};
-use masonry::kurbo::{Affine, Axis, Point, RoundedRect, Size};
+use masonry::kurbo::{Affine, Axis, Point, RoundedRect};
 use masonry::layout::{LenReq, Length};
 use masonry::peniko::BlendMode;
 
@@ -105,8 +106,6 @@ impl Widget for TextButton {
 
     press_events!(line);
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         match axis {
             Axis::Vertical => Length::px(self.size.height()),
@@ -116,8 +115,6 @@ impl Widget for TextButton {
             }
         }
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         if ctx.is_disabled() {
@@ -137,7 +134,5 @@ impl Widget for TextButton {
         node.add_action(Action::Click);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }

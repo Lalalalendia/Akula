@@ -1,10 +1,11 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::{
-    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, NewWidget, PaintCtx,
-    PropertiesRef, RegisterCtx, Widget, render_text,
+    AccessCtx, MeasureCtx, NewWidget, PaintCtx,
+    PropertiesRef, Widget, render_text,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, RoundedRect, Size};
+use masonry::kurbo::{Affine, Axis, RoundedRect};
 use masonry::layout::{LenReq, Length};
 use masonry::peniko::Color;
 
@@ -34,13 +35,9 @@ impl IconView {
 impl Widget for IconView {
     type Action = masonry::core::NoAction;
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, _axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(self.container)
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let origin = ctx.content_box().center() - masonry::kurbo::Vec2::new(self.size / 2.0, self.size / 2.0);
@@ -55,9 +52,7 @@ impl Widget for IconView {
 
     fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
 pub struct Chip {
     label: String,
@@ -77,16 +72,12 @@ impl Widget for Chip {
 
     press_events!(line);
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(match axis {
             Axis::Horizontal => text::measure(ctx, &self.label, text::Style::ui(size::SIZE_20)).ceil() + size::SPACE_12 * 2.0,
             Axis::Vertical => size::SIZE_20 + size::SPACE_4 * 2.0,
         })
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -114,7 +105,5 @@ impl Widget for Chip {
         node.add_action(Action::Click);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
