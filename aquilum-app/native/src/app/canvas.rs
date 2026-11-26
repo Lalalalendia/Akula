@@ -83,12 +83,7 @@ impl App {
             Ok(_) => session.save(&self.workspace.core).err().map(|e| format!("Not saved: {e}")),
         };
         let session = &self.canvas.documents[path];
-        let value = session.value().clone();
-        let (dirty, undo, redo) = (session.dirty(), session.can_undo(), session.can_redo());
-        let notice = self.canvas.notice.clone();
-        view.edit(root, |mut widget| {
-            CanvasPage::update_state(&mut widget, &value, dirty, undo, redo, notice);
-        });
+        self.update_canvas_view(root, view, session);
         true
     }
     pub(in crate::app) fn canvas_dirty_active(&self) -> bool {
@@ -101,6 +96,9 @@ impl App {
         let Some(path) = self.tabs.active().path.as_ref() else { return };
         let Some(session) = self.canvas.documents.get(path) else { return };
         let Some(view) = self.canvas.view else { return };
+        self.update_canvas_view(root, view, session);
+    }
+    fn update_canvas_view(&self, root: &mut RenderRoot, view: Handle<CanvasPage>, session: &CanvasSession) {
         let value = session.value().clone();
         let (dirty, undo, redo) = (session.dirty(), session.can_undo(), session.can_redo());
         let notice = self.canvas.notice.clone();
