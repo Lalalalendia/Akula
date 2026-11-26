@@ -8,7 +8,8 @@ use std::io::{BufRead, BufReader, Read};
 #[cfg(windows)]
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
+use super::worker_process::{ChildGuard, diagnostic_tail};
 use super::{download, library::{Library, LIBRARY_MAX, SINGLE_VIDEO_MAX}, youtube};
 #[cfg(all(windows, feature = "video-rust-bundle"))]
 #[path = "light_windows_version.rs"]
@@ -25,27 +26,6 @@ impl Stage {
 }
 impl Drop for Stage {
     fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
-}
-
-struct ChildGuard(Child);
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        if self.0.try_wait().ok().flatten().is_none() {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-}
-
-fn tail(mut stream: impl Read) -> String {
-    let mut buf = [0u8; 4096];
-    let mut latest = Vec::new();
-    while let Ok(len) = stream.read(&mut buf) {
-        if len == 0 { break; }
-        latest.extend_from_slice(&buf[..len]);
-        if latest.len() > 8192 { latest.drain(..latest.len() - 8192); }
-    }
-    String::from_utf8_lossy(&latest).chars().take(500).collect()
 }
 
 #[derive(Clone, Copy)]
@@ -113,7 +93,7 @@ fn run_track(
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn().map_err(|e| format!("yt-dlp unavailable: {e}"))?);
     let errors = child.0.stderr.take().ok_or("missing yt-dlp stderr")?;
-    let diagnostics = std::thread::spawn(move || tail(errors));
+    let diagnostics = std::thread::spawn(move || diagnostic_tail(errors, false));
     let stdout = child.0.stdout.take().ok_or("missing yt-dlp stdout")?;
     let mut too_large = false;
     for line in BufReader::new(stdout).lines() {
@@ -177,8 +157,8 @@ fn run_mux(executable: &Path, stage: &Path, result: &Path) -> Result<(), String>
         .spawn().map_err(|e| format!("Rust MP4 muxer cannot start: {e}"))?);
     let errors = child.0.stderr.take().ok_or("missing mux stderr")?;
     let receipts = child.0.stdout.take().ok_or("missing mux stdout")?;
-    let diagnostics = std::thread::spawn(move || tail(errors));
-    let result_report = std::thread::spawn(move || tail(receipts));
+    let diagnostics = std::thread::spawn(move || diagnostic_tail(errors, false));
+    let result_report = std::thread::spawn(move || diagnostic_tail(receipts, false));
     let exit = child.0.wait().map_err(|e| e.to_string())?;
     let error = diagnostics.join().unwrap_or_default();
     let receipt = result_report.join().unwrap_or_default();

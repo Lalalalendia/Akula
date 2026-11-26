@@ -1,6 +1,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
+use super::worker_process::{ChildGuard, diagnostic_tail};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use super::library::{Library, LIBRARY_MAX, SINGLE_VIDEO_MAX};
@@ -47,29 +48,6 @@ fn command_args_with_js(url: &str, stage: &Path, max_bytes: u64, quickjs: Option
         args.splice(0..0, [OsString::from("--no-js-runtimes"), OsString::from("--js-runtimes"), arg]);
     }
     args
-}
-/// If the progress stream cannot be decoded or inspected, the download
-/// process must not continue writing after the staging directory is dropped.
-struct ChildGuard(std::process::Child);
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        if self.0.try_wait().ok().flatten().is_none() {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-}
-fn get_error(mut reader: impl Read) -> String {
-    let mut bytes = [0_u8; 4096];
-    let mut recent = Vec::<u8>::new();
-    while let Ok(n) = reader.read(&mut bytes) {
-        if n == 0 { break; }
-        recent.extend_from_slice(&bytes[..n]);
-        if recent.len() > 8192 {
-            recent.drain(..recent.len() - 8192);
-        }
-    }
-    String::from_utf8_lossy(&recent).trim().chars().take(500).collect()
 }
 /// Private same-volume staging directory. Unlike a persistent video, it is
 /// removed on failure, process errors and normal completion.
@@ -152,7 +130,7 @@ fn download_one_inner(
         .stderr(Stdio::piped())
         .spawn().map_err(|e| format!("yt-dlp unavailable or could not start: {e}"))?);
     let stderr = child.0.stderr.take().ok_or("yt-dlp error stream unavailable")?;
-    let diagnostics = std::thread::spawn(move || get_error(stderr));
+    let diagnostics = std::thread::spawn(move || diagnostic_tail(stderr, true));
     let stdout = child.0.stdout.take().ok_or("yt-dlp progress stream unavailable")?;
     let mut over_limit = false;
     for line in BufReader::new(stdout).lines() {
