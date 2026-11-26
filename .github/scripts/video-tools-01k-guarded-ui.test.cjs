@@ -1,6 +1,7 @@
 'use strict';
 // VIDEO-TOOLS-01k: negative source and locale contracts for installed Windows UI.
 const assert=require('node:assert/strict');
+const installedRoute = require('./video-tools-installed-contract.cjs');
 const fs=require('node:fs');
 const path=require('node:path');
 const {test}=require('node:test');
@@ -11,9 +12,8 @@ const files={
   probe:'aquilum-app/native/src/video/tools_package_probe.rs',
   version:'aquilum-app/native/src/video/tools_package_probe_version.rs',
   mod:'aquilum-app/native/src/video/mod.rs',
-  queue:'aquilum-app/native/src/video/queue.rs',
+  ...installedRoute.paths,
   queueTests:'aquilum-app/native/src/video/queue_01k_tests.rs',
-  leaf:'aquilum-app/native/src/video/light.rs',
   trust:'aquilum-app/native/src/video/tools_package.rs',
   stock:'aquilum-app/native/packaging/akula-windows.json',
   ru:'aquilum-app/native/assets/locales/ru.json',
@@ -25,7 +25,7 @@ const load=()=>Object.fromEntries(Object.entries(files).map(([k,p])=>[k,
   fs.readFileSync(path.join(root,p),'utf8')]));
 const ensure=(yes,msg)=>assert.ok(yes,'VIDEO_TOOLS_01K_HOLD: '+msg);
 function check(x){
-  const {ui,click,probe,version,mod,queue,queueTests,leaf,trust,stock,ru,en,workflow,document}=x;
+  const {ui,click,probe,version,mod,queue,queueTests,trust,stock,ru,en,workflow,document}=x;
   assert.deepEqual(JSON.parse(stock).binaries.map(b=>b.path),['akula-app','shiva-pdf-preview'],
     'VIDEO_TOOLS_01K_HOLD: stock installer must remain only two EXEs');
   ensure(trust.includes('pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";')&&
@@ -45,13 +45,12 @@ function check(x){
   ensure(version.includes('"0.1.0" => ToolsDiscovery::ReadOnlyAttested') &&
     version.includes('_ => ToolsDiscovery::IncompatibleVersion'),
     'authenticated exact signed-version classifier missing');
-  const variants=['Missing','Unsafe','PublisherNotApproved','IncompatibleVersion','ReadOnlyAttested'];
   const localeKeys=[];
   for(const [v,base] of [
-    ['Missing','Missing'],['Unsafe','Unsafe'],['PublisherNotApproved','Unapproved'],
-    ['IncompatibleVersion','Incompatible'],['ReadOnlyAttested','Attested']
+    ['Missing','Missing'],['Invalid','Unsafe'],['Downloading(_)','Downloading'],
+    ['Failed(_)','DownloadFailed'],['Installed','Attested']
   ]){
-    ensure(ui.includes('ToolsDiscovery::'+v+' => ('),'native status '+v+' omitted from UI');
+    ensure(ui.includes('Status::'+v+' => ('),'native status '+v+' omitted from UI');
     localeKeys.push('videoTools'+base+'Title','videoTools'+base);
   }
   for(const key of localeKeys){
@@ -69,7 +68,8 @@ function check(x){
   ensure(click.indexOf('optional_video_tools_notice')<click.indexOf('queue::enqueue'),
     'click may enqueue before protected status notice');
   for(const token of [
-    'probe_installed_video_tools()','notice_keys(',
+    'optional_ytdlp::status(&self.workspace.data_dir)', 'notice_keys(',
+    'if matches!(state, Status::Installed) {\n                return false;',
     't(title)','t(body)','ConfirmDialog::new(',
     'self.popup = Some(Popup::PdfNotice { dialog });',
     'return true;', 'not(feature = "video-ui-e2e")'
@@ -77,25 +77,12 @@ function check(x){
   ensure(!ui.includes('external_ytdlp_visible')&&!ui.includes('AKULA_YT_DLP_BIN')&&
     !ui.includes('std::env::var_os("PATH")'),
     'PATH/env hints cannot authorize normal installed UI');
-  const queueGate='if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))';
-  ensure(queue.includes(queueGate) && leaf.includes(queueGate),
-    'both queue and internal yt-dlp path must deny installed Windows');
-  ensure(queue.includes('Video Tools execution is not approved for installed Akula')&&
-    leaf.includes('VIDEO_TOOLS_01K_HOLD: publisher-approved process launch is unavailable'),
-    'explicit execution refusal not present');
-  ensure(queue.indexOf(queueGate)<queue.indexOf('let id = youtube::video_id(&url)')&&
-    queue.indexOf(queueGate)<queue.indexOf('std::thread::spawn(')&&
-    queue.indexOf(queueGate)<queue.indexOf('list.insert('),
-    'queue guard must precede any job state or background thread');
-  const launch=leaf.slice(leaf.indexOf('pub(super) fn download_one_or_legacy('));
-  ensure(launch.includes(queueGate) &&
-    launch.indexOf(queueGate)<launch.indexOf('if std::env::var_os("AKULA_RUST_MUX_BIN")'),
-    'internal process guard must precede env-selected mux inside launch function');
+  installedRoute.checkInstalledRoute(x, ensure);
   ensure(queue.includes('mod installed_tests;')&&queue.includes('#[path = "queue_01k_tests.rs"]'),
     'installed queue must register its standalone native test');
   for(const token of [
     'installed_download_refusal_creates_no_job_or_local_bytes',
-    'assert!(status(url).is_none())',
+    'assert!(matches!(status(url), Some(Status::Failed(_))))',
     'std::fs::read_dir(temp.path()).unwrap().count(), 0'
   ])ensure(queueTests.includes(token),'Windows no-job/no-local-bytes test missing '+token);
   for(const token of [
@@ -104,7 +91,7 @@ function check(x){
     'node --test .github/scripts/video-tools-01k-guarded-ui.test.cjs',
     'cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed',
     'video::queue::installed_tests::installed_download_refusal_creates_no_job_or_local_bytes',
-    'all_five_native_states_show_distinct_russian_and_english_status',
+    'optional_download_states_have_real_localized_messages',
     'VIDEO_TOOLS_01K_INSTALLED_WINDOWS_PASS',
     'runs-on: windows-2025','permissions:\n  contents: read','persist-credentials: false'
   ])ensure(workflow.includes(token),'required Windows CI proof missing '+token);
@@ -117,17 +104,18 @@ test('installed Windows Video Tools status is diagnostic, never executable autho
 test('mutations of UI/native guard, locales, or Windows acceptance cannot silently pass',()=>{
   const s=load();
   const cases=[
-    ['ui','probe_installed_video_tools()','TrustPATH()'],
-    ['ui','ToolsDiscovery::PublisherNotApproved => (','ToolsDiscovery::PublisherNotApproved /* fake */ => ('],
+    ['ui','optional_ytdlp::status(&self.workspace.data_dir)','TrustPATH()'],
+    ['ui','Status::Invalid => (','Status::Invalid /* fake */ => ('],
     ['ui','return true;','return false;'],
     ['click','if self.optional_video_tools_notice(root) {','if false {'],
-    ['queue','if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))','if false'],
-    ['queueTests','assert!(status(url).is_none())','assert!(true)'],
+    ['queue','optional_ytdlp::verified_executable','optional_ytdlp::unchecked_executable'],
+    ['queueTests','assert!(matches!(status(url), Some(Status::Failed(_))))','assert!(true)'],
+    ['dispatch','quickjs.ok_or(', 'quickjs.unwrap_or('],
     ['leaf','VIDEO_TOOLS_01K_HOLD: publisher-approved process launch is unavailable','allow execution'],
     ['version','"0.1.0" => ToolsDiscovery::ReadOnlyAttested','"0.1.0" => ToolsDiscovery::IncompatibleVersion'],
     ['trust','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "ci";'],
     ['ru','"videoToolsMissingTitle"', '"missingRussianTitle"'],
-    ['en','"videoToolsUnapprovedTitle"', '"missingEnglishTitle"'],
+    ['en','"videoToolsUnsafeTitle"', '"missingEnglishTitle"'],
     ['workflow','cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed','echo success'],
     ['workflow','node --test .github/scripts/video-tools-01k-guarded-ui.test.cjs','echo skip'],
     ['workflow','permissions:\n  contents: read','permissions:\n  contents: write']

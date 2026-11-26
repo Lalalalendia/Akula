@@ -2,6 +2,7 @@
 // VIDEO-TOOLS-01p: a genuinely signed-MANIFEST six-file package is probed
 // by a distinct non-admin Windows SID, without enabling publisher admission.
 const assert=require('node:assert/strict');
+const installedRoute = require('./video-tools-installed-contract.cjs');
 const fs=require('node:fs');
 const path=require('node:path');
 const {test}=require('node:test');
@@ -11,7 +12,7 @@ const paths={
   signed:'scripts/windows-video-tools-01j-six-signed-lab.ps1',
   wf:'.github/workflows/akula-video-tools-01a-isolated-lab.yml',
   trust:'aquilum-app/native/src/video/tools_package.rs',
-  queue:'aquilum-app/native/src/video/queue.rs',
+  ...installedRoute.paths,
   stock:'aquilum-app/native/packaging/akula-windows.json',
   doc:'docs/release/video-tools-01p-signed-six-nonadmin.md'
 };
@@ -25,8 +26,7 @@ function verify(s){
   hold(s.trust.includes('pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";') &&
     s.trust.includes('false // a future, separately reviewed release gate must replace this constant'),
     'production publisher key or release permission opened');
-  hold(s.queue.includes('if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))'),
-    'installed Video Tools queue is no longer fail-closed');
+  installedRoute.checkInstalledRoute(s, hold);
   for(const token of [
     '[switch]$SignedSix',
     '$expectedRoot=Join-Path (Get-AkulaVideoToolsOsProgramFiles)',
@@ -92,7 +92,7 @@ test('reject removal of signed user proof, bytes/ACL safety or release HOLD',()=
     ['wf','node --test .github/scripts/video-tools-01p-signed-nonadmin.test.cjs','echo skipped'],
     ['wf','permissions:\n  contents: read','permissions:\n  contents: write'],
     ['trust','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "CI";'],
-    ['queue','if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))','if false']
+    ['queue','optional_ytdlp::verified_executable','optional_ytdlp::unchecked_executable']
   ]){
     hold(s[key].includes(from),'negative mutation target missing '+key+': '+from);
     assert.throws(()=>verify({...s,[key]:s[key].replace(from,to)}),/VIDEO_TOOLS_01P_HOLD/);

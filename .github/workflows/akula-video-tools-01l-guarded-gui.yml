@@ -6,6 +6,7 @@ on:
       - 'scripts/windows-video-tools-01l-guarded-gui.ps1'
       - 'scripts/video-tools-01l-child-sentinel.rs'
       - '.github/scripts/video-tools-01l-guarded-gui.test.cjs'
+      - '.github/scripts/video-tools-installed-contract.cjs'
       - 'docs/release/video-tools-01l-guarded-gui.md'
       - '.github/workflows/akula-video-tools-01l-guarded-gui.yml'
 
@@ -26,7 +27,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
-      - name: Verify normal installed download remains forbidden
+      - name: Verify installed downloads require the opt-in tools
         run: |
           set -euo pipefail
           node --test .github/scripts/video-tools-01l-guarded-gui.test.cjs
@@ -64,12 +65,16 @@ jobs:
         working-directory: aquilum-app
         run: |
           $ErrorActionPreference='Stop'
-          cargo test --locked -p aquilum-native --manifest-path Cargo.toml --features installed,video-tools-gui-e2e --bin aquilum-native -- video::queue::installed_tests::installed_download_refusal_creates_no_job_or_local_bytes --exact --nocapture
-          if($LASTEXITCODE -ne 0){
+          $queueProof=@(cargo test --locked -p aquilum-native --manifest-path Cargo.toml --features installed,video-tools-gui-e2e --bin aquilum-native -- video::queue::installed_tests::installed_download_refusal_creates_no_job_or_local_bytes --exact --nocapture 2>&1)
+          $status=$LASTEXITCODE
+          $queueProof | Out-Host
+          if($status -ne 0 -or !(($queueProof | Out-String).Contains('test result: ok. 1 passed;'))){
             throw 'VIDEO_TOOLS_01L_HOLD: installed queue can launch unapproved downloader'
           }
-          cargo test --locked -p aquilum-native --manifest-path Cargo.toml --features installed,video-tools-gui-e2e --bin aquilum-native -- app::editor_requests::video_stock_admission::tests::all_five_native_states_show_distinct_russian_and_english_status --exact --nocapture
-          if($LASTEXITCODE -ne 0){
+          $localeProof=@(cargo test --locked -p aquilum-native --manifest-path Cargo.toml --features installed,video-tools-gui-e2e --bin aquilum-native -- app::editor_requests::video_stock_admission::tests::optional_download_states_have_real_localized_messages --exact --nocapture 2>&1)
+          $status=$LASTEXITCODE
+          $localeProof | Out-Host
+          if($status -ne 0 -or !(($localeProof | Out-String).Contains('test result: ok. 1 passed;'))){
             throw 'VIDEO_TOOLS_01L_HOLD: localized UI state tests failed'
           }
       - name: Build and stage the ordinary installed-flavor Windows GUI candidate

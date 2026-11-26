@@ -1,6 +1,7 @@
 'use strict';
 // VIDEO-TOOLS-01l: source mutation contracts; real UI accepted separately on Win32.
 const assert=require('node:assert/strict');
+const installedRoute = require('./video-tools-installed-contract.cjs');
 const fs=require('node:fs');
 const path=require('node:path');
 const {test}=require('node:test');
@@ -13,8 +14,7 @@ const paths={
  preview:'aquilum-app/native/src/app/embeds/youtube.rs',
  module:'aquilum-app/native/src/video/mod.rs',
  witness:'aquilum-app/native/src/video/ui_acceptance.rs',
- queue:'aquilum-app/native/src/video/queue.rs',
- leaf:'aquilum-app/native/src/video/light.rs',
+  ...installedRoute.paths,
  trust:'aquilum-app/native/src/video/tools_package.rs',
  stock:'aquilum-app/native/packaging/akula-windows.json',
  ps:'scripts/windows-video-tools-01l-guarded-gui.ps1',
@@ -38,9 +38,7 @@ function check(x){
  hold(x.video.includes('mark("NOTICE_BLOCKED")')&&
       x.video.indexOf('optional_video_tools_notice')<x.video.indexOf('queue::enqueue('),
       'download must abort before queue');
- hold(x.queue.includes('if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))')&&
-      x.leaf.includes('VIDEO_TOOLS_01K_HOLD: publisher-approved process launch is unavailable'),
-      'installed queue or executable launch gate weakened');
+ installedRoute.checkInstalledRoute(x, hold);
  hold(x.trust.includes('pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";')&&
       x.trust.includes('false // a future, separately reviewed release gate must replace this constant'),
       'publisher key or shipping approval silently enabled');
@@ -58,9 +56,9 @@ function check(x){
     'CLICK_DOWNLOAD','NOTICE_BLOCKED','HOVER_DOWNLOAD',
     'PRESS_DOWNLOAD','WINDOW_POINTER_DOWN','Assert-Dialog',
     'Assert-No-Launch','AKULA_VIDEO_TOOLS_01L_CHILD_MARKER',
-    "Scenario 'missing' 'Akula Video Tools are not installed'",
-    "Scenario 'publisher-not-approved' 'Video Tools publisher is not yet approved'",
-    "Scenario 'unsafe' 'Video Tools installation did not pass verification'",
+    "Scenario 'missing' 'yt-dlp is required for video downloads'",
+    "Scenario 'publisher-not-approved' 'yt-dlp is required for video downloads'",
+    "Scenario 'unsafe' 'yt-dlp verification failed'",
     'VIDEO_TOOLS_01L_REAL_GUI_PASS real_pointer=3'
  ])hold(x.ps.includes(token),'genuine Windows GUI test proof missing '+token);
  hold(!/Invoke-WebRequest|Invoke-RestMethod|Start-BitsTransfer|gh release create/.test(x.ps),
@@ -83,6 +81,7 @@ function check(x){
     'scripts/windows-video-tools-01l-guarded-gui.ps1',
     'scripts/video-tools-01l-child-sentinel.rs',
     '.github/scripts/video-tools-01l-guarded-gui.test.cjs',
+    '.github/scripts/video-tools-installed-contract.cjs',
     'docs/release/video-tools-01l-guarded-gui.md',
     '.github/workflows/akula-video-tools-01l-guarded-gui.yml'
  ]),'new CI cannot increase fanout on existing source');
@@ -99,7 +98,7 @@ test('negative mutations of click, protected root and CI proof are blocked',()=>
    ['video','mark("NOTICE_BLOCKED")','mark("NOTICE_OK")'],
    ['mouse','feature = "video-tools-gui-e2e"','feature = "video-tools-fake"'],
    ['witness','"NOTICE_BLOCKED"','"NOTICE_ALLOWED"'],
-   ['queue','if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))','if false'],
+   ['queue','optional_ytdlp::verified_executable','optional_ytdlp::unchecked_executable'],
    ['trust','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "ci";'],
    ['ps','SendInput(1,down','SendInput(0,down'],
    ['ps','Icacls -Arguments @($root','Write-Output fake-acl @($root'],
