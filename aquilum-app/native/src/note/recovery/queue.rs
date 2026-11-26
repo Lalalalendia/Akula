@@ -197,10 +197,7 @@ mod tests {
 
     #[test]
     fn rapid_edit_burst_coalesces_and_only_final_bytes_become_durable() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("draft.md");
-        fs::write(&doc, "before").unwrap();
+        let (data, vault, doc) = super::super::test_note_fixture("draft.md", "before");
         let queue = SnapshotQueue::new(data.path(), vault.path(), Uuid::new_v4(), &doc, &digest(&doc)).unwrap();
         let (tx, rx) = channel::<()>();
         // Hold the one serial disk worker to make coalescing deterministic.
@@ -223,10 +220,7 @@ mod tests {
 
     #[test]
     fn many_durable_100k_style_edits_keep_one_latest_shadow_not_a_disk_filling_history() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("large.md");
-        fs::write(&doc, "disk source").unwrap();
+        let (data, vault, doc) = super::super::test_note_fixture("large.md", "disk source");
         let workspace = Uuid::new_v4();
         let queue = SnapshotQueue::new(data.path(), vault.path(), workspace, &doc, &digest(&doc)).unwrap();
         let large = format!("{}\n", "Unicode 🐱漢字".repeat(300_000));
@@ -251,10 +245,7 @@ mod tests {
 
     #[test]
     fn failure_never_reports_durability_or_modifies_original_note() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("fail.md");
-        fs::write(&doc, "before").unwrap();
+        let (data, vault, doc) = super::super::test_note_fixture("fail.md", "before");
         let queue = SnapshotQueue::new(data.path(), vault.path(), Uuid::new_v4(), &doc, &digest(&doc)).unwrap();
         fs::remove_file(&doc).unwrap();
         queue.request(Rope::from("unpublished")).unwrap();
@@ -268,10 +259,7 @@ mod tests {
 
     #[test]
     fn old_unsaved_draft_survives_new_process_edits_and_ack_until_review() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("note.md");
-        fs::write(&doc, "last confirmed").unwrap();
+        let (data, vault, doc) = super::super::test_note_fixture("note.md", "last confirmed");
         let workspace = Uuid::new_v4();
         let baseline = digest(&doc);
         stage(data.path(), vault.path(), workspace, &doc, &baseline, 31, "prior crash draft").unwrap();
@@ -288,10 +276,7 @@ mod tests {
 
     #[test]
     fn reopening_queue_chooses_revision_above_previous_snapshot() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("restart.md");
-        fs::write(&doc, "before").unwrap();
+        let (data, vault, doc) = super::super::test_note_fixture("restart.md", "before");
         let workspace = Uuid::new_v4();
         let baseline = digest(&doc);
         // Simulate a prior run that left a newer-than-clock revision behind.

@@ -14,10 +14,7 @@ fn digest(path: &std::path::Path) -> String {
 
 #[test]
 fn oversized_shadow_is_rejected_before_revision_or_disk_work() {
-    let data = tempfile::tempdir().unwrap();
-    let vault = tempfile::tempdir().unwrap();
-    let doc = vault.path().join("over-limit.md");
-    fs::write(&doc, "original").unwrap();
+    let (data, vault, doc) = super::super::test_note_fixture("over-limit.md", "original");
     let workspace = Uuid::new_v4();
     let queue = SnapshotQueue::new(data.path(), vault.path(), workspace, &doc, &digest(&doc)).unwrap();
     let too_large = Rope::from("x".repeat(super::super::MAX_TEXT + 1));
@@ -43,10 +40,7 @@ fn oversized_shadow_is_rejected_before_revision_or_disk_work() {
 
 #[test]
 fn over_limit_recovery_failure_does_not_block_regular_file_gate_save() {
-    let data = tempfile::tempdir().unwrap();
-    let vault = tempfile::tempdir().unwrap();
-    let doc = vault.path().join("large-note.md");
-    fs::write(&doc, "original").unwrap();
+    let (data, vault, doc) = super::super::test_note_fixture("large-note.md", "original");
     let workspace = Uuid::new_v4();
     let core = Arc::new(aquilum_core::Core::open(data.path(), Arc::new(|_| {})));
     let (mut note, _) = crate::note::Note::open(doc.clone()).unwrap();

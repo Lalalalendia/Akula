@@ -52,10 +52,7 @@ mod tests {
 
     #[test]
     fn stale_crash_pending_is_removed_but_fresh_writer_and_original_survive() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("draft.md");
-        fs::write(&doc, "persisted").unwrap();
+        let (data, vault, doc) = super::super::test_note_fixture("draft.md", "persisted");
         let workspace = Uuid::new_v4();
         let baseline = blake3::hash(b"persisted").to_hex().to_string();
         let bucket = super::super::folder(data.path(), workspace, true).unwrap().unwrap();
