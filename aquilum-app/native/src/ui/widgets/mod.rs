@@ -9,7 +9,7 @@ mod document_item;
 mod items;
 mod kbd;
 mod label;
-mod layout;
+pub(super) mod layout;
 mod sash;
 mod visible;
 

@@ -1,9 +1,8 @@
-use masonry::accesskit::{Node, Role};
+use crate::ui::widgets::layout::contract::passive_single_child;
 use masonry::core::{
-    AccessCtx, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, NewWidget, NoAction, PaintCtx, PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef,
-    RegisterCtx, ScrollDelta, Widget, WidgetPod,
+    EventCtx, LayoutCtx, MeasureCtx, NewWidget, NoAction, PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef,
+    ScrollDelta, Widget, WidgetPod,
 };
-use masonry::imaging::Painter;
 use masonry::kurbo::{Axis, Point, Size};
 use masonry::layout::{LenReq, Length};
 
@@ -70,10 +69,6 @@ impl Widget for HScroll {
         }
     }
 
-    fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
-        ctx.register_child(&mut self.child);
-    }
-
     fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, len_req: LenReq, cross: Option<Length>) -> Length {
         if axis == Axis::Horizontal && matches!(len_req, LenReq::MinContent) {
             return Length::ZERO;
@@ -90,15 +85,5 @@ impl Widget for HScroll {
         ctx.set_clip_path(size.to_rect());
     }
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _painter: &mut Painter<'_>) {}
-
-    fn accessibility_role(&self) -> Role {
-        Role::GenericContainer
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
-
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::from_slice(&[self.child.id()])
-    }
+    passive_single_child!(child);
 }
