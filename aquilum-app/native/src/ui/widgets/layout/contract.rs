@@ -4,6 +4,6 @@ mod labeled_click;
 mod leaf;
 mod fill_context;
 pub(in crate::ui) use {
-    single_child::passive_single_child, labeled_click::labeled_click,
+    single_child::{passive_single_child, passive_surface}, labeled_click::labeled_click,
     leaf::leaf_widget, fill_context::fill_context,
 };

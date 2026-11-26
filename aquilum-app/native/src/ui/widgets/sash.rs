@@ -1,4 +1,4 @@
-use crate::ui::widgets::layout::contract::{fill_context, leaf_widget};
+use crate::ui::widgets::layout::contract::{fill_context, leaf_widget, passive_surface};
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
     AccessCtx, ChildrenIds, CursorIcon, EventCtx, LayoutCtx, MeasureCtx, NewWidget, NoAction, PaintCtx, PointerButton, PointerEvent, PropertiesMut, PropertiesRef, QueryCtx,
@@ -65,13 +65,7 @@ impl Widget for Edged {
         ctx.place_child(&mut self.sash, Point::new(x, 0.0));
     }
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _painter: &mut Painter<'_>) {}
-
-    fn accessibility_role(&self) -> Role {
-        Role::GenericContainer
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
+    passive_surface!();
 
     fn children_ids(&self) -> ChildrenIds {
         ChildrenIds::from_slice(&[self.content.id(), self.sash.id()])
