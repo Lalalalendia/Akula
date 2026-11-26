@@ -81,9 +81,7 @@ impl App {
         commands.push((VersionCommand::Rename, t("common.rename")));
         let labels: Vec<&str> = commands.iter().map(|(_, label)| label.as_str()).collect();
         let menu = Menu::new(&t("history.versionActions"), &labels);
-        let layer = menu.id();
-        root.add_layer(menu, Menu::context_origin(at, labels.len(), self.window));
-        root.focus_on(Some(layer));
+        let layer = crate::app::ui_actions::mount_menu(root, menu, Menu::context_origin(at, labels.len(), self.window), None);
         self.popup = Some(Popup::VersionMenu { layer, index, commands: commands.into_iter().map(|(c, _)| c).collect() });
     }
 

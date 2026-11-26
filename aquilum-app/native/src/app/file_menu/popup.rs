@@ -17,8 +17,7 @@ impl App {
         };
         let confirm = if many { t_with("confirm.deleteMany", &[("count", &count)]) } else { t("common.delete") };
         let (layer, dialog) = ConfirmDialog::new(&title, &description, &t("common.cancel"), &confirm);
-        root.add_layer(layer, Point::ORIGIN);
-        root.focus_on(Some(dialog.layer));
+        crate::app::ui_actions::mount_modal(root, layer, dialog.layer);
         self.popup = Some(Popup::Delete { dialog, targets });
     }
 }
