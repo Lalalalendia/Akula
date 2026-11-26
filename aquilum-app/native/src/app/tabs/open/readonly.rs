@@ -7,11 +7,7 @@ impl App {
         use aquilum_core::files::structured::StructuredDocument;
         use masonry::core::NewWidget;
         use masonry::widgets::Flex;
-        self.note = None;
-        self.note_ids = None;
-        self.embeds = None;
-        self.open_error = None;
-        self.open_error_ids = None;
+        self.reset_note_view_for_preview();
         if path.extension().and_then(|ext| ext.to_str())
             .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas"))
         {
@@ -41,11 +37,7 @@ impl App {
     }
 
     pub(super) fn show_image_readonly(&mut self, root: &mut RenderRoot, path: &Path) {
-        self.note = None;
-        self.note_ids = None;
-        self.embeds = None;
-        self.open_error = None;
-        self.open_error_ids = None;
+        self.reset_note_view_for_preview();
         if let Some(page) = self.image_tab_widget() {
             if let Some(chrome) = &self.chrome {
                 chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page));

@@ -49,8 +49,7 @@ impl App {
         let config = self.workspace.core.settings.get_config();
         let ctx = self.settings_context(section, None, 0);
         let (layer, dialog) = settings::dialog(&config, &ctx, section);
-        root.add_layer(layer, Point::ORIGIN);
-        root.focus_on(Some(dialog.layer));
+        crate::app::ui_actions::mount_modal(root, layer, dialog.layer);
         self.popup = Some(Popup::Settings { dialog, menu: None });
     }
 

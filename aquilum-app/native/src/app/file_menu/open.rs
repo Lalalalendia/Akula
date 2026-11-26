@@ -54,9 +54,7 @@ impl App {
         let swatches: Vec<Swatch<'_>> = names.iter().zip(std::iter::once(None).chain(palette::NAMES.iter().map(|name| palette::color(name, &theme)))).map(|(label, color)| Swatch { label, color }).collect();
         let current = self.tree.color(&clicked).and_then(|name| palette::NAMES.iter().position(|known| *known == name)).map_or(0, |at| at + 1);
         let menu = if colored { Menu::with_submenu(&label, &items, &Submenu { at: MENU_COLOR, items: &swatches, checked: current }) } else { Menu::entries(&label, &items) };
-        let layer = menu.id();
-        root.add_layer(menu, Menu::context_origin(at, items.len(), window));
-        root.focus_on(Some(layer));
+        let layer = crate::app::ui_actions::mount_menu(root, menu, Menu::context_origin(at, items.len(), window), None);
         self.popup = Some(Popup::FileMenu { layer, targets, clicked, tab });
     }
 
