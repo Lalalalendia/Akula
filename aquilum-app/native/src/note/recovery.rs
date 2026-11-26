@@ -378,6 +378,17 @@ pub(super) fn clear_after_verified_save(
     Ok(true)
 }
 
+// Shared single-document setup for recovery tests. Every invocation owns a
+// fresh AppData and vault; test-specific admission and mutations remain local.
+#[cfg(test)]
+fn test_note_fixture(name: &str, initial: &str) -> (tempfile::TempDir, tempfile::TempDir, PathBuf) {
+    let data = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let doc = vault.path().join(name);
+    fs::write(&doc, initial).unwrap();
+    (data, vault, doc)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,10 +428,7 @@ mod tests {
     #[test]
     fn hundred_thousand_unicode_lines_survive_crash_without_original_overwrite() {
         use std::process::Command;
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("huge.md");
-        fs::write(&doc, "original source").unwrap();
+        let (data, vault, doc) = test_note_fixture("huge.md", "original source");
         let workspace = Uuid::new_v4();
         let child = Command::new(std::env::current_exe().unwrap())
             .arg("abrupt_child_exit_with_large_unicode_shadow")
@@ -442,10 +450,7 @@ mod tests {
 
     #[test]
     fn oversized_unicode_body_is_rejected_without_publishing_shadow() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("oversized.md");
-        fs::write(&doc, "original source").unwrap();
+        let (data, vault, doc) = test_note_fixture("oversized.md", "original source");
         let id = Uuid::new_v4();
         let oversized = "x".repeat(MAX_TEXT + 1);
         assert!(stage(data.path(), vault.path(), id, &doc, &digest(&doc), 1, &oversized).is_err());
@@ -455,10 +460,7 @@ mod tests {
 
     #[test]
     fn snapshot_count_admission_never_strands_an_existing_draft() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("admission.md");
-        fs::write(&doc, "confirmed").unwrap();
+        let (data, vault, doc) = test_note_fixture("admission.md", "confirmed");
         let workspace = Uuid::new_v4();
         let baseline = digest(&doc);
         for revision in 1..=MAX_RECORDS {
@@ -477,10 +479,7 @@ mod tests {
 
     #[test]
     fn superseded_cleanup_refuses_a_corrupted_newer_record() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("superseded.md");
-        fs::write(&doc, "confirmed").unwrap();
+        let (data, vault, doc) = test_note_fixture("superseded.md", "confirmed");
         let workspace = Uuid::new_v4();
         let baseline = digest(&doc);
         let older = stage(data.path(), vault.path(), workspace, &doc, &baseline, 1, "old").unwrap();
@@ -511,10 +510,7 @@ mod tests {
 
     #[test]
     fn refuses_corruption_and_same_revision_overwrite() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("note.md");
-        fs::write(&doc, "base").unwrap();
+        let (data, vault, doc) = test_note_fixture("note.md", "base");
         let id = Uuid::new_v4();
         let base = digest(&doc);
         let path = stage(data.path(), vault.path(), id, &doc, &base, 7, "draft").unwrap();
@@ -527,10 +523,7 @@ mod tests {
 
     #[test]
     fn changed_source_remains_held_until_exact_disk_bytes_and_revision() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("note.md");
-        fs::write(&doc, "base").unwrap();
+        let (data, vault, doc) = test_note_fixture("note.md", "base");
         let id = Uuid::new_v4();
         stage(data.path(), vault.path(), id, &doc, &digest(&doc), 9, "draft").unwrap();
         fs::write(&doc, "external").unwrap();
@@ -545,10 +538,7 @@ mod tests {
 
     #[test]
     fn acknowledged_newest_revision_prunes_stale_drafts_without_losing_source() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("multi.md");
-        fs::write(&doc, "base").unwrap();
+        let (data, vault, doc) = test_note_fixture("multi.md", "base");
         let id = Uuid::new_v4();
         let baseline = digest(&doc);
         stage(data.path(), vault.path(), id, &doc, &baseline, 41, "first").unwrap();
@@ -562,10 +552,7 @@ mod tests {
 
     #[test]
     fn corrupt_older_revision_blocks_cleanup_without_deleting_newest() {
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("multi.md");
-        fs::write(&doc, "base").unwrap();
+        let (data, vault, doc) = test_note_fixture("multi.md", "base");
         let id = Uuid::new_v4();
         let baseline = digest(&doc);
         let old = stage(data.path(), vault.path(), id, &doc, &baseline, 41, "first").unwrap();
@@ -591,10 +578,7 @@ mod tests {
     #[test]
     fn synced_snapshot_survives_forced_process_exit_without_touching_file() {
         use std::process::Command;
-        let data = tempfile::tempdir().unwrap();
-        let vault = tempfile::tempdir().unwrap();
-        let doc = vault.path().join("unsaved.md");
-        fs::write(&doc, "last disk version").unwrap();
+        let (data, vault, doc) = test_note_fixture("unsaved.md", "last disk version");
         let id = Uuid::new_v4();
         let status = Command::new(std::env::current_exe().unwrap())
             .arg("abrupt_child_exit_after_snapshot_sync")
