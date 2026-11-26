@@ -72,9 +72,9 @@ impl DropboxPreview {
                     return Err(AccountLoginError::BrowserUnavailable);
                 }
                 session.finish(Duration::from_secs(120))
-        });
-                PreviewReply::Account(result)
             });
+            PreviewReply::Account(result)
+        });
     }
 
     /// Manual cold-start recovery from the OS secret store. This never
