@@ -7,7 +7,6 @@
 use akula_yandex_disk_connect_lab::{ConnectError, ConnectSession, ReadOnlyReceipt, ReadOnlyReview};
 use std::{
     path::Path,
-    process::{Command, Stdio},
     sync::{mpsc::{self, Receiver, Sender}, Arc},
     time::Duration,
 };
@@ -24,19 +23,9 @@ fn registered_identity() -> Option<(&'static str, u16)> {
     }
     Some((client, port))
 }
-fn open_browser(url: &str) -> bool {
-    let program = if cfg!(target_os = "windows") {
-        "explorer.exe"
-    } else if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    };
-    // Do not use a shell; do not inherit child output or log the URL/state.
-    Command::new(program).arg(url)
-        .stdout(Stdio::null()).stderr(Stdio::null())
-        .spawn().is_ok()
-}
+#[path = "oauth_browser.rs"]
+mod browser;
+use browser::open_browser;
 #[path = "yandex_disk_preview/lifecycle.rs"] mod lifecycle;
 enum Reply {
     Reviewed(Result<ReadOnlyReview, ConnectError>),
