@@ -1,6 +1,6 @@
 //! Shared, narrow framework contracts; each widget owns its rendering and input.
-mod single_child;
-pub(in crate::ui) use single_child::passive_single_child;
+mod single_child; mod labeled_click;
+pub(in crate::ui) use {single_child::passive_single_child, labeled_click::labeled_click};
 
 // Only widgets with no child and no layout work may use this contract.
 macro_rules! leaf_widget {

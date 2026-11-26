@@ -1,7 +1,6 @@
-use crate::ui::widgets::layout::contract::leaf_widget;
-use masonry::accesskit::{Action, Node, Role};
+use crate::ui::widgets::layout::contract::{leaf_widget, labeled_click};
 use masonry::core::{
-    AccessCtx, MeasureCtx, NewWidget, PaintCtx, PropertiesRef, Widget, render_text,
+    MeasureCtx, NewWidget, PaintCtx, PropertiesRef, Widget, render_text,
 };
 use masonry::imaging::Painter;
 use masonry::kurbo::{Affine, Axis, Line, Point, Stroke};
@@ -59,14 +58,7 @@ impl Widget for LinkButton {
         }
     }
 
-    fn accessibility_role(&self) -> Role {
-        Role::Button
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, node: &mut Node) {
-        node.set_label(self.label.clone());
-        node.add_action(Action::Click);
-    }
+    labeled_click!(Button, label);
 
     leaf_widget!();
 }
