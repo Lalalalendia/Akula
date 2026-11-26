@@ -15,6 +15,14 @@ pub enum Setter {
     Autostart,
 }
 
+pub(crate) fn same_setter(a: Setter, b: Setter) -> bool {
+    match (a, b) {
+        (Setter::Config(x), Setter::Config(y)) => std::ptr::fn_addr_eq(x, y),
+        (Setter::Scale, Setter::Scale) | (Setter::HomePage, Setter::HomePage) | (Setter::Autostart, Setter::Autostart) => true,
+        _ => false,
+    }
+}
+
 mod context;
 pub use context::Context;
 mod actions;
