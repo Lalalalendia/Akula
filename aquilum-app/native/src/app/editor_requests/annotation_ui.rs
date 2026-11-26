@@ -9,7 +9,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 use aquilum_core::text::annotations::{
-    capture, reattach, DocumentIdentity, Reattachment, MAX_DOCUMENT_BYTES,
+    capture, DocumentIdentity, MAX_DOCUMENT_BYTES,
 };
 use aquilum_core::text::annotation_store::{
     AnnotationRecord, AnnotationStore, BindingStatus, PaletteColor, StoreError,
@@ -20,7 +20,9 @@ use masonry::peniko::Color;
 
 use super::super::{App, Popup};
 use crate::i18n::t;
-use crate::ui::editor::{AnnotationPaintSpan, TextEditor};
+use crate::ui::editor::TextEditor;
+
+mod overlay;
 use crate::ui::menu::MenuChoice;
 
 const PALETTE: [PaletteColor; 6] = [
@@ -213,30 +215,6 @@ impl App {
             return;
         };
         self.show_verified_annotation_overlay(root, &current, &snapshot.records);
-    }
-
-    // Both callers independently authorize the editor and load their sidecar.
-    pub(super) fn show_verified_annotation_overlay(
-        &self, root: &mut RenderRoot, current: &AuthorizedEditor, records: &[AnnotationRecord],
-    ) {
-        let spans = records.iter()
-            .filter(|record| record.anchor.document == current.document
-                && record.status == BindingStatus::Current)
-            .filter_map(|record| match reattach(
-                &record.anchor, &current.document, &current.body, &current.body, None,
-            ) {
-                Ok(Reattachment::Attached(anchor)) => Some(AnnotationPaintSpan {
-                    bytes: anchor.byte_start..anchor.byte_end,
-                    color: paint(record.color),
-                }),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        if let Some(ids) = &self.note_ids {
-            ids.body.edit(root, |mut editor| {
-                TextEditor::set_annotation_overlay(&mut editor, spans);
-            });
-        }
     }
 }
 
