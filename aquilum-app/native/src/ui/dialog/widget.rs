@@ -1,7 +1,8 @@
+use crate::ui::widgets::layout::contract::fill_context;
 use masonry::accesskit::{Node, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
-    AccessCtx, ChildrenIds, EventCtx, Layer, LayoutCtx, MeasureCtx, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, TextEvent, Update,
+    AccessCtx, ChildrenIds, EventCtx, Layer, LayoutCtx, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, TextEvent, Update,
     UpdateCtx, Widget, WidgetPod,
 };
 use masonry::imaging::Painter;
@@ -67,9 +68,7 @@ impl Widget for Modal {
         ctx.register_child(&mut self.card);
     }
 
-    fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
-        ctx.context_size().length(axis).unwrap_or(Length::ZERO)
-    }
+    fill_context!();
 
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, size: Size) {
         let room = Size::new((size.width - size::SPACE_16 * 2.0).max(0.0), (size.height - size::SPACE_16 * 2.0).max(0.0));

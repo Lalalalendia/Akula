@@ -1,17 +1,17 @@
 //! Non-blocking, strictly read-only DICOM page.
 //! Initial DICOMDIR indexing and each selected-frame decode run off the UI thread.
+use crate::ui::widgets::layout::contract::fill_context;
 use crate::dicom::{DicomWorker, Navigation};
 use crate::ui::{text::{Line, Style}, theme};
 use masonry::accesskit::{Node, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
-    render_text, AccessCtx, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, NewWidget,
+    render_text, AccessCtx, ChildrenIds, EventCtx, LayoutCtx, NewWidget,
     PaintCtx, PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef,
     RegisterCtx, ScrollDelta, TextEvent, Update, UpdateCtx, Widget,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, Point, Rect, Size};
-use masonry::layout::{LenReq, Length};
+use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::peniko::{ImageAlphaType, ImageBrush};
 use std::path::PathBuf;
 
@@ -150,10 +150,7 @@ impl Widget for DicomPage {
 
     fn accepts_focus(&self) -> bool { true }
     fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-    fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>,
-               axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
-        ctx.context_size().length(axis).unwrap_or(Length::ZERO)
-    }
+    fill_context!();
     fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, size: Size) {
         let Some(image) = &self.image else {
             self.frame = Rect::ZERO;

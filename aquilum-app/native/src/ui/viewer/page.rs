@@ -1,11 +1,11 @@
+use crate::ui::widgets::layout::contract::fill_context;
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
-    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, PaintCtx, PropertiesRef,
+    AccessCtx, ChildrenIds, LayoutCtx, PaintCtx, PropertiesRef,
     RegisterCtx, Widget,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, Point, Rect, Size};
-use masonry::layout::{LenReq, Length};
+use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::peniko::ImageBrush;
 
 use super::super::theme;
@@ -30,9 +30,7 @@ impl Widget for ImagePage {
 
     fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
 
-    fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
-        ctx.context_size().length(axis).unwrap_or(Length::ZERO)
-    }
+    fill_context!();
 
     fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, size: Size) {
         let width = f64::from(self.image.image.width);

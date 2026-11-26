@@ -1,13 +1,13 @@
+use crate::ui::widgets::layout::contract::fill_context;
 use std::time::Instant;
 
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
-    AccessCtx, ChildrenIds, CursorIcon, EventCtx, LayoutCtx, MeasureCtx, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, QueryCtx, RegisterCtx, Update, UpdateCtx, Widget,
+    AccessCtx, ChildrenIds, CursorIcon, EventCtx, LayoutCtx, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, QueryCtx, RegisterCtx, Update, UpdateCtx, Widget,
     WidgetPod,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, Point, Rect, Size};
-use masonry::layout::{LenReq, Length};
+use masonry::kurbo::{Affine, Point, Rect, Size};
 
 use crate::ui::text::Line;
 use crate::ui::theme;
@@ -72,9 +72,7 @@ impl Widget for GraphView {
         }
     }
 
-    fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
-        ctx.context_size().length(axis).unwrap_or(Length::ZERO)
-    }
+    fill_context!();
 
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, size: Size) {
         let resized = self.size != size;
