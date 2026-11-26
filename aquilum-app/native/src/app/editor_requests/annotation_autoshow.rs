@@ -5,13 +5,10 @@
 //! Only the already-authorized current, clean editor may receive ranges.
 //! On missing/foreign/corrupt/stale data the editor keeps its empty overlay.
 
-use aquilum_core::text::annotations::{reattach, Reattachment};
-use aquilum_core::text::annotation_store::{AnnotationStore, BindingStatus};
+use aquilum_core::text::annotation_store::AnnotationStore;
 use masonry::app::RenderRoot;
 
 use super::super::App;
-use super::annotation_ui::paint;
-use crate::ui::editor::{AnnotationPaintSpan, TextEditor};
 
 impl App {
     /// Called only after the native note page has been installed into
@@ -35,22 +32,6 @@ impl App {
         else {
             return;
         };
-        let spans = snapshot.records.iter().filter(|record|
-            record.anchor.document == source.document
-                && record.status == BindingStatus::Current
-        ).filter_map(|record| match reattach(
-            &record.anchor, &source.document, &source.body, &source.body, None,
-        ) {
-            Ok(Reattachment::Attached(anchor)) => Some(AnnotationPaintSpan {
-                bytes: anchor.byte_start..anchor.byte_end,
-                color: paint(record.color),
-            }),
-            _ => None,
-        }).collect::<Vec<_>>();
-        if let Some(ids) = &self.note_ids {
-            ids.body.edit(root, |mut editor| {
-                TextEditor::set_annotation_overlay(&mut editor, spans);
-            });
-        }
+        self.show_verified_annotation_overlay(root, &source, &snapshot.records);
     }
 }
