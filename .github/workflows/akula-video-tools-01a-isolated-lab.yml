@@ -21,6 +21,8 @@ on:
       - 'labs/video-tools-01j/'
       - '.github/scripts/video-tools-01j-six-signed.test.cjs'
       - 'docs/release/video-tools-01j-six-signed.md'
+      - '.github/scripts/video-tools-01k-guarded-ui.test.cjs'
+      - '.github/scripts/video-tools-installed-contract.cjs'
       - '.github/scripts/video-tools-01m-trust-state.test.cjs'
       - 'docs/release/video-tools-01m-trust-state.md'
       - '.github/scripts/video-tools-01n-manual-reinstall.test.cjs'
@@ -298,8 +300,8 @@ jobs:
           if($LASTEXITCODE -ne 0){
             throw 'VIDEO_TOOLS_01K_HOLD: Windows installed queue accepted an unapproved executable'
           }
-          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --bin aquilum-native -- app::editor_requests::video_stock_admission::tests::all_five_native_states_show_distinct_russian_and_english_status --exact --nocapture
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --bin aquilum-native -- app::editor_requests::video_stock_admission::tests::optional_download_states_have_real_localized_messages --exact --nocapture
           if($LASTEXITCODE -ne 0){
             throw 'VIDEO_TOOLS_01K_HOLD: user-visible native Windows package status or locales incomplete'
           }
-          Write-Output 'VIDEO_TOOLS_01K_INSTALLED_WINDOWS_PASS read_only_status=5 queue=closed untrusted_path=0 release=0'
+          Write-Output 'VIDEO_TOOLS_01K_INSTALLED_WINDOWS_PASS localized_status=5 unverified_download_refused=1 untrusted_path=0 release=0'

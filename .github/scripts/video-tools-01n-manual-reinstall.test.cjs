@@ -1,6 +1,7 @@
 'use strict';
 // VIDEO-TOOLS-01n: strict test-only manual install refusal + owner HOLD.
 const assert = require('node:assert/strict');
+const installedRoute = require('./video-tools-installed-contract.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const {test} = require('node:test');
@@ -10,7 +11,7 @@ const paths = {
   runner:'scripts/windows-video-tools-01j-six-signed-lab.ps1',
   flow:'.github/workflows/akula-video-tools-01a-isolated-lab.yml',
   trust:'aquilum-app/native/src/video/tools_package.rs',
-  queue:'aquilum-app/native/src/video/queue.rs',
+  ...installedRoute.paths,
   stock:'aquilum-app/native/packaging/akula-windows.json',
   doc:'docs/release/video-tools-01n-owner-and-manual-hold.md'
 };
@@ -18,15 +19,14 @@ const load = () => Object.fromEntries(Object.entries(paths).map(([k,v]) =>
   [k,fs.readFileSync(path.join(repo,v),'utf8')]));
 const hold = (v,m) => assert.ok(v,'VIDEO_TOOLS_01N_HOLD: '+m);
 function check(s) {
-  const {nsis,runner,flow,trust,queue,stock,doc}=s;
+  const {nsis,runner,flow,trust,stock,doc}=s;
   hold(JSON.stringify(JSON.parse(stock).binaries.map(x=>x.path)) ===
     JSON.stringify(['akula-app','shiva-pdf-preview']),
     'stock installer no longer two EXEs');
   hold(trust.includes('pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";') &&
     trust.includes('false // a future, separately reviewed release gate must replace this constant'),
     'real publisher key/release HOLD was bypassed');
-  hold(queue.includes('if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))'),
-    'installed queue was unlocked');
+  installedRoute.checkInstalledRoute(s, hold);
   for(const t of [
     'Name "Akula Video Tools 01j NONRELEASE laboratory"',
     'InstallDir "$PROGRAMFILES64\\Akula Video Tools"',
@@ -90,7 +90,7 @@ test('negative source mutations must fail',()=>{
     ['runner','if($reuninstall01n.ExitCode -ne 0)','if($false)'],
     ['runner','VIDEO_TOOLS_01N_MANUAL_REINSTALL_PASS denied_overwrite=1','VIDEO_TOOLS_01N_MANUAL_REINSTALL_PASS denied_overwrite=0'],
     ['trust','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "CI";'],
-    ['queue','if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))','if false'],
+    ['queue','optional_ytdlp::verified_executable','optional_ytdlp::unchecked_executable'],
     ['flow','permissions:\n  contents: read','permissions:\n  contents: write'],
     ['flow','node --test .github/scripts/video-tools-01n-manual-reinstall.test.cjs','echo skipped']
   ]) {

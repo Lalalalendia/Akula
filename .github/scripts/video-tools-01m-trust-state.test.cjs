@@ -4,12 +4,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {test} = require('node:test');
+const installedRoute = require('./video-tools-installed-contract.cjs');
 const root = path.resolve(__dirname, '../..');
 const files = {
   probe: 'aquilum-app/native/src/video/tools_package_probe.rs',
   version: 'aquilum-app/native/src/video/tools_package_probe_version.rs',
   signed: 'aquilum-app/native/src/video/tools_package.rs',
-  queue: 'aquilum-app/native/src/video/queue.rs',
+  ...installedRoute.paths,
   native: 'labs/video-tools-01j/src/main.rs',
   runner: 'scripts/windows-video-tools-01j-six-signed-lab.ps1',
   workflow: '.github/workflows/akula-video-tools-01a-isolated-lab.yml',
@@ -34,8 +35,7 @@ function verify(s) {
   hold(s.signed.includes('pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";') &&
        s.signed.includes('false // a future, separately reviewed release gate must replace this constant'),
        'real publisher authority and public release must remain absent');
-  hold(s.queue.includes('if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))'),
-       'ordinary installed download queue must stay closed');
+  installedRoute.checkInstalledRoute(s, hold);
   hold(JSON.stringify(JSON.parse(s.stock).binaries.map(x=>x.path)) ===
        JSON.stringify(['akula-app','shiva-pdf-preview']),
        'stock signed Akula installer must remain two-EXE');
@@ -94,7 +94,7 @@ test('mutating signer, classification, publisher gate or proof makes CI fail',()
     ['version','"0.1.0" => ToolsDiscovery::ReadOnlyAttested','"0.1.0" => ToolsDiscovery::IncompatibleVersion'],
     ['probe','check_installed_acl(&root, &files)','Ok(())'],
     ['signed','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";','pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "CI";'],
-    ['queue','if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))','if false'],
+    ['queue','optional_ytdlp::verified_executable','optional_ytdlp::unchecked_executable'],
     ['native','tools_package::verify_signed(root, &raw, signed, key)?','panic!("fake verify")'],
     ['native','PinnedPackage::open(','FakePinned::open('],
     ['native','probe_installed_video_tools() != ToolsDiscovery::PublisherNotApproved','false'],

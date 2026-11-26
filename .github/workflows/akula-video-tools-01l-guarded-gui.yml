@@ -6,6 +6,7 @@ on:
       - 'scripts/windows-video-tools-01l-guarded-gui.ps1'
       - 'scripts/video-tools-01l-child-sentinel.rs'
       - '.github/scripts/video-tools-01l-guarded-gui.test.cjs'
+      - '.github/scripts/video-tools-installed-contract.cjs'
       - 'docs/release/video-tools-01l-guarded-gui.md'
       - '.github/workflows/akula-video-tools-01l-guarded-gui.yml'
 
@@ -26,7 +27,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
-      - name: Verify normal installed download remains forbidden
+      - name: Verify installed downloads require the opt-in tools
         run: |
           set -euo pipefail
           node --test .github/scripts/video-tools-01l-guarded-gui.test.cjs
