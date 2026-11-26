@@ -1,9 +1,10 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::{
-    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PropertiesRef, RegisterCtx, Widget, render_text,
+    AccessCtx, MeasureCtx, NewWidget, PaintCtx, PropertiesRef, Widget, render_text,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, Line, Point, Size, Stroke};
+use masonry::kurbo::{Affine, Axis, Line, Point, Stroke};
 use masonry::layout::{LenReq, Length};
 
 use crate::ui::tokens::{number, size};
@@ -32,8 +33,6 @@ impl Widget for LinkButton {
 
     press_events!(line);
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         let style = Self::style();
         Length::px(match axis {
@@ -41,8 +40,6 @@ impl Widget for LinkButton {
             Axis::Vertical => style.line_height + size::SPACE_8 * 2.0,
         })
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -71,7 +68,5 @@ impl Widget for LinkButton {
         node.add_action(Action::Click);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }

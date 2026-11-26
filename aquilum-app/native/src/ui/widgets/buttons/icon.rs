@@ -1,10 +1,11 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::{
-    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, PaintCtx, PropertiesMut, PropertiesRef, RegisterCtx, Update, UpdateCtx,
+    AccessCtx, MeasureCtx, PaintCtx, PropertiesMut, PropertiesRef, Update, UpdateCtx,
     Widget, WidgetMut,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Axis, Rect, RoundedRect, Size, Stroke, Vec2};
+use masonry::kurbo::{Axis, Rect, RoundedRect, Stroke, Vec2};
 use masonry::layout::{LenReq, Length};
 
 use crate::ui::icons::{self, Icon};
@@ -70,13 +71,9 @@ impl Widget for IconButton {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, _axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(self.size)
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -126,9 +123,7 @@ impl Widget for IconButton {
         node.add_action(Action::Click);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
 
 pub fn paint_close(painter: &mut Painter<'_>, rect: Rect, hovered: bool, alpha: f32) {

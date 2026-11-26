@@ -1,3 +1,4 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Node, Role};
 use masonry::core::{AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PropertiesRef, RegisterCtx, Widget, WidgetPod};
 use masonry::imaging::Painter;
@@ -26,8 +27,6 @@ impl Rule {
 impl Widget for Rule {
     type Action = masonry::core::NoAction;
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, len_req: LenReq, _cross: Option<Length>) -> Length {
         match (axis == self.axis, len_req) {
             (true, LenReq::FitContent(space)) => space,
@@ -35,8 +34,6 @@ impl Widget for Rule {
             (false, _) => Length::px(size::BORDER_1),
         }
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         if let Some(base) = self.base {
@@ -51,9 +48,7 @@ impl Widget for Rule {
 
     fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
 
 pub struct Underlined {

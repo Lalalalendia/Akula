@@ -1,3 +1,4 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
     AccessCtx, ChildrenIds, CursorIcon, EventCtx, LayoutCtx, MeasureCtx, NewWidget, NoAction, PaintCtx, PointerButton, PointerEvent, PropertiesMut, PropertiesRef, QueryCtx,
@@ -110,16 +111,12 @@ impl Widget for Sash {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         match axis {
             Axis::Horizontal => Length::px(SASH_WIDTH),
             Axis::Vertical => ctx.context_size().length(axis).unwrap_or(Length::ZERO),
         }
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _painter: &mut Painter<'_>) {}
 
@@ -133,7 +130,5 @@ impl Widget for Sash {
 
     fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }

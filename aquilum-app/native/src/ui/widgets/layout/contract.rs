@@ -1,23 +1,15 @@
-//! Identical Widget contract for single-child containers that paint no
-//! independent content and expose no independent accessibility action.
-//! Measurement, layout, update and input handling stay in each widget.
-macro_rules! passive_single_child {
-    ($child:ident) => {
-        fn register_children(&mut self, ctx: &mut masonry::core::RegisterCtx<'_>) {
-            ctx.register_child(&mut self.$child);
-        }
+//! Shared, narrow framework contracts; each widget owns its rendering and input.
+mod single_child;
+pub(in crate::ui) use single_child::passive_single_child;
 
-        fn paint(&mut self, _ctx: &mut masonry::core::PaintCtx<'_>, _props: &masonry::core::PropertiesRef<'_>, _painter: &mut masonry::imaging::Painter<'_>) {}
-
-        fn accessibility_role(&self) -> masonry::accesskit::Role {
-            masonry::accesskit::Role::GenericContainer
-        }
-
-        fn accessibility(&mut self, _ctx: &mut masonry::core::AccessCtx<'_>, _props: &masonry::core::PropertiesRef<'_>, _node: &mut masonry::accesskit::Node) {}
-
+// Only widgets with no child and no layout work may use this contract.
+macro_rules! leaf_widget {
+    () => {
+        fn register_children(&mut self, _ctx: &mut masonry::core::RegisterCtx<'_>) {}
+        fn layout(&mut self, _ctx: &mut masonry::core::LayoutCtx<'_>, _props: &masonry::core::PropertiesRef<'_>, _size: masonry::kurbo::Size) {}
         fn children_ids(&self) -> masonry::core::ChildrenIds {
-            masonry::core::ChildrenIds::from_slice(&[self.$child.id()])
+            masonry::core::ChildrenIds::new()
         }
     };
 }
-pub(in crate::ui) use passive_single_child;
+pub(in crate::ui) use leaf_widget;

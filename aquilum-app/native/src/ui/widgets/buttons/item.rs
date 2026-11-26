@@ -1,9 +1,10 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::{
-    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, PaintCtx, PropertiesRef, RegisterCtx, Widget, WidgetMut, render_text,
+    AccessCtx, MeasureCtx, PaintCtx, PropertiesRef, Widget, WidgetMut, render_text,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, Point, Rect, RoundedRect, Size};
+use masonry::kurbo::{Affine, Axis, Point, Rect, RoundedRect};
 use masonry::layout::{LenReq, Length};
 
 use crate::ui::icons::Icon;
@@ -44,8 +45,6 @@ impl Widget for ItemButton {
 
     press_events!(line);
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, len_req: LenReq, _cross: Option<Length>) -> Length {
         match (axis, len_req) {
             (Axis::Vertical, _) => Length::px(size::SIZE_32),
@@ -53,8 +52,6 @@ impl Widget for ItemButton {
             (Axis::Horizontal, _) => Length::px(size::SIZE_32),
         }
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -88,9 +85,7 @@ impl Widget for ItemButton {
         node.add_action(Action::Click);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
 
 pub fn paint_item_bg(painter: &mut Painter<'_>, bounds: Rect, active: bool, hovered: bool) {
