@@ -62,31 +62,18 @@ impl DropboxPreview {
             self.status = "INVALID_AKULA_OAUTH_IDENTITY / SYNC_DISABLED".into();
             return;
         }
-        self.busy = true;
-        self.status = "WAITING_FOR_DROPBOX_ACCOUNT_CONSENT / SYNC_DISABLED".into();
-        self.generation = self.generation.wrapping_add(1);
-        let generation = self.generation;
-        let tx = self.tx.clone();
-        let _ = std::thread::Builder::new()
-            .name("akula-dropbox-account".into())
-            .spawn(move || {
-                // Bind loopback before launching the system browser. Never
-                // print the OAuth URL, authorization code or access token.
-                let result = AccountSession::begin(
-                    AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT,
-                ).and_then(|session| {
-                    if !open_browser(session.browser_authorize_url()) {
-                        return Err(AccountLoginError::BrowserUnavailable);
-                    }
-                    session.finish(Duration::from_secs(120))
-                });
-                if tx.send((generation, PreviewReply::Account(result))).is_ok() {
-                    wake();
+        self.spawn_preview("WAITING_FOR_DROPBOX_ACCOUNT_CONSENT / SYNC_DISABLED", "akula-dropbox-account", wake, move || {
+            // Bind loopback before launching the system browser. Never
+            // print the OAuth URL, authorization code or access token.
+            let result = AccountSession::begin(
+                AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT,
+            ).and_then(|session| {
+                if !open_browser(session.browser_authorize_url()) {
+                    return Err(AccountLoginError::BrowserUnavailable);
                 }
-            })
-            .map_err(|_| {
-                self.busy = false;
-                self.status = "THREAD_START_FAILED / SYNC_DISABLED".into();
+                session.finish(Duration::from_secs(120))
+        });
+                PreviewReply::Account(result)
             });
     }
 
@@ -104,27 +91,14 @@ impl DropboxPreview {
             self.status = "ACCOUNT_RESUME_INVALID_IDENTITY / SYNC_DISABLED".into();
             return;
         }
-        self.busy = true;
-        self.status = "VERIFYING_SAVED_DROPBOX_CONSENT / SYNC_DISABLED".into();
-        self.generation = self.generation.wrapping_add(1);
-        let generation = self.generation;
-        let tx = self.tx.clone();
-        let _ = std::thread::Builder::new()
-            .name("akula-dropbox-account-resume".into())
-            .spawn(move || {
-                let expected = AccountIdentity {
-                    account_id: draft.account_id,
-                    root_namespace_id: draft.root_namespace_id,
-                };
-                let result = resume_account(AKULA_DROPBOX_APP_KEY, &expected);
-                if tx.send((generation, PreviewReply::Resumed(result))).is_ok() {
-                    wake();
-                }
-            })
-            .map_err(|_| {
-                self.busy = false;
-                self.status = "THREAD_START_FAILED / SYNC_DISABLED".into();
-            });
+        self.spawn_preview("VERIFYING_SAVED_DROPBOX_CONSENT / SYNC_DISABLED", "akula-dropbox-account-resume", wake, move || {
+            let expected = AccountIdentity {
+                account_id: draft.account_id,
+                root_namespace_id: draft.root_namespace_id,
+            };
+            let result = resume_account(AKULA_DROPBOX_APP_KEY, &expected);
+            PreviewReply::Resumed(result)
+        });
     }
 
     /// Forget only this device's approved account and optional Vault tokens.
@@ -141,43 +115,30 @@ impl DropboxPreview {
             self.status = "ACCOUNT_LOGOUT_INVALID_IDENTITY / SYNC_DISABLED".into();
             return;
         }
-        self.busy = true;
-        self.status = "FORGETTING_LOCAL_DROPBOX_CREDENTIALS / SYNC_DISABLED".into();
-        self.generation = self.generation.wrapping_add(1);
-        let generation = self.generation;
-        let tx = self.tx.clone();
-        let _ = std::thread::Builder::new()
-            .name("akula-dropbox-account-forget".into())
-            .spawn(move || {
-                let result = (|| {
-                    let scope = AccountCredentialScope::new(
-                        &draft.oauth_app_key, &draft.account_id, &draft.root_namespace_id,
+        self.spawn_preview("FORGETTING_LOCAL_DROPBOX_CREDENTIALS / SYNC_DISABLED", "akula-dropbox-account-forget", wake, move || {
+            let result = (|| {
+                let scope = AccountCredentialScope::new(
+                    &draft.oauth_app_key, &draft.account_id, &draft.root_namespace_id,
+                ).map_err(|_| ())?;
+                AccountCredentialStore::system().map_err(|_| ())?
+                    .forget_local(&scope).map_err(|_| ())?;
+                // A paired Vault's refresh token lives in a separate
+                // credential namespace and must also be forgotten.
+                if draft.ready() {
+                    let vault = CredentialScope::new(
+                        &draft.account_id, &draft.root_namespace_id,
+                        &draft.vault_id, &draft.profile_id, &draft.oauth_app_key,
                     ).map_err(|_| ())?;
-                    AccountCredentialStore::system().map_err(|_| ())?
-                        .forget_local(&scope).map_err(|_| ())?;
-                    // A paired Vault's refresh token lives in a separate
-                    // credential namespace and must also be forgotten.
-                    if draft.ready() {
-                        let vault = CredentialScope::new(
-                            &draft.account_id, &draft.root_namespace_id,
-                            &draft.vault_id, &draft.profile_id, &draft.oauth_app_key,
-                        ).map_err(|_| ())?;
-                        CredentialVault::system().map_err(|_| ())?
-                            .forget_local(&vault).map_err(|_| ())?;
-                    }
-                    Ok(AccountIdentity {
-                        account_id: draft.account_id,
-                        root_namespace_id: draft.root_namespace_id,
-                    })
-                })();
-                if tx.send((generation, PreviewReply::SignedOut(result))).is_ok() {
-                    wake();
+                    CredentialVault::system().map_err(|_| ())?
+                        .forget_local(&vault).map_err(|_| ())?;
                 }
-            })
-            .map_err(|_| {
-                self.busy = false;
-                self.status = "THREAD_START_FAILED / SYNC_DISABLED".into();
-            });
+                Ok(AccountIdentity {
+                    account_id: draft.account_id,
+                    root_namespace_id: draft.root_namespace_id,
+                })
+            })();
+            PreviewReply::SignedOut(result)
+        });
     }
 
     pub(super) fn start(
@@ -203,48 +164,55 @@ impl DropboxPreview {
             self.status = "INVALID_HEAD_PIN / SYNC_DISABLED".into();
             return;
         };
-        self.busy = true;
-        self.status = if resume {
+        let status = if resume {
             "VERIFYING_STORED_READ_ONLY_CONNECTION"
         } else {
             "WAITING_FOR_DROPBOX_BROWSER_CONSENT"
-        }.into();
+        };
+        // Never print the app key, OAuth URL, browser callback, token or HEAD.
+        self.spawn_preview(status, "akula-dropbox-readonly", wake, move || {
+            let outcome = if resume {
+                match resume_readonly(scope, &draft.oauth_app_key, pin) {
+                    Ok(candidate) if candidate.status()
+                        == ConnectionStatus::RemotePinnedNeedsPublisherApproval =>
+                        "REMOTE_PINNED_READ_OK / PUBLISHER_NOT_APPROVED / SYNC_DISABLED",
+                    _ => "READ_ONLY_RESUME_REJECTED / SYNC_DISABLED",
+                }
+            } else {
+                match ConnectSession::begin(
+                    scope, &draft.oauth_app_key, draft.registered_port, pin,
+                ) {
+                    Ok(session) if open_browser(session.browser_authorize_url()) => {
+                        match session.finish(Duration::from_secs(120)) {
+                            Ok(candidate) if candidate.status()
+                                == ConnectionStatus::RemotePinnedNeedsPublisherApproval =>
+                                "REMOTE_PINNED_READ_OK / PUBLISHER_NOT_APPROVED / SYNC_DISABLED",
+                            _ => "READ_ONLY_CONNECT_REJECTED / SYNC_DISABLED",
+                        }
+                    }
+                    Ok(_) => "BROWSER_LAUNCH_FAILED / SYNC_DISABLED",
+                    Err(_) => "LOGIN_BIND_REJECTED / SYNC_DISABLED",
+                }
+            };
+            PreviewReply::Vault(outcome)
+        });
+    }
+
+    // Call only after the operation-specific admission checks have passed.
+    fn spawn_preview(&mut self, status: &str, name: &str, wake: Arc<dyn Fn() + Send + Sync>,
+        work: impl FnOnce() -> PreviewReply + Send + 'static,
+    ) {
+        self.busy = true;
+        self.status = status.into();
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         let tx = self.tx.clone();
-        // Never print the app key, OAuth URL, browser callback, token or HEAD.
-        let _ = std::thread::Builder::new()
-            .name("akula-dropbox-readonly".into())
-            .spawn(move || {
-                let outcome = if resume {
-                    match resume_readonly(scope, &draft.oauth_app_key, pin) {
-                        Ok(candidate) if candidate.status()
-                            == ConnectionStatus::RemotePinnedNeedsPublisherApproval =>
-                            "REMOTE_PINNED_READ_OK / PUBLISHER_NOT_APPROVED / SYNC_DISABLED",
-                        _ => "READ_ONLY_RESUME_REJECTED / SYNC_DISABLED",
-                    }
-                } else {
-                    match ConnectSession::begin(
-                        scope, &draft.oauth_app_key, draft.registered_port, pin,
-                    ) {
-                        Ok(session) if open_browser(session.browser_authorize_url()) => {
-                            match session.finish(Duration::from_secs(120)) {
-                                Ok(candidate) if candidate.status()
-                                    == ConnectionStatus::RemotePinnedNeedsPublisherApproval =>
-                                    "REMOTE_PINNED_READ_OK / PUBLISHER_NOT_APPROVED / SYNC_DISABLED",
-                                _ => "READ_ONLY_CONNECT_REJECTED / SYNC_DISABLED",
-                            }
-                        }
-                        Ok(_) => "BROWSER_LAUNCH_FAILED / SYNC_DISABLED",
-                        Err(_) => "LOGIN_BIND_REJECTED / SYNC_DISABLED",
-                    }
-                };
-                if tx.send((generation, PreviewReply::Vault(outcome))).is_ok() { wake(); }
-            })
-            .map_err(|_| {
-                self.busy = false;
-                self.status = "THREAD_START_FAILED / SYNC_DISABLED".into();
-            });
+        let _ = std::thread::Builder::new().name(name.into()).spawn(move || {
+            if tx.send((generation, work())).is_ok() { wake(); }
+        }).map_err(|_| {
+            self.busy = false;
+            self.status = "THREAD_START_FAILED / SYNC_DISABLED".into();
+        });
     }
 
     /// Editing account/root/head invalidates even an in-flight successful reply.
@@ -385,6 +353,30 @@ fn open_browser(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_wakes_after_reply_and_retains_generation_boundary() {
+        for invalidate in [false, true] {
+            let mut state = DropboxPreview::new();
+            let (ready_tx, ready_rx) = channel();
+            let (release_tx, release_rx) = channel();
+            state.spawn_preview("PENDING / SYNC_DISABLED", "dropbox-test-worker",
+                Arc::new(move || { let _ = ready_tx.send(()); }),
+                move || {
+                    release_rx.recv().unwrap();
+                    PreviewReply::Vault("COMPLETE / SYNC_DISABLED")
+                });
+            assert!(state.busy);
+            assert_eq!(state.status, "PENDING / SYNC_DISABLED");
+            assert_eq!(state.generation, 1);
+            if invalidate { state.invalidate(); }
+            release_tx.send(()).unwrap();
+            ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(state.poll(), (!invalidate, None, None));
+            assert!(!state.busy);
+            assert_eq!(state.status, if invalidate { "DISCONNECTED / SYNC_DISABLED" } else { "COMPLETE / SYNC_DISABLED" });
+        }
+    }
 
     #[test]
     fn missing_scope_does_not_start_browser_or_network() {
