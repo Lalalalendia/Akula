@@ -1,7 +1,7 @@
-use crate::ui::widgets::layout::contract::fill_context;
+use crate::ui::widgets::layout::contract::{fill_context, leaf_widget};
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
-    AccessCtx, ChildrenIds, EventCtx, Layer, LayoutCtx, NewWidget, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx,
+    AccessCtx, EventCtx, Layer, NewWidget, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef,
     UpdateCtx, Widget, WidgetMut, render_text,
 };
 use masonry::imaging::Painter;
@@ -60,11 +60,7 @@ impl Widget for UpdateSplash {
         ctx.request_paint_only();
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fill_context!();
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let tm = theme::current();
@@ -110,9 +106,7 @@ impl Widget for UpdateSplash {
         node.set_label(format!("{title}. {detail}"));
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 
     fn as_layer(&mut self) -> Option<&mut dyn Layer> {
         Some(self)
