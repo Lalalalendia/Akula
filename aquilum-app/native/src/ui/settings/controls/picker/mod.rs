@@ -6,6 +6,7 @@ use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{Layer, TextEvent};
 
 use super::*;
+use crate::ui::widgets::layout::contract::leaf_widget;
 use color::{hsv, rgb};
 
 const PAD: f64 = 12.0;
@@ -139,13 +140,9 @@ impl Widget for ColorPicker {
         true
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(Self::size().get_coord(axis))
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         self.draw(ctx, painter);
@@ -159,9 +156,7 @@ impl Widget for ColorPicker {
         node.set_value(self.hex());
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 
     fn as_layer(&mut self) -> Option<&mut dyn Layer> {
         Some(self)

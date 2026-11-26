@@ -1,10 +1,11 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::{
-    AccessCtx, AccessEvent, ChildrenIds, ComposeCtx, EventCtx, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, Update,
+    AccessCtx, AccessEvent, ComposeCtx, EventCtx, MeasureCtx, NewWidget, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, Update,
     UpdateCtx, Widget, WidgetMut, render_text,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, Point, Rect, RoundedRect, Size, Stroke};
+use masonry::kurbo::{Affine, Axis, Point, Rect, RoundedRect, Stroke};
 use masonry::layout::{LenReq, Length};
 
 use super::marked::{CardLayouts, paint_marked, snippet_line};
@@ -106,8 +107,6 @@ impl Widget for ResultCard {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, len_req: LenReq, _cross: Option<Length>) -> Length {
         match (axis, len_req) {
             (Axis::Vertical, _) => Length::px(self.kind.height()),
@@ -115,8 +114,6 @@ impl Widget for ResultCard {
             (Axis::Horizontal, _) => Length::ZERO,
         }
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn compose(&mut self, ctx: &mut ComposeCtx<'_>) {
         let bounds = ctx.window_transform().transform_rect_bbox(ctx.border_box());
@@ -184,7 +181,5 @@ impl Widget for ResultCard {
         node.add_action(Action::Click);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }

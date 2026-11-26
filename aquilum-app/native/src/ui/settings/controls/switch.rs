@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widgets::layout::contract::leaf_widget;
 
 pub struct Switch {
     on: bool,
@@ -70,16 +71,12 @@ impl Widget for Switch {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(match axis {
             Axis::Horizontal => size::SWITCH_WIDTH,
             Axis::Vertical => size::SWITCH_HEIGHT,
         })
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -112,7 +109,5 @@ impl Widget for Switch {
         }
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
