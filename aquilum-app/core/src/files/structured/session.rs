@@ -172,20 +172,16 @@ impl CanvasSession {
         }
         self.stage(next)
     }
-    pub fn undo(&mut self) -> Result<bool, CanvasSessionError> {
-        let Some(previous) = self.undo.last().cloned() else { return Ok(false); };
-        self.document.replace_canvas(&previous)?;
-        let before = std::mem::replace(&mut self.value, previous);
-        self.undo.pop();
-        self.redo.push(before);
-        Ok(true)
-    }
-    pub fn redo(&mut self) -> Result<bool, CanvasSessionError> {
-        let Some(next) = self.redo.last().cloned() else { return Ok(false); };
+    pub fn undo(&mut self) -> Result<bool, CanvasSessionError> { self.step_history(true) }
+    pub fn redo(&mut self) -> Result<bool, CanvasSessionError> { self.step_history(false) }
+
+    fn step_history(&mut self, backward: bool) -> Result<bool, CanvasSessionError> {
+        let (source, destination) = if backward { (&mut self.undo, &mut self.redo) } else { (&mut self.redo, &mut self.undo) };
+        let Some(next) = source.last().cloned() else { return Ok(false); };
         self.document.replace_canvas(&next)?;
         let before = std::mem::replace(&mut self.value, next);
-        self.redo.pop();
-        self.undo.push(before);
+        source.pop();
+        destination.push(before);
         Ok(true)
     }
     /// On File Gate conflict, the edited Value and both history stacks survive
