@@ -1,3 +1,4 @@
+use crate::ui::widgets::layout::contract::fill_context;
 use super::*;
 
 use crate::ui::keymap::{self, Command, Scope};
@@ -111,9 +112,7 @@ impl Widget for Thumbnail {
         ctx.register_child(&mut self.replace);
     }
 
-    fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
-        ctx.context_size().length(axis).unwrap_or(Length::ZERO)
-    }
+    fill_context!();
 
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, size_: Size) {
         self.height = size_.height;

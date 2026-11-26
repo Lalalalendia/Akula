@@ -6,18 +6,18 @@ mod resize;
 mod connections; mod groups;
 #[cfg(test)]
 mod scene_tests;
+use crate::ui::widgets::layout::contract::fill_context;
 use model::{Board, Card, Connection, Kind, Side};
 pub use interaction::CanvasAction;
 use interaction::CanvasDrag;
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
-    AccessCtx, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, PaintCtx,
+    AccessCtx, ChildrenIds, EventCtx, LayoutCtx, PaintCtx,
     PointerButton, PointerEvent, PropertiesMut, PropertiesRef,
     RegisterCtx, Update, UpdateCtx, Widget, WidgetMut, render_text,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, Line as Segment, Point, Rect, RoundedRect, Size, Stroke, Vec2};
-use masonry::layout::{LenReq, Length};
+use masonry::kurbo::{Affine, Line as Segment, Point, Rect, RoundedRect, Size, Stroke, Vec2};
 use masonry::peniko::Color;
 use crate::ui::text::{Line, Style};
 use crate::ui::theme;
@@ -187,9 +187,7 @@ impl Widget for CanvasPage {
 
     fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
 
-    fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
-        ctx.context_size().length(axis).unwrap_or(Length::ZERO)
-    }
+    fill_context!();
 
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, size: Size) {
         self.size = size;
