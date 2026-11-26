@@ -6,7 +6,8 @@
 //! Changed or duplicated tables are held until explicit confirmation.
 //! This module does not read vault files, issue permissions or modify notes.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+use super::identity::exact_match::EvidenceIndex;
 use serde::{Deserialize, Serialize};
 
 use super::editor_snapshot::{MAX_TABLE_CELL_BYTES, MAX_TABLE_COLUMNS, MAX_TABLE_ROWS};
@@ -193,42 +194,16 @@ pub fn reconcile_tables(
         return Err(AnchorError::NoteChanged);
     }
     let new_digests = fingerprint_tables(current_tables)?;
-    let mut old_counts = BTreeMap::<[u8; 32], usize>::new();
-    for anchor in &saved.tables {
-        *old_counts.entry(anchor.full_digest).or_default() += 1;
-    }
-    let mut new_indices = BTreeMap::<[u8; 32], Vec<usize>>::new();
-    for (index, digest) in new_digests.iter().enumerate() {
-        new_indices.entry(*digest).or_default().push(index);
-    }
-
+    let matches = EvidenceIndex::new(saved.tables.iter().map(|anchor| anchor.full_digest), &new_digests);
     let mut attached = Vec::new();
     let mut held = Vec::new();
     for anchor in &saved.tables {
-        let previous_count = old_counts.get(&anchor.full_digest).copied().unwrap_or(0);
-        let matches = new_indices.get(&anchor.full_digest);
-        if previous_count == 1 && matches.is_some_and(|m| m.len() == 1) {
-            attached.push(AttachedTable {
-                table_id: anchor.table_id.clone(),
-                current_index: matches.expect("verified unique current table")[0],
-            });
-        } else {
-            held.push(HeldTable {
-                table_id: anchor.table_id.clone(),
-                previous_index: anchor.previous_index,
-                reason: if previous_count > 1 || matches.is_some_and(|m| m.len() > 1) {
-                    HoldReason::Ambiguous
-                } else {
-                    HoldReason::MissingOrEdited
-                },
-            });
+        match matches.find(&anchor.full_digest, HoldReason::MissingOrEdited, HoldReason::Ambiguous) {
+            Ok(index) => attached.push(AttachedTable { table_id: anchor.table_id.clone(), current_index: index }),
+            Err(reason) => held.push(HeldTable { table_id: anchor.table_id.clone(), previous_index: anchor.previous_index, reason }),
         }
     }
-    let unbound_indices = new_digests.iter().enumerate().filter_map(|(index, digest)| {
-        let old_unique = old_counts.get(digest).copied() == Some(1);
-        let new_unique = new_indices.get(digest).is_some_and(|m| m.len() == 1);
-        (!old_unique || !new_unique).then_some(index)
-    }).collect();
+    let unbound_indices = matches.unbound(&new_digests, 0);
     Ok(TableReconciliation { attached, held, unbound_indices })
 }
 

@@ -6,7 +6,10 @@
 //! confirmation rather than inheriting someone else's review history.
 //! No filesystem access, ID issuance, persistence or permissions are here.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+
+pub(super) mod exact_match;
+use exact_match::EvidenceIndex;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -121,38 +124,17 @@ fn validate(previous: &Previous, current: &Current<'_>) -> Result<(), Error> {
 /// Matching by row index, English spelling or a partial translation is unsafe.
 pub fn reconcile(previous: &Previous, current: Current<'_>) -> Result<ResultRows, Error> {
     validate(previous, &current)?;
-    let mut old: BTreeMap<Digest, usize> = BTreeMap::new();
-    for row in &previous.rows {
-        *old.entry(row.digest).or_default() += 1;
-    }
     let digests: Vec<Digest> = current.rows.iter().map(|row| digest(row)).collect();
-    let mut new: BTreeMap<Digest, Vec<usize>> = BTreeMap::new();
-    for (idx, key) in digests.iter().enumerate() {
-        new.entry(*key).or_default().push(idx + 1);
-    }
+    let matches = EvidenceIndex::new(previous.rows.iter().map(|row| row.digest), &digests);
     let mut attached = Vec::new();
     let mut held = Vec::new();
     for row in &previous.rows {
-        let old_count = old.get(&row.digest).copied().unwrap_or(0);
-        let candidates = new.get(&row.digest);
-        if old_count == 1 && candidates.is_some_and(|rows| rows.len() == 1) {
-            attached.push(Attached {
-                id: row.id.clone(),
-                position: candidates.expect("unique candidate checked above")[0],
-            });
-        } else {
-            let reason = if old_count > 1 || candidates.is_some_and(|rows| rows.len() > 1) {
-                HoldReason::Ambiguous
-            } else {
-                HoldReason::MissingOrEdited
-            };
-            held.push(Held { id: row.id.clone(), previous_position: row.position, reason });
+        match matches.find(&row.digest, HoldReason::MissingOrEdited, HoldReason::Ambiguous) {
+            Ok(index) => attached.push(Attached { id: row.id.clone(), position: index + 1 }),
+            Err(reason) => held.push(Held { id: row.id.clone(), previous_position: row.position, reason }),
         }
     }
-    let unbound = digests.iter().enumerate().filter_map(|(idx, key)| {
-        (old.get(key).copied() != Some(1) || new.get(key).map(Vec::len) != Some(1))
-            .then_some(idx + 1)
-    }).collect();
+    let unbound = matches.unbound(&digests, 1);
     Ok(ResultRows { attached, held, unbound })
 }
 
