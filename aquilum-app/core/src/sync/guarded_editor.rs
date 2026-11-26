@@ -341,6 +341,27 @@ mod tests {
     use std::sync::Arc;
 
 
+    fn verified_fixture(
+        namespace: &S3Keyspace, bucket: &str, etag: &str,
+    ) -> (S3ConnectionProfile, S3VerifiedHead) {
+        let profile = S3ConnectionProfile {
+            bucket: bucket.into(),
+            region: "us-east-1".into(),
+            endpoint: Some("http://127.0.0.1:9000".into()),
+            force_path_style: true,
+        };
+        let manifest = S3ManifestV1::new(
+            namespace, OperationId::new(), 1, None, vec![],
+        ).unwrap();
+        let pointer = S3HeadPointerV1::new(
+            namespace, 1, manifest.manifest_id,
+            &manifest.digest(namespace).unwrap(), None,
+        ).unwrap();
+        (profile, S3VerifiedHead {
+            pointer, manifest, etag: etag.into(),
+        })
+    }
+
     #[test]
     fn prepared_prewrite_without_activated_custody_cannot_use_legacy_gate() {
         let temp = tempfile::tempdir().unwrap();
@@ -405,22 +426,7 @@ mod tests {
         #[cfg(unix)]
         let scope = fs::canonicalize(&scope).unwrap();
         let namespace = S3Keyspace::new("akula/optin-editor", VaultId::new()).unwrap();
-        let profile = S3ConnectionProfile {
-            bucket: "akula-guarded-editor-test".into(),
-            region: "us-east-1".into(),
-            endpoint: Some("http://127.0.0.1:9000".into()),
-            force_path_style: true,
-        };
-        let manifest = S3ManifestV1::new(
-            &namespace, OperationId::new(), 1, None, vec![],
-        ).unwrap();
-        let pointer = S3HeadPointerV1::new(
-            &namespace, 1, manifest.manifest_id,
-            &manifest.digest(&namespace).unwrap(), None,
-        ).unwrap();
-        let verified = S3VerifiedHead {
-            pointer, manifest, etag: "\"test-only-etag\"".into(),
-        };
+        let (profile, verified) = verified_fixture(&namespace, "akula-guarded-editor-test", "\"test-only-etag\"");
         let profile_db = data.join("registered-s3.sqlite");
         let custody_db = data.join("custody.sqlite");
         {
@@ -635,22 +641,7 @@ mod tests {
         }
         let scope = fs::canonicalize(scope).unwrap();
         let namespace = S3Keyspace::new("akula/host-editor-enrollment", VaultId::new()).unwrap();
-        let profile = S3ConnectionProfile {
-            bucket: "akula-host-enrollment-fixture".into(),
-            region: "us-east-1".into(),
-            endpoint: Some("http://127.0.0.1:9000".into()),
-            force_path_style: true,
-        };
-        let manifest = S3ManifestV1::new(
-            &namespace, OperationId::new(), 1, None, vec![],
-        ).unwrap();
-        let pointer = S3HeadPointerV1::new(
-            &namespace, 1, manifest.manifest_id,
-            &manifest.digest(&namespace).unwrap(), None,
-        ).unwrap();
-        let head = S3VerifiedHead {
-            pointer, manifest, etag: "\"test-host-enrollment\"".into(),
-        };
+        let (profile, head) = verified_fixture(&namespace, "akula-host-enrollment-fixture", "\"test-host-enrollment\"");
         let profile_db = app_a.join("s3-profile.sqlite");
         let custody_db = app_a.join("local-custody.sqlite");
         {
@@ -747,22 +738,7 @@ mod tests {
         }
         let scope = fs::canonicalize(scope).unwrap();
         let namespace = S3Keyspace::new("akula/missing-installed-ledger", VaultId::new()).unwrap();
-        let profile = S3ConnectionProfile {
-            bucket: "akula-missing-host-fixture".into(),
-            region: "us-east-1".into(),
-            endpoint: Some("http://127.0.0.1:9000".into()),
-            force_path_style: true,
-        };
-        let manifest = S3ManifestV1::new(
-            &namespace, OperationId::new(), 1, None, vec![],
-        ).unwrap();
-        let pointer = S3HeadPointerV1::new(
-            &namespace, 1, manifest.manifest_id,
-            &manifest.digest(&namespace).unwrap(), None,
-        ).unwrap();
-        let head = S3VerifiedHead {
-            pointer, manifest, etag: "\"missing-ledger-test\"".into(),
-        };
+        let (profile, head) = verified_fixture(&namespace, "akula-missing-host-fixture", "\"missing-ledger-test\"");
         let profile_db = appdata.join("registered-s3.sqlite");
         let custody_db = appdata.join("custody.sqlite");
         {
