@@ -1,7 +1,6 @@
-use crate::ui::widgets::layout::contract::leaf_widget;
-use masonry::accesskit::{Action, Node, Role};
+use crate::ui::widgets::layout::contract::{leaf_widget, labeled_click};
 use masonry::core::{
-    AccessCtx, MeasureCtx, PaintCtx, PropertiesMut, PropertiesRef, Update, UpdateCtx,
+    MeasureCtx, PaintCtx, PropertiesMut, PropertiesRef, Update, UpdateCtx,
     Widget, WidgetMut,
 };
 use masonry::imaging::Painter;
@@ -114,14 +113,7 @@ impl Widget for IconButton {
         self.icon.draw(painter, origin, glyph, stroke, color);
     }
 
-    fn accessibility_role(&self) -> Role {
-        Role::Button
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, node: &mut Node) {
-        node.set_label(self.label.clone());
-        node.add_action(Action::Click);
-    }
+    labeled_click!(Button, label);
 
     leaf_widget!();
 }

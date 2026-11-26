@@ -1,7 +1,7 @@
-use crate::ui::widgets::layout::contract::leaf_widget;
-use masonry::accesskit::{Action, Node, Role};
+use crate::ui::widgets::layout::contract::{leaf_widget, labeled_click};
+use masonry::accesskit::Action;
 use masonry::core::{
-    AccessCtx, AccessEvent, EventCtx, MeasureCtx, NewWidget, PaintCtx,
+    AccessEvent, EventCtx, MeasureCtx, NewWidget, PaintCtx,
     PointerButton, PointerEvent, PropertiesMut, PropertiesRef, Update,
     UpdateCtx, Widget, render_text,
 };
@@ -110,14 +110,7 @@ impl Widget for DocumentItem {
         render_text(painter, Affine::translate((bounds.x0 + pad, y)), layout, &[t.text_link.into()], true);
     }
 
-    fn accessibility_role(&self) -> Role {
-        Role::Link
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, node: &mut Node) {
-        node.set_label(self.label.clone());
-        node.add_action(Action::Click);
-    }
+    labeled_click!(Link, label);
 
     leaf_widget!();
 }
