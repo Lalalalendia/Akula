@@ -15,28 +15,28 @@ pub fn expression(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
     or_level(cursor)
 }
 
-// All four repeating precedence levels fold left. Comparison deliberately
+// Expression and source precedence levels fold left. Comparison deliberately
 // stays separate: its grammar accepts only a single comparison operator.
-fn left_chain(
+pub(super) fn left_chain<T, O: Copy>(
     cursor: &mut Cursor<'_>,
-    operand: impl Fn(&mut Cursor<'_>) -> Result<Expr, String>,
-    operators: &[(Symbol, Option<&str>, BinaryOp)],
-) -> Result<Expr, String> {
+    operand: impl Fn(&mut Cursor<'_>) -> Result<T, String>,
+    operators: &[(Symbol, Option<&str>, O)], combine: impl Fn(O, T, T) -> T,
+) -> Result<T, String> {
     let mut left = operand(cursor)?;
     while let Some(operator) = operators.iter().find_map(|&(symbol, word, op)| {
         (cursor.take_symbol(symbol) || word.is_some_and(|w| cursor.take_word(w))).then_some(op)
     }) {
-        left = binary(operator, left, operand(cursor)?);
+        left = combine(operator, left, operand(cursor)?);
     }
     Ok(left)
 }
 
 fn or_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
-    left_chain(cursor, and_level, &[(Symbol::PipePipe, Some("or"), BinaryOp::Or)])
+    left_chain(cursor, and_level, &[(Symbol::PipePipe, Some("or"), BinaryOp::Or)], binary)
 }
 
 fn and_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
-    left_chain(cursor, compare_level, &[(Symbol::AmpAmp, Some("and"), BinaryOp::And)])
+    left_chain(cursor, compare_level, &[(Symbol::AmpAmp, Some("and"), BinaryOp::And)], binary)
 }
 
 fn compare_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
@@ -63,7 +63,7 @@ fn additive_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
     left_chain(cursor, multiplicative_level, &[
         (Symbol::Plus, None, BinaryOp::Add),
         (Symbol::Minus, None, BinaryOp::Subtract),
-    ])
+    ], binary)
 }
 
 fn multiplicative_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
@@ -71,7 +71,7 @@ fn multiplicative_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
         (Symbol::Star, None, BinaryOp::Multiply),
         (Symbol::Slash, None, BinaryOp::Divide),
         (Symbol::Percent, None, BinaryOp::Modulo),
-    ])
+    ], binary)
 }
 
 fn unary_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
