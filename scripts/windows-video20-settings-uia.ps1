@@ -73,13 +73,13 @@ public static class AkulaVideo20Mouse {
         }, IntPtr.Zero);
         return found;
     }
-    public static void Scroll(IntPtr hwnd, int pid, int x, int y) {
+    public static void Scroll(IntPtr hwnd, int pid, int x, int y, bool up) {
         uint owner;
         if (GetForegroundWindow() != hwnd || GetWindowThreadProcessId(hwnd, out owner) == 0 ||
             owner != (uint)pid || !SetCursorPos(x, y))
             throw new InvalidOperationException("VIDEO21 refuses unowned scroll");
         Thread.Sleep(75);
-        var wheel = new Input[] {new Input {Type=0,Flags=0x0800,Data=unchecked((uint)-120)}};
+        var wheel = new Input[] {new Input {Type=0,Flags=0x0800,Data=unchecked((uint)(up ? 120 : -120))}};
         if (SendInput(1, wheel, Marshal.SizeOf(typeof(Input))) != 1)
             throw new InvalidOperationException("VIDEO21 physical scroll failed");
     }
@@ -174,7 +174,7 @@ function Wait-Button([Windows.Automation.AutomationElement]$Root, [string[]]$Nam
     throw ('Expected live Windows UIA button was not found: ' + ($Names -join ' / '))
 }
 function Reveal-Button([Diagnostics.Process]$Process,
-    [Windows.Automation.AutomationElement]$Root, [string[]]$Names) {
+    [Windows.Automation.AutomationElement]$Root, [string[]]$Names, [switch]$Up) {
     for ($n = 0; $n -lt 12; $n++) {
         $button = Find-Button $Root $Names
         if ($null -ne $button) { return $button }
@@ -185,10 +185,10 @@ function Reveal-Button([Diagnostics.Process]$Process,
         }
         $x = [int][Math]::Round($rect.Left + $rect.Width * 0.65)
         $y = [int][Math]::Round($rect.Top + $rect.Height * 0.60)
-        [AkulaVideo20Mouse]::Scroll($hwnd, $Process.Id, $x, $y)
+        [AkulaVideo20Mouse]::Scroll($hwnd, $Process.Id, $x, $y, $Up.IsPresent)
         Start-Sleep -Milliseconds 180
     }
-    throw ('VIDEO21 QuickJS Settings button not found after native scrolling: ' + ($Names -join ' / '))
+    throw ('VIDEO20 video tool Settings button not found after native scrolling: ' + ($Names -join ' / '))
 }
 function Invoke-Button([Windows.Automation.AutomationElement]$Button) {
     $pattern = [Windows.Automation.InvokePattern]$Button.GetCurrentPattern(
@@ -267,11 +267,14 @@ $note = Join-Path $VaultPath 'Video20 disposable note.md'
 [IO.File]::WriteAllText($note, '# VIDEO20 local-only UIA note', [Text.UTF8Encoding]::new($false))
 $videoDir = Join-Path $DataDir 'local-videos'
 New-Item -ItemType Directory -Path $videoDir | Out-Null
-$existingVideo = Join-Path $videoDir 'already-downloaded.mp4'
-[IO.File]::WriteAllText($existingVideo, 'existing user local media must survive yt-dlp removal')
+$existingVideo = Join-Path $videoDir 'AbCdEfGhIJK.mp4'
+$fixture = Join-Path $env:GITHUB_WORKSPACE 'aquilum-app/native/src/video/fixtures/native_avc_aac_test.mp4'
+Copy-Item -LiteralPath $fixture -Destination $existingVideo -ErrorAction Stop
 $noteHash = Hash $note
-$videoHash = Hash $existingVideo
+$videoHash = Hash $fixture
+if ((Hash $existingVideo) -cne $videoHash) { throw 'Local AVC/AAC fixture differs from the source fixture' }
 $tool = Join-Path $DataDir 'tools\yt-dlp\yt-dlp-2026.10.26.exe'
+$ytdlpHash = 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d'
 $quickjsTool = Join-Path $DataDir 'tools\quickjs\qjs.exe'
 
 try {
@@ -309,24 +312,12 @@ try {
     Decide-Dialog $proc (Wait-Dialog $proc $installDialogNames) $true
     Wait-Tool $tool $true 320
     if ((Get-Item -LiteralPath $tool).Length -ne 23575744 -or
-        (Hash $tool) -cne 'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d') {
+        (Hash $tool) -cne $ytdlpHash) {
         throw 'Real GUI-installed yt-dlp differs from exact pinned official bytes'
     }
     [void](Wait-Button $root $removeNames)
     Write-Host 'VIDEO20_SETTINGS_INSTALL_UIA_PASS consent=1 sha256=1 local_only=1'
 
-    Press-AkulaButton $proc (Wait-Button $root $removeNames)
-    Decide-Dialog $proc (Wait-Dialog $proc $removeDialogNames) $true
-    Wait-Tool $tool $false 80
-    [void](Wait-Button $root $downloadNames)
-    if ((Hash $note) -cne $noteHash -or (Hash $existingVideo) -cne $videoHash) {
-        throw 'Removing optional yt-dlp changed Markdown or local video'
-    }
-    if (@(Get-ChildItem -LiteralPath $VaultPath -Recurse -File |
-        Where-Object { $_.Extension -in @('.mp4','.webm','.m4v','.exe') }).Count -ne 0) {
-        throw 'yt-dlp or video bytes appeared in synchronized vault'
-    }
-    Write-Host 'VIDEO20_SETTINGS_REMOVE_UIA_PASS file_removed=1 note_unchanged=1 media_retained=1'
     # VIDEO-21: exact native mouse clicks in the same installed-style GUI.
     $quickjsButton = Reveal-Button $proc $root $quickjsDownloadNames
     if (Test-Path -LiteralPath $quickjsTool) { throw 'Opening Settings silently installed QuickJS' }
@@ -352,7 +343,21 @@ try {
     if ((Hash $note) -cne $noteHash -or (Hash $existingVideo) -cne $videoHash) {
         throw 'QuickJS removal changed user Markdown or saved video'
     }
+    if ((Hash $tool) -cne $ytdlpHash) { throw 'Removing QuickJS changed the installed yt-dlp' }
     Write-Host 'VIDEO21_QUICKJS_REMOVE_UIA_PASS removed=1 media_retained=1 note_unchanged=1'
+    Press-AkulaButton $proc (Reveal-Button $proc $root $removeNames -Up)
+    Decide-Dialog $proc (Wait-Dialog $proc $removeDialogNames) $true
+    Wait-Tool $tool $false 80
+    [void](Reveal-Button $proc $root $downloadNames -Up)
+    if ((Hash $note) -cne $noteHash -or (Hash $existingVideo) -cne $videoHash) {
+        throw 'Removing optional yt-dlp changed Markdown or local video'
+    }
+    if (@(Get-ChildItem -LiteralPath $VaultPath -Recurse -File |
+        Where-Object { $_.Extension -in @('.mp4','.webm','.m4v','.exe') }).Count -ne 0) {
+        throw 'yt-dlp or video bytes appeared in synchronized vault'
+    }
+    Write-Host 'VIDEO20_SETTINGS_REMOVE_UIA_PASS file_removed=1 note_unchanged=1 media_retained=1'
+    Write-Host 'VIDEO22_LOCAL_MEDIA_RETENTION_PASS avc_aac_fixture=1 sha256=1 both_tools_removed=1'
 }
 finally {
     if ($null -ne $proc) {
