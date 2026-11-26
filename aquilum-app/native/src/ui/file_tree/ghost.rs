@@ -1,13 +1,14 @@
 //! Плашка перетаскивания (`.q-drag-ghost`): акцентный фон, текст на акценте, тень, прозрачность
 //! 0.9. Слой над окном, указатель не перехватывает.
 
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
-    AccessCtx, ChildrenIds, EventCtx, Layer, LayoutCtx, MeasureCtx, NewWidget, PaintCtx,
-    PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, Widget, render_text,
+    AccessCtx, EventCtx, Layer, MeasureCtx, NewWidget, PaintCtx,
+    PointerEvent, PropertiesMut, PropertiesRef, Widget, render_text,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, RoundedRect, Size};
+use masonry::kurbo::{Affine, Axis, RoundedRect};
 use masonry::layout::{LenReq, Length};
 
 use crate::ui::menu::box_shadow;
@@ -42,8 +43,6 @@ impl DragGhost {
 impl Widget for DragGhost {
     type Action = masonry::core::NoAction;
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn update(&mut self, ctx: &mut masonry::core::UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &masonry::core::Update) {
         if matches!(event, masonry::core::Update::FontsChanged) {
             self.line.clear();
@@ -62,8 +61,6 @@ impl Widget for DragGhost {
             Axis::Vertical => Length::px(Self::style().line_height + size::SPACE_4 * 2.0),
         }
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -85,9 +82,7 @@ impl Widget for DragGhost {
         node.set_label(self.label.clone());
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 
     fn as_layer(&mut self) -> Option<&mut dyn Layer> {
         Some(self)
