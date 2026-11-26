@@ -1,9 +1,8 @@
-use masonry::accesskit::{Node, Role};
+use crate::ui::widgets::layout::contract::passive_single_child;
 use masonry::core::{
-    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PropertiesMut,
-    PropertiesRef, RegisterCtx, Update, UpdateCtx, Widget, WidgetMut, WidgetPod,
+    LayoutCtx, MeasureCtx, NewWidget, PropertiesMut,
+    PropertiesRef, Update, UpdateCtx, Widget, WidgetMut, WidgetPod,
 };
-use masonry::imaging::Painter;
 use masonry::kurbo::{Axis, Point, Size};
 use masonry::layout::{LenDef, LenReq, Length, SizeDef};
 use masonry::parley::style::StyleProperty;
@@ -93,10 +92,6 @@ impl Widget for EditorColumn {
         }
     }
 
-    fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
-        ctx.register_child(&mut self.child);
-    }
-
     fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, len_req: LenReq, cross: Option<Length>) -> Length {
         let max = self.max(ctx);
         match axis {
@@ -123,15 +118,5 @@ impl Widget for EditorColumn {
         ctx.place_child(&mut self.child, Point::new(((size_.width - inner) / 2.0).round(), 0.0));
     }
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _painter: &mut Painter<'_>) {}
-
-    fn accessibility_role(&self) -> Role {
-        Role::GenericContainer
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
-
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::from_slice(&[self.child.id()])
-    }
+    passive_single_child!(child);
 }
