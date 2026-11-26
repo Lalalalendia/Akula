@@ -10,7 +10,6 @@ use masonry::app::RenderRoot;
 use masonry::core::keyboard::{Key, Modifiers};
 use crate::ui::keymap::{self, Command, Scope};
 use masonry::core::{NewWidget, WidgetId};
-use masonry::kurbo::Point;
 use masonry::widgets::Flex;
 
 use super::{App, Outcome, Popup};
@@ -51,9 +50,7 @@ impl App {
         let body_handle = Handle::of(&body);
         let card = search::dialog_card(search_box.widget, body, search::template_footer());
         let layer = Modal::new(card, &t("templateDialog.title"), CardSize::Anchored(search::card_size), Role::Dialog, false);
-        let layer_id = layer.id();
-        root.add_layer(layer, Point::ORIGIN);
-        root.focus_on(Some(search_box.field.id()));
+        let layer_id = super::ui_actions::mount_modal(root, layer, search_box.field.id());
 
         let templates = self.scan_templates();
         let filtered = (0..templates.len()).collect();
@@ -75,10 +72,7 @@ impl App {
 
     pub fn close_templates(&mut self, root: &mut RenderRoot) {
         if let Some(Popup::Templates(state)) = self.popup.take() {
-            crate::ui::dialog::close(root, state.layer);
-            if let Some(ids) = &self.note_ids {
-                root.focus_on(Some(ids.body.id()));
-            }
+            self.close_picker(root, state.layer);
         }
     }
 

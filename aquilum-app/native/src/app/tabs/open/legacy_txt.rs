@@ -6,13 +6,8 @@ use std::io::Read;
 use std::path::Path;
 
 use aquilum_core::files::error::FileCommandError;
-use masonry::core::NewWidget;
-use masonry::properties::types::CrossAxisAlignment;
-use masonry::widgets::Flex;
 
 use super::*;
-use crate::ui::scroll::ScrollArea;
-use crate::ui::widgets::{Font, Label, Leading};
 
 const MAX_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -131,19 +126,8 @@ impl App {
         let vault = self.tree.root().ok_or_else(|| "Хранилище Akula не выбрано".to_owned())?;
         let (body, encoding) = read_legacy(vault, path)?;
         let name = path.file_name().unwrap_or_default().to_string_lossy();
-        let heading = NewWidget::new(crate::ui::widgets::Caption::new(&format!(
-            "{name} — {encoding}, только чтение (исходный файл не изменён)"
-        )));
-        let body = NewWidget::new(Label::new(&body, |theme| theme.text_primary)
-            .font(Font::Editor).leading(Leading::Editor).selectable());
-        let column = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch)
-            .with_fixed(heading).with_fixed(body);
-        let page = NewWidget::new(ScrollArea::new(NewWidget::new(column)));
-        self.note = None;
-        self.note_ids = None;
-        self.embeds = None;
-        self.open_error = None;
-        self.open_error_ids = None;
+        let page = crate::app::ui_actions::readonly_text_page(&format!("{name} — {encoding}, только чтение (исходный файл не изменён)"), &body);
+        self.reset_note_view_for_preview();
         self.text = crop::Rope::new();
         if let Some(chrome) = &self.chrome {
             chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
