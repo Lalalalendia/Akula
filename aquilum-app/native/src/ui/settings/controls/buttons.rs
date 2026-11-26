@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widgets::layout::contract::leaf_widget;
 
 pub struct DropdownButton {
     label: String,
@@ -49,16 +50,12 @@ impl Widget for DropdownButton {
         crate::ui::widgets::press::update_button_line(&mut self.line, ctx, event);
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(match axis {
             Axis::Horizontal => size::INPUT_WIDTH,
             Axis::Vertical => size::INPUT_PADDING_Y * 2.0 + size::INPUT_CONTENT_HEIGHT,
         })
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -86,9 +83,7 @@ impl Widget for DropdownButton {
         node.add_action(Action::Click);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
 
 #[derive(Default)]
@@ -112,13 +107,9 @@ impl Widget for Swatch {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, _axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(size::SIZE_20)
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -142,7 +133,5 @@ impl Widget for Swatch {
         }
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
