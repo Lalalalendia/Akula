@@ -1,7 +1,8 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use aquilum_core::text::matcher::{IGNORE_CASE, Matcher};
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
-    AccessCtx, ChildrenIds, EventCtx, Layer, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, Update,
+    AccessCtx, EventCtx, Layer, MeasureCtx, NewWidget, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, Update,
     UpdateCtx, Widget, WidgetMut, render_text,
 };
 use masonry::imaging::Painter;
@@ -98,13 +99,9 @@ impl Widget for SuggestList {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(Self::size_for(&self.items).get_coord(axis))
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let tm = theme::current();
@@ -146,9 +143,7 @@ impl Widget for SuggestList {
         }
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 
     fn as_layer(&mut self) -> Option<&mut dyn Layer> {
         Some(self)

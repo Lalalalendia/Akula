@@ -1,15 +1,16 @@
 mod paint;
 mod pointer;
 
-pub(super) use paint::{Look, Texts, paint as paint_row};
+pub(super) use crate::ui::widgets::layout::contract::leaf_widget;
+use paint::{Look, Texts, paint as paint_row};
 
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
-    AccessCtx, AccessEvent, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, PaintCtx, PointerEvent,
-    PropertiesMut, PropertiesRef, RegisterCtx, Update, UpdateCtx, Widget, WidgetMut,
+    AccessCtx, AccessEvent, EventCtx, MeasureCtx, PaintCtx, PointerEvent,
+    PropertiesMut, PropertiesRef, Update, UpdateCtx, Widget, WidgetMut,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Axis, Point, Size};
+use masonry::kurbo::{Axis, Point};
 use masonry::layout::{LenReq, Length};
 
 use super::model::{Modifiers, Row};
@@ -75,8 +76,6 @@ impl Widget for TreeRow {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(
         &mut self,
         _ctx: &mut MeasureCtx<'_>,
@@ -91,8 +90,6 @@ impl Widget for TreeRow {
             (Axis::Horizontal, _) => Length::px(paint::text_x(self.row.depth) + size::SIDEBAR_ITEM_PADDING),
         }
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let look = Look { hovered: ctx.is_hovered(), drop_over: self.drop_over };
@@ -117,7 +114,5 @@ impl Widget for TreeRow {
         node.add_action(masonry::accesskit::Action::Click);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
