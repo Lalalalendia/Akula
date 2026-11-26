@@ -12,6 +12,7 @@ on:
       - 'aquilum-app/native/src/video/optional_ytdlp_tests.rs'
       - 'aquilum-app/native/src/video/optional_quickjs_tests.rs'
       - 'aquilum-app/native/src/video/download_video21_tests.rs'
+      - 'aquilum-app/native/src/video/fixtures/native_avc_aac_test.mp4'
       - 'scripts/windows-video20-settings-uia.ps1'
       - '.github/workflows/akula-video20-user-optin-windows.yml'
 permissions:
@@ -122,6 +123,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installed QuickJS tests failed' }
           cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::download::video21_tests -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Installed yt-dlp QuickJS command tests failed' }
+          $decode=@(cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::download::tests::synthetic_avc_aac_download_survives_restart_and_decodes_natively -- --exact --nocapture 2>&1)
+          $decodeExit=$LASTEXITCODE
+          $decode | Out-Host
+          if ($decodeExit -ne 0 -or !(($decode | Out-String).Contains('test result: ok. 1 passed;'))) {
+            throw 'Installed Windows decoder did not decode a frame from the saved AVC/AAC fixture'
+          }
           cargo test --locked -p aquilum-native --features installed --bin aquilum-native video::queue::installed_tests -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Installed Windows queue fail-closed test failed' }
           cargo test --locked -p aquilum-native --features installed --bin aquilum-native ui::settings::schema::tests -- --test-threads=1 --nocapture
@@ -181,6 +188,10 @@ jobs:
           $exe=Join-Path $env:LOCALAPPDATA 'Akula/akula-app.exe'
           $vault=Join-Path $env:RUNNER_TEMP 'video20-real-ui-vault'
           $data=Join-Path $env:RUNNER_TEMP 'video20-real-ui-data'
-          & $powershell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $script -ExePath $exe -VaultPath $vault -DataDir $data
-          if ($LASTEXITCODE -ne 0) { throw 'VIDEO20 real Windows Settings GUI acceptance failed' }
+          $output=@(& $powershell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $script -ExePath $exe -VaultPath $vault -DataDir $data 2>&1)
+          $status=$LASTEXITCODE
+          $output | Out-Host
+          if ($status -ne 0 -or !(($output | Out-String).Contains('VIDEO22_LOCAL_MEDIA_RETENTION_PASS avc_aac_fixture=1 sha256=1 both_tools_removed=1'))) {
+            throw 'VIDEO20 real Windows Settings GUI and local media retention acceptance failed'
+          }
           Write-Host 'VIDEO20_REAL_SETTINGS_UIA_PASS no_youtube=1 release=0'
