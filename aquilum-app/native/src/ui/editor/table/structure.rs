@@ -66,7 +66,7 @@ impl Table {
         true
     }
 
-    fn order(len: usize, start: usize, end: usize, dest: usize) -> Option<Vec<usize>> {
+    fn order(len: usize, start: usize, end: usize, dest: usize) -> Option<(Vec<usize>, Vec<usize>)> {
         let size = end - start + 1;
         let dest = dest.min(len - size);
         if dest == start {
@@ -75,15 +75,15 @@ impl Table {
         let mut order: Vec<usize> = (0..len).collect();
         let block: Vec<usize> = order.drain(start..=end).collect();
         order.splice(dest..dest, block);
-        Some(order)
-    }
-
-    pub fn move_rows(&mut self, top: usize, bottom: usize, dest: usize) -> bool {
-        let Some(order) = Self::order(self.rows(), top, bottom, dest) else { return false };
         let mut back = vec![0; order.len()];
         for (new, old) in order.iter().enumerate() {
             back[*old] = new;
         }
+        Some((order, back))
+    }
+
+    pub fn move_rows(&mut self, top: usize, bottom: usize, dest: usize) -> bool {
+        let Some((order, back)) = Self::order(self.rows(), top, bottom, dest) else { return false };
         self.cells = order.iter().map(|o| self.cells[*o].clone()).collect();
         self.heights = order.iter().map(|o| self.heights[*o]).collect();
         self.merges = self.merges.iter().map(|m| Range2 { top: back[m.top], bottom: back[m.bottom], ..*m }).collect();
@@ -92,11 +92,7 @@ impl Table {
     }
 
     pub fn move_cols(&mut self, left: usize, right: usize, dest: usize) -> bool {
-        let Some(order) = Self::order(self.cols(), left, right, dest) else { return false };
-        let mut back = vec![0; order.len()];
-        for (new, old) in order.iter().enumerate() {
-            back[*old] = new;
-        }
+        let Some((order, back)) = Self::order(self.cols(), left, right, dest) else { return false };
         self.cells = self.cells.iter().map(|row| order.iter().map(|o| row[*o].clone()).collect()).collect();
         self.widths = order.iter().map(|o| self.widths[*o]).collect();
         self.aligns = order.iter().map(|o| self.aligns[*o]).collect();

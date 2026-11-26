@@ -1,7 +1,6 @@
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::{
-    AccessCtx, AccessEvent, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, Update, UpdateCtx,
-    Widget, WidgetMut, render_text,
+    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, PaintCtx, PropertiesRef, RegisterCtx, Widget, WidgetMut, render_text,
 };
 use masonry::imaging::{Composite, GroupRef, PaintSink, Painter};
 use masonry::kurbo::{Affine, Axis, Point, RoundedRect, Size};
@@ -12,7 +11,7 @@ use super::{ButtonSize, Variant, paint_primary};
 use crate::ui::icons::Icon;
 use crate::ui::tokens::{number, size};
 use crate::ui::widgets::{Press, Pressed};
-use crate::ui::widgets::press::{submit_pointer, submit_access, update_button_line};
+use crate::ui::widgets::press::press_events;
 use crate::ui::{text, theme};
 
 pub struct TextButton {
@@ -104,17 +103,7 @@ impl TextButton {
 impl Widget for TextButton {
     type Action = Pressed;
 
-    fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        submit_pointer(&mut self.press, ctx, event);
-    }
-
-    fn on_access_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &AccessEvent) {
-        submit_access(ctx, event);
-    }
-
-    fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
-        update_button_line(&mut self.line, ctx, event);
-    }
+    press_events!(line);
 
     fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
 
