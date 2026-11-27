@@ -26,27 +26,11 @@ impl Output {
         // On Windows GDI the uncovered area after another window moves away is
         // not necessarily part of the application's own damage rectangles.
         // Present the complete retained frame, even if dirty is empty.
-        #[cfg(target_os = "windows")]
-        let result = if dirty.is_empty() || self.fresh {
+        let result = if cfg!(target_os = "windows") && (dirty.is_empty() || self.fresh) {
             // WM_PAINT may expose retained pixels without changing the scene.
             buffer.present()
         } else {
             // Keep partial updates for regular scene changes.
-            let mut areas = dirty.to_vec();
-            super::super::merge(&mut areas);
-            let rects: Vec<softbuffer::Rect> = areas
-                .iter()
-                .filter_map(|a| Some(softbuffer::Rect {
-                    x: a.x,
-                    y: a.y,
-                    width: NonZeroU32::new(a.w)?,
-                    height: NonZeroU32::new(a.h)?,
-                }))
-                .collect();
-            buffer.present_with_damage(&rects)
-        };
-        #[cfg(not(target_os = "windows"))]
-        let result = {
             let mut areas = dirty.to_vec();
             super::super::merge(&mut areas);
             let rects: Vec<softbuffer::Rect> = areas
