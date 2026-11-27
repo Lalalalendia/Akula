@@ -17,11 +17,16 @@ fn real_speech_batch_from_settings_keeps_queue_order_and_respects_pause() {
     let model = tools.join("model");
     let vad = tools.join("vad");
     std::fs::write(&whisper, r#"#!/bin/sh
+[ "$OMP_THREAD_LIMIT" = 1 ] && [ "$OPENBLAS_NUM_THREADS" = 1 ] || exit 3
 if [ ! -f "${0%/*}/permit" ]; then
     : > "${0%/*}/recognizing"
     exec /bin/sleep 30
 fi
 while [ "$#" -gt 0 ]; do
+    if [ "$1" = "-t" ]; then
+        shift
+        [ "$1" = 1 ] || exit 4
+    fi
     if [ "$1" = "-of" ]; then
         shift
         printf '%s' '{"transcription":[{"offsets":{"from":100,"to":1000},"text":"Verified batch cue"}]}' > "$1.json"
@@ -97,6 +102,8 @@ exit 2
         h.app.workspace.speech().send(Command::SetTool(role, path));
     }
     wait(&mut h, View::ready);
+    press(&mut h, Speech::CpuMode(speech::CpuMode::Quiet));
+    wait(&mut h, |view| view.cpu_mode == speech::CpuMode::Quiet);
     let batch = vec![first.clone(), invalid, second.clone(), third.clone()];
     for _ in 0..2 {
         h.app

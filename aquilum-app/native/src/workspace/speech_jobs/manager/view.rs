@@ -1,11 +1,11 @@
 use super::{Manager, Notice, PathBuf};
 use crate::workspace::speech_jobs::{JobRow, PAGE_SIZE};
 use aquilum_core::background_jobs::speech;
-
 impl Manager<'_> {
     pub(super) fn publish(&mut self) {
         self.view.tools = self.config.paths();
         self.view.auto_downloads = self.config.auto_downloads;
+        self.view.cpu_mode = self.config.cpu_mode;
         self.view.newer = !self.bounds.is_empty();
         self.view.active = self.worker.as_ref().map(|worker| worker.id);
         self.view.active_source = self.worker.as_ref().map(|worker| worker.source.clone());

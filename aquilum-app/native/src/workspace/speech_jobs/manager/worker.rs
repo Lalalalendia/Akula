@@ -1,15 +1,22 @@
 use super::{Manager, Notice};
 use aquilum_core::background_jobs::{
-    Job, JobId, Queue, State,
+    Job, JobId, State,
     speech::{self, Outcome},
 };
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+mod execute;
+use execute::run;
 use std::thread::{self, JoinHandle};
+
+pub(super) enum Failure {
+    MemoryPressure,
+    Other(String),
+}
 
 pub(super) struct Worker {
     pub(super) id: JobId,
     pub(super) source: PathBuf,
-    pub(super) handle: JoinHandle<Result<Outcome, String>>,
+    pub(super) handle: JoinHandle<Result<Outcome, Failure>>,
 }
 
 impl Manager<'_> {
@@ -66,7 +73,11 @@ impl Manager<'_> {
                 }
                 Ok(Ok(Outcome::Idle)) => (),
                 Ok(Ok(Outcome::Completed | Outcome::Interrupted)) => (),
-                Ok(Err(error)) => {
+                Ok(Err(Failure::MemoryPressure)) => {
+                    self.view.processing_queue = false;
+                    self.view.notice = Some(Notice::MemoryPressure);
+                }
+                Ok(Err(Failure::Other(error))) => {
                     // A media failure is recorded on its own row. A startup
                     // failure can leave it queued and would cause a retry loop.
                     if self.admit(worker.id) != Ok(State::Failed) {
@@ -81,21 +92,4 @@ impl Manager<'_> {
             }
         }
     }
-}
-
-fn run(
-    database: &Path,
-    config: &super::Config,
-    id: JobId,
-    queued_only: bool,
-) -> Result<Outcome, String> {
-    let mut queue = Queue::open(database).map_err(|error| error.to_string())?;
-    let tools = config.verify()?;
-    let threads = thread::available_parallelism().map_or(1, |cores| cores.get().min(2) as u8);
-    let work = if queued_only {
-        speech::work_queued
-    } else {
-        speech::work
-    };
-    work(&mut queue, &tools, id, threads).map_err(|error| error.to_string())
 }

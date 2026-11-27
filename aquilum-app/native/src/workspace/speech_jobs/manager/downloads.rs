@@ -116,7 +116,7 @@ impl Manager<'_> {
         if job.cancelled.load(Ordering::Relaxed) {
             return;
         }
-        if job.config != self.config {
+        if !job.config.same_tools(&self.config) {
             self.published_video(job.path);
             return;
         }

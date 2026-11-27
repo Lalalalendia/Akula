@@ -1,10 +1,10 @@
 use super::*;
 use crate::workspace::speech_jobs::Notice;
 use aquilum_core::background_jobs::speech::MAX_BATCH_FILES;
-
 pub(super) fn row(notice: &Notice) -> Row {
     let (message, tone) = match notice {
         Notice::Error(error) => (error.chars().take(300).collect(), Tone::Danger),
+        Notice::MemoryPressure => (label("memoryPressure"), Tone::Danger),
         Notice::LeaseBusy => (label("leaseBusy"), Tone::Secondary),
         Notice::Exported => (label("exported"), Tone::Secondary),
         Notice::BatchTooLarge => (

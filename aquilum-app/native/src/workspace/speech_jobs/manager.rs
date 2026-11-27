@@ -115,6 +115,7 @@ impl Manager<'_> {
             Command::Batch(sources) => self.prepare(|this| this.add_batch(sources)),
             Command::PublishedVideo(path) => { self.published_video(path); Ok(()) }
             Command::Action(Action::AutoDownloads(enabled)) => self.set_auto_downloads(enabled),
+            Command::Action(Action::CpuMode(mode)) => self.config.set_cpu_mode(&self.profile, mode),
             Command::Export(id, path) => self.prepare(|this| {
                 this.admit(id)?;
                 super::export::save(&this.queue, id, &path)?;
@@ -194,5 +195,4 @@ impl Manager<'_> {
     fn admit(&self, id: JobId) -> Result<State, String> {
         self.job(id).map(|job| job.state)
     }
-
 }

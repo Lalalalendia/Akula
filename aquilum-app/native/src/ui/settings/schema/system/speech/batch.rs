@@ -1,5 +1,4 @@
 use super::*;
-
 pub(super) fn controls(view: &View) -> Vec<Row> {
     let mut rows = vec![
         info(
@@ -37,6 +36,7 @@ pub(super) fn controls(view: &View) -> Vec<Row> {
         buttons(vec![control]),
     ));
     downloads::controls(&mut rows, view);
+    rows.push(performance::row(view));
     if !view.loaded || view.preparing {
         rows.push(status("progress", label("preparing"), Tone::Secondary));
     }

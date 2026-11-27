@@ -1,5 +1,5 @@
 use super::command::{run, Workspace};
-use super::{Error, Result};
+use super::{Error, Result, resources::Limits};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -101,7 +101,7 @@ pub(super) fn probe(
         temp,
         Some(&output),
         (&output, PROBE_LIMIT),
-        IO_TIMEOUT,
+        IO_TIMEOUT, Limits::Media,
         check,
     )?;
     let raw: Raw = serde_json::from_slice(&fs::read(output)?)?;
@@ -151,7 +151,7 @@ pub(super) fn window(
         temp,
         None,
         (&path, MAX_WINDOW_WAV),
-        IO_TIMEOUT,
+        IO_TIMEOUT, Limits::Media,
         check,
     )?;
     Ok(path)

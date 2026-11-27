@@ -396,6 +396,7 @@ dependencies = [
  "windows",
  "yrs",
  "zeroize",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
