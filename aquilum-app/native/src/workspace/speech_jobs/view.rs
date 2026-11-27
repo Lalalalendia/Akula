@@ -1,5 +1,7 @@
+mod notice;
 use super::{JobId, PathBuf};
 use aquilum_core::background_jobs::State;
+pub(crate) use notice::{BatchReport, Notice};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Track {
@@ -24,22 +26,6 @@ pub(crate) struct JobRow {
     pub(crate) error: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum Notice {
-    Error(String),
-    LeaseBusy,
-    Exported,
-    Batch(BatchReport),
-    BatchTooLarge,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct BatchReport {
-    pub accepted: usize,
-    pub rejected: usize,
-    pub example: Option<String>,
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct View {
     pub(crate) tools: [Option<PathBuf>; 5],
@@ -51,6 +37,8 @@ pub(crate) struct View {
     pub(crate) has_queued: bool,
     pub(crate) caption_job: Option<JobId>,
     pub(crate) preparing: bool,
+    pub(crate) auto_downloads: bool,
+    pub(crate) admitting_download: Option<PathBuf>,
     pub(crate) loaded: bool,
     pub(crate) older: bool,
     pub(crate) newer: bool,

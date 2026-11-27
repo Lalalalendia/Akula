@@ -1,6 +1,4 @@
 use super::*;
-use crate::workspace::speech_jobs::Notice;
-use aquilum_core::background_jobs::speech::MAX_BATCH_FILES;
 
 pub(super) fn controls(view: &View) -> Vec<Row> {
     let mut rows = vec![
@@ -38,42 +36,12 @@ pub(super) fn controls(view: &View) -> Vec<Row> {
         description,
         buttons(vec![control]),
     ));
+    downloads::controls(&mut rows, view);
     if !view.loaded || view.preparing {
         rows.push(status("progress", label("preparing"), Tone::Secondary));
     }
     if let Some(notice) = &view.notice {
-        let (message, tone) = match notice {
-            Notice::Error(error) => (error.chars().take(300).collect(), Tone::Danger),
-            Notice::LeaseBusy => (label("leaseBusy"), Tone::Secondary),
-            Notice::Exported => (label("exported"), Tone::Secondary),
-            Notice::BatchTooLarge => (
-                t_with(
-                    "settings.system.speech.batchLimit",
-                    &[("limit", &MAX_BATCH_FILES.to_string())],
-                ),
-                Tone::Danger,
-            ),
-            Notice::Batch(report) => {
-                let mut summary = t_with(
-                    "settings.system.speech.batchResult",
-                    &[
-                        ("accepted", &report.accepted.to_string()),
-                        ("rejected", &report.rejected.to_string()),
-                    ],
-                );
-                if let Some(example) = &report.example {
-                    summary.push_str("\n");
-                    summary.push_str(example);
-                }
-                let tone = if report.rejected == 0 {
-                    Tone::Secondary
-                } else {
-                    Tone::Danger
-                };
-                (summary, tone)
-            }
-        };
-        rows.push(status("status", message, tone));
+        rows.push(notice::row(notice));
     }
     rows
 }

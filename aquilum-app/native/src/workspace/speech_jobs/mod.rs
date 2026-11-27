@@ -1,7 +1,7 @@
 //! One local speech dispatcher per open Akula profile.
 
 mod commands;
-mod config;
+mod config; mod downloads;
 mod export;
 mod manager;
 mod view; pub(crate) use view::{BatchReport, JobRow, Notice, Selection, Track, View};

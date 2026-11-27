@@ -35,7 +35,7 @@ pub(crate) enum Action {
     PickTool(Tool),
     PickMedia, PickBatch,
     UseTrack(u32),
-    DismissMedia,
+    DismissMedia, AutoDownloads(bool),
     Run(JobId), RunQueue, StopQueue,
     Pause(JobId),
     Cancel(JobId),
@@ -48,7 +48,7 @@ pub(crate) enum Action {
 
 pub(crate) enum Command {
     SetTool(Tool, PathBuf),
-    Inspect(PathBuf), Batch(Vec<PathBuf>),
+    Inspect(PathBuf), Batch(Vec<PathBuf>), PublishedVideo(PathBuf),
     Export(JobId, PathBuf),
     CaptionPage(Arc<playback::Attached>, i64),
     Action(Action), Transcript(super::transcript::Request), Shutdown,

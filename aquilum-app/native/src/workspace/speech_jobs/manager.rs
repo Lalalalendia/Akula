@@ -1,9 +1,9 @@
-mod batch; mod intake; mod transcript; mod worker;
+mod batch; mod downloads; mod intake; mod transcript; mod worker; mod view;
 use worker::Worker;
 use super::config::Config;
 use super::playback::Attached;
 use super::{
-    Action, Command, JobId, JobRow, Notice, PAGE_SIZE, POLL, Selection, Shared, Track, View,
+    Action, Command, JobId, Notice, POLL, Selection, Shared, Track, View,
     Wake,
 };
 use aquilum_core::background_jobs::{Queue, State, speech};
@@ -15,6 +15,7 @@ struct Manager<'a> {
     profile: PathBuf,
     database: PathBuf,
     config: Config,
+    downloads: downloads::Downloads,
     worker: Option<Worker>,
     bounds: Vec<JobId>,
     view: View,
@@ -50,6 +51,7 @@ pub(super) fn serve(
         profile,
         database,
         config: Config::default(),
+        downloads: downloads::Downloads::default(),
         worker: None,
         bounds: Vec::new(),
         view: View {
@@ -66,7 +68,7 @@ pub(super) fn serve(
     }
     manager.publish();
     loop {
-        let command = if manager.worker.is_some() || manager.view.processing_queue {
+        let command = if manager.worker.is_some() || manager.view.processing_queue || manager.downloads.busy() {
             match commands.recv_timeout(POLL) {
                 Ok(command) => Some(command),
                 Err(RecvTimeoutError::Timeout) => None,
@@ -82,7 +84,7 @@ pub(super) fn serve(
             if matches!(command, Command::Shutdown) {
                 break;
             }
-            if !matches!(command, Command::CaptionPage(..) | Command::Transcript(_)) {
+            if !matches!(command, Command::CaptionPage(..) | Command::Transcript(_) | Command::PublishedVideo(_)) {
                 manager.view.notice = None;
             }
             if let Err(error) = manager.handle(command) {
@@ -90,6 +92,7 @@ pub(super) fn serve(
             }
         }
         manager.reap();
+        manager.poll_downloads();
         manager.advance_queue();
         manager.refresh_captions();
         manager.publish();
@@ -101,37 +104,6 @@ pub(super) fn serve(
 }
 
 impl Manager<'_> {
-    fn publish(&mut self) {
-        self.view.tools = self.config.paths();
-        self.view.newer = !self.bounds.is_empty();
-        self.view.active = self.worker.as_ref().map(|worker| worker.id);
-        self.view.active_source = self.worker.as_ref().map(|worker| worker.source.clone());
-        self.view.has_queued = self.queue.oldest_queued(speech::KIND).is_ok_and(|job| job.is_some());
-        self.view.caption_job = self.shared.playback.selected().map(|track| track.id());
-        match self
-            .queue
-            .list(speech::KIND, self.bounds.last().copied(), PAGE_SIZE + 1)
-        {
-            Ok(jobs) => {
-                self.view.older = jobs.len() > PAGE_SIZE as usize;
-                self.view.jobs = jobs
-                    .into_iter()
-                    .take(PAGE_SIZE as usize)
-                    .map(|job| JobRow {
-                        id: job.id,
-                        source: PathBuf::from(job.spec.source),
-                        state: job.state,
-                        committed: job.committed,
-                        total: job.total,
-                        error: job.error,
-                    })
-                    .collect();
-            }
-            Err(error) => self.view.notice = Some(Notice::Error(error.to_string())),
-        }
-        self.shared.publish(self.view.clone(), self.wake);
-    }
-
     fn handle(&mut self, command: Command) -> Result<(), String> {
         match command {
             Command::SetTool(tool, path) => self.prepare(|this| {
@@ -141,6 +113,8 @@ impl Manager<'_> {
             }),
             Command::Inspect(source) => self.prepare(|this| this.inspect(source)),
             Command::Batch(sources) => self.prepare(|this| this.add_batch(sources)),
+            Command::PublishedVideo(path) => { self.published_video(path); Ok(()) }
+            Command::Action(Action::AutoDownloads(enabled)) => self.set_auto_downloads(enabled),
             Command::Export(id, path) => self.prepare(|this| {
                 this.admit(id)?;
                 super::export::save(&this.queue, id, &path)?;

@@ -1,8 +1,8 @@
 use super::{Tool, Tools};
-use aquilum_core::files::document::write_file_atomic_impl;
+mod storage;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -14,28 +14,11 @@ struct TrustedFile {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct Config {
     files: [Option<TrustedFile>; 5],
+    #[serde(default)]
+    pub(super) auto_downloads: bool,
 }
 
-const MAX_CONFIG: u64 = 64 * 1024;
-
 impl Config {
-    pub(super) fn load(profile: &Path) -> Result<Self, String> {
-        let path = config_path(profile);
-        let file = match File::open(path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
-            Err(error) => return Err(error.to_string()),
-        };
-        let mut data = Vec::new();
-        file.take(MAX_CONFIG + 1)
-            .read_to_end(&mut data)
-            .map_err(|error| error.to_string())?;
-        if data.len() as u64 > MAX_CONFIG {
-            return Err("speech tools configuration exceeds the size limit".into());
-        }
-        serde_json::from_slice(&data).map_err(|error| error.to_string())
-    }
-
     pub(super) fn choose(
         &mut self,
         profile: &Path,
@@ -46,12 +29,7 @@ impl Config {
         let digest = digest(&path)?;
         let mut next = self.clone();
         next.files[tool as usize] = Some(TrustedFile { path, digest });
-        let content = serde_json::to_string_pretty(&next).map_err(|error| error.to_string())?;
-        if content.len() as u64 > MAX_CONFIG {
-            return Err("speech tools configuration exceeds the size limit".into());
-        }
-        write_file_atomic_impl(&config_path(profile), &content, None)
-            .map_err(|error| format!("{error:?}"))?;
+        next.save(profile)?;
         *self = next;
         Ok(())
     }
@@ -80,10 +58,6 @@ impl Config {
         }
         Ok(&file.path)
     }
-}
-
-fn config_path(profile: &Path) -> PathBuf {
-    profile.join("speech-tools.json")
 }
 
 fn digest(path: &Path) -> Result<String, String> {

@@ -8,7 +8,7 @@ pub mod playback;
 #[cfg(test)]
 mod tests;
 
-pub use admission::{enqueue, enqueue_batch, MAX_BATCH_FILES};
+pub use admission::{enqueue, enqueue_batch, prepare_enqueue, MAX_BATCH_FILES};
 pub use media::{Track, TrackTags};
 pub use edits::read_cues; pub use output::{write_vtt, Cue};
 use super::{JobId, Lease, Queue, Segment};

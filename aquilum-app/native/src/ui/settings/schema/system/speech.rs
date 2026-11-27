@@ -1,4 +1,4 @@
-mod batch; mod item;
+mod batch; mod downloads; mod item; mod notice;
 use super::*;
 use crate::workspace::speech_jobs::{Action as Speech, Tool, View};
 use aquilum_core::background_jobs::State;

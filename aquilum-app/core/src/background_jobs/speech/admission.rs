@@ -1,7 +1,7 @@
-use super::{
-    Error, JobId, KIND, Queue, Recipe, Result, Tools, Workspace, fingerprint, local_file, media,
-};
+mod source;
+use super::{Error, JobId, Queue, Recipe, Result, Tools};
 use crate::background_jobs::Spec;
+use source::spec;
 use std::path::{Path, PathBuf};
 
 pub const MAX_BATCH_FILES: usize = 32;
@@ -13,8 +13,24 @@ pub fn enqueue(
     track: Option<u32>,
     language: &str,
 ) -> Result<JobId> {
-    admit(queue, tools, source, track, |track| {
-        tools.recipe(track, language, &mut || Ok(()))
+    Ok(queue.enqueue(&prepare_enqueue(
+        tools,
+        source,
+        track,
+        language,
+        &mut || Ok(()),
+    )?)?)
+}
+
+pub fn prepare_enqueue(
+    tools: &Tools,
+    source: &Path,
+    track: Option<u32>,
+    language: &str,
+    check: &mut impl FnMut() -> Result<()>,
+) -> Result<Spec> {
+    spec(tools, source, track, check, |track, check| {
+        tools.recipe(track, language, check)
     })
 }
 
@@ -36,47 +52,13 @@ pub fn enqueue_batch(
     Ok(sources
         .iter()
         .map(|source| {
-            admit(queue, tools, source, None, |track| {
+            let spec = spec(tools, source, None, &mut || Ok(()), |track, _| {
                 Ok(Recipe {
                     track,
                     ..template.clone()
                 })
-            })
+            })?;
+            Ok(queue.enqueue(&spec)?)
         })
         .collect())
-}
-
-fn admit(
-    queue: &Queue,
-    tools: &Tools,
-    source: &Path,
-    track: Option<u32>,
-    recipe: impl FnOnce(u32) -> Result<Recipe>,
-) -> Result<JobId> {
-    let source = local_file(source)?;
-    let source_name = source
-        .to_str()
-        .ok_or_else(|| Error::Invalid("media path is not representable as UTF-8".into()))?;
-    let mut check = || Ok(());
-    let input = fingerprint(&source, &mut check)?;
-    let probe = media::probe(&tools.ffprobe, &source, &Workspace::new()?, &mut check)?;
-    let track = match track {
-        Some(index) => index,
-        None => {
-            probe
-                .tracks
-                .first()
-                .ok_or_else(|| Error::Invalid("media has no audio tracks".into()))?
-                .index
-        }
-    };
-    probe.duration_ms(track)?;
-    let recipe = recipe(track)?;
-    input.verify(&source)?;
-    Ok(queue.enqueue(&Spec {
-        kind: KIND.into(),
-        source: source_name.into(),
-        revision: input.digest,
-        recipe: serde_json::to_string(&recipe)?,
-    })?)
 }

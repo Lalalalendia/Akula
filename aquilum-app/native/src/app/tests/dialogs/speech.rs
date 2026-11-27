@@ -1,4 +1,4 @@
-mod batch; mod playback; mod transcript;
+mod batch; mod downloads; mod playback; mod transcript;
 use super::*;
 use crate::ui::settings::{Binding, schema::Action};
 use crate::workspace::speech_jobs::{Action as Speech, Command, Tool, View};
