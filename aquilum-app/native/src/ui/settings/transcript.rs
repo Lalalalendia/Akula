@@ -1,5 +1,5 @@
 mod card;
-mod preview;
+mod preview; mod playback;
 
 use crate::i18n::t;
 use crate::ui::dialog::{CardSize, DialogAnswer, Modal};
@@ -48,12 +48,20 @@ pub(crate) struct Editor {
 
 impl Editor {
     pub(crate) fn new(dispatcher: &Dispatcher, job: JobId) -> (NewWidget<Modal>, Self) {
+        Self::with_task(dispatcher, job, Task::Page(0))
+    }
+
+    pub(crate) fn from_search(dispatcher: &Dispatcher, target: aquilum_core::background_jobs::speech::search::Target) -> (NewWidget<Modal>, Self) {
+        Self::with_task(dispatcher, target.job, Task::Locate(target))
+    }
+
+    fn with_task(dispatcher: &Dispatcher, job: JobId, task: Task) -> (NewWidget<Modal>, Self) {
         let mut editor = Self {
             layer: None,
             job,
             page: None,
             edit: None,
-            pending: Some(dispatcher.transcript(job, Task::Page(0))),
+            pending: Some(dispatcher.transcript(job, task)),
             error: None,
             media: None,
             pending_playback: None,
@@ -176,6 +184,12 @@ impl Editor {
                 }
                 self.edit = None;
             }
+            Ok(Reply::Located(page, media, time)) => {
+                self.page = Some(page);
+                self.media = Some(media);
+                self.play(Button::Jump(time));
+                reset_scroll = true;
+            }
             Ok(Reply::Media(media)) => {
                 self.media = Some(media);
                 if let Some(button) = playback {
@@ -185,40 +199,6 @@ impl Editor {
             Err(error) => self.error = Some(error.chars().take(300).collect()),
         }
         self.render(root, reset_scroll);
-    }
-
-    fn capture_draft(&mut self, root: &RenderRoot) {
-        if let (Some((_, draft)), Some(input)) = (
-            self.edit.as_mut(),
-            self.input.and_then(|input| input.get(root)),
-        ) {
-            *draft = input.inner().text();
-        }
-    }
-
-    fn play(&mut self, button: Button) {
-        let Some(path) = self.media.as_ref().and_then(Transcript::current_path) else {
-            self.media = None;
-            *self.playback.borrow_mut() = Playback::default();
-            self.error = Some(label("transcriptMediaChanged"));
-            return;
-        };
-        let mut preview = self.playback.borrow_mut();
-        if !preview.open(path) {
-            self.error = Some(label("transcriptNoPlayer"));
-            return;
-        }
-        match button {
-            Button::Jump(ms) => {
-                preview.seek(ms);
-                if let Some(state) = crate::video::state(path).filter(|state| state.duration > 0.0)
-                {
-                    crate::video::seek(path, ms as f64 / 1000.0 / state.duration);
-                }
-            }
-            Button::Toggle => preview.toggle(),
-            _ => {}
-        }
     }
 
     fn render(&mut self, root: &mut RenderRoot, reset_scroll: bool) {

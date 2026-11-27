@@ -2,7 +2,7 @@ use super::{Error, Result};
 use rusqlite::Transaction;
 
 const APPLICATION_ID: i64 = 0x414b4a31; // AKJ1
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 pub(super) fn migrate(tx: &Transaction<'_>) -> Result<()> {
     let application: i64 = tx.pragma_query_value(None, "application_id", |row| row.get(0))?;
@@ -18,16 +18,15 @@ pub(super) fn migrate(tx: &Transaction<'_>) -> Result<()> {
                 return Err(Error::Schema);
             }
             tx.execute_batch(include_str!("schema.sql"))?;
-            tx.execute_batch(include_str!("schema_v2.sql"))?;
             tx.pragma_update(None, "application_id", APPLICATION_ID)?;
-            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
-        (APPLICATION_ID, 1) => {
-            tx.execute_batch(include_str!("schema_v2.sql"))?;
-            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-        }
-        (APPLICATION_ID, SCHEMA_VERSION) => {}
+        (APPLICATION_ID, 1 | 2 | SCHEMA_VERSION) => {}
         _ => return Err(Error::Schema),
+    }
+    if version < 2 { tx.execute_batch(include_str!("schema_v2.sql"))?; }
+    if version < SCHEMA_VERSION {
+        tx.execute_batch(include_str!("schema_v3.sql"))?;
+        tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     Ok(())
 }

@@ -6,7 +6,6 @@ use super::{
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
 const PAGE_WINDOWS: i64 = 4;
-
 pub struct MediaSource {
     path: PathBuf,
     metadata: Metadata,
@@ -18,7 +17,6 @@ impl MediaSource {
         let metadata = fs::metadata(&path)?;
         Ok(Self { path, metadata })
     }
-
     pub fn matches(&self, other: &Self) -> bool {
         self.path == other.path && same_file(&self.metadata, &other.metadata).unwrap_or(false)
     }
@@ -40,12 +38,15 @@ pub struct Page {
 
 impl Transcript {
     pub fn verify(queue: &Queue, id: JobId) -> Result<Self> {
+        Self::verify_checking(queue, id, &mut || Ok(()))
+    }
+    pub(super) fn verify_checking(queue: &Queue, id: JobId, check: &mut impl FnMut() -> Result<()>) -> Result<Self> {
         let job = queue
             .get(id)?
             .filter(|job| job.spec.kind == KIND && job.committed > 0)
             .ok_or_else(|| Error::Invalid("no committed speech for this job".into()))?;
         let path = local_file(Path::new(&job.spec.source))?;
-        let current = fingerprint(&path, &mut || Ok(()))?;
+        let current = fingerprint(&path, check)?;
         if path.as_os_str() != Path::new(&job.spec.source).as_os_str()
             || current.digest != job.spec.revision
         {
@@ -61,7 +62,6 @@ impl Transcript {
             },
         })
     }
-
     pub fn id(&self) -> JobId {
         self.id
     }

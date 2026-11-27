@@ -262,6 +262,7 @@
     "actions": "Note actions"
   },
   "search": {
+    "transcript": "Transcript",
     "noResults": "Nothing found",
     "noFolder": "No folder open",
     "noFolderHint": "Open a knowledge base to search",

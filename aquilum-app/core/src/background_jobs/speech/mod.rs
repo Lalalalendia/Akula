@@ -4,7 +4,7 @@ mod command;
 pub mod edits;
 mod media;
 mod output;
-pub mod playback;
+pub mod playback; pub mod search;
 #[cfg(test)]
 mod tests;
 
