@@ -1,11 +1,11 @@
-//! Durable, device-local background work. Callers supply a source revision
-//! and a recipe identity. SQLite commits each output and its checkpoint together.
+//! Durable, device-local background work with atomic output checkpoints.
 
 use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Row, TransactionBehavior};
 use serde::Serialize;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub mod speech;
 #[cfg(test)]
 mod tests;
 mod worker;
