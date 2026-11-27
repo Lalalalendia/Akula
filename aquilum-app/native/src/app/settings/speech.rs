@@ -1,4 +1,4 @@
-mod poll;
+mod picker; mod poll;
 use super::*;
 use crate::i18n::{t, t_with};
 use crate::workspace::speech_jobs::{Action as Speech, Command};
@@ -17,10 +17,7 @@ impl App {
                 ))
                 .pick_file()
                 .map(|path| Command::SetTool(tool, path)),
-            Speech::PickMedia => rfd::FileDialog::new()
-                .set_title(t("settings.system.speech.mediaPicker"))
-                .pick_file()
-                .map(Command::Inspect),
+            Speech::PickMedia | Speech::PickBatch => picker::media(action),
             Speech::Export(id) => rfd::FileDialog::new()
                 .set_title(t("settings.system.speech.export"))
                 .add_filter("WebVTT", &["vtt"])

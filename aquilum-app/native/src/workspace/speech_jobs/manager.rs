@@ -1,24 +1,15 @@
-mod intake; mod transcript;
+mod batch; mod intake; mod transcript; mod worker;
+use worker::Worker;
 use super::config::Config;
 use super::playback::Attached;
 use super::{
-    Action, Command, JobId, JobRow, Notice, PAGE_SIZE, POLL, Selection, Shared, State, Track, View,
+    Action, Command, JobId, JobRow, Notice, PAGE_SIZE, POLL, Selection, Shared, Track, View,
     Wake,
 };
-use aquilum_core::background_jobs::{
-    Queue,
-    speech::{self, Outcome},
-};
-use std::path::{Path, PathBuf};
+use aquilum_core::background_jobs::{Queue, State, speech};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
-use std::thread::{self, JoinHandle};
-
-struct Worker {
-    id: JobId,
-    handle: JoinHandle<Result<Outcome, String>>,
-}
-
 struct Manager<'a> {
     queue: Queue,
     profile: PathBuf,
@@ -75,7 +66,7 @@ pub(super) fn serve(
     }
     manager.publish();
     loop {
-        let command = if manager.worker.is_some() {
+        let command = if manager.worker.is_some() || manager.view.processing_queue {
             match commands.recv_timeout(POLL) {
                 Ok(command) => Some(command),
                 Err(RecvTimeoutError::Timeout) => None,
@@ -99,6 +90,7 @@ pub(super) fn serve(
             }
         }
         manager.reap();
+        manager.advance_queue();
         manager.refresh_captions();
         manager.publish();
     }
@@ -113,6 +105,8 @@ impl Manager<'_> {
         self.view.tools = self.config.paths();
         self.view.newer = !self.bounds.is_empty();
         self.view.active = self.worker.as_ref().map(|worker| worker.id);
+        self.view.active_source = self.worker.as_ref().map(|worker| worker.source.clone());
+        self.view.has_queued = self.queue.oldest_queued(speech::KIND).is_ok_and(|job| job.is_some());
         self.view.caption_job = self.shared.playback.selected().map(|track| track.id());
         match self
             .queue
@@ -146,6 +140,7 @@ impl Manager<'_> {
                 Ok(())
             }),
             Command::Inspect(source) => self.prepare(|this| this.inspect(source)),
+            Command::Batch(sources) => self.prepare(|this| this.add_batch(sources)),
             Command::Export(id, path) => self.prepare(|this| {
                 this.admit(id)?;
                 super::export::save(&this.queue, id, &path)?;
@@ -176,11 +171,10 @@ impl Manager<'_> {
                 Ok(())
             }
             Command::Action(Action::UseTrack(track)) => self.prepare(|this| this.add(track)),
-            Command::Action(Action::Run(id)) => self.start(id),
-            Command::Action(Action::Pause(id)) => {
-                self.admit(id)?;
-                self.queue.pause(id).map_err(|error| error.to_string())
-            }
+            Command::Action(Action::Run(id)) => self.start(id, false),
+            Command::Action(Action::RunQueue) => self.run_queue(),
+            Command::Action(Action::StopQueue) => self.stop_queue(),
+            Command::Action(Action::Pause(id)) => self.pause(id),
             Command::Action(Action::Cancel(id)) => {
                 self.admit(id)?;
                 self.queue.cancel(id).map_err(|error| error.to_string())
@@ -201,7 +195,7 @@ impl Manager<'_> {
                 self.bounds.pop();
                 Ok(())
             }
-            Command::Action(Action::Refresh | Action::OpenTranscript(_) | Action::PickTool(_) | Action::PickMedia | Action::Export(_))
+            Command::Action(Action::Refresh | Action::OpenTranscript(_) | Action::PickTool(_) | Action::PickMedia | Action::PickBatch | Action::Export(_))
             | Command::Shutdown => Ok(()),
         }
     }
@@ -224,58 +218,7 @@ impl Manager<'_> {
     }
 
     fn admit(&self, id: JobId) -> Result<State, String> {
-        self.queue
-            .get(id)
-            .map_err(|error| error.to_string())?
-            .filter(|job| job.spec.kind == speech::KIND)
-            .map(|job| job.state)
-            .ok_or_else(|| "speech job is unavailable".into())
+        self.job(id).map(|job| job.state)
     }
 
-    fn start(&mut self, id: JobId) -> Result<(), String> {
-        if self.worker.is_some() {
-            return Err("a speech job is already active".into());
-        }
-        match self.admit(id)? {
-            State::Completed | State::Cancelled => return Ok(()),
-            State::Paused | State::Failed => {
-                self.queue.resume(id).map_err(|error| error.to_string())?;
-            }
-            _ => {}
-        }
-        let database = self.database.clone();
-        let config = self.config.clone();
-        let handle = thread::Builder::new()
-            .name("speech-recognition".into())
-            .spawn(move || run(&database, &config, id))
-            .map_err(|error| error.to_string())?;
-        self.worker = Some(Worker { id, handle });
-        Ok(())
-    }
-
-    fn reap(&mut self) {
-        if self
-            .worker
-            .as_ref()
-            .is_some_and(|worker| worker.handle.is_finished())
-        {
-            let worker = self.worker.take().expect("finished speech worker");
-            match worker.handle.join() {
-                Ok(Ok(Outcome::Idle)) if self.admit(worker.id) == Ok(State::Running) => {
-                    self.view.notice = Some(Notice::LeaseBusy);
-                }
-                Ok(Ok(Outcome::Idle)) => (),
-                Ok(Ok(Outcome::Completed | Outcome::Interrupted)) => (),
-                Ok(Err(error)) => self.view.notice = Some(Notice::Error(error)),
-                Err(_) => self.view.notice = Some(Notice::Error("speech worker terminated".into())),
-            }
-        }
-    }
-}
-
-fn run(database: &Path, config: &Config, id: JobId) -> Result<Outcome, String> {
-    let mut queue = Queue::open(database).map_err(|error| error.to_string())?;
-    let tools = config.verify()?;
-    let threads = thread::available_parallelism().map_or(1, |cores| cores.get().min(2) as u8);
-    speech::work(&mut queue, &tools, id, threads).map_err(|error| error.to_string())
 }

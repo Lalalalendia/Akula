@@ -4,12 +4,13 @@ mod commands;
 mod config;
 mod export;
 mod manager;
+mod view; pub(crate) use view::{BatchReport, JobRow, Notice, Selection, Track, View};
 pub(crate) mod playback; pub(crate) mod transcript;
 #[cfg(test)]
 mod tests;
 
 use aquilum_core::background_jobs::Queue;
-use aquilum_core::background_jobs::{JobId, State, speech::Tools};
+use aquilum_core::background_jobs::{JobId, speech::Tools}; #[cfg(test)] use aquilum_core::background_jobs::State;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -20,59 +21,6 @@ const PAGE_SIZE: u32 = 8;
 type Wake = Arc<dyn Fn() + Send + Sync>;
 
 pub(crate) use commands::{Action, Command, Tool};
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Track {
-    pub(crate) index: u32,
-    pub(crate) language: Option<String>,
-    pub(crate) title: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Selection {
-    pub(crate) source: PathBuf,
-    pub(crate) tracks: Vec<Track>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct JobRow {
-    pub(crate) id: JobId,
-    pub(crate) source: PathBuf,
-    pub(crate) state: State,
-    pub(crate) committed: i64,
-    pub(crate) total: Option<i64>,
-    pub(crate) error: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum Notice {
-    Error(String),
-    LeaseBusy,
-    Exported,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct View {
-    pub(crate) tools: [Option<PathBuf>; 5],
-    pub(crate) jobs: Vec<JobRow>,
-    pub(crate) selection: Option<Selection>,
-    pub(crate) active: Option<JobId>,
-    pub(crate) caption_job: Option<JobId>,
-    pub(crate) preparing: bool,
-    pub(crate) loaded: bool,
-    pub(crate) older: bool,
-    pub(crate) newer: bool,
-    pub(crate) notice: Option<Notice>,
-}
-
-impl View {
-    pub(crate) fn ready(&self) -> bool {
-        self.loaded
-            && !self.preparing
-            && self.active.is_none()
-            && self.tools.iter().all(Option::is_some)
-    }
-}
 
 #[derive(Default)]
 struct Shared {

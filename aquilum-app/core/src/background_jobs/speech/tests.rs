@@ -1,4 +1,4 @@
-use super::*;
+use super::*; use crate::background_jobs::Spec;
 
 #[test]
 fn decoded_cues_use_the_media_timeline_and_clamp_model_offsets() {

@@ -33,10 +33,10 @@ impl Tool {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Action {
     PickTool(Tool),
-    PickMedia,
+    PickMedia, PickBatch,
     UseTrack(u32),
     DismissMedia,
-    Run(JobId),
+    Run(JobId), RunQueue, StopQueue,
     Pause(JobId),
     Cancel(JobId),
     Export(JobId),
@@ -48,7 +48,7 @@ pub(crate) enum Action {
 
 pub(crate) enum Command {
     SetTool(Tool, PathBuf),
-    Inspect(PathBuf),
+    Inspect(PathBuf), Batch(Vec<PathBuf>),
     Export(JobId, PathBuf),
     CaptionPage(Arc<playback::Attached>, i64),
     Action(Action), Transcript(super::transcript::Request), Shutdown,

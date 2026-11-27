@@ -1,3 +1,4 @@
+mod batch;
 use super::*;
 use aquilum_core::background_jobs::{Queue, Segment, Spec, speech};
 use std::path::Path;

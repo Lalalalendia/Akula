@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-mod schema;
+mod pending; mod schema;
 pub mod speech;
 #[cfg(test)]
 mod tests;

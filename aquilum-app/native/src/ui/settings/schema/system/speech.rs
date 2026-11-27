@@ -1,29 +1,12 @@
-mod item;
+mod batch; mod item;
 use super::*;
-use crate::workspace::speech_jobs::{Action as Speech, Notice, Tool, View};
+use crate::workspace::speech_jobs::{Action as Speech, Tool, View};
 use aquilum_core::background_jobs::State;
 use item::{button, buttons, file_name, label, status};
 use std::path::Path;
 
 pub(super) fn block(view: &View) -> Block {
-    let mut rows = vec![info(
-        label("source"),
-        Some(label("sourceHint")),
-        buttons(vec![
-            button("chooseMedia", Speech::PickMedia).enabled(view.ready()),
-        ]),
-    )];
-    if !view.loaded || view.preparing {
-        rows.push(status("progress", label("preparing"), Tone::Secondary));
-    }
-    if let Some(notice) = &view.notice {
-        let (message, tone) = match notice {
-            Notice::Error(error) => (error.chars().take(300).collect(), Tone::Danger),
-            Notice::LeaseBusy => (label("leaseBusy"), Tone::Secondary),
-            Notice::Exported => (label("exported"), Tone::Secondary),
-        };
-        rows.push(status("status", message, tone));
-    }
+    let mut rows = batch::controls(view);
     if let Some(selection) = &view.selection {
         rows.push(info(
             file_name(&selection.source),

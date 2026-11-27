@@ -1,7 +1,7 @@
 use super::*;
 use rusqlite::Transaction;
 
-fn deadline(current: i64, lifetime: Duration) -> Result<i64> {
+pub(super) fn deadline(current: i64, lifetime: Duration) -> Result<i64> {
     let ms = lifetime.as_millis();
     if !(1_000..=3_600_000).contains(&ms) {
         return Err(Error::Invalid("lease duration"));
@@ -10,31 +10,11 @@ fn deadline(current: i64, lifetime: Duration) -> Result<i64> {
 }
 
 impl Queue {
-    fn timed_write<T>(&self, write: impl FnOnce(&Connection, i64) -> Result<T>) -> Result<T> {
+    pub(super) fn timed_write<T>(&self, write: impl FnOnce(&Connection, i64) -> Result<T>) -> Result<T> {
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
         let result = write(&tx, now()?)?;
         tx.commit()?;
         Ok(result)
-    }
-
-    pub fn claim(
-        &self,
-        kind: &str,
-        job: Option<JobId>,
-        lifetime: Duration,
-    ) -> Result<Option<Lease>> {
-        self.timed_write(|conn, current| claim(conn, kind, job, lifetime, current))
-    }
-
-    #[cfg(test)]
-    pub(super) fn claim_at(
-        &self,
-        kind: &str,
-        job: Option<JobId>,
-        lifetime: Duration,
-        current: i64,
-    ) -> Result<Option<Lease>> {
-        claim(&self.connection, kind, job, lifetime, current)
     }
 
     pub fn heartbeat(&self, lease: &Lease, lifetime: Duration) -> Result<()> {
@@ -122,31 +102,4 @@ impl Queue {
             )?)
         })
     }
-}
-
-fn claim(
-    conn: &Connection,
-    kind: &str,
-    job: Option<JobId>,
-    lifetime: Duration,
-    current: i64,
-) -> Result<Option<Lease>> {
-    let until = deadline(current, lifetime)?;
-    Ok(conn
-        .query_row(
-            "UPDATE jobs SET state='running', generation=generation+1, lease_until=?4
-             WHERE id=(SELECT id FROM jobs
-                 WHERE kind=?1 AND (?2 IS NULL OR id=?2)
-                 AND (state='queued' OR (state='running' AND lease_until<=?3))
-                 ORDER BY id LIMIT 1)
-             RETURNING id,generation",
-            params![kind, job, current, until],
-            |row| {
-                Ok(Lease {
-                    job: row.get(0)?,
-                    generation: row.get(1)?,
-                })
-            },
-        )
-        .optional()?)
 }

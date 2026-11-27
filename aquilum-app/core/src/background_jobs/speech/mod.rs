@@ -1,4 +1,5 @@
 //! Opt-in local speech projection for explicitly installed CPU tools.
+mod admission;
 mod command;
 pub mod edits;
 mod media;
@@ -7,9 +8,10 @@ pub mod playback;
 #[cfg(test)]
 mod tests;
 
+pub use admission::{enqueue, enqueue_batch, MAX_BATCH_FILES};
 pub use media::{Track, TrackTags};
 pub use edits::read_cues; pub use output::{write_vtt, Cue};
-use super::{JobId, Lease, Queue, Segment, Spec};
+use super::{JobId, Lease, Queue, Segment};
 use command::{run, Workspace};
 use ring::digest::{Context, SHA256};
 use serde::{Deserialize, Serialize};
@@ -131,7 +133,7 @@ impl Tools {
     }
 }
 
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct Recipe {
     version: u32,
     track: u32,
@@ -158,48 +160,24 @@ pub fn tracks(ffprobe: &Path, source: &Path) -> Result<Vec<Track>> {
     .tracks)
 }
 
-pub fn enqueue(
-    queue: &Queue,
-    tools: &Tools,
-    source: &Path,
-    track: Option<u32>,
-    language: &str,
-) -> Result<JobId> {
-    let source = local_file(source)?;
-    let source_name = source
-        .to_str()
-        .ok_or_else(|| Error::Invalid("media path is not representable as UTF-8".into()))?;
-    let mut check = || Ok(());
-    let input = fingerprint(&source, &mut check)?;
-    let probe = media::probe(&tools.ffprobe, &source, &Workspace::new()?, &mut check)?;
-    let track = match track {
-        Some(index) => index,
-        None => {
-            probe
-                .tracks
-                .first()
-                .ok_or_else(|| Error::Invalid("media has no audio tracks".into()))?
-                .index
-        }
-    };
-    probe.duration_ms(track)?;
-    let recipe = tools.recipe(track, language, &mut check)?;
-    input.verify(&source)?;
-    Ok(queue.enqueue(&Spec {
-        kind: KIND.into(),
-        source: source_name.into(),
-        revision: input.digest,
-        recipe: serde_json::to_string(&recipe)?,
-    })?)
-}
-
 /// Process one selected job. The controller may pause or cancel from a
 /// separate connection. Already committed windows are never sent to Whisper.
 pub fn work(queue: &mut Queue, tools: &Tools, id: JobId, threads: u8) -> Result<Outcome> {
+    work_job(queue, tools, id, threads, false)
+}
+
+/// Automatic draining claims queued jobs when no live worker owns a speech job.
+pub fn work_queued(queue: &mut Queue, tools: &Tools, id: JobId, threads: u8) -> Result<Outcome> {
+    work_job(queue, tools, id, threads, true)
+}
+
+fn work_job(queue: &mut Queue, tools: &Tools, id: JobId, threads: u8, queued_only: bool) -> Result<Outcome> {
     if !(1..=8).contains(&threads) {
         return Err(Error::Invalid("expected 1 to 8 CPU threads".into()));
     }
-    let Some(lease) = queue.claim(KIND, Some(id), LEASE)? else {
+    let lease = if queued_only { queue.claim_queued(KIND, id, LEASE)? }
+        else { queue.claim(KIND, Some(id), LEASE)? };
+    let Some(lease) = lease else {
         return Ok(Outcome::Idle);
     };
     match process_job(queue, tools, &lease, threads) {
