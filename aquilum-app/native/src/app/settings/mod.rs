@@ -13,6 +13,7 @@ mod cloud_action;
 mod menu_action;
 mod apply;
 mod press; #[cfg(windows)] mod video_tools;
+mod speech;
 mod context;
 mod bindings;
 mod refresh;
@@ -21,7 +22,6 @@ mod recovery;
 pub(super) mod server_state;
 #[cfg(all(windows, feature = "server-readonly-preflight"))]
 pub(super) mod server;
-
 use crate::system;
 use crate::ui::menu::Menu;
 use crate::ui::settings::controls::{Changed, ColorPicker, Committed, DropdownButton, Switch};

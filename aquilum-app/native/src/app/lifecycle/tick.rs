@@ -1,7 +1,7 @@
 use super::super::*; #[cfg(windows)] #[path = "tick_video_tools.rs"] mod video_tools;
 impl App {
     pub fn tick(&mut self, root: &mut RenderRoot, now: Instant) {
-        // Drain background S3 and SSH observations without network I/O on the GUI thread.
+        self.poll_speech_settings(root);
         if self.yandex_probe.poll()
             && matches!(&self.popup, Some(Popup::Settings { dialog, .. })
                 if dialog.section == crate::ui::settings::schema::Section::Sync)

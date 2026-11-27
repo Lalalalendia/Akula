@@ -1,7 +1,7 @@
-use std::path::PathBuf; use aquilum_core::mcp::McpStatus;
-use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryCasePreview};
+use std::path::PathBuf; use aquilum_core::{mcp::McpStatus, sync::{NativeRecoveryOverview, NativeRecoveryCasePreview}};
 pub struct Context {
     pub workspace: Option<PathBuf>,
+    pub(crate) speech: Option<crate::workspace::speech_jobs::View>,
     pub scale: f64,
     pub home_page: String,
     pub mcp: Option<McpStatus>,

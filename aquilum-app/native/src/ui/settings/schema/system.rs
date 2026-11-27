@@ -1,4 +1,5 @@
 use super::*; #[cfg(windows)] mod video_tools;
+mod speech;
 pub(super) const PROJECT_TELEGRAM_URL: &str = "https://t.me/AkulaHubl";
 pub(super) fn update_row(status: &crate::updater::Status) -> Row {
     use crate::updater::Status;
@@ -44,8 +45,7 @@ pub(super) fn system(config: &AppConfig, ctx: &Context) -> Vec<Block> {
                 None => info(t("settings.system.launch"), Some(t("settings.system.launchUnavailable")), Control::Locked(false)),
             }],
         },
-        Block {
-            title: t("settings.system.about"),
+        Block { title: t("settings.system.about"),
             rows: vec![
                 info(
                     t("settings.system.projectTelegram"),
@@ -60,7 +60,7 @@ pub(super) fn system(config: &AppConfig, ctx: &Context) -> Vec<Block> {
             ],
         },
     ];
-    #[cfg(windows)]
-    blocks.insert(2, video_tools::optional_ytdlp_block(ctx));
+    #[cfg(windows)] blocks.insert(2, video_tools::optional_ytdlp_block(ctx));
+    if let Some(speech) = &ctx.speech { blocks.insert(2, speech::block(speech)); }
     blocks
 }

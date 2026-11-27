@@ -1,6 +1,5 @@
 use super::*;
 mod tick;
-
 impl App {
     pub fn title(&self) -> String {
         let product = if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" };
@@ -29,6 +28,7 @@ impl App {
             Some(note) => note.flush(&self.workspace.core, &self.text),
             None => crate::disk::wait(),
         }
+        self.workspace.speech.take();
         self.workspace.core.shutdown();
     }
 
