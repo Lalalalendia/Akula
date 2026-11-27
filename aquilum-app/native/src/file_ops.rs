@@ -1,3 +1,5 @@
+mod same_target;
+pub(crate) use same_target::is_noop_rename;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -75,12 +77,10 @@ pub fn title_target(from: &Path, input: &str) -> Option<(PathBuf, String)> {
 
 pub fn rename_target(from: &Path, input: &str) -> Option<(PathBuf, String)> {
     let note = is_markdown(from);
-    let current = if note { from.file_stem() } else { from.file_name() }.map(|n| n.to_string_lossy().into_owned());
     let name = if note { sanitize_file_name(input.trim()) } else { input.trim().to_owned() };
-    if name.is_empty() || Some(&name) == current.as_ref() {
-        return None;
-    }
+    if name.is_empty() { return None; }
     let to = from.with_file_name(if note { format!("{name}.md") } else { name.clone() });
+    if is_noop_rename(from, &to) { return None; }
     Some((to, name))
 }
 

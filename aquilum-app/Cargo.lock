@@ -454,6 +454,7 @@ dependencies = [
  "softbuffer",
  "tempfile",
  "tokio",
+ "unicode-normalization",
  "unicode-segmentation",
  "ureq",
  "uuid",
