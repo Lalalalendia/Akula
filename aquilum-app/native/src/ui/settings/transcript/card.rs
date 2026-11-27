@@ -5,8 +5,8 @@ use crate::ui::editor::TextEditor;
 use crate::ui::handle::Handle;
 use crate::ui::scroll::ScrollArea;
 use crate::ui::text;
-use crate::ui::theme;
 use crate::ui::widgets::{Leading, Rule, TextButton, Variant};
+use crate::ui::{style, theme};
 use masonry::core::{NewWidget, PropertySet};
 use masonry::kurbo::Axis;
 use masonry::layout::Length;
@@ -36,13 +36,15 @@ impl Editor {
         let number = page.map_or(0, |page| page.number);
         let pages = page.map_or(1, |page| page.pages);
         let rows = page.map_or_else(Vec::new, |page| page.rows.clone());
-        let cues = rows
-            .iter()
-            .filter(|row| !row.cue.text.is_empty())
-            .map(|row| row.cue.clone())
-            .collect();
-        let preview = Preview::new(self.playback.clone(), cues);
-        let preview = NewWidget::new(SizedBox::new(preview).height(Length::px(136.0)));
+        let preview = self.playback.borrow().is_open().then(|| {
+            let cues = rows
+                .iter()
+                .filter(|row| !row.cue.text.is_empty())
+                .map(|row| row.cue.clone())
+                .collect();
+            let preview = Preview::new(self.playback.clone(), cues);
+            NewWidget::new(SizedBox::new(preview).height(Length::px(136.0)))
+        });
         let count = t_with(
             "settings.system.speech.transcriptPage",
             &[
@@ -120,7 +122,10 @@ impl Editor {
         if let Some(source) = source {
             body = body.with_fixed(message(&source));
         }
-        body = body.with_fixed(preview).with_fixed(spaced(controls));
+        if let Some(preview) = preview {
+            body = body.with_fixed(preview);
+        }
+        body = body.with_fixed(spaced(controls));
         if let Some(error) = self.error.as_ref() {
             body = body.with_fixed(message(error));
         } else if busy {
@@ -140,10 +145,13 @@ impl Editor {
             .cross_axis_alignment(CrossAxisAlignment::Stretch)
             .with_fixed(message(&heading));
         if !busy {
-            let input = NewWidget::new(TextEditor::new(&draft));
+            let input = NewWidget::new(TextEditor::new(&draft).styled(|| style::ui_text(20.0)))
+                .with_class(style::FIELD);
             self.input = Some(Handle::of(&input));
             let input = NewWidget::new(ScrollArea::new(input));
-            let input = NewWidget::new(SizedBox::new(input).height(Length::px(64.0)));
+            let input = NewWidget::new(SizedBox::new(input).height(Length::px(70.0)))
+                .with_class(style::CARD)
+                .with_props(PropertySet::new().with(Padding::all(Length::px(8.0))));
             let commands = Flex::row()
                 .with_fixed(self.button(Button::Save, label("transcriptSave"), Variant::Primary))
                 .with_fixed(self.button(

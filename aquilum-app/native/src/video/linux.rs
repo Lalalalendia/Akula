@@ -74,7 +74,6 @@ impl Engine {
             self.seek_to(duration * fraction.clamp(0.0, 1.0), mode);
         }
     }
-
     pub fn mute(&mut self) {
         let muted = self.playbin.property::<bool>("mute");
         self.playbin.set_property("mute", !muted);
@@ -85,9 +84,10 @@ impl Engine {
         let position = self.playbin.query_position::<gst::ClockTime>().map_or(0.0, |p| p.seconds_f64());
         (self.play, position, self.duration(), self.playbin.property::<bool>("mute"))
     }
-
     pub fn frame(&mut self) -> Option<ImageBrush> {
-        let sample = self.sink.try_pull_sample(gst::ClockTime::ZERO).or_else(|| self.sink.try_pull_preroll(gst::ClockTime::ZERO))?;
+        // Pulling a playing sample clears Appsink’s paused preroll buffer.
+        let sample = if self.play { self.sink.try_pull_sample(gst::ClockTime::ZERO) }
+            else { self.sink.try_pull_preroll(gst::ClockTime::ZERO) }?;
         let buffer = sample.buffer()?;
         if buffer.pts().is_some() && buffer.pts() == self.last {
             return None;

@@ -16,8 +16,11 @@ impl Editor {
     }
 
     #[cfg(all(target_os = "linux", feature = "memory-probe"))]
-    pub(crate) fn playback_for_test(&self) -> (bool, f64) {
+    pub(crate) fn playback_for_test(&self) -> (Option<u64>, f64) {
         let playback = self.playback.borrow();
-        (playback.frame().is_some(), playback.position())
+        (
+            playback.frame().map(|frame| frame.image.data.id()),
+            playback.position(),
+        )
     }
 }

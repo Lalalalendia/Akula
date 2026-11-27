@@ -101,9 +101,12 @@ fn speech_transcript_pages_and_saves_from_settings() {
     let layer = editor(&h).layer();
     h.act(layer, DialogAnswer::Cancel);
     let input = editor(&h).input_for_test().expect("edit stays open");
+    h.root
+        .handle_text_event(masonry::core::TextEvent::WindowFocusChange(true));
     input.edit(&mut h.root, |mut editor| {
-        TextEditor::reset_text(&mut editor, "Исправленная реплика")
+        TextEditor::select_byte_range(&mut editor, 0, row.cue.text.len());
     });
+    h.type_text("Исправленная реплика");
     click(&mut h, Button::Save);
     until(&mut h, |editor| {
         editor.page_for_test().unwrap().rows[0].revision == 1
@@ -173,13 +176,14 @@ fn real_speech_transcript_timecodes_seek_the_preview_and_refresh_attached_captio
     click(&mut h, Button::Jump(2_325));
     until(&mut h, |editor| {
         let (frame, position) = editor.playback_for_test();
-        frame && (position - 2.325).abs() < 0.12
+        frame.is_some() && (position - 2.325).abs() < 0.12
     });
     h.snapshot("asr-transcript-playing.png");
+    let first_frame = editor(&h).playback_for_test().0;
     click(&mut h, Button::Jump(450));
     until(&mut h, |editor| {
         let (frame, position) = editor.playback_for_test();
-        frame && (position - 0.45).abs() < 0.12
+        frame.is_some() && frame != first_frame && (position - 0.45).abs() < 0.12
     });
 
     let dispatcher = h.app.workspace.speech();
