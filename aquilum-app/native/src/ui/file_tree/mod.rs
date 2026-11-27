@@ -1,6 +1,7 @@
 mod actions;
 mod build;
 mod drag;
+mod filter;
 mod ghost;
 pub mod model;
 mod parts;
@@ -42,21 +43,7 @@ pub enum TreeAction {
     SortMenu { button: WidgetId },
 }
 
-pub struct FileTree {
-    model: TreeModel,
-    drag: Option<Drag>,
-    create_button: Option<WidgetId>,
-    row_ids: Vec<WidgetId>,
-    scroll: Option<Handle<ScrollArea<Flex>>>,
-    pinned: Option<Handle<Pinned>>,
-    counting: scan::worker::CountScan,
-    wake: std::sync::Arc<dyn Fn() + Send + Sync>,
-    rename: Option<Handle<TextEditor>>,
-    store: ExpandedStore,
-    first: usize,
-    offset: f64,
-    toolbar: Option<Toolbar>,
-}
+include!("state.rs");
 
 const SPAN: usize = 160;
 const MARGIN: usize = 40;
@@ -81,6 +68,7 @@ impl FileTree {
             scroll: None,
             pinned: None,
             counting: scan::worker::CountScan::default(),
+            indexing: None,
             wake: std::sync::Arc::clone(&wake),
             rename: None,
             store,
@@ -111,6 +99,7 @@ impl FileTree {
     }
 
     pub fn reveal(&mut self, root: &mut RenderRoot, path: &Path) {
+        if self.model.filtering() && self.model.index_of(path).is_none() { self.filter(root, ""); }
         self.model.expand_to(path);
         self.save_expanded();
         let index = self.model.index_of(path);

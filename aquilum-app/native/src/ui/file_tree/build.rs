@@ -4,12 +4,12 @@ use masonry::layout::Length;
 use masonry::properties::types::CrossAxisAlignment;
 use masonry::properties::{Gap, Padding};
 use masonry::layout::UnitPoint;
-use masonry::widgets::{ChildAlignment, Flex, SizedBox, ZStack};
+use masonry::widgets::{ChildAlignment, Flex, ZStack};
 
 use super::model::comparable;
 use super::pinned::Pinned;
 use super::pins::pins;
-use super::parts::{empty_state, rename_field, toolbar};
+use super::parts::{empty_state, filtered_empty_state, rename_field, toolbar};
 use super::row::TreeRow;
 use super::{FileTree, MARGIN, SPAN, step};
 use crate::ui::editor::TextEditor;
@@ -17,9 +17,8 @@ use crate::ui::handle::Handle;
 use crate::ui::scroll::ScrollArea;
 use crate::ui::tokens::size;
 
-fn spacer(rows: usize) -> NewWidget<SizedBox> {
-    NewWidget::new(SizedBox::empty().height(Length::px(rows as f64 * step() - size::SPACE_2)))
-}
+mod spacer;
+use spacer::spacer;
 
 impl FileTree {
     pub fn widget(&mut self) -> NewWidget<Flex> {
@@ -31,7 +30,7 @@ impl FileTree {
         let mut column = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch);
         self.toolbar = None;
         if self.model.root().is_some() {
-            let (toolbar, ids) = toolbar();
+            let (toolbar, ids) = toolbar(self.model.filter_query());
             self.toolbar = Some(ids);
             column = column.with_fixed(toolbar);
         }
@@ -43,6 +42,7 @@ impl FileTree {
         self.create_button = None;
         self.rename = None;
         if self.model.root().is_some() && self.model.rows().is_empty() {
+            if self.model.filtering() { return if self.model.indexed() { filtered_empty_state() } else { NewWidget::new(Flex::column()) }; }
             let (state, button) = empty_state();
             self.create_button = Some(button);
             return state;
