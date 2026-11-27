@@ -92,11 +92,10 @@ pub(super) fn block(view: &View) -> Block {
             ],
         };
         if job.committed > 0 {
-            actions.push(
-                button("showCaptions", Speech::ShowCaptions(job.id)).enabled(
-                    view.caption_job != Some(job.id) && view.active.is_none() && !view.preparing,
-                ),
-            );
+            actions.push(button("transcript", Speech::OpenTranscript(job.id)));
+            actions.push(button("showCaptions", Speech::ShowCaptions(job.id)).enabled(
+                view.caption_job != Some(job.id) && view.active.is_none() && !view.preparing,
+            ));
             actions.push(
                 button("export", Speech::Export(job.id))
                     .enabled(view.active.is_none() && !view.preparing),

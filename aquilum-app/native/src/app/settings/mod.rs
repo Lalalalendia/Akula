@@ -13,7 +13,7 @@ mod cloud_action;
 mod menu_action;
 mod apply;
 mod press; #[cfg(windows)] mod video_tools;
-mod speech;
+mod speech; mod transcript;
 mod context;
 mod bindings;
 mod refresh;

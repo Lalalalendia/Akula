@@ -1,5 +1,5 @@
 #[cfg(windows)] pub(crate) mod optional_ytdlp;
-pub(crate) mod captions; pub(crate) mod download; mod worker_process;
+pub(crate) mod captions; pub(crate) mod preview; pub(crate) mod download; mod worker_process;
 pub(crate) mod library;
 pub(crate) mod light;
 pub(crate) mod queue; mod queue_dispatch;

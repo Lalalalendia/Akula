@@ -2,9 +2,9 @@ use super::*;
 
 impl App {
     pub(in crate::app) fn poll_speech_settings(&mut self, root: &mut RenderRoot) {
+        self.poll_transcript(root);
         if let Some(track) = self
-            .workspace
-            .speech
+            .workspace.speech
             .get()
             .and_then(|dispatcher| dispatcher.take_caption_update())
         {

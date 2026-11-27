@@ -1,10 +1,10 @@
-use super::{Error, Result, KIND};
+use super::{Error, KIND, Result, edits};
 use crate::background_jobs::{JobId, Queue};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::ops::Range;
 
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Cue {
     pub start_ms: i64,
     pub end_ms: i64,
@@ -48,25 +48,9 @@ pub(super) fn decode_whisper(json: &[u8], window: Range<i64>) -> Result<Vec<Cue>
     Ok(cues)
 }
 
-/// Read a page of committed windows with their timestamped cues.
-pub fn read_cues(
-    queue: &Queue,
-    id: JobId,
-    first: i64,
-    windows: u32,
-) -> Result<Vec<(i64, Vec<Cue>)>> {
-    if !queue.get(id)?.is_some_and(|job| job.spec.kind == KIND) {
-        return Err(Error::Invalid(format!("speech job {id} does not exist")));
-    }
-    queue
-        .segments(id, first, windows)?
-        .into_iter()
-        .map(|segment| Ok((segment.ordinal, serde_json::from_slice(&segment.payload)?)))
-        .collect()
-}
-
 /// Export a consistent snapshot of committed speech, including a partial job.
 pub fn write_vtt(queue: &Queue, id: JobId, mut output: impl Write) -> Result<()> {
+    let _snapshot = edits::snapshot(queue)?;
     let job = queue
         .get(id)?
         .filter(|job| job.spec.kind == KIND)
@@ -74,16 +58,15 @@ pub fn write_vtt(queue: &Queue, id: JobId, mut output: impl Write) -> Result<()>
     writeln!(output, "WEBVTT\n")?;
     let mut cursor = 0;
     while cursor < job.committed {
-        let segments = queue.segments(id, cursor, (job.committed - cursor).min(16) as u32)?;
+        let segments = edits::windows(queue, id, cursor, (job.committed - cursor).min(16) as u32)?;
         if segments.is_empty() {
             return Err(Error::Invalid("speech checkpoint has no output".into()));
         }
-        for segment in segments {
-            if segment.ordinal != cursor {
+        for (ordinal, rows) in segments {
+            if ordinal != cursor {
                 return Err(Error::Invalid("speech checkpoint has a gap".into()));
             }
-            let cues: Vec<Cue> = serde_json::from_slice(&segment.payload)?;
-            for cue in cues {
+            for cue in edits::effective(rows) {
                 let text = cue
                     .text
                     .split_whitespace()

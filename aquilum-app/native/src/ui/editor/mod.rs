@@ -1,6 +1,6 @@
 mod change;
 mod document;
-mod embed;
+mod embed; pub(crate) use embed::media::{captions::paint_caption, draw_image};
 mod highlight;
 mod history;
 mod markdown;

@@ -2,11 +2,9 @@
 
 use super::{
     fingerprint, local_file, read_cues, same_file, Cue, Error, Queue, Result, KIND, WINDOW_MS,
-};
-use crate::background_jobs::JobId;
+}; use crate::background_jobs::JobId;
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
-
 const PAGE_WINDOWS: i64 = 4;
 
 pub struct MediaSource {
@@ -72,12 +70,14 @@ impl Transcript {
         self.media.matches(source)
     }
 
+    pub fn current_path(&self) -> Option<&Path> {
+        self.media.is_current().then_some(&self.media.path)
+    }
+
     pub fn page_at(position_ms: i64) -> i64 {
         position_ms / WINDOW_MS / PAGE_WINDOWS
     }
 
-    /// Each page covers a fixed number of recognition windows and reads only
-    /// the commits visible at the initial checkpoint.
     pub fn page(&self, queue: &Queue, page: i64) -> Result<Page> {
         if !self.media.is_current() {
             return Err(Error::Invalid(

@@ -1,6 +1,6 @@
 //! Opt-in local speech projection for explicitly installed CPU tools.
-
 mod command;
+pub mod edits;
 mod media;
 mod output;
 pub mod playback;
@@ -8,7 +8,7 @@ pub mod playback;
 mod tests;
 
 pub use media::{Track, TrackTags};
-pub use output::{read_cues, write_vtt, Cue};
+pub use edits::read_cues; pub use output::{write_vtt, Cue};
 use super::{JobId, Lease, Queue, Segment, Spec};
 use command::{run, Workspace};
 use ring::digest::{Context, SHA256};

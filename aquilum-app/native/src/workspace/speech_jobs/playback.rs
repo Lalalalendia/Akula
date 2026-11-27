@@ -117,7 +117,7 @@ impl Attached {
         Ok(true)
     }
 
-    fn requested(&self) -> Option<i64> {
+    pub(super) fn requested(&self) -> Option<i64> {
         self.state
             .lock()
             .unwrap_or_else(|error| error.into_inner())

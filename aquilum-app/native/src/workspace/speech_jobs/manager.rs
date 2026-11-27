@@ -1,4 +1,4 @@
-mod intake;
+mod intake; mod transcript;
 use super::config::Config;
 use super::playback::Attached;
 use super::{
@@ -91,7 +91,7 @@ pub(super) fn serve(
             if matches!(command, Command::Shutdown) {
                 break;
             }
-            if !matches!(command, Command::CaptionPage(..)) {
+            if !matches!(command, Command::CaptionPage(..) | Command::Transcript(_)) {
                 manager.view.notice = None;
             }
             if let Err(error) = manager.handle(command) {
@@ -163,6 +163,7 @@ impl Manager<'_> {
                 }
                 Ok(())
             }
+            Command::Transcript(request) => { self.transcript(request); Ok(()) }
             Command::Action(Action::ShowCaptions(id)) => self.prepare(|this| {
                 let track = Attached::new(&this.queue, id, this.page_requests.clone())?;
                 this.shared
@@ -200,8 +201,7 @@ impl Manager<'_> {
                 self.bounds.pop();
                 Ok(())
             }
-            Command::Action(Action::Refresh) => Ok(()),
-            Command::Action(Action::PickTool(_) | Action::PickMedia | Action::Export(_))
+            Command::Action(Action::Refresh | Action::OpenTranscript(_) | Action::PickTool(_) | Action::PickMedia | Action::Export(_))
             | Command::Shutdown => Ok(()),
         }
     }

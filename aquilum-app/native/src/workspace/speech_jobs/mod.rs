@@ -4,7 +4,7 @@ mod commands;
 mod config;
 mod export;
 mod manager;
-pub(crate) mod playback;
+pub(crate) mod playback; pub(crate) mod transcript;
 #[cfg(test)]
 mod tests;
 

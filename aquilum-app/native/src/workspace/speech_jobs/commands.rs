@@ -40,8 +40,7 @@ pub(crate) enum Action {
     Pause(JobId),
     Cancel(JobId),
     Export(JobId),
-    ShowCaptions(JobId),
-    HideCaptions,
+    ShowCaptions(JobId), HideCaptions, OpenTranscript(JobId),
     Refresh,
     Older,
     Newer,
@@ -52,6 +51,5 @@ pub(crate) enum Command {
     Inspect(PathBuf),
     Export(JobId, PathBuf),
     CaptionPage(Arc<playback::Attached>, i64),
-    Action(Action),
-    Shutdown,
+    Action(Action), Transcript(super::transcript::Request), Shutdown,
 }
