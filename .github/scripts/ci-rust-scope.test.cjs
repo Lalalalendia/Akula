@@ -449,7 +449,7 @@ test('every standalone Rust module has a protected CI owner and executable Cargo
     const workflow=fs.readFileSync(path.join(__dirname,'../workflows',workflowName),'utf8');
     const policy=parse(workflow);
     if(name==='music'){
-      assert.equal(matches(policy,manifest),true,'required Main PR gate must own music');
+      assert.equal(policy.t,'global','music must use the existing global Main PR gate');
       assert.match(workflow,/music_module_required: \$\{\{ steps\.scope\.outputs\.music_module_required \}\}/);
       assert.ok(workflow.includes('git diff --quiet "$BASE_SHA" HEAD -- modules/music/'));
       assert.ok(workflow.includes("if: needs.classify.outputs.music_module_required == 'true'"));
