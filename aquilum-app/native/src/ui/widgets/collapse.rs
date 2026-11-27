@@ -1,6 +1,6 @@
-use masonry::accesskit::{Node, Role};
+use crate::ui::widgets::layout::contract::passive_single_child;
 use masonry::core::{
-    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PropertiesMut, PropertiesRef, RegisterCtx, UpdateCtx, Widget, WidgetMut,
+    LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PropertiesMut, PropertiesRef, UpdateCtx, Widget, WidgetMut,
     WidgetPod,
 };
 use masonry::imaging::Painter;
@@ -65,10 +65,6 @@ impl Collapse {
 impl Widget for Collapse {
     type Action = masonry::core::NoAction;
 
-    fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
-        ctx.register_child(&mut self.child);
-    }
-
     fn on_anim_frame(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, interval: u64) {
         let seconds = interval as f64 / 1e9;
         let goal = self.goal();
@@ -107,8 +103,6 @@ impl Widget for Collapse {
         ctx.set_clip_path(Rect::from_origin_size(Point::ORIGIN, size));
     }
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _painter: &mut Painter<'_>) {}
-
     fn post_paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let opacity = if self.open { bezier(EASE_IN, self.fade) } else { 1.0 - bezier(EASE_IN, 1.0 - self.fade) };
         let veil = 1.0 - opacity;
@@ -117,13 +111,5 @@ impl Widget for Collapse {
         }
     }
 
-    fn accessibility_role(&self) -> Role {
-        Role::GenericContainer
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
-
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::from_slice(&[self.child.id()])
-    }
+    passive_single_child!(child);
 }
