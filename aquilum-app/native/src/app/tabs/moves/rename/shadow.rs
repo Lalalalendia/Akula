@@ -25,6 +25,13 @@ impl App {
     /// A detached tab may retain an unreviewed shadow under its old filename.
     /// Do not move its file or parent folder before explicit recovery review.
     pub(super) fn rename_shadow_blocker(&self, from: &Path) -> Option<String> {
+        let blocker = |result: std::io::Result<bool>| match result {
+            Ok(true) => Some(t("editor.renameRecoveryHold")),
+            Err(error) => Some(t_with(
+                "editor.renameRecoveryCheck", &[("reason", &error.to_string())],
+            )),
+            Ok(false) => None,
+        };
         let descendants = self.tabs.tabs().iter().filter_map(|tab| tab.path.as_deref())
             .filter(|path| path.starts_with(from));
         for path in std::iter::once(from).chain(descendants) {
@@ -40,27 +47,17 @@ impl App {
                     &self.workspace.data_dir, vault, session.workspace_id, path,
                 ).map(|record| record.is_some_and(|record| !record.already_saved)),
             };
-            match unreviewed {
-                Ok(true) => return Some(t("editor.renameRecoveryHold")),
-                Err(error) => return Some(t_with(
-                    "editor.renameRecoveryCheck", &[("reason", &error.to_string())],
-                )),
-                Ok(false) => {}
+            if let Some(reason) = blocker(unreviewed) {
+                return Some(reason);
             }
         }
         if from.is_dir() {
             let (Some(vault), Some(session)) = (self.tree.root(), self.session.as_ref()) else {
                 return Some(t_with("editor.renameRecoveryCheck", &[("reason", "workspace recovery context unavailable")]));
             };
-            match crate::note::bridge::has_unreviewed_shadow_under_move(
+            return blocker(crate::note::bridge::has_unreviewed_shadow_under_move(
                 &self.workspace.data_dir, vault, session.workspace_id, from,
-            ) {
-                Ok(true) => return Some(t("editor.renameRecoveryHold")),
-                Err(error) => return Some(t_with(
-                    "editor.renameRecoveryCheck", &[("reason", &error.to_string())],
-                )),
-                Ok(false) => {}
-            }
+            ));
         }
         None
     }
