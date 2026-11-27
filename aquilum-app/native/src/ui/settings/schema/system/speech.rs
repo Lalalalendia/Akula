@@ -1,6 +1,8 @@
+mod item;
 use super::*;
 use crate::workspace::speech_jobs::{Action as Speech, Notice, Tool, View};
 use aquilum_core::background_jobs::State;
+use item::{button, buttons, file_name, label, status};
 use std::path::Path;
 
 pub(super) fn block(view: &View) -> Block {
@@ -91,6 +93,11 @@ pub(super) fn block(view: &View) -> Block {
         };
         if job.committed > 0 {
             actions.push(
+                button("showCaptions", Speech::ShowCaptions(job.id)).enabled(
+                    view.caption_job != Some(job.id) && view.active.is_none() && !view.preparing,
+                ),
+            );
+            actions.push(
                 button("export", Speech::Export(job.id))
                     .enabled(view.active.is_none() && !view.preparing),
             );
@@ -99,6 +106,13 @@ pub(super) fn block(view: &View) -> Block {
             file_name(&job.source),
             Some(description),
             buttons(actions),
+        ));
+    }
+    if view.caption_job.is_some() {
+        rows.push(info(
+            label("captionsEnabled"),
+            None,
+            buttons(vec![button("hideCaptions", Speech::HideCaptions)]),
         ));
     }
     rows.push(info(
@@ -130,29 +144,4 @@ pub(super) fn block(view: &View) -> Block {
         title: label("title"),
         rows,
     }
-}
-
-fn buttons(items: Vec<Button>) -> Control {
-    Control::Buttons(items)
-}
-
-fn button(key: &str, action: Speech) -> Button {
-    Button::new(label(key), Action::Speech(action))
-}
-
-fn label(key: &str) -> String {
-    t(&format!("settings.system.speech.{key}"))
-}
-
-fn status(key: &str, value: String, tone: Tone) -> Row {
-    info(label(key), None, Control::Status { text: value, tone })
-}
-
-fn file_name(path: &Path) -> String {
-    path.file_name()
-        .unwrap_or(path.as_os_str())
-        .to_string_lossy()
-        .chars()
-        .take(120)
-        .collect()
 }

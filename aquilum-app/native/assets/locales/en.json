@@ -770,6 +770,9 @@
         "toolPicker": "Choose {{tool}} file",
         "export": "Save WebVTT",
         "exported": "WebVTT file saved",
+        "showCaptions": "Show in player",
+        "hideCaptions": "Hide captions",
+        "captionsEnabled": "Player captions enabled",
         "mediaPicker": "Choose an audio or video file"
       },
       "ytdlpTitle": "Video: yt-dlp (separate installation)",

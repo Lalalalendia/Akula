@@ -1,4 +1,6 @@
+mod intake;
 use super::config::Config;
+use super::playback::Attached;
 use super::{
     Action, Command, JobId, JobRow, Notice, PAGE_SIZE, POLL, Selection, Shared, State, Track, View,
     Wake,
@@ -8,7 +10,8 @@ use aquilum_core::background_jobs::{
     speech::{self, Outcome},
 };
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 
 struct Worker {
@@ -25,10 +28,17 @@ struct Manager<'a> {
     bounds: Vec<JobId>,
     view: View,
     shared: &'a Shared,
+    page_requests: Sender<Command>,
     wake: &'a Wake,
 }
 
-pub(super) fn serve(profile: PathBuf, commands: Receiver<Command>, shared: &Shared, wake: &Wake) {
+pub(super) fn serve(
+    profile: PathBuf,
+    commands: Receiver<Command>,
+    page_requests: Sender<Command>,
+    shared: &Shared,
+    wake: &Wake,
+) {
     let database = profile.join("media-jobs.sqlite");
     let queue = match Queue::open(&database) {
         Ok(queue) => queue,
@@ -56,6 +66,7 @@ pub(super) fn serve(profile: PathBuf, commands: Receiver<Command>, shared: &Shar
             ..View::default()
         },
         shared,
+        page_requests,
         wake,
     };
     match Config::load(&manager.profile) {
@@ -80,12 +91,15 @@ pub(super) fn serve(profile: PathBuf, commands: Receiver<Command>, shared: &Shar
             if matches!(command, Command::Shutdown) {
                 break;
             }
-            manager.view.notice = None;
+            if !matches!(command, Command::CaptionPage(..)) {
+                manager.view.notice = None;
+            }
             if let Err(error) = manager.handle(command) {
                 manager.view.notice = Some(Notice::Error(error));
             }
         }
         manager.reap();
+        manager.refresh_captions();
         manager.publish();
     }
     if let Some(worker) = manager.worker.take() {
@@ -99,6 +113,7 @@ impl Manager<'_> {
         self.view.tools = self.config.paths();
         self.view.newer = !self.bounds.is_empty();
         self.view.active = self.worker.as_ref().map(|worker| worker.id);
+        self.view.caption_job = self.shared.playback.selected().map(|track| track.id());
         match self
             .queue
             .list(speech::KIND, self.bounds.last().copied(), PAGE_SIZE + 1)
@@ -123,20 +138,6 @@ impl Manager<'_> {
         self.shared.publish(self.view.clone(), self.wake);
     }
 
-    fn prepare(
-        &mut self,
-        action: impl FnOnce(&mut Self) -> Result<(), String>,
-    ) -> Result<(), String> {
-        if self.worker.is_some() {
-            return Err("a speech job is already active".into());
-        }
-        self.view.preparing = true;
-        self.publish();
-        let result = action(self);
-        self.view.preparing = false;
-        result
-    }
-
     fn handle(&mut self, command: Command) -> Result<(), String> {
         match command {
             Command::SetTool(tool, path) => self.prepare(|this| {
@@ -151,6 +152,28 @@ impl Manager<'_> {
                 this.view.notice = Some(Notice::Exported);
                 Ok(())
             }),
+            Command::CaptionPage(track, page) => {
+                if self
+                    .shared
+                    .playback
+                    .selected()
+                    .is_some_and(|active| Arc::ptr_eq(&active, &track))
+                {
+                    self.caption_update(track.load(&self.queue, page));
+                }
+                Ok(())
+            }
+            Command::Action(Action::ShowCaptions(id)) => self.prepare(|this| {
+                let track = Attached::new(&this.queue, id, this.page_requests.clone())?;
+                this.shared
+                    .playback
+                    .select(Some(Arc::new(track)), this.wake);
+                Ok(())
+            }),
+            Command::Action(Action::HideCaptions) => {
+                self.shared.playback.select(None, self.wake);
+                Ok(())
+            }
             Command::Action(Action::UseTrack(track)) => self.prepare(|this| this.add(track)),
             Command::Action(Action::Run(id)) => self.start(id),
             Command::Action(Action::Pause(id)) => {
@@ -183,50 +206,21 @@ impl Manager<'_> {
         }
     }
 
-    fn inspect(&mut self, source: PathBuf) -> Result<(), String> {
-        self.view.selection = None;
-        let probe = self.config.checked(super::Tool::Probe)?;
-        let tracks = speech::tracks(probe, &source).map_err(|error| error.to_string())?;
-        if tracks.is_empty() {
-            return Err("the media file has no audio tracks".into());
+    fn refresh_captions(&mut self) {
+        if let Some(track) = self.shared.playback.selected() {
+            self.caption_update(track.update_if_advanced(&self.queue));
         }
-        let tracks = tracks
-            .into_iter()
-            .map(|track| {
-                let (language, title) = match track.tags {
-                    Some(tags) => (tags.language, tags.title),
-                    None => (None, None),
-                };
-                Track {
-                    index: track.index,
-                    language,
-                    title,
-                }
-            })
-            .collect();
-        self.view.selection = Some(Selection { source, tracks });
-        Ok(())
     }
 
-    fn add(&mut self, track: u32) -> Result<(), String> {
-        let selection = self
-            .view
-            .selection
-            .as_ref()
-            .ok_or("select a media file first")?;
-        if !selection
-            .tracks
-            .iter()
-            .any(|candidate| candidate.index == track)
-        {
-            return Err("selected audio track is unavailable".into());
+    fn caption_update(&mut self, result: Result<bool, String>) {
+        match result {
+            Ok(true) => self.shared.playback.notify(self.wake),
+            Ok(false) => (),
+            Err(error) => {
+                self.shared.playback.select(None, self.wake);
+                self.view.notice = Some(Notice::Error(error));
+            }
         }
-        let tools = self.config.verify()?;
-        speech::enqueue(&self.queue, &tools, &selection.source, Some(track), "auto")
-            .map_err(|error| error.to_string())?;
-        self.view.selection = None;
-        self.bounds.clear();
-        Ok(())
     }
 
     fn admit(&self, id: JobId) -> Result<State, String> {

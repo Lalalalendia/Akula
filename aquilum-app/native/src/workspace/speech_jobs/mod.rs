@@ -1,11 +1,14 @@
 //! One local speech dispatcher per open Akula profile.
 
+mod commands;
 mod config;
 mod export;
 mod manager;
+pub(crate) mod playback;
 #[cfg(test)]
 mod tests;
 
+use aquilum_core::background_jobs::Queue;
 use aquilum_core::background_jobs::{JobId, State, speech::Tools};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,57 +19,7 @@ const POLL: Duration = Duration::from_millis(350);
 const PAGE_SIZE: u32 = 8;
 type Wake = Arc<dyn Fn() + Send + Sync>;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Tool {
-    Probe,
-    Ffmpeg,
-    Whisper,
-    Model,
-    Vad,
-}
-
-impl Tool {
-    pub(crate) const ALL: [Self; 5] = [
-        Self::Probe,
-        Self::Ffmpeg,
-        Self::Whisper,
-        Self::Model,
-        Self::Vad,
-    ];
-
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Probe => "FFprobe",
-            Self::Ffmpeg => "FFmpeg",
-            Self::Whisper => "whisper-cli",
-            Self::Model => "Whisper",
-            Self::Vad => "Silero VAD",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum Action {
-    PickTool(Tool),
-    PickMedia,
-    UseTrack(u32),
-    DismissMedia,
-    Run(JobId),
-    Pause(JobId),
-    Cancel(JobId),
-    Export(JobId),
-    Refresh,
-    Older,
-    Newer,
-}
-
-pub(crate) enum Command {
-    SetTool(Tool, PathBuf),
-    Inspect(PathBuf),
-    Export(JobId, PathBuf),
-    Action(Action),
-    Shutdown,
-}
+pub(crate) use commands::{Action, Command, Tool};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Track {
@@ -104,6 +57,7 @@ pub(crate) struct View {
     pub(crate) jobs: Vec<JobRow>,
     pub(crate) selection: Option<Selection>,
     pub(crate) active: Option<JobId>,
+    pub(crate) caption_job: Option<JobId>,
     pub(crate) preparing: bool,
     pub(crate) loaded: bool,
     pub(crate) older: bool,
@@ -124,6 +78,7 @@ impl View {
 struct Shared {
     view: Mutex<View>,
     updated: AtomicBool,
+    playback: playback::Bridge,
 }
 
 pub(crate) struct Dispatcher {
@@ -139,10 +94,11 @@ impl Dispatcher {
         let shared = Arc::new(Shared::default());
         let worker_view = Arc::clone(&shared);
         let worker_wake = Arc::clone(&wake);
+        let page_requests = tx.clone();
         if let Err(error) = std::thread::Builder::new()
             .name("speech-dispatch".into())
             .spawn(move || {
-                manager::serve(profile, rx, &worker_view, &worker_wake);
+                manager::serve(profile, rx, page_requests, &worker_view, &worker_wake);
                 let _ = done.send(());
             })
         {
@@ -172,6 +128,10 @@ impl Dispatcher {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clone()
+    }
+
+    pub(crate) fn take_caption_update(&self) -> Option<Option<Arc<playback::Attached>>> {
+        self.shared.playback.take_update()
     }
 
     pub(crate) fn updated(&self) -> bool {

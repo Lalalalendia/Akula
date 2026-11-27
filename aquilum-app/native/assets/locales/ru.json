@@ -772,6 +772,9 @@
         "toolPicker": "Выберите файл {{tool}}",
         "export": "Сохранить WebVTT",
         "exported": "Файл WebVTT сохранён",
+        "showCaptions": "В плеер",
+        "hideCaptions": "Скрыть субтитры",
+        "captionsEnabled": "Субтитры в плеере включены",
         "mediaPicker": "Выберите аудио или видео"
       },
       "ytdlpTitle": "Видео: yt-dlp (отдельная установка)",

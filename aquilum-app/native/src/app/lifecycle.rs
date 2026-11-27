@@ -29,9 +29,9 @@ impl App {
             None => crate::disk::wait(),
         }
         self.workspace.speech.take();
+        crate::video::captions::select(None);
         self.workspace.core.shutdown();
     }
-
     pub fn hold_due(&mut self, now: Instant) -> bool {
         self.hold.is_some_and(|until| until <= now) && self.hold.take().is_some()
     }

@@ -1,3 +1,4 @@
+mod poll;
 use super::*;
 use crate::i18n::{t, t_with};
 use crate::workspace::speech_jobs::{Action as Speech, Command};
@@ -32,17 +33,5 @@ impl App {
             dispatcher.send(command);
         }
         Effect::None
-    }
-
-    pub(in crate::app) fn poll_speech_settings(&mut self, root: &mut RenderRoot) {
-        if matches!(&self.popup, Some(Popup::Settings { dialog, menu: None }) if dialog.section == Section::System)
-            && self
-                .workspace
-                .speech
-                .get()
-                .is_some_and(|dispatcher| dispatcher.updated())
-        {
-            self.refresh_settings(root);
-        }
     }
 }

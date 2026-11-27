@@ -3,12 +3,12 @@
 mod command;
 mod media;
 mod output;
+pub mod playback;
 #[cfg(test)]
 mod tests;
 
 pub use media::{Track, TrackTags};
 pub use output::{read_cues, write_vtt, Cue};
-
 use super::{JobId, Lease, Queue, Segment, Spec};
 use command::{run, Workspace};
 use ring::digest::{Context, SHA256};

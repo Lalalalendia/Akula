@@ -1,10 +1,10 @@
+mod playback;
 use super::*;
 use crate::ui::settings::{Binding, schema::Action};
 use crate::workspace::speech_jobs::{Action as Speech, Command, Tool, View};
 use aquilum_core::background_jobs::{Queue, Spec, State, speech};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-
 fn wait(h: &mut Harness, condition: impl Fn(&View) -> bool) -> View {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
