@@ -162,7 +162,7 @@ pub fn enqueue(
     queue: &Queue,
     tools: &Tools,
     source: &Path,
-    track: u32,
+    track: Option<u32>,
     language: &str,
 ) -> Result<JobId> {
     let source = local_file(source)?;
@@ -171,8 +171,19 @@ pub fn enqueue(
         .ok_or_else(|| Error::Invalid("media path is not representable as UTF-8".into()))?;
     let mut check = || Ok(());
     let input = fingerprint(&source, &mut check)?;
+    let probe = media::probe(&tools.ffprobe, &source, &Workspace::new()?, &mut check)?;
+    let track = match track {
+        Some(index) => index,
+        None => {
+            probe
+                .tracks
+                .first()
+                .ok_or_else(|| Error::Invalid("media has no audio tracks".into()))?
+                .index
+        }
+    };
+    probe.duration_ms(track)?;
     let recipe = tools.recipe(track, language, &mut check)?;
-    media::probe(&tools.ffprobe, &source, &Workspace::new()?, &mut check)?.duration_ms(track)?;
     input.verify(&source)?;
     Ok(queue.enqueue(&Spec {
         kind: KIND.into(),

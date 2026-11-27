@@ -9,6 +9,7 @@ const USAGE: &str = "\
 media_asr tracks <ffprobe> <source>
 media_asr <queue.sqlite> add <source> <stream-index> <language|auto> <ffprobe> <ffmpeg> <whisper-cli> <model> <vad-model>
 media_asr <queue.sqlite> work <job-id> <cpu-threads> <ffprobe> <ffmpeg> <whisper-cli> <model> <vad-model>
+media_asr <queue.sqlite> batch <stream-index|first> <language|auto> <cpu-threads> <ffprobe> <ffmpeg> <whisper-cli> <model> <vad-model> <source>...
 media_asr <queue.sqlite> list [before-id]
 media_asr <queue.sqlite> {status,pause,resume,cancel,vtt} <job-id>";
 
@@ -46,7 +47,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 &queue,
                 &tools(binaries)?,
                 Path::new(source),
-                text(track)?.parse()?,
+                Some(text(track)?.parse()?),
                 text(language)?,
             )?;
             println!("{id}");
@@ -59,6 +60,30 @@ fn run() -> Result<(), Box<dyn Error>> {
                 text(threads)?.parse()?,
             )?;
             print_json(&outcome)?;
+        }
+        (
+            Some("batch"),
+            [track, language, threads, probe, ffmpeg, whisper, model, vad, sources @ ..],
+        ) if !sources.is_empty() => {
+            let track = match text(track)? {
+                "first" => None,
+                value => Some(value.parse()?),
+            };
+            let tools = speech::Tools::new(
+                Path::new(probe),
+                Path::new(ffmpeg),
+                Path::new(whisper),
+                Path::new(model),
+                Path::new(vad),
+            )?;
+            run_batch(
+                &mut queue,
+                &tools,
+                track,
+                text(language)?,
+                text(threads)?.parse()?,
+                sources,
+            )?;
         }
         (Some("list"), [] | [_]) => {
             let before = args.first().map(|id| job_id(id)).transpose()?;
@@ -89,6 +114,57 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
         }
         _ => return Err(USAGE.into()),
+    }
+    Ok(())
+}
+
+fn run_batch(
+    queue: &mut Queue,
+    tools: &speech::Tools,
+    track: Option<u32>,
+    language: &str,
+    threads: u8,
+    sources: &[OsString],
+) -> Result<(), Box<dyn Error>> {
+    use aquilum_core::background_jobs::State;
+    if !(1..=8).contains(&threads) {
+        return Err("expected 1 to 8 CPU threads".into());
+    }
+    let mut incomplete = 0;
+    for source in sources {
+        let path = Path::new(source);
+        let id = match speech::enqueue(queue, tools, path, track, language) {
+            Ok(id) => id,
+            Err(error) => {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({"source":path.display().to_string(),"error":error.to_string()})
+                );
+                incomplete += 1;
+                continue;
+            }
+        };
+        let work = speech::work(queue, tools, id, threads);
+        let job = queue
+            .get(id)?
+            .ok_or("batch job disappeared from the queue")?;
+        incomplete += usize::from(job.state != State::Completed);
+        println!(
+            "{}",
+            serde_json::json!({
+                "source":path.display().to_string(),
+                "job":id,
+                "state":job.state,
+                "error":work.err().map(|error| error.to_string()).or(job.error),
+            })
+        );
+    }
+    if incomplete > 0 {
+        return Err(format!(
+            "{incomplete} of {} sources remain incomplete",
+            sources.len()
+        )
+        .into());
     }
     Ok(())
 }
