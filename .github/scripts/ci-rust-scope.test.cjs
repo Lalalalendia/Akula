@@ -436,6 +436,7 @@ test('every standalone Rust module has a protected CI owner and executable Cargo
     'dropbox-connect-lab':'dropbox-t0-isolated.yml',
     'text-delta-codec':'text-delta-codec-isolated.yml',
     'game-session':'game-session-isolated.yml',
+    'music':'app-checks.yml',
   };
   const moduleRoot=path.join(__dirname,'../../modules');
   const found=fs.readdirSync(moduleRoot,{withFileTypes:true})
@@ -447,7 +448,15 @@ test('every standalone Rust module has a protected CI owner and executable Cargo
     const manifest='modules/'+name+'/Cargo.toml';
     const workflow=fs.readFileSync(path.join(__dirname,'../workflows',workflowName),'utf8');
     const policy=parse(workflow);
-    if(name==='text-delta-codec'){
+    if(name==='music'){
+      assert.equal(policy.t,'global','music must use the existing global Main PR gate');
+      assert.match(workflow,/music_module_required: \$\{\{ steps\.scope\.outputs\.music_module_required \}\}/);
+      assert.ok(workflow.includes('git diff --quiet "$BASE_SHA" HEAD -- modules/music/'));
+      assert.ok(workflow.includes("if: needs.classify.outputs.music_module_required == 'true'"));
+      assert.ok(workflow.includes("|| needs.classify.outputs.music_module_required == 'true'"));
+      assert.match(workflow,/name: Require standalone music listening contracts/);
+      assert.match(workflow,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+    }else if(name==='text-delta-codec'){
       assert.equal(matches(policy,manifest),false,'no duplicate top-level Text Delta PR workflow');
       const app=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
       assert.match(app,/text_delta_module_required: \$\{\{ steps\.scope\.outputs\.text_delta_module_required \}\}/);

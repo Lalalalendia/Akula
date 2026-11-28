@@ -58,6 +58,7 @@ jobs:
       owned_pinned_read: ${{ steps.scope.outputs.owned_pinned_read }}
       owned_s3_reservation: ${{ steps.scope.outputs.owned_s3_reservation }}
       owned_s3_minio: ${{ steps.scope.outputs.owned_s3_minio }}
+      music_module_required: ${{ steps.scope.outputs.music_module_required }}
       text_delta_module_required: ${{ steps.scope.outputs.text_delta_module_required }}
       text_delta_pack_fast_path: ${{ steps.scope.outputs.text_delta_pack_fast_path }}
       text_delta_pack_boundary_changed: ${{ steps.scope.outputs.text_delta_pack_boundary_changed }}
@@ -140,6 +141,12 @@ jobs:
           node .github/scripts/ci-pr-concurrency.cjs --base="$BASE_SHA" --head=HEAD
           node --test .github/scripts/ci-rust-scope.test.cjs
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+          # Standalone music contract; reuse the required runner, not another PR workflow.
+          if git diff --quiet "$BASE_SHA" HEAD -- modules/music/ .github/workflows/app-checks.yml .github/scripts/ci-rust-scope.test.cjs; then
+            echo 'music_module_required=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'music_module_required=true' >> "$GITHUB_OUTPUT"
+          fi
           node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs .github/scripts/canvas-crossapp-validate.test.cjs
           node .github/scripts/ci-shared-manifest-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
           # Respect the former perf path filter; ordinary CI-only / docs changes never launch benchmarks.
@@ -242,8 +249,19 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
 
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true' || needs.classify.outputs.text_delta_module_required == 'true' || needs.classify.outputs.node_v1_required == 'true'
+        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true' || needs.classify.outputs.text_delta_module_required == 'true' || needs.classify.outputs.node_v1_required == 'true' || needs.classify.outputs.music_module_required == 'true'
 
+
+      - name: Require standalone music listening contracts
+        if: needs.classify.outputs.music_module_required == 'true'
+        shell: bash
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path modules/music/Cargo.toml --offline -- --nocapture
+          grep -Fx '[workspace]' modules/music/Cargo.toml
+          ! grep -q 'aquilum-core' modules/music/Cargo.toml
 
       # Text Delta is outside the Cargo workspace. Tests execute in the existing
       # mandatory runner and therefore block Main PR gate without another workflow.
