@@ -118,7 +118,7 @@ impl ThreadedRuntime {
             return Err((Admission::Full, request));
         }
         state.queue.push_back(request);
-        self.shared.ready.notify_one();
+        self.shared.ready.notify_all();
         Ok(())
     }
 
