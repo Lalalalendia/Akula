@@ -2,7 +2,7 @@
 use sha2::{Digest, Sha256};
 use std::{fs::File, io::{Read, Write}, time::Duration};
 
-pub(super) struct Transfer<'a> {
+pub(crate) struct Transfer<'a> {
     pub url: &'a str,
     pub bytes: u64,
     pub sha256: &'a str,
@@ -11,7 +11,7 @@ pub(super) struct Transfer<'a> {
 }
 
 impl Transfer<'_> {
-    pub(super) fn download(&self, dest: File, notice: impl FnMut(u64)) -> Result<(), String> {
+    pub(crate) fn download(&self, dest: File, notice: impl FnMut(u64)) -> Result<(), String> {
         // Redirects are allowed, but exact length and hash must verify before publication.
         let [request, status, ..] = self.errors;
         let agent = ureq::AgentBuilder::new()
@@ -25,7 +25,7 @@ impl Transfer<'_> {
         self.copy_checked(&mut reply.into_reader(), dest, notice)
     }
 
-    pub(super) fn copy_checked(&self, stream: &mut impl Read, mut dest: File,
+    pub(crate) fn copy_checked(&self, stream: &mut impl Read, mut dest: File,
         mut notice: impl FnMut(u64)) -> Result<(), String> {
         let [_, _, interrupted, oversize, write, flush, mismatch] = self.errors;
         let mut digest = Sha256::new();

@@ -12,6 +12,9 @@ on:
       - 'aquilum-app/native/src/video/queue.rs'
       - 'aquilum-app/native/src/app/embeds/video.rs'
       - 'aquilum-app/native/src/ui/icons/video.rs'
+      - 'aquilum-app/core/src/background_jobs/**'
+      - 'aquilum-app/native/src/workspace/speech_jobs/**'
+      - 'aquilum-app/native/src/app/tests/dialogs/speech/**'
       - '.github/workflows/akula-video-local-windows.yml'
   workflow_dispatch:
 
@@ -49,6 +52,19 @@ jobs:
           cargo test --locked -p aquilum-native --bin aquilum-native video_download_tests -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Windows native YouTube card download-action tests failed' }
           Write-Host 'AKULA_VIDEO_WINDOWS_CARD_PASS explicit_click=1 local_copy=1 markdown_unchanged=1'
+      - name: Recognize speech from fresh Windows settings
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:AKULA_ASR_SAMPLE = Join-Path $env:RUNNER_TEMP 'akula-jfk.wav'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/ggml-org/whisper.cpp/v1.8.2/samples/jfk.wav' -OutFile $env:AKULA_ASR_SAMPLE
+          if ((Get-FileHash $env:AKULA_ASR_SAMPLE -Algorithm SHA256).Hash -ne '59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e') {
+            throw 'Speech sample SHA-256 mismatch'
+          }
+          cargo test --locked -p aquilum-native --bin aquilum-native fresh_windows_profile_installs_speech -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Windows speech toolkit acceptance failed' }
+          Write-Host 'AKULA_SPEECH_WINDOWS_PASS settings_install=1 original_preserved=1'
       - name: Build installed Akula release with local-only downloader
         shell: pwsh
         working-directory: aquilum-app

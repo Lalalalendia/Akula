@@ -12,10 +12,9 @@ impl App {
     pub(in crate::app) fn on_settings_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction) -> Outcome {
         self.typing = None;
         let Some(Popup::Settings { mut dialog, menu }) = self.popup.take() else { return Outcome::default() };
+        if dialog.transcript.is_some() { return self.on_transcript_action(root, id, action, dialog); }
         let mut effect = Effect::None;
-        // A confirmation dialog is a distinct focus-trapped interaction;
-        // cancel/escape is ALWAYS inert. Never interpret a click behind the
-        // active confirmation as permission to mutate journal metadata.
+        // Only explicit confirmation may mutate journal metadata.
         if let Some((confirmation, decision)) = dialog.sync_confirm.take() {
             if let Some(answer) = confirmation.answer(id, action) {
                 crate::ui::dialog::close(root, confirmation.layer);
@@ -28,7 +27,6 @@ impl App {
             return self.keep(dialog, None, effect, root);
         }
 
-        // A provider modal owns input until it is explicitly closed.
         if let Some(cloud) = dialog.cloud_popup.take() {
             return self.on_cloud_action(root, id, action, dialog, cloud);
         }
@@ -93,6 +91,7 @@ impl App {
                     dialog.cloud_popup = Some(popup);
                     Effect::None
                 }
+                Action::Speech(crate::workspace::speech_jobs::Action::OpenTranscript(job)) if dialog.section == super::Section::System => self.open_transcript(root, &mut dialog, job),
                 other => self.press(&mut dialog, other),
             };
         }

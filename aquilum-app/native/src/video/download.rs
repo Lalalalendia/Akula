@@ -5,7 +5,7 @@ use super::worker_process::{ChildGuard, diagnostic_tail};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use super::library::{Library, LIBRARY_MAX, SINGLE_VIDEO_MAX};
-use super::youtube;
+use super::youtube; mod result; pub(super) use result::Completed;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Progress {
     pub downloaded: u64,
@@ -95,14 +95,14 @@ fn completed(stage: &Path, id: &str) -> Result<PathBuf, String> {
 }
 /// This method runs synchronously. The UI MUST call it from its download
 /// worker, never from the rendering thread. It does nothing on note-open.
-pub fn download_one(
+pub(super) fn download_one(
     library: &Library, executable: &OsStr, url: &str,
     on_progress: impl FnMut(Progress),
-) -> Result<PathBuf, String> { download_one_inner(library, executable, None, url, on_progress) }
-pub fn download_one_with_js(
+) -> Result<Completed, String> { download_one_inner(library, executable, None, url, on_progress) }
+pub(super) fn download_one_with_js(
     library: &Library, executable: &OsStr, quickjs: &OsStr, url: &str,
     on_progress: impl FnMut(Progress),
-) -> Result<PathBuf, String> {
+) -> Result<Completed, String> {
     if !Path::new(quickjs).is_absolute() {
         return Err("pinned QuickJS runtime path must be absolute".into());
     }
@@ -111,10 +111,10 @@ pub fn download_one_with_js(
 fn download_one_inner(
     library: &Library, executable: &OsStr, quickjs: Option<&OsStr>,
     url: &str, mut on_progress: impl FnMut(Progress),
-) -> Result<PathBuf, String> {
+) -> Result<Completed, String> {
     let id = youtube::video_id(url).ok_or("unsupported or invalid single YouTube URL")?;
     if let Some(existing) = library.existing(id).map_err(|e| e.to_string())? {
-        return Ok(existing);
+        return Ok(Completed::cached(existing));
     }
     let used = library.used_bytes().map_err(|e| e.to_string())?;
     let allowance = LIBRARY_MAX.saturating_sub(used).min(SINGLE_VIDEO_MAX);
@@ -162,10 +162,10 @@ fn download_one_inner(
     let ext = staged.extension().and_then(|e| e.to_str()).ok_or("invalid yt-dlp output extension")?;
     let target = library.published(id, ext).map_err(|e| e.to_string())?;
     if let Some(existing) = library.existing(id).map_err(|e| e.to_string())? {
-        return Ok(existing);
+        return Ok(Completed::cached(existing));
     }
     fs::hard_link(&staged, &target).map_err(|e| format!("unable to publish local video without overwrite: {e}"))?;
-    Ok(target)
+    Ok(Completed::published(target))
 }
 #[cfg(test)]
 #[path = "download_tests.rs"]

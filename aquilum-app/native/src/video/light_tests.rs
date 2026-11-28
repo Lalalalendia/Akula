@@ -41,11 +41,11 @@ fn two_explicit_tracks_are_remuxed_once_without_any_cloud_or_vault_write() {
     let mut progress = Vec::new();
     let first = download_rust(&library, yt.as_os_str(), &mux, Path::new("/tmp/mock-qjs"), URL, |p| progress.push(p))
         .expect("separate streams should publish an original local media file");
-    assert_eq!(first, library.root().join(format!("{ID}.mp4")));
-    assert_eq!(fs::read(&first).unwrap(), fs::read(fixture_path).unwrap());
+    assert!(first.newly_published); assert_eq!(first.path, library.root().join(format!("{ID}.mp4")));
+    assert_eq!(fs::read(&first.path).unwrap(), fs::read(fixture_path).unwrap());
     assert!(progress.iter().any(|p| p.downloaded > 16),
         "second track progress should be aggregated");
-    assert_eq!(download_rust(&library, OsStr::new("missing-yt-dlp"), &temp.path().join("no-mux"), Path::new("/tmp/mock-qjs"), URL, |_| {}).unwrap(), first);
+    assert_eq!(download_rust(&library, OsStr::new("missing-yt-dlp"), &temp.path().join("no-mux"), Path::new("/tmp/mock-qjs"), URL, |_| {}).unwrap().path, first.path);
     assert_eq!(fs::read_dir(library.root()).unwrap().count(), 1, "staging must be removed");
     assert_eq!(fs::read_dir(vault).unwrap().count(), 0, "vault must stay empty");
 }
@@ -83,7 +83,7 @@ fn native_windows_two_track_mock_uses_local_library_and_writable_flush() {
     fs::write(&mux, "@echo off\r\nif not \"%~1\"==\"mux-pair\" exit /b 4\r\ncopy /y \"%~dp0fixture.mp4\" \"%~4\" >nul\r\nif errorlevel 1 exit /b 5\r\necho DASH_RUST_MUX_PAIR_PASS protocol=v2 duration_ms=6000 video_samples=60 audio_samples=94 ffmpeg_in_runtime=0\r\nexit /b 0\r\n").unwrap();
     let first = download_rust(&library, yt.as_os_str(), &mux, Path::new("C:\\mock-qjs.exe"), URL, |_| {})
         .expect("Windows mock Rust mux should publish after successful FlushFileBuffers");
-    assert_eq!(fs::read(&first).unwrap(), fs::read(fixture_path).unwrap());
+    assert_eq!(fs::read(&first.path).unwrap(), fs::read(fixture_path).unwrap());
     assert_eq!(fs::read_dir(library.root()).unwrap().count(), 1);
     assert_eq!(fs::read_dir(vault).unwrap().count(), 0);
 }

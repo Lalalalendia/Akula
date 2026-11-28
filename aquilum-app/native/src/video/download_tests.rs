@@ -66,10 +66,10 @@ use super::*;
         "#);
         let mut seen = Vec::new();
         let first = download_one(&library, exe.as_os_str(), "https://youtu.be/dQw4w9WgXcQ", |p| seen.push(p)).unwrap();
-        assert_eq!(fs::read(&first).unwrap(), b"synthetic-media-bytes");
+        assert!(first.newly_published); assert_eq!(fs::read(&first.path).unwrap(), b"synthetic-media-bytes");
         assert!(seen.iter().any(|p| p.total == Some(21)));
         let second = download_one(&library, OsStr::new("missing-executable"), "https://youtu.be/dQw4w9WgXcQ", |_| {}).unwrap();
-        assert_eq!(first, second, "dedup must avoid a second download");
+        assert!(!second.newly_published); assert_eq!(first.path, second.path, "dedup must avoid a second download");
         assert_eq!(fs::read_dir(library.root()).unwrap().count(), 1, "no partial temp directories");
     }
 
@@ -107,13 +107,13 @@ use super::*;
             &library, stub.as_os_str(), "https://youtu.be/dQw4w9WgXcQ",
             |p| progress.push(p),
         ).expect("Windows fake downloader must publish after successful flush");
-        assert_eq!(first.parent(), Some(library.root()));
-        assert!(fs::read(&first).unwrap().starts_with(b"synthetic-windows-video"));
+        assert!(first.newly_published); assert_eq!(first.path.parent(), Some(library.root()));
+        assert!(fs::read(&first.path).unwrap().starts_with(b"synthetic-windows-video"));
         assert!(progress.iter().any(|p| p.total == Some(25)));
         assert_eq!(
             download_one(&library, OsStr::new("missing-yt-dlp.exe"),
-                "https://youtu.be/dQw4w9WgXcQ", |_| {}).unwrap(),
-            first,
+                "https://youtu.be/dQw4w9WgXcQ", |_| {}).unwrap().path,
+            first.path,
             "a second note must reuse the same device-local file",
         );
         assert_eq!(fs::read_dir(library.root()).unwrap().count(), 1);
@@ -193,7 +193,7 @@ use super::*;
         let stub = temp.path().join("fake-codec-yt-dlp.cmd");
         fs::write(&stub, "@echo off\r\ncopy /y \"%~dp0fixture.mp4\" \"dQw4w9WgXcQ.mp4\" >nul\r\nif errorlevel 1 exit /b 21\r\necho AKULA_PROGRESS:2956:2956:0\r\nexit /b 0\r\n").unwrap();
         let path = download_one(&library, stub.as_os_str(), "https://youtu.be/dQw4w9WgXcQ", |_| {})
-            .expect("fixture must publish after synthetic downloader completes");
+            .expect("fixture must publish after synthetic downloader completes").path;
         assert_eq!(fs::read(&path).unwrap(), fs::read(&fixture).unwrap());
         drop(library);
         let reopened = Library::at(device_dir, &[]).unwrap();

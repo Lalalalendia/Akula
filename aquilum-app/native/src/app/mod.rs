@@ -54,8 +54,7 @@ use crate::ui::backlinks::{Body, HistoryBody, VersionView};
 use crate::ui::titlebar::WindowButton;
 use crate::{note::Note, session::Session};
 use crate::tabs::Tabs;
-use crate::workspace::Workspace;
-use uuid::Uuid;
+use crate::workspace::Workspace; use uuid::Uuid;
 enum Popup {
     FileMenu { layer: WidgetId, targets: Vec<PathBuf>, clicked: PathBuf, tab: Option<Uuid> },
     Delete { dialog: DialogIds, targets: Vec<PathBuf> },
@@ -72,6 +71,7 @@ enum Popup {
     RenameFailed { dialog: DialogIds, reveal: PathBuf },
     Reader(Box<reader::ReaderState>),
     Search(search::SearchState),
+    Transcript(Box<crate::ui::settings::transcript::Editor>),
     Templates(templates::TemplatesState),
     Workspaces(workspaces::WorkspacesState),
     Transfers(crate::ui::transfer::TransferDialog),

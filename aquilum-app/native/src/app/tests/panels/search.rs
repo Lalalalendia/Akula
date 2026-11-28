@@ -1,4 +1,4 @@
-use super::*;
+use super::*; mod speech;
 
 impl Harness {
     pub(super) fn type_search(&mut self, text: &str) {

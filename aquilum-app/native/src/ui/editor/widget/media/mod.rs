@@ -35,7 +35,6 @@ impl MediaState {
         }
     }
 }
-
 impl TextEditor {
     fn media_view(&self, start: usize) -> Option<&MediaView> {
         let p = self.doc.paragraph(self.doc.at_offset(start));
@@ -58,7 +57,7 @@ impl TextEditor {
         let overlay = MediaOverlay { hovered: true, ..self.media_overlay(p.start) };
         Some((p.start, view.hit(local, &overlay))).filter(|(_, hit)| *hit != MediaHit::Outside)
     }
-    pub(super) fn paint_videos(&self, painter: &mut masonry::imaging::Painter<'_>) {
+    pub(super) fn paint_videos(&self, ctx: &mut masonry::core::PaintCtx<'_>, painter: &mut masonry::imaging::Painter<'_>) {
         let (first, last) = (self.doc.at_y(self.painted.0), self.doc.at_y(self.painted.1));
         for (i, top, _) in self.doc.placed(first..=last) {
             let p = self.doc.paragraph(i);
@@ -68,6 +67,7 @@ impl TextEditor {
                 crate::video::ui_acceptance::frame_ready(overlay.video.as_ref().is_some_and(|v| v.frame.is_some()));
                 if overlay.video.is_some() {
                     view.paint(painter, self.shift().x, top, &overlay);
+                    view.paint_captions(ctx, painter, self.shift().x, top, &overlay);
                 }
             }
         }
