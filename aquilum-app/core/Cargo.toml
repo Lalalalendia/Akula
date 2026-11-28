@@ -41,7 +41,7 @@ server-owner-windows-signer = ["server-install-review", "dep:windows"]
 # Opt-in Windows signed-KEX first-root staging transport; never shipped.
 server-root-stage-ssh-lab = ["server-owner-windows-signer", "server-bootstrap-b0-openssh-lab"]
 # Linux-only inert staging laboratory; requires B1a verifier, no executable install.
-server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
+server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab", "dep:akula-server-staging-b1b0"]
 # Linux-only inert release-floor chain lab, requiring verified staged bytes.
 server-bootstrap-b1b1-floor-lab = ["server-bootstrap-b1b-custody-lab"]
 # Detached operator signature and inert witness CAS request, never installs.
@@ -243,6 +243,9 @@ tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "=0.38.44", features = ["fs", "process"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+akula-server-staging-b1b0 = { path = "../../modules/bootstrap-b1b0", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Credentials", "Win32_System_Threading"] }

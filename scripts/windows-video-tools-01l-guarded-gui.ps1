@@ -267,7 +267,7 @@ try {
   $spoof=Join-Path $env:RUNNER_TEMP 'video-tools-01l-spoof'
   New-Item -ItemType Directory -Path $spoof | Out-Null
   $env:ProgramFiles=$spoof
-  Scenario 'missing' 'Akula Video Tools are not installed'
+  Scenario 'missing' 'yt-dlp is required for video downloads'
   New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
   $created=$true
   foreach($name in $names){
@@ -280,9 +280,15 @@ try {
   if(@(Get-ChildItem -LiteralPath $root -Force).Count -ne 6){
     throw 'VIDEO_TOOLS_01L_HOLD: protected fixture identity mismatch'
   }
-  Scenario 'publisher-not-approved' 'Video Tools publisher is not yet approved'
+  Scenario 'publisher-not-approved' 'yt-dlp is required for video downloads'
   Icacls -Arguments @((Join-Path $root 'akula-yt-dlp.exe'),'/grant','*S-1-5-32-545:M')
-  Scenario 'unsafe' 'Video Tools installation did not pass verification'
+  $toolDir=Join-Path $data 'tools/yt-dlp'
+  $pinSource=Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'aquilum-app/native/src/video/optional_ytdlp.rs') -Raw
+  $fileName=[regex]::Match($pinSource,'(?m)^const FILENAME: &str = "(yt-dlp-[0-9.]+[.]exe)";$')
+  if(!$fileName.Success){throw 'VIDEO_TOOLS_01L_HOLD: opt-in filename unavailable'}
+  New-Item -ItemType Directory -Path $toolDir -ErrorAction Stop | Out-Null
+  Copy-Item -LiteralPath $SentinelPath -Destination (Join-Path $toolDir $fileName.Groups[1].Value) -ErrorAction Stop
+  Scenario 'unsafe' 'yt-dlp verification failed'
   Write-Host 'VIDEO_TOOLS_01L_REAL_GUI_PASS real_pointer=3 uia_warning=3 no_ytdlp_child=1 no_media=1 release=0'
 } finally {
   if($created -and (Test-Path -LiteralPath $root)){

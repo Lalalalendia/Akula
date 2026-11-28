@@ -157,3 +157,20 @@ fn animations_switch_turns_motion_off_and_on() {
     h.click(center.x, center.y);
     assert!(h.config().ui.animations && crate::ui::motion::on());
 }
+
+#[test]
+fn settings_animation_approach_preserves_direction_and_clamps_to_goal() {
+    use crate::ui::motion::approach;
+    for (value, goal, step, expected) in [
+        (0.0, 1.0, 0.25, 0.25),
+        (1.0, 0.0, 0.25, 0.75),
+        (0.75, 1.0, 0.5, 1.0),
+        (0.25, 0.0, 0.5, 0.0),
+        (2.0, 0.0, 0.5, 1.5),
+        (0.0, 3.0, 1.0, 1.0),
+        (1.0, 1.0, 0.25, 1.0),
+        (0.5, 1.0, 0.0, 0.5),
+    ] {
+        assert_eq!(approach(value, goal, step), expected);
+    }
+}

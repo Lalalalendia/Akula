@@ -1028,19 +1028,25 @@ impl HistoryService {
         }
     }
 
-    pub fn try_moved(&self, roots: Roots<'_>, from: &Path, to: &Path) -> Result<(), HistoryMoveFailure> {
-        let action = "move history";
+    // Admission is checked both before waiting and while holding the history locks.
+    fn relocation_lock(&self, action: &'static str) -> Result<HistoryFilesStateGuard<'_>, HistoryMoveFailure> {
         if self.denies_unverified_history_writes() {
             return Err(HistoryMoveFailure::new(action,
                 "direct history mutation refused by enrolled workspace HOLD", false));
         }
-        let Some(mut state) = self.files_lock() else {
+        let Some(state) = self.files_lock() else {
             return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
         };
         if self.denies_unverified_history_writes() {
             return Err(HistoryMoveFailure::new(action,
                 "participant HOLD activated before direct history relocation", false));
         }
+        Ok(state)
+    }
+
+    pub fn try_moved(&self, roots: Roots<'_>, from: &Path, to: &Path) -> Result<(), HistoryMoveFailure> {
+        let action = "move history";
+        let mut state = self.relocation_lock(action)?;
         state.roots = roots(); // Rename admission's registry snapshot, not cached roots.
         let (Some(source), Some(target)) = (
             locate(&mut state, roots, from),
@@ -1104,17 +1110,7 @@ impl HistoryService {
 
     pub fn try_trashed(&self, roots: Roots<'_>, note: &Path, trashed_at: &Path) -> Result<(), HistoryMoveFailure> {
         let action = "trash history";
-        if self.denies_unverified_history_writes() {
-            return Err(HistoryMoveFailure::new(action,
-                "direct history mutation refused by enrolled workspace HOLD", false));
-        }
-        let Some(mut state) = self.files_lock() else {
-            return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
-        };
-        if self.denies_unverified_history_writes() {
-            return Err(HistoryMoveFailure::new(action,
-                "participant HOLD activated before direct history relocation", false));
-        }
+        let mut state = self.relocation_lock(action)?;
         let Some(located) = locate(&mut state, roots, note) else {
             return Ok(());
         };
@@ -1162,17 +1158,7 @@ impl HistoryService {
 
     pub fn try_restored(&self, roots: Roots<'_>, trashed_at: &Path, restored: &Path) -> Result<(), HistoryMoveFailure> {
         let action = "restore history";
-        if self.denies_unverified_history_writes() {
-            return Err(HistoryMoveFailure::new(action,
-                "direct history mutation refused by enrolled workspace HOLD", false));
-        }
-        let Some(mut state) = self.files_lock() else {
-            return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
-        };
-        if self.denies_unverified_history_writes() {
-            return Err(HistoryMoveFailure::new(action,
-                "participant HOLD activated before direct history relocation", false));
-        }
+        let mut state = self.relocation_lock(action)?;
         let Some(located) = locate(&mut state, roots, restored) else {
             return Ok(());
         };

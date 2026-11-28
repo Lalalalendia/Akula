@@ -5,7 +5,6 @@ use masonry::widgets::Flex;
 use crate::ui::dialog::DialogIds;
 use crate::ui::handle::Handle;
 use crate::ui::scroll::ScrollArea;
-
 pub struct SettingsDialog {
     pub layer: WidgetId,
     pub close: WidgetId,
@@ -21,4 +20,5 @@ pub struct SettingsDialog {
     pub yandex_notice: Option<String>,
     pub sync_confirm: Option<(DialogIds, aquilum_core::sync::NativeRecoveryDecision)>,
     pub cloud_popup: Option<CloudPopup>,
+    pub(crate) transcript: Option<super::transcript::Editor>,
 }

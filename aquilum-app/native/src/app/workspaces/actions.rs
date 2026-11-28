@@ -59,8 +59,7 @@ impl App {
             (Some((path, workspace)), Some(RowAction::Forget)) => {
                 let (title, description) = workspaces::forget_texts(&path);
                 let (layer, forget) = ConfirmDialog::new(&title, &description, &t("common.cancel"), &t("workspaces.forgetConfirm"));
-                root.add_layer(layer, Point::ORIGIN);
-                root.focus_on(Some(forget.layer));
+                crate::app::ui_actions::mount_modal(root, layer, forget.layer);
                 let was_current = self.tree.root().is_some_and(|root| workspaces::same_path(root, &path));
                 state.forget = Some((forget, workspace, was_current));
             }

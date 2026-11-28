@@ -16,13 +16,10 @@ const PREVIEW_ROWS: usize = 64;
 const SHOWN_EXAMPLES: usize = 5;
 const SHOWN_CHARS: usize = 72;
 
-fn compact(value: &str) -> String {
-    let mut visible = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if visible.chars().count() > SHOWN_CHARS {
-        visible = visible.chars().take(SHOWN_CHARS).collect::<String>() + "…";
-    }
-    visible
-}
+#[path = "study_common.rs"]
+mod common;
+pub(super) use common::{bounded_text, feedback_answer};
+fn compact(value: &str) -> String { bounded_text(value, SHOWN_CHARS) }
 
 pub(super) fn labels(snapshot: &EditorTableSnapshot, skip: Option<usize>) -> Vec<(usize, String)> {
     snapshot.cells[0].iter().enumerate().filter_map(|(index, header)| {
@@ -69,6 +66,22 @@ fn preview_text(
 }
 
 impl App {
+    /// Handle only menu dispatch; keep each caller's owned state and authority distinct.
+    pub(super) fn study_menu_item<T>(&mut self, root: &mut RenderRoot, layer: WidgetId,
+        state: T, action: &ErasedAction, restore: impl FnOnce(T) -> Popup) -> Option<(usize, T)> {
+        match action.downcast_ref::<MenuChoice>() {
+            Some(MenuChoice::Item(index)) => {
+                root.remove_layer(layer);
+                Some((*index, state))
+            }
+            None | Some(MenuChoice::Hover(_)) => {
+                self.popup = Some(restore(state));
+                None
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn study_menu(&mut self, root: &mut RenderRoot, title: &str, entries: &[(usize, String)]) -> WidgetId {
         let labels = entries.iter().map(|(_, label)| label.as_str()).collect::<Vec<_>>();
         let center = self.window.width * 0.5;
@@ -95,19 +108,10 @@ impl App {
         &mut self, root: &mut RenderRoot, layer: WidgetId,
         snapshot: EditorTableSnapshot, action: &ErasedAction,
     ) {
-        let Some(choice) = action.downcast_ref::<MenuChoice>() else {
-            self.popup = Some(Popup::StudyQuestion { layer, snapshot });
-            return;
-        };
-        let MenuChoice::Item(index) = choice else {
-            if matches!(choice, MenuChoice::Hover(_)) {
-                self.popup = Some(Popup::StudyQuestion { layer, snapshot });
-            }
-            return;
-        };
-        root.remove_layer(layer);
+        let Some((index, snapshot)) = self.study_menu_item(root, layer, snapshot, action,
+            |snapshot| Popup::StudyQuestion { layer, snapshot }) else { return };
         let columns = labels(&snapshot, None);
-        let Some((question, _)) = columns.get(*index) else { return };
+        let Some((question, _)) = columns.get(index) else { return };
         let question = *question;
         let entries = labels(&snapshot, Some(question));
         let layer = self.study_menu(root, &t("editor.table.studyAnswer"), &entries);
@@ -118,19 +122,10 @@ impl App {
         &mut self, root: &mut RenderRoot, layer: WidgetId,
         snapshot: EditorTableSnapshot, question: usize, action: &ErasedAction,
     ) {
-        let Some(choice) = action.downcast_ref::<MenuChoice>() else {
-            self.popup = Some(Popup::StudyAnswer { layer, snapshot, question });
-            return;
-        };
-        let MenuChoice::Item(index) = choice else {
-            if matches!(choice, MenuChoice::Hover(_)) {
-                self.popup = Some(Popup::StudyAnswer { layer, snapshot, question });
-            }
-            return;
-        };
-        root.remove_layer(layer);
+        let Some((index, snapshot)) = self.study_menu_item(root, layer, snapshot, action,
+            |snapshot| Popup::StudyAnswer { layer, snapshot, question }) else { return };
         let choices = labels(&snapshot, Some(question));
-        let Some((answer, _)) = choices.get(*index) else { return };
+        let Some((answer, _)) = choices.get(index) else { return };
         match preview_text(&snapshot, question, *answer) {
             Some((description, copy)) => self.study_dialog(root, &description, copy),
             None => self.study_notice(root, &t("editor.table.studyInvalidMapping")),

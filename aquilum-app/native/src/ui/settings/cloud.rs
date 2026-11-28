@@ -28,7 +28,7 @@ use crate::ui::tokens::size;
 use crate::ui::widgets::{IconButton, Leading, Press, Pressed, Rule, TextButton, Variant, Wrap};
 use crate::ui::{icons, theme};
 
-use schema::{Action, CloudProvider, Context, Control, Section, Setter};
+use schema::{Action, CloudProvider, Context, Control, Section, Setter, same_setter};
 
 const TILE_WIDTH: f64 = 196.0;
 const TILE_HEIGHT: f64 = 148.0;
@@ -175,15 +175,11 @@ impl Widget for ProviderTile {
     type Action = Pressed;
 
     fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        if self.press.pointer(ctx, event) {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
+        crate::ui::widgets::press::submit_pointer(&mut self.press, ctx, event);
     }
 
     fn on_access_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &AccessEvent) {
-        if event.action == AccessAction::Click {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
+        crate::ui::widgets::press::submit_access(ctx, event);
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
@@ -286,15 +282,6 @@ pub struct CloudPopup {
     dropbox_identity: (String, String),
 }
 
-fn same_setter(a: Setter, b: Setter) -> bool {
-    match (a, b) {
-        (Setter::Config(x), Setter::Config(y)) => std::ptr::fn_addr_eq(x, y),
-        (Setter::Scale, Setter::Scale) |
-        (Setter::HomePage, Setter::HomePage) |
-        (Setter::Autostart, Setter::Autostart) => true,
-        _ => false,
-    }
-}
 
 pub struct CloudCard {
     card: NewWidget<Flex>,

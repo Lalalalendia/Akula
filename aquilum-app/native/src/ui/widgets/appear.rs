@@ -1,8 +1,7 @@
-use masonry::accesskit::{Node, Role};
+use crate::ui::widgets::layout::contract::passive_single_child;
 use masonry::core::{
-    AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PropertiesMut, PropertiesRef, RegisterCtx, Update, UpdateCtx, Widget, WidgetPod,
+    LayoutCtx, MeasureCtx, NewWidget, PropertiesMut, PropertiesRef, Update, UpdateCtx, Widget, WidgetPod,
 };
-use masonry::imaging::Painter;
 use masonry::kurbo::{Axis, Point, Size};
 use masonry::layout::{LenReq, Length};
 
@@ -69,10 +68,6 @@ impl Appear {
 impl Widget for Appear {
     type Action = masonry::core::NoAction;
 
-    fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
-        ctx.register_child(&mut self.child);
-    }
-
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
         match event {
             Update::WidgetAdded | Update::StashedChanged(false) => {
@@ -102,17 +97,7 @@ impl Widget for Appear {
         ctx.place_child(&mut self.child, Point::ORIGIN);
     }
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _painter: &mut Painter<'_>) {}
-
-    fn accessibility_role(&self) -> Role {
-        Role::GenericContainer
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
-
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::from_slice(&[self.child.id()])
-    }
+    passive_single_child!(child);
 }
 
 pub struct Tween {

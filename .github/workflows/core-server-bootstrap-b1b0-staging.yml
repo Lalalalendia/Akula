@@ -27,17 +27,30 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@stable
-      - name: Verify isolated B1b0 matches unchanged Core source
+      - name: Verify Core re-exports the single shared B1b0 implementation
         shell: bash
         run: |
           set -euo pipefail
-          cmp aquilum-app/core/src/server_staging_lab.rs modules/bootstrap-b1b0/src/server_staging_lab.rs
-      - name: Format isolated Rust lab sources
+          grep -Fx 'pub use akula_server_staging_b1b0::server_staging_lab::*;' aquilum-app/core/src/server_staging_lab.rs
+          test "$(grep -cvE '^[[:space:]]*(//.*)?$' aquilum-app/core/src/server_staging_lab.rs)" = 1
+          rustfmt --edition 2021 --emit stdout modules/bootstrap-b1b0/src/server_staging_lab.rs aquilum-app/core/tests/server_bootstrap_b1b0.rs >/dev/null
+      - name: Reproduce first B1b0 lock attachment using Cargo
+        if: github.event_name == 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
-          rustfmt --edition 2021 aquilum-app/core/src/server_staging_lab.rs aquilum-app/core/tests/server_bootstrap_b1b0.rs
+          before="$RUNNER_TEMP/b1b0-before.lock"
+          expected="$RUNNER_TEMP/b1b0-expected.lock"
+          git show HEAD^1:aquilum-app/Cargo.lock > "$before"
+          if ! grep -Fxq ' "akula-server-staging-b1b0",' "$before"; then
+            cp aquilum-app/Cargo.lock "$expected"
+            cp "$before" aquilum-app/Cargo.lock
+            cargo update --workspace --manifest-path aquilum-app/Cargo.toml
+            diff -u "$expected" aquilum-app/Cargo.lock
+            echo AKULA_B1B0_CARGO_LOCK_REPRODUCED
+          fi
       - name: Run standalone B1b0 adversarial parity tests
         shell: bash
         run: |
@@ -50,3 +63,6 @@ jobs:
           set -euo pipefail
           cargo test --locked -p aquilum-core --features server-bootstrap-b1b-custody-lab --test server_bootstrap_b1b0 -- --nocapture
           cargo check --locked -p aquilum-core --no-default-features
+          # The shared types are consumed by the downstream approval chain.
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b1c-witness-lab \
+            --test server_bootstrap_b1b1a --test server_bootstrap_b1b1b --test server_bootstrap_b1b1c -- --nocapture

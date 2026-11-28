@@ -25,10 +25,11 @@ mod templates;
 mod transfer;
 mod widths;
 mod workspaces;
+mod ui_actions;
 #[cfg(test)] mod tests;
 use std::{collections::HashMap, path::{Path, PathBuf}, sync::Arc};
 #[cfg(feature = "dicom-preview")] use std::collections::HashSet;
-use crate::ui::editor::TextEditor;
+use crate::ui::editor::{TextEditor, TextAction};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 use aquilum_core::CoreEvent;
@@ -36,7 +37,6 @@ use aquilum_core::mcp::bridge::{Disposition, Navigation};
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, NewWidget, Widget, WidgetId};
 use masonry::kurbo::{Point, Size};
-use crate::ui::editor::TextAction;
 use crate::i18n::{self, t, t_with};
 use crate::ui::dialog::{ConfirmDialog, DialogAnswer, DialogIds};
 use crate::ui::file_tree::{FileTree, TreeAction};
@@ -54,8 +54,7 @@ use crate::ui::backlinks::{Body, HistoryBody, VersionView};
 use crate::ui::titlebar::WindowButton;
 use crate::{note::Note, session::Session};
 use crate::tabs::Tabs;
-use crate::workspace::Workspace;
-use uuid::Uuid;
+use crate::workspace::Workspace; use uuid::Uuid;
 enum Popup {
     FileMenu { layer: WidgetId, targets: Vec<PathBuf>, clicked: PathBuf, tab: Option<Uuid> },
     Delete { dialog: DialogIds, targets: Vec<PathBuf> },
@@ -72,6 +71,7 @@ enum Popup {
     RenameFailed { dialog: DialogIds, reveal: PathBuf },
     Reader(Box<reader::ReaderState>),
     Search(search::SearchState),
+    Transcript(Box<crate::ui::settings::transcript::Editor>),
     Templates(templates::TemplatesState),
     Workspaces(workspaces::WorkspacesState),
     Transfers(crate::ui::transfer::TransferDialog),

@@ -217,3 +217,266 @@ fn damaged_durable_blob_cannot_be_served_or_confirmed() {
         &f.roster, &f.read, peer, read_challenge, &signed,
     ).is_err());
 }
+
+fn expect_hold<T>(result: Result<T, NodeV1Error>, expected: &str) {
+    match result {
+        Err(NodeV1Error::Hold(actual)) => assert_eq!(actual, expected),
+        Err(other) => panic!("expected Hold({expected}), got {other:?}"),
+        Ok(_) => panic!("unexpected admission: expected Hold({expected})"),
+    }
+}
+
+fn expect_pair(
+    trust: &RootTrust, roster: &OwnerSignedRoster, read: &OwnerReadGrant,
+    put: &OwnerPutGrant, peer: [u8; 32], read_error: &str, put_error: &str,
+) {
+    expect_hold(trust.admit_read(roster, read, peer), read_error);
+    expect_hold(trust.admit_put(roster, put, peer), put_error);
+}
+
+// Test-only custody: replace the independently pinned fixture policy and
+// reopen it through the real protected-file loader, never through a request.
+fn pin_test_policy(f: &Fixture, policy: &PolicyFile) -> RootTrust {
+    fs::write(f.policy_dir.join(POLICY_NAME), serde_json::to_vec(policy).unwrap()).unwrap();
+    RootTrust::load_from(&f.policy_dir, rustix::process::geteuid().as_raw(), policy.node_public)
+        .unwrap()
+}
+
+fn sign_test_roster(roster: &mut OwnerSignedRoster) {
+    let owner = Ed25519KeyPair::from_seed_unchecked(&[3; 32]).unwrap();
+    roster.signature = owner.sign(&roster.canonical_claim().unwrap())
+        .as_ref().try_into().unwrap();
+}
+
+#[test]
+fn read_write_scope_and_error_precedence_are_pinned() {
+    let temp = tempfile::tempdir().unwrap();
+    let f = fixture(temp.path());
+    let trust = &f.host.trust;
+    let peer = f.put.device_public_key;
+    let admitted_read = trust.admit_read(&f.roster, &f.read, peer).unwrap();
+    let admitted_put = trust.admit_put(&f.roster, &f.put, peer).unwrap();
+    assert_eq!(admitted_read.peer(), peer);
+    assert_eq!(admitted_read.grant_digest(), signed_grant_digest(&f.read).unwrap());
+    assert_eq!(admitted_read.policy_digest(), trust.digest);
+    assert_eq!(admitted_put.scope(), &f.put);
+    assert_eq!(admitted_put.digest(), signed_put_digest(&f.put).unwrap());
+    assert_eq!(admitted_put.policy_digest(), trust.digest);
+
+    for wrong_peer in [[0; 32], [8; 32]] {
+        expect_pair(trust, &f.roster, &f.read, &f.put, wrong_peer,
+            "incorrect read scope", "incorrect write scope");
+    }
+
+    macro_rules! wrong_scope {
+        ($field:ident, $value:expr) => {{
+            let mut read = f.read.clone();
+            let mut put = f.put.clone();
+            read.$field = $value;
+            put.$field = $value;
+            // Invalid claim/signature must not mask the earlier scope rejection.
+            read.filename = "../bad.md".into();
+            put.filename = "../bad.md".into();
+            expect_pair(trust, &f.roster, &read, &put, peer,
+                "incorrect read scope", "incorrect write scope");
+        }};
+    }
+    wrong_scope!(device_public_key, [8; 32]);
+    wrong_scope!(node_identity, [8; 32]);
+    wrong_scope!(vault_id, VaultId::new());
+    wrong_scope!(grant_epoch, 8);
+
+    let mut old_roster = f.roster.clone();
+    old_roster.epoch -= 1;
+    sign_test_roster(&mut old_roster);
+    expect_pair(trust, &old_roster, &f.read, &f.put, peer,
+        "incorrect read scope", "incorrect write scope");
+
+    let mut future_roster = f.roster.clone();
+    future_roster.epoch += 1;
+    sign_test_roster(&mut future_roster);
+    expect_pair(trust, &future_roster, &f.read, &f.put, peer,
+        "incorrect read scope", "incorrect write scope");
+}
+
+#[test]
+fn read_write_roster_admission_is_independently_pinned() {
+    let temp = tempfile::tempdir().unwrap();
+    let f = fixture(temp.path());
+    let peer = f.put.device_public_key;
+    let original = &f.host.trust;
+
+    let mut forged = f.roster.clone();
+    forged.signature[0] ^= 1;
+    expect_pair(original, &forged, &f.read, &f.put, peer,
+        "invalid signed roster", "invalid signed device roster");
+
+    let mut ambiguous = f.roster.clone();
+    ambiguous.devices.push(f.roster.devices[0].clone());
+    expect_pair(original, &ambiguous, &f.read, &f.put, peer,
+        "invalid signed roster", "invalid signed device roster");
+
+    let mut different_vault = f.roster.clone();
+    different_vault.vault_id = VaultId::new();
+    sign_test_roster(&mut different_vault);
+    expect_pair(original, &different_vault, &f.read, &f.put, peer,
+        "invalid signed roster", "invalid signed device roster");
+
+    let mut revoked = f.roster.clone();
+    revoked.devices[0].status = RosterStatus::Revoked;
+    sign_test_roster(&mut revoked);
+    // Even a correctly signed roster cannot replace the independently pinned digest.
+    expect_pair(original, &revoked, &f.read, &f.put, peer,
+        "invalid signed roster", "invalid signed device roster");
+
+    let mut absent = f.roster.clone();
+    absent.devices.clear();
+    let mut wrong_endpoint = f.roster.clone();
+    wrong_endpoint.devices[0].endpoint_public_key = [8; 32];
+    let mut wrong_device_key = f.roster.clone();
+    wrong_device_key.devices[0].device_public_key = [8; 32];
+    let mut wrong_device_id = f.roster.clone();
+    wrong_device_id.devices[0].device_id = DeviceId::new();
+
+    for (mut roster, read_error, put_error) in [
+        (absent, "device is not enrolled", "write device is not enrolled"),
+        (wrong_endpoint, "device is not enrolled", "write device is not enrolled"),
+        (revoked, "revoked or ambiguous device", "revoked write device"),
+        (wrong_device_key, "revoked or ambiguous device", "revoked write device"),
+        (wrong_device_id, "revoked or ambiguous device", "revoked write device"),
+    ] {
+        sign_test_roster(&mut roster);
+        let mut policy = original.policy.clone();
+        policy.roster_digest = roster.claim_digest().unwrap();
+        let trust = pin_test_policy(&f, &policy);
+        expect_pair(&trust, &roster, &f.read, &f.put, peer, read_error, put_error);
+    }
+}
+
+#[test]
+fn read_write_claim_signatures_and_exact_digests_remain_distinct() {
+    let temp = tempfile::tempdir().unwrap();
+    let f = fixture(temp.path());
+    let peer = f.put.device_public_key;
+    let original = &f.host.trust;
+    let owner = Ed25519KeyPair::from_seed_unchecked(&[3; 32]).unwrap();
+    let mut read = f.read.clone();
+    let mut put = f.put.clone();
+    read.filename = "../bad.md".into();
+    put.filename = "../bad.md".into();
+    expect_pair(original, &f.roster, &read, &put, peer,
+        "invalid signed grant claim", "invalid write claim");
+
+    let mut read = f.read.clone();
+    let mut put = f.put.clone();
+    read.owner_signature = f.put.owner_signature;
+    put.owner_signature = f.read.owner_signature;
+    expect_pair(original, &f.roster, &read, &put, peer,
+        "invalid owner signature", "invalid owner write signature");
+
+    let mut read = f.read.clone();
+    let mut put = f.put.clone();
+    let other_document = DocumentId::new();
+    read.document_id = other_document;
+    put.document_id = other_document;
+    read.owner_signature = owner.sign(&owner_claim(&read).unwrap()).as_ref().try_into().unwrap();
+    put.owner_signature = owner.sign(&put_claim(&put).unwrap()).as_ref().try_into().unwrap();
+    expect_pair(original, &f.roster, &read, &put, peer,
+        "grant is no longer current", "owner write grant is no longer current");
+
+    let mut policy = original.policy.clone();
+    assert_ne!(policy.grant_digest, policy.put_grant_digest);
+    std::mem::swap(&mut policy.grant_digest, &mut policy.put_grant_digest);
+    let trust = pin_test_policy(&f, &policy);
+    expect_pair(&trust, &f.roster, &f.read, &f.put, peer,
+        "grant is no longer current", "owner write grant is no longer current");
+
+    let mut policy = original.policy.clone();
+    policy.grant_digest = [91; 32];
+    let trust = pin_test_policy(&f, &policy);
+    expect_hold(trust.admit_read(&f.roster, &f.read, peer), "grant is no longer current");
+    assert!(trust.admit_put(&f.roster, &f.put, peer).is_ok());
+
+    let mut policy = original.policy.clone();
+    policy.put_grant_digest = [92; 32];
+    let trust = pin_test_policy(&f, &policy);
+    assert!(trust.admit_read(&f.roster, &f.read, peer).is_ok());
+    expect_hold(trust.admit_put(&f.roster, &f.put, peer), "owner write grant is no longer current");
+}
+
+#[test]
+fn read_write_policy_rotation_precedes_untrusted_request_checks() {
+    let temp = tempfile::tempdir().unwrap();
+    let f = fixture(temp.path());
+    let original = &f.host.trust;
+    let peer = f.put.device_public_key;
+    let mut policy = original.policy.clone();
+    policy.iroh_endpoint_public = [93; 32];
+    let reloaded = pin_test_policy(&f, &policy);
+    expect_pair(original, &f.roster, &f.read, &f.put, [0; 32],
+        "owner policy changed: reload and review", "owner policy changed: reload and review");
+    expect_pair(original, &f.roster, &f.read, &f.put, peer,
+        "owner policy changed: reload and review", "owner policy changed: reload and review");
+    assert!(reloaded.admit_read(&f.roster, &f.read, peer).is_ok());
+    assert!(reloaded.admit_put(&f.roster, &f.put, peer).is_ok());
+}
+
+fn pending_challenges(db: &rusqlite::Connection) -> (i64, i64) {
+    db.query_row(
+        "SELECT (SELECT COUNT(*) FROM issued), (SELECT COUNT(*) FROM put_issued)",
+        [], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap()
+}
+
+#[test]
+fn read_write_challenges_share_quota_and_expiration() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut f = fixture(temp.path());
+    let peer = f.put.device_public_key;
+    let read = f.host.trust.admit_read(&f.roster, &f.read, peer).unwrap();
+    let put = f.host.trust.admit_put(&f.roster, &f.put, peer).unwrap();
+    let db = rusqlite::Connection::open(f.state.join("node-challenges.sqlite")).unwrap();
+    let old_read = f.host.ledger.issue(&read).unwrap();
+    let old_put = f.host.ledger.issue_put(&put).unwrap();
+    for _ in 1..32 {
+        f.host.ledger.issue(&read).unwrap();
+        f.host.ledger.issue_put(&put).unwrap();
+    }
+    assert_eq!(pending_challenges(&db), (32, 32));
+    expect_hold(f.host.ledger.issue(&read), "Node challenge quota exhausted");
+    expect_hold(f.host.ledger.issue_put(&put), "Node challenge quota exhausted");
+    assert_eq!(pending_challenges(&db), (32, 32));
+
+    // Change only expiry in the temporary ledger; the real issuance path
+    // must prune both tables atomically and retain the operation boundary.
+    db.execute_batch("UPDATE issued SET expires_at = 1; UPDATE put_issued SET expires_at = 1;").unwrap();
+    let new_read = f.host.ledger.issue(&read).unwrap();
+    assert_eq!(pending_challenges(&db), (1, 0));
+    let new_put = f.host.ledger.issue_put(&put).unwrap();
+    assert_eq!(pending_challenges(&db), (1, 1));
+    assert!(!f.host.ledger.consume_once(peer, read.grant_digest(), old_read).unwrap());
+    assert!(!f.host.ledger.consume_put(&put, old_put).unwrap());
+    assert!(!f.host.ledger.consume_put(&put, new_read).unwrap());
+    assert!(!f.host.ledger.consume_once(peer, read.grant_digest(), new_put).unwrap());
+    assert!(f.host.ledger.consume_once(peer, read.grant_digest(), new_read).unwrap());
+    assert!(f.host.ledger.consume_put(&put, new_put).unwrap());
+    assert_eq!(pending_challenges(&db), (0, 0));
+}
+
+#[test]
+fn read_write_challenge_clock_rollback_denies_without_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut f = fixture(temp.path());
+    let peer = f.put.device_public_key;
+    let read = f.host.trust.admit_read(&f.roster, &f.read, peer).unwrap();
+    let put = f.host.trust.admit_put(&f.roster, &f.put, peer).unwrap();
+    f.host.ledger.issue(&read).unwrap();
+    f.host.ledger.issue_put(&put).unwrap();
+    let db = rusqlite::Connection::open(f.state.join("node-challenges.sqlite")).unwrap();
+    db.execute("UPDATE clock_guard SET seen = ?1 WHERE id = 1", [i64::MAX]).unwrap();
+    expect_hold(f.host.ledger.issue(&read), "clock rollback: challenge ledger HOLD");
+    expect_hold(f.host.ledger.issue_put(&put), "clock rollback: challenge ledger HOLD");
+    assert_eq!(pending_challenges(&db), (1, 1));
+    let seen: i64 = db.query_row("SELECT seen FROM clock_guard WHERE id = 1", [], |row| row.get(0)).unwrap();
+    assert_eq!(seen, i64::MAX);
+}

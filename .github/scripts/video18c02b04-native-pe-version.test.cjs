@@ -32,6 +32,8 @@ function gate(build,rust,workflow,doc){
     'cargo metadata --locked --no-deps --format-version 1',
     'cargo build --release --locked -p aquilum-native',
     'VIDEO18C02B04_FALSE_VERSION_DENIED_PASS',
+    'node scripts/akula-version.cjs check',
+    '$sourceVersion $sourceVersion $phantomVersion',
     'VIDEO18C02B04_NATIVE_PE_IDENTITY_PASS',
     '$deniedExit=$LASTEXITCODE',
     'VIDEO18C02B04_HOLD: signed label is not a genuine newer native PE version',

@@ -38,11 +38,15 @@ fn lang02_named_collection_native_gui_persists_without_mutating_markdown() {
         Some(Popup::StudyAddQuestion { layer, .. }) => *layer,
         _ => panic!("saved table should offer the study-column mapping menu"),
     };
+    h.act(question, MenuChoice::Hover(0));
+    assert!(matches!(&h.app.popup, Some(Popup::StudyAddQuestion { layer, .. }) if *layer == question));
     h.act(question, MenuChoice::Item(0));
     let answer = match &h.app.popup {
         Some(Popup::StudyAddAnswer { layer, .. }) => *layer,
         _ => panic!("choosing question must open answer mapping"),
     };
+    h.act(answer, MenuChoice::Hover(0));
+    assert!(matches!(&h.app.popup, Some(Popup::StudyAddAnswer { layer, question: 0, .. }) if *layer == answer));
     h.act(answer, MenuChoice::Item(0));
 
     let (group_menu, new_index) = match &h.app.popup {
@@ -52,9 +56,15 @@ fn lang02_named_collection_native_gui_persists_without_mutating_markdown() {
         ),
         _ => panic!("table columns should lead to collection choice"),
     };
+    h.act(group_menu, MenuChoice::Hover(new_index));
+    assert!(matches!(&h.app.popup, Some(Popup::StudyAddCollection { layer, choices, .. })
+        if *layer == group_menu && choices.get(new_index).is_some_and(|(id, _)| id.is_empty())));
     h.act(group_menu, MenuChoice::Item(new_index));
     let field = match &h.app.popup {
-        Some(Popup::StudyNewCollection { field, .. }) => field.id(),
+        Some(Popup::StudyNewCollection { field, .. }) => {
+            assert!(field.get(&h.root).unwrap().inner().text().is_empty());
+            field.id()
+        }
         _ => panic!("New collection must open an editable native dialog"),
     };
     h.act(field, TextAction::Changed("  Физика / термины  ".into()));
@@ -219,4 +229,40 @@ fn lang02_changed_table_during_collection_dialog_refuses_stale_bind() {
     assert_eq!(std::fs::read(&path).unwrap(), saved_bytes,
         "stale create dialog must not modify saved Markdown");
     eprintln!("AKULA_LANG02_CHANGED_DIALOG_PASS=stale_editor,notice,no_sqlite_write,source_unchanged");
+}
+
+#[test]
+fn lang02_preview_menu_hover_preserves_snapshot_and_explicit_column_mapping() {
+    use aquilum_core::learning::editor_snapshot::capture;
+    let mut h = Harness::new();
+    let rows = vec![vec!["Q".into(), "A".into()], vec!["star".into(), "answer".into()]];
+    let snapshot = capture(&rows, 0..20, 20, false).unwrap();
+    let path = h.vault.path().join("a.md");
+    let original = std::fs::read(&path).unwrap();
+    let db = h.app.workspace.data_dir.join("language-study.sqlite");
+    let before = StudyStore::open(&db).unwrap().load().unwrap().revision;
+    h.app.open_study_question(&mut h.root, snapshot.clone());
+    let layer = match &h.app.popup {
+        Some(Popup::StudyQuestion { layer, .. }) => *layer,
+        _ => panic!("question menu missing"),
+    };
+    h.act(layer, MenuChoice::Hover(1));
+    assert!(matches!(&h.app.popup, Some(Popup::StudyQuestion { layer: current, snapshot: retained })
+        if *current == layer && retained == &snapshot));
+    h.act(layer, MenuChoice::Item(1));
+    let answer = match &h.app.popup {
+        Some(Popup::StudyAnswer { layer, question: 1, snapshot: retained }) => {
+            assert_eq!(retained, &snapshot);
+            *layer
+        }
+        _ => panic!("reverse column choice must open the answer menu"),
+    };
+    h.act(answer, MenuChoice::Hover(0));
+    assert!(matches!(&h.app.popup, Some(Popup::StudyAnswer { layer: current, question: 1, snapshot: retained })
+        if *current == answer && retained == &snapshot));
+    h.act(answer, MenuChoice::Item(0));
+    assert!(matches!(&h.app.popup, Some(Popup::StudyPreview { copy: Some(value), .. }) if value == "answer\tstar"));
+    assert_eq!(StudyStore::open(&db).unwrap().load().unwrap().revision, before);
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    eprintln!("AKULA_REUSE14_STUDY_PREVIEW_PASS=hover,reverse_mapping,no_write");
 }

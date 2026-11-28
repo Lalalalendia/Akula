@@ -94,7 +94,7 @@ pub(super) fn child(args: &[String]) -> Result<(), String> {
     let signed=admit_hosted_lab_signature(
         &bytes,&STANDARD.encode(sig),&STANDARD.encode(key),"0.3.20"
     )?;
-    insist(signed.version()=="0.3.21" && signed.source_commit()==head,
+    insist(signed.version()==super::super::gui_launcher::lab::candidate_version()? && signed.source_commit()==head,
         "wrong signed generation/version/source")?;
     insist(signed.cargo_lock_sha256()==sha(&workspace.join("aquilum-app/Cargo.lock"))?,
         "new signed generation bound to different source lock")?;

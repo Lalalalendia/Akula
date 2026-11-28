@@ -1,14 +1,14 @@
 mod page;
 pub use page::ImagePage;
+use crate::ui::widgets::layout::contract::fill_context;
 use masonry::accesskit::{Node, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
-    AccessCtx, ChildrenIds, EventCtx, Layer, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, TextEvent, Update, UpdateCtx, Widget,
+    AccessCtx, ChildrenIds, EventCtx, Layer, LayoutCtx, NewWidget, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, TextEvent, Update, UpdateCtx, Widget,
 };
 use super::widgets::{Intro, NORMAL};
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, Rect, RoundedRect, Size};
-use masonry::layout::{LenReq, Length};
+use masonry::kurbo::{Affine, Rect, RoundedRect, Size};
 use masonry::peniko::ImageBrush;
 
 use super::menu::box_shadow;
@@ -62,9 +62,7 @@ impl Widget for Viewer {
 
     fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
 
-    fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
-        ctx.context_size().length(axis).unwrap_or(Length::ZERO)
-    }
+    fill_context!();
 
     fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, size: Size) {
         let (iw, ih) = (f64::from(self.image.image.width), f64::from(self.image.image.height));

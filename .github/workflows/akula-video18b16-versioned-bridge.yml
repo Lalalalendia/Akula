@@ -8,6 +8,9 @@ on:
       - 'scripts/windows-video18b16-protected-versioned-bridge.ps1'
       - 'scripts/windows-video18c02b02b02a-distinct-native.ps1'
       - 'scripts/windows-video18c02b02b02b-distinct-signed-generations.ps1'
+      - 'scripts/akula-version.cjs'
+      - 'aquilum-app/native/packaging/akula-windows.json'
+      - 'aquilum-app/native/packaging/akula-windows-video17-lab.json'
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
@@ -245,7 +248,7 @@ jobs:
           $app=Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release/aquilum-native.exe'
           if(!(Test-Path -LiteralPath $app -PathType Leaf)){throw 'Video Akula binary missing'}
           Add-Content -Path $env:GITHUB_ENV -Value "VIDEO18B04_APP=$app"
-      - name: Bind real 0.3.21 PE identity to strict 0.3.20 version floor before signing
+      - name: Bind current PE identity to the pinned historical floor before signing
         shell: pwsh
         env:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -257,35 +260,40 @@ jobs:
              (git rev-parse HEAD).Trim() -cne $env:EXPECTED_HEAD_SHA) {
             throw 'VIDEO18C02B06_HOLD: exact-head hosted Windows PR only'
           }
-          node scripts/akula-version.cjs check
-          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B06_HOLD: source version mirror mismatch'}
+          $candidate=@(node scripts/akula-version.cjs check)
+          if($LASTEXITCODE -ne 0 -or $candidate.Count -ne 1){throw 'VIDEO18C02B06_HOLD: source version mirror mismatch'}
+          $sourceVersion=$candidate[0]
+          # This fixture builds the pinned historical 0.3.20 source tree.
+          $previousVersion='0.3.20'
+          $futureVersion=node scripts/akula-version.cjs next-patch
+          if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B06_HOLD: cannot derive forged label'}
           $metadata=@(cargo metadata --locked --no-deps --format-version 1 --manifest-path aquilum-app/Cargo.toml 2>&1)
           if($LASTEXITCODE -ne 0){throw 'VIDEO18C02B06_HOLD: source metadata unavailable'}
           $packages=@(($metadata -join [Environment]::NewLine | ConvertFrom-Json).packages |
             Where-Object { $_.name -ceq 'aquilum-native' })
-          if($packages.Count -ne 1 -or [string]$packages[0].version -cne '0.3.21'){
-            throw 'VIDEO18C02B06_HOLD: current native source is not genuine 0.3.21'
+          if($packages.Count -ne 1 -or [string]$packages[0].version -cne $sourceVersion){
+            throw 'VIDEO18C02B06_HOLD: current native source disagrees with canonical version'
           }
           $witness=Join-Path $env:RUNNER_TEMP 'video18c02b06-native-pe-verifier.exe'
           rustc --edition=2024 labs/video-lite/video18c02b04-native-pe-version.rs -o $witness
           if($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $witness -PathType Leaf)){
             throw 'VIDEO18C02B06_HOLD: independent native version reader unavailable'
           }
-          $pass=@(& $witness --admit $env:VIDEO18B04_APP '0.3.21' '0.3.20' '0.3.21' 2>&1)
+          $pass=@(& $witness --admit $env:VIDEO18B04_APP $sourceVersion $previousVersion $sourceVersion 2>&1)
           $code=$LASTEXITCODE
           $pass | Out-Host
           if($code -ne 0 -or !(($pass | Out-String).Contains('VIDEO18C02B04_STRICT_VERSION_FLOOR_PASS'))){
             throw 'VIDEO18C02B06_HOLD: real native PE does not attest a raised version'
           }
-          foreach($forged in @(@('0.3.20','0.3.20'),@('0.3.20','0.3.22'),@('0.3.21','0.3.21'))){
-            $no=@(& $witness --admit $env:VIDEO18B04_APP '0.3.21' $forged[0] $forged[1] 2>&1)
+          foreach($forged in @(@($previousVersion,$previousVersion),@($previousVersion,$futureVersion),@($sourceVersion,$sourceVersion))){
+            $no=@(& $witness --admit $env:VIDEO18B04_APP $sourceVersion $forged[0] $forged[1] 2>&1)
             $code=$LASTEXITCODE
             if($code -eq 0 -or !(($no | Out-String).Contains('VIDEO18C02B04_HOLD: signed label is not a genuine newer native PE version'))){
               throw 'VIDEO18C02B06_HOLD: forged/nonincreasing version admitted'
             }
           }
           Add-Content -Path $env:GITHUB_ENV -Value "VIDEO18C02B06_VERSION_WITNESS=$witness"
-          Write-Host 'VIDEO18C02B06_REAL_NATIVE_FLOOR_PASS old_source=0.3.20 new_source=0.3.21 pe_verified=1 negatives=3 nonrelease=1'
+          Write-Host "VIDEO18C02B06_REAL_NATIVE_FLOOR_PASS old_source=$previousVersion new_source=$sourceVersion pe_verified=1 negatives=3 nonrelease=1"
           # GitHub's pwsh wrapper returns the last native exit code on successful scripts.
           # All three negative cases MUST fail, and leave a stale nonzero $LASTEXITCODE.
           # Reset only AFTER every explicit refusal was verified and the success marker emitted.

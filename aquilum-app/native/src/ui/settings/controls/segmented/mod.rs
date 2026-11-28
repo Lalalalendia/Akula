@@ -117,7 +117,7 @@ impl Widget for Segmented {
     fn on_anim_frame(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, interval: u64) {
         let goal = self.selected as f64;
         let step = crate::ui::motion::step(interval as f64 / 1e9, crate::ui::motion::MEDIUM);
-        self.shown = if self.shown < goal { (self.shown + step).min(goal) } else { (self.shown - step).max(goal) };
+        self.shown = crate::ui::motion::approach(self.shown, goal, step);
         ctx.request_paint_only();
         if self.shown != goal {
             ctx.request_anim_frame();

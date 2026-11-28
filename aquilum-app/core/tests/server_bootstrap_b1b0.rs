@@ -172,3 +172,16 @@ fn independent_handles_serialize_writers() {
     results.sort();
     assert_eq!(results, [false, true]);
 }
+
+#[test]
+fn core_and_standalone_staging_share_exact_types() {
+    use akula_server_staging_b1b0::server_staging_lab as shared;
+    use std::any::TypeId;
+    use aquilum_core::server_staging_lab::StageReceipt;
+    assert_eq!(TypeId::of::<InstallId>(), TypeId::of::<shared::InstallId>());
+    assert_eq!(TypeId::of::<ApprovedPlanDigest>(), TypeId::of::<shared::ApprovedPlanDigest>());
+    assert_eq!(TypeId::of::<StageReceipt>(), TypeId::of::<shared::StageReceipt>());
+    assert_eq!(TypeId::of::<StageError>(), TypeId::of::<shared::StageError>());
+    let (_dir, staging) = lab();
+    let _: shared::PrivateStagingLab = staging;
+}

@@ -3,13 +3,9 @@
 //! The Akula installer does not bundle yt-dlp, and this code never updates
 //! the Akula updater or authorizes the old 3-EXE Video Tools package.
 //! Download only after a Settings confirmation; no PATH/env executable input.
-use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicU64, Ordering}};
-use std::time::Duration;
-use sha2::{Digest, Sha256};
+use std::sync::{Arc, atomic::Ordering};
 
 pub(crate) const VERSION: &str = "2026.10.26";
 pub(crate) const BYTES: u64 = 23_575_744;
@@ -18,8 +14,13 @@ pub(crate) const SHA256: &str =
 pub(super) const URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe";
 const FILENAME: &str = "yt-dlp-2026.10.26.exe";
+#[path = "optional_tool_verify.rs"] mod pinned_file;
+use super::optional_tool_transfer as pinned_transfer;
+#[path = "optional_tool_state.rs"] mod tool_state;
+#[path = "optional_tool_install.rs"] mod pinned_install;
+use tool_state::ToolState;
 #[path = "light_windows_version.rs"]
-mod version_gate; #[path = "optional_quickjs.rs"] pub(crate) mod quickjs;
+pub(crate) mod version_gate; #[path = "optional_quickjs.rs"] pub(crate) mod quickjs;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Status {
@@ -29,18 +30,8 @@ pub(crate) enum Status {
     Invalid,
     Failed(String),
 }
-static STATES: OnceLock<Mutex<HashMap<PathBuf, Status>>> = OnceLock::new();
-static REVISION: AtomicU64 = AtomicU64::new(0);
-
-fn states() -> &'static Mutex<HashMap<PathBuf, Status>> {
-    STATES.get_or_init(|| Mutex::new(HashMap::new()))
-}
-pub(crate) fn revision() -> u64 { REVISION.load(Ordering::Relaxed) }
-fn set_state(key: &Path, state: Status, wake: &Arc<dyn Fn() + Send + Sync>) {
-    states().lock().unwrap_or_else(|e| e.into_inner()).insert(key.to_path_buf(), state);
-    REVISION.fetch_add(1, Ordering::Relaxed);
-    wake();
-}
+static STATE: ToolState = ToolState::new();
+pub(crate) fn revision() -> u64 { STATE.revision() }
 
 fn local_root(app_data: &Path) -> Result<PathBuf, String> {
     // Reuse the native video library's existing Windows local-data selection,
@@ -92,31 +83,13 @@ fn ensure_directory(path: &Path) -> Result<(), String> {
     Ok(())
 }
 fn verified(path: &Path) -> Result<(), String> {
-    check_ancestors(path.parent().ok_or("tool has no parent")?)?;
-    checked_path(path, false)?;
-    let mut file = File::open(path).map_err(|e| e.to_string())?;
-    if file.metadata().map_err(|e| e.to_string())?.len() != BYTES {
-        return Err("yt-dlp executable length does not match the pinned release".into());
-    }
-    let mut digest = Sha256::new();
-    let mut read_total = 0u64;
-    let mut buffer = [0u8; 65_536];
-    loop {
-        let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
-        if n == 0 { break; }
-        read_total += n as u64;
-        if read_total > BYTES { return Err("yt-dlp executable grew during verification".into()); }
-        digest.update(&buffer[..n]);
-    }
-    let hex = digest.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>();
-    if read_total != BYTES || hex != SHA256 {
-        return Err("yt-dlp SHA-256 differs from the pinned official release".into());
-    }
-    checked_path(path, false)?;
-    if file.metadata().map_err(|e| e.to_string())?.len() != BYTES {
-        return Err("yt-dlp executable changed during verification".into());
-    }
-    Ok(())
+    pinned_file::verify(path, BYTES, SHA256, [
+        "tool has no parent",
+        "yt-dlp executable length does not match the pinned release",
+        "yt-dlp executable grew during verification",
+        "yt-dlp SHA-256 differs from the pinned official release",
+        "yt-dlp executable changed during verification",
+    ])
 }
 pub(crate) fn verified_executable(app_data: &Path) -> Result<PathBuf, String> {
     let path = executable(app_data)?;
@@ -124,12 +97,12 @@ pub(crate) fn verified_executable(app_data: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 pub(crate) fn status(app_data: &Path) -> Status {
-    if let Some(Status::Downloading(n)) = states().lock().unwrap_or_else(|e| e.into_inner())
+    if let Some(Status::Downloading(n)) = STATE.states().lock().unwrap_or_else(|e| e.into_inner())
         .get(app_data).cloned()
     {
         return Status::Downloading(n);
     }
-    let prior = states().lock().unwrap_or_else(|e| e.into_inner())
+    let prior = STATE.states().lock().unwrap_or_else(|e| e.into_inner())
         .get(app_data).cloned();
     match verified_executable(app_data) {
         Ok(_) => Status::Installed,
@@ -144,85 +117,33 @@ pub(crate) fn status(app_data: &Path) -> Status {
         }
     }
 }
-struct Partial(PathBuf);
-impl Drop for Partial {
-    fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
-}
 fn fetch(app_data: &Path, wake: &Arc<dyn Fn() + Send + Sync>) -> Result<(), String> {
     version_gate::require_pinned_windows_video_runtime()?;
     let root = local_root(app_data)?;
-    ensure_directory(&root)?;
-    let target = root.join(FILENAME);
-    if target.exists() {
-        return Err("yt-dlp already exists; remove the invalid file before reinstalling".into());
-    }
-    let stage = Partial(root.join(format!(".yt-dlp-{}.part", uuid::Uuid::new_v4())));
-    let mut dest = OpenOptions::new().write(true).create_new(true).open(&stage.0)
-        .map_err(|e| format!("cannot stage the optional downloader: {e}"))?;
-    // This URL is pinned. Redirects on GitHub may use release-assets hosts,
-    // but no downloaded byte is usable until SHA-256 and exact size verify.
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(20))
-        .timeout_read(Duration::from_secs(30))
-        .build();
-    let reply = agent.get(URL).call()
-        .map_err(|e| format!("official yt-dlp download failed: {e}"))?;
-    if reply.status() != 200 {
-        return Err("official yt-dlp release returned a non-200 response".into());
-    }
-    let mut stream = reply.into_reader();
-    let mut sha = Sha256::new();
-    let mut done = 0u64;
-    let mut last_notice = 0u64;
-    let mut buf = [0u8; 65_536];
-    loop {
-        let n = stream.read(&mut buf).map_err(|e| format!("yt-dlp download interrupted: {e}"))?;
-        if n == 0 { break; }
-        done = done.saturating_add(n as u64);
-        if done > BYTES { return Err("yt-dlp downloaded bytes exceed the pinned length".into()); }
-        sha.update(&buf[..n]);
-        dest.write_all(&buf[..n]).map_err(|e| format!("yt-dlp temporary write failed: {e}"))?;
-        if done.saturating_sub(last_notice) >= 1_048_576 {
-            last_notice = done;
-            set_state(app_data, Status::Downloading(done), wake);
-        }
-    }
-    dest.sync_all().map_err(|e| format!("yt-dlp temporary flush failed: {e}"))?;
-    drop(dest);
-    let hash = sha.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>();
-    if done != BYTES || hash != SHA256 {
-        return Err("official yt-dlp size or SHA-256 mismatch; refusing installation".into());
-    }
-    // Atomic, same-volume, no-clobber publication; the temp is always deleted.
-    fs::hard_link(&stage.0, &target)
-        .map_err(|e| format!("cannot commit yt-dlp without overwriting another file: {e}"))?;
-    verified(&target)?;
-    Ok(())
+    pinned_install::install(&root, FILENAME, "yt-dlp", [
+        "yt-dlp already exists; remove the invalid file before reinstalling",
+        "cannot stage the optional downloader",
+        "cannot commit yt-dlp without overwriting another file",
+    ], |dest| pinned_transfer::Transfer {
+        url: URL, bytes: BYTES, sha256: SHA256, notice_every: 1_048_576,
+        errors: [
+            "official yt-dlp download failed",
+            "official yt-dlp release returned a non-200 response",
+            "yt-dlp download interrupted",
+            "yt-dlp downloaded bytes exceed the pinned length",
+            "yt-dlp temporary write failed",
+            "yt-dlp temporary flush failed",
+            "official yt-dlp size or SHA-256 mismatch; refusing installation",
+        ],
+    }.download(dest, |done| STATE.set_state(app_data, Status::Downloading(done), wake)), verified)
 }
 
 /// Called exclusively by the Settings confirmation button; no startup fetch.
 pub(crate) fn start(app_data: PathBuf, wake: Arc<dyn Fn() + Send + Sync>) -> Result<(), String> {
-    {
-        let mut lock = states().lock().unwrap_or_else(|e| e.into_inner());
-        if matches!(lock.get(&app_data), Some(Status::Downloading(_))) {
-            return Err("yt-dlp download is already in progress".into());
-        }
-        if matches!(status_disk(&app_data), Status::Installed) {
-            return Err("the pinned yt-dlp version is already installed".into());
-        }
-        lock.insert(app_data.clone(), Status::Downloading(0));
-    }
-    REVISION.fetch_add(1, Ordering::Relaxed);
-    wake();
-    std::thread::spawn(move || {
-        let outcome = fetch(&app_data, &wake);
-        let next = match outcome {
-            Ok(()) => Status::Installed,
-            Err(err) => Status::Failed(err),
-        };
-        set_state(&app_data, next, &wake);
-    });
-    Ok(())
+    STATE.start(app_data, wake, status_disk, fetch, [
+        "yt-dlp download is already in progress",
+        "the pinned yt-dlp version is already installed",
+    ])
 }
 fn status_disk(app_data: &Path) -> Status {
     match verified_executable(app_data) {
@@ -232,7 +153,7 @@ fn status_disk(app_data: &Path) -> Status {
     }
 }
 pub(crate) fn remove(app_data: &Path) -> Result<(), String> {
-    let mut lock = states().lock().unwrap_or_else(|e| e.into_inner());
+    let mut lock = STATE.states().lock().unwrap_or_else(|e| e.into_inner());
     if matches!(lock.get(app_data), Some(Status::Downloading(_))) {
         return Err("cannot remove yt-dlp during an active download".into());
     }
@@ -243,81 +164,9 @@ pub(crate) fn remove(app_data: &Path) -> Result<(), String> {
         fs::remove_file(&path).map_err(|e| format!("cannot remove optional yt-dlp: {e}"))?;
     }
     lock.remove(app_data);
-    REVISION.fetch_add(1, Ordering::Relaxed);
+    STATE.revision.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn official_release_pin_is_fixed_and_distinct_from_user_paths() {
-        assert_eq!(VERSION, "2026.10.26");
-        assert!(URL.starts_with("https://github.com/yt-dlp/yt-dlp/releases/download/"));
-        assert_eq!(SHA256.len(), 64);
-        assert_eq!(BYTES, 23_575_744);
-    }
-    #[test]
-    fn missing_invalid_and_manual_removal_do_not_touch_local_media() {
-        let temp = tempfile::tempdir().unwrap();
-        let profile = temp.path().join("AkulaProfile");
-        fs::create_dir(&profile).unwrap();
-        let videos = profile.join("local-videos");
-        fs::create_dir(&videos).unwrap();
-        let saved = videos.join("already-downloaded.mp4");
-        fs::write(&saved, b"local offline video stays").unwrap();
-        assert_eq!(status(&profile), Status::Missing);
-        assert!(!local_root(&profile).unwrap().exists(),
-                "checking status cannot install tools or create directories");
-        let root = local_root(&profile).unwrap();
-        ensure_directory(&root).unwrap();
-        fs::write(root.join(FILENAME), b"malicious executable").unwrap();
-        assert_eq!(status(&profile), Status::Invalid);
-        assert!(verified_executable(&profile).is_err());
-        remove(&profile).unwrap();
-        assert_eq!(status(&profile), Status::Missing);
-        assert_eq!(fs::read(&saved).unwrap(), b"local offline video stays");
-    }
-
-    #[test]
-    #[ignore = "CI-only, user-initiated official GitHub download; no executable execution"]
-    fn user_optin_real_download_remove_ci_only() {
-        assert_eq!(std::env::var("AKULA_VIDEO20_RUN_LAB").ok().as_deref(), Some("1"));
-        assert_eq!(std::env::var("RUNNER_ENVIRONMENT").ok().as_deref(), Some("github-hosted"));
-        let temp = tempfile::tempdir().unwrap();
-        let profile = temp.path().join("isolated-profile");
-        fs::create_dir(&profile).unwrap();
-        assert_eq!(status(&profile), Status::Missing);
-        assert!(!local_root(&profile).unwrap().exists());
-        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(|| {});
-        start(profile.clone(), wake).expect("explicit opt-in starts a single background download");
-        let mut ok = false;
-        for _ in 0..240 {
-            match status(&profile) {
-                Status::Installed => { ok = true; break; },
-                Status::Failed(reason) => panic!("pinned official download failed: {reason}"),
-                _ => std::thread::sleep(Duration::from_millis(250)),
-            }
-        }
-        assert!(ok, "pinned yt-dlp must be installed after user consent in CI lab");
-        let binary = verified_executable(&profile).unwrap();
-        assert_eq!(fs::metadata(&binary).unwrap().len(), BYTES);
-        // This CI-only test exercises the exact pinned executable, not
-        // arbitrary PATH tools. Installation itself never executes it.
-        let version = std::process::Command::new(&binary)
-            .args(["--ignore-config", "--no-plugin-dirs", "--no-js-runtimes", "--version"])
-            .output().expect("verified official yt-dlp should launch on Windows");
-        assert!(version.status.success(), "verified yt-dlp --version failed");
-        assert_eq!(String::from_utf8_lossy(&version.stdout).trim(), VERSION);
-        remove(&profile).unwrap();
-        assert_eq!(status(&profile), Status::Missing);
-        assert!(!local_root(&profile).unwrap().join(FILENAME).exists());
-        println!("VIDEO20_USER_INITIATED_OFFICIAL_YTDLP_PASS file_verified=1 removed=1 release=0");
-    }
-    #[test]
-    fn never_accept_an_unpinned_download_or_arbitrary_binary() {
-        let folder = tempfile::tempdir().unwrap();
-        let file = folder.path().join(FILENAME);
-        fs::write(&file, b"untrusted payload").unwrap();
-        assert!(verified(&file).is_err());
-    }
-}
+#[path = "optional_ytdlp_tests.rs"]
+mod tests;

@@ -10,9 +10,8 @@ use masonry::core::{ErasedAction, WidgetId};
 use masonry::kurbo::Point;
 use super::super::{App, Popup};
 use super::study::labels;
-use crate::i18n::{t, t_with};
+use crate::i18n::t;
 use crate::ui::dialog::ConfirmDialog;
-use crate::ui::menu::MenuChoice;
 
 pub(crate) struct PendingTable {
     pub note: NoteKey,
@@ -66,16 +65,10 @@ impl App {
         &mut self, root: &mut RenderRoot, layer: WidgetId,
         pending: PendingTable, action: &ErasedAction,
     ) {
-        let Some(choice) = action.downcast_ref::<MenuChoice>() else {
-            self.popup = Some(Popup::StudyAddQuestion { layer, pending }); return;
-        };
-        let MenuChoice::Item(index) = choice else {
-            if matches!(choice, MenuChoice::Hover(_)) { self.popup = Some(Popup::StudyAddQuestion { layer, pending }); }
-            return;
-        };
-        root.remove_layer(layer);
+        let Some((index, pending)) = self.study_menu_item(root, layer, pending, action,
+            |pending| Popup::StudyAddQuestion { layer, pending }) else { return };
         let choices = labels(&pending.selected, None);
-        let Some((question, _)) = choices.get(*index) else { return };
+        let Some((question, _)) = choices.get(index) else { return };
         let question = *question;
         let choices = labels(&pending.selected, Some(question));
         let layer = self.study_menu(root, &t("editor.table.studyAnswer"), &choices);
@@ -85,16 +78,10 @@ impl App {
         &mut self, root: &mut RenderRoot, layer: WidgetId,
         pending: PendingTable, question: usize, action: &ErasedAction,
     ) {
-        let Some(choice) = action.downcast_ref::<MenuChoice>() else {
-            self.popup = Some(Popup::StudyAddAnswer { layer, pending, question }); return;
-        };
-        let MenuChoice::Item(index) = choice else {
-            if matches!(choice, MenuChoice::Hover(_)) { self.popup = Some(Popup::StudyAddAnswer { layer, pending, question }); }
-            return;
-        };
-        root.remove_layer(layer);
+        let Some((index, pending)) = self.study_menu_item(root, layer, pending, action,
+            |pending| Popup::StudyAddAnswer { layer, pending, question }) else { return };
         let options = labels(&pending.selected, Some(question));
-        let Some((answer, _)) = options.get(*index) else { return };
+        let Some((answer, _)) = options.get(index) else { return };
         let mapping = ColumnMapping { question, answers: vec![*answer], context: None };
         if mapping.validate(pending.selected.cells[0].len()).is_err() {
             self.study_add_notice(root, &t("editor.table.studyInvalidMapping"), false); return;
@@ -115,26 +102,11 @@ impl App {
         &mut self, root: &mut RenderRoot, layer: WidgetId,
         pending: PendingColumns, choices: Vec<(String, String)>, action: &ErasedAction,
     ) {
-        let Some(choice) = action.downcast_ref::<MenuChoice>() else {
-            self.popup = Some(Popup::StudyAddCollection { layer, pending, choices }); return;
-        };
-        let MenuChoice::Item(index) = choice else {
-            if matches!(choice, MenuChoice::Hover(_)) {
-                self.popup = Some(Popup::StudyAddCollection { layer, pending, choices });
-            }
-            return;
-        };
-        root.remove_layer(layer);
-        let Some((id, name)) = choices.get(*index) else { return };
+        let Some((index, (pending, choices))) = self.study_menu_item(root, layer, (pending, choices), action,
+            |(pending, choices)| Popup::StudyAddCollection { layer, pending, choices }) else { return };
+        let Some((id, name)) = choices.get(index) else { return };
         if id.is_empty() { self.open_study_new_collection(root, pending); return; } if id == "__manage__" { self.open_study_manage(root); return; }
-        match self.bind_live_table(root, &pending, id, name) {
-            Ok(()) => self.study_add_notice(root, &t_with("editor.table.studySaved", &[("name", name)]), true),
-            Err(StateError::DuplicateTable | StateError::NeedsRebind) =>
-                self.study_add_notice(root, &t("editor.table.studyHold"), false),
-            Err(StateError::InvalidSelection) =>
-                self.study_add_notice(root, &t("editor.table.studyStillChanged"), false),
-            Err(_) => self.study_add_notice(root, &t("editor.table.studySaveFailed"), false),
-        }
+        self.bind_live_table_with_notice(root, &pending, id, name);
     }
 
     pub(super) fn bind_live_table(

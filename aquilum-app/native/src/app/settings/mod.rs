@@ -13,6 +13,7 @@ mod cloud_action;
 mod menu_action;
 mod apply;
 mod press; #[cfg(windows)] mod video_tools;
+mod speech; mod transcript;
 mod context;
 mod bindings;
 mod refresh;
@@ -21,7 +22,6 @@ mod recovery;
 pub(super) mod server_state;
 #[cfg(all(windows, feature = "server-readonly-preflight"))]
 pub(super) mod server;
-
 use crate::system;
 use crate::ui::menu::Menu;
 use crate::ui::settings::controls::{Changed, ColorPicker, Committed, DropdownButton, Switch};
@@ -49,8 +49,7 @@ impl App {
         let config = self.workspace.core.settings.get_config();
         let ctx = self.settings_context(section, None, 0);
         let (layer, dialog) = settings::dialog(&config, &ctx, section);
-        root.add_layer(layer, Point::ORIGIN);
-        root.focus_on(Some(dialog.layer));
+        crate::app::ui_actions::mount_modal(root, layer, dialog.layer);
         self.popup = Some(Popup::Settings { dialog, menu: None });
     }
 

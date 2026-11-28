@@ -1,10 +1,8 @@
-//! Связь окна с ядром `aquilum-core`: каталог данных, база знаний и события ядра.
-//!
-//! События приходят из потоков ядра: `EventSink` кладёт их в канал и будит цикл winit,
-//! хост вычитывает канал целиком в `proxy_wake_up` (пробуждения склеиваются).
+//! Связь окна с ядром, локальным профилем и фоновыми задачами.
+pub(crate) mod speech_jobs;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::sync::mpsc::{Receiver, channel};
 
 use aquilum_core::{Core, CoreEvent, EventSink};
@@ -17,7 +15,7 @@ pub const APP_ID: &str = "com.dmitriy.aquilum-app";
 pub struct Workspace {
     pub core: Arc<Core>,
     pub data_dir: PathBuf,
-    /// Корень базы знаний; `None` — база не выбрана.
+    pub(crate) speech: OnceLock<speech_jobs::Dispatcher>,
     pub root: Option<PathBuf>,
     pub wake: Arc<dyn Fn() + Send + Sync>,
     events: Receiver<CoreEvent>,
@@ -57,10 +55,12 @@ impl Workspace {
                 report!("база {} не запомнена: {e:?}", root.display());
             }
         }
-        Ok(Workspace { core, data_dir, root, wake, events })
+        Ok(Workspace { core, data_dir, root, wake, events, speech: OnceLock::new() })
     }
 
-    /// Все накопившиеся события ядра.
+    pub(crate) fn speech(&self) -> &speech_jobs::Dispatcher {
+        self.speech.get_or_init(|| speech_jobs::Dispatcher::new(self.data_dir.clone(), Arc::clone(&self.wake)))
+    }
     pub fn drain_events(&self) -> Vec<CoreEvent> {
         self.events.try_iter().collect()
     }
@@ -127,7 +127,6 @@ mod host_custody_feature_tests {
         );
     }
 }
-
 
 /// P0-B4a: exercise the real native Workspace::open entrypoint (the route
 /// behind --data-dir), not just an internal Core fixture. This only proves

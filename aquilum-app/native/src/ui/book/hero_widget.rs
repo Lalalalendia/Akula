@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widgets::layout::contract::passive_surface;
 
 pub fn hero(view: HeroView) -> (NewWidget<Hero>, HeroIds) {
     let mut ids = HeroIds {
@@ -155,13 +156,7 @@ impl Widget for Hero {
         }
     }
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _painter: &mut Painter<'_>) {}
-
-    fn accessibility_role(&self) -> Role {
-        Role::GenericContainer
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
+    passive_surface!();
 
     fn children_ids(&self) -> ChildrenIds {
         let mut ids = Vec::new();

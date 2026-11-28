@@ -52,7 +52,7 @@ fn real_windows_native_pipeline_remuxes_local_dash_without_syncing_media() {
         &library, ytdlp.as_os_str(), &rust_mux, &quickjs,
         URL, &manifest, |point| progress.push(point),
     ).expect("real yt-dlp and Rust mux must publish a valid local MP4");
-    assert_eq!(output, library.root().join(format!("{ID}.mp4")));
+    assert!(output.newly_published); let output = output.path; assert_eq!(output, library.root().join(format!("{ID}.mp4")));
     assert!(output.metadata().unwrap().len() > 1_000);
     assert!(progress.iter().any(|p| p.downloaded > 0),
         "native progress callback must receive bytes from real yt-dlp");
@@ -61,7 +61,7 @@ fn real_windows_native_pipeline_remuxes_local_dash_without_syncing_media() {
         &library, OsStr::new("missing-downloader"), Path::new("no-mux"),
         Path::new("no-quickjs"), URL, "http://127.0.0.1:1/invalid", |_| {},
     ).expect("existing media must be deduplicated before looking up executables");
-    assert_eq!(second, output);
+    assert!(!second.newly_published); assert_eq!(second.path, output);
     assert_eq!(fs::read_dir(library.root()).unwrap().count(), 1,
         "staging files must be removed after successful mux and publication");
     assert_eq!(fs::read_to_string(&note).unwrap(), original,

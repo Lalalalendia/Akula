@@ -404,6 +404,84 @@ function changedWorkflows(base, head = 'HEAD', cwd = process.cwd()) {
   return records;
 }
 
+// CI-LANG-01: one exact, auditable replacement of five historical wrappers.
+// Not a general deletion exemption. The replacement retains every original
+// contract and installed step body and owner path; its aggregate gate fails
+// closed on missing/failed selected witnesses. Subsequent deletion is denied.
+const LANG08_OLD_BLOBS=Object.freeze({
+  ".github/workflows/akula-language08-installed-annotations-nsis.yml": "4bcc3c9a4f8142422fd53639ad6a0c63e8f674f9",
+  ".github/workflows/akula-language08b-installed-backup-nsis.yml": "f5d8934d3b0f7d698dcded269460b60a608a3363",
+  ".github/workflows/akula-language08c-installed-collections-nsis.yml": "648de9edde1499ca5452c2564ef0355f00a9bfcf",
+  ".github/workflows/akula-language08c2-installed-negative-names-nsis.yml": "8f955946e7f2436af60ca9fc7bcf7688e2480cef",
+  ".github/workflows/akula-language08c2b-installed-invalid-names-nsis.yml": "f119146d135fdfbe37dc1c6e671d6255fa8a7213"
+});
+const LANG08_REPLACEMENT='.github/workflows/akula-language08c2b-installed-invalid-names-nsis.yml';
+const LANG08_NEW_BLOB='6e27800605e1447e350d01d4e26fef0fb6515ea8';
+const LANG08_PRESERVED=Object.freeze([
+  "scripts/windows-lang08-installed-annotations.ps1",
+  "scripts/windows-lang08b-installed-backup.ps1",
+  "scripts/windows-lang08c-installed-collections.ps1",
+  "scripts/windows-lang08c2-installed-negative-names.ps1",
+  "scripts/windows-lang08c2b-installed-invalid-names.ps1",
+  ".github/workflows/windows-beta.yml",
+  "scripts/windows-beta-recovery-large.ps1"
+]);
+function allowedLang08Consolidation(path,records,baseBlob,headBlob){
+  if(path===LANG08_REPLACEMENT || !Object.hasOwn(LANG08_OLD_BLOBS,path))return false;
+  const expected=Object.keys(LANG08_OLD_BLOBS).map(p=>({path:p,status:p===LANG08_REPLACEMENT?'M':'D'}));
+  if(records.length!==expected.length || !expected.every(e=>records.some(r=>r.path===e.path&&r.status===e.status)))return false;
+  try {
+    if(!Object.entries(LANG08_OLD_BLOBS).every(([p,id])=>baseBlob(p)===id))return false;
+    if(headBlob(LANG08_REPLACEMENT)!==LANG08_NEW_BLOB)return false;
+    // Exact tree evidence, including the original five witness scripts and
+    // the actual shared unsigned candidate. Missing blobs must reject.
+    return LANG08_PRESERVED.every(p=>{const old=baseBlob(p);return /^[0-9a-f]{40}$/.test(old||'')&&headBlob(p)===old;});
+  }catch{return false;}
+}
+
+// CI-LANG-02: exact three-to-one native workflow replacement, no generic deletion exemption.
+// The original test step bodies/transcript names are retained and the selected outcomes fail closed.
+const NATIVE_LANG_OLD_BLOBS=Object.freeze({
+  ".github/workflows/akula-language-native-ui.yml": "cbe58389924cb85834a756a7cde9529afd20a7e5",
+  ".github/workflows/akula-language-annotation-rebind-native-ui.yml": "36debedaa69d5c67c2662b483b57b3313e0ff54c",
+  ".github/workflows/akula-language-flashcards-native-ui.yml": "e1a92f9a6493678a162524c27b3927b35f936685"
+});
+const NATIVE_LANG_REPLACEMENT=".github/workflows/akula-language-native-ui.yml";
+const NATIVE_LANG_NEW_BLOB="3d398844a6d9921035b668dca42e52a0578856c3";
+const NATIVE_LANG_PRESERVED=Object.freeze([
+  "aquilum-app/native/assets/locales/en.json",
+  "aquilum-app/native/assets/locales/ru.json",
+  "aquilum-app/native/src/app/editor_requests/annotation_manual_rebind_ui.rs",
+  "aquilum-app/native/src/app/editor_requests/study_cards.rs",
+  "aquilum-app/native/src/app/editor_requests/study_choice.rs",
+  "aquilum-app/native/src/app/editor_requests/study_create.rs",
+  "aquilum-app/native/src/app/editor_requests/study_live.rs",
+  "aquilum-app/native/src/app/editor_requests/study_manage.rs",
+  "aquilum-app/native/src/app/editor_requests/study_match.rs",
+  "aquilum-app/native/src/app/editor_requests/study_name_dialog.rs",
+  "aquilum-app/native/src/app/tests/learning.rs",
+  "aquilum-app/native/src/app/tests/learning_annotation_manual_rebind.rs",
+  "aquilum-app/native/src/app/tests/learning_cards.rs",
+  "aquilum-app/native/src/app/tests/learning_choice.rs",
+  "aquilum-app/native/src/app/tests/learning_global.rs",
+  "aquilum-app/native/src/app/tests/learning_live.rs",
+  "aquilum-app/native/src/app/tests/learning_manage.rs",
+  "aquilum-app/native/src/app/tests/learning_match.rs",
+  "aquilum-app/native/src/app/tests/learning_multi.rs",
+  "aquilum-app/native/src/app/tests/mod.rs",
+  "aquilum-app/native/src/note/study.rs"
+]);
+function allowedNativeLangConsolidation(path,records,baseBlob,headBlob){
+  if(path===NATIVE_LANG_REPLACEMENT || !Object.hasOwn(NATIVE_LANG_OLD_BLOBS,path))return false;
+  const expected=Object.keys(NATIVE_LANG_OLD_BLOBS).map(p=>({path:p,status:p===NATIVE_LANG_REPLACEMENT?'M':'D'}));
+  if(records.length!==expected.length || !expected.every(e=>records.some(r=>r.path===e.path&&r.status===e.status)))return false;
+  try {
+    if(!Object.entries(NATIVE_LANG_OLD_BLOBS).every(([p,id])=>baseBlob(p)===id))return false;
+    if(headBlob(NATIVE_LANG_REPLACEMENT)!==NATIVE_LANG_NEW_BLOB)return false;
+    return NATIVE_LANG_PRESERVED.every(p=>{const old=baseBlob(p);return /^[0-9a-f]{40}$/.test(old||'')&&headBlob(p)===old;});
+  }catch{return false;}
+}
+
 function audit(base, head = 'HEAD', cwd = process.cwd()) {
   const records = changedWorkflows(base, head, cwd);
   const errors = [];
@@ -416,7 +494,10 @@ function audit(base, head = 'HEAD', cwd = process.cwd()) {
       const before = git(cwd, 'show', base + ':' + record.path);
       if (prTrigger(before) && topBlock(before, 'concurrency').length > 0) {
         protectedModified++;
-        errors.push(record.path + ': deleted previously protected PR workflow');
+        const blob=(ref,path)=>git(cwd,'rev-parse','--verify',ref+':'+path).trim();
+        if(!allowedLang08Consolidation(record.path,records,p=>blob(base,p),p=>blob(head,p)) &&
+           !allowedNativeLangConsolidation(record.path,records,p=>blob(base,p),p=>blob(head,p)))
+          errors.push(record.path + ': deleted previously protected PR workflow');
       }
       continue;
     }
@@ -490,4 +571,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { topBlock, prEvents, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, allowedTextDeltaMigration, allowedB1b2bMigration, allowedB1b3cMigration, allowedB1c0Migration, changedWorkflows, audit, main };
+module.exports = { topBlock, prEvents, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, allowedTextDeltaMigration, allowedB1b2bMigration, allowedB1b3cMigration, allowedB1c0Migration, allowedLang08Consolidation, allowedNativeLangConsolidation, changedWorkflows, audit, main };

@@ -5,7 +5,7 @@ const cp=require('node:child_process');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const {classify,changed,safeManifestOnly,textDeltaModuleRequired,textDeltaPackFastPath,textDeltaPackBoundaryChanged,updaterSecurityAffected}=require('./ci-rust-scope.cjs');
+const {classify,changed,safeManifestOnly,textDeltaModuleRequired,textDeltaPackFastPath,textDeltaPackBoundaryChanged,updaterSecurityAffected,nodeV1Required}=require('./ci-rust-scope.cjs');
 
 test('pure documentation and CI telemetry do not compile Rust',()=>{
   assert.equal(classify(['README.md','docs/engineering-budgets.md',
@@ -555,4 +555,72 @@ test('only module-only Text Delta source changes can avoid AWS SDK regression',(
     'aquilum-app/core/src/sync/mod.rs',
     'aquilum-app/core/src/sync/s3_transport/pack_probe.rs'])
     assert.equal(textDeltaPackBoundaryChanged([p]),true,'both modes: '+p);
+});
+
+
+test('Node V1 authority and its shared storage dependencies require the opt-in test lane',()=>{
+  const owned=[
+    'aquilum-app/core/src/node_v1/trust/admit.rs',
+    'aquilum-app/core/src/node_v1/fence/put.rs',
+    'aquilum-app/core/src/node_v1/trust/put_tests.rs',
+    'aquilum-app/core/src/node_v1.rs',
+    'aquilum-app/core/src/bin/akula_node.rs',
+    'aquilum-app/core/src/node_replica_auth_lab.rs',
+    'aquilum-app/core/src/node_replica_lab.rs',
+    'aquilum-app/core/src/node_catalog_lab.rs',
+    'aquilum-app/core/src/sync/device_roster_lab.rs',
+    'aquilum-app/core/src/sync/journal.rs',
+    'modules/node-catalog/src/lib.rs',
+    'aquilum-app/core/Cargo.toml','aquilum-app/core/src/lib.rs',
+    'aquilum-app/Cargo.toml','aquilum-app/Cargo.lock',
+    '.github/workflows/app-checks.yml',
+    '.github/workflows/node-v1-branch-smoke.yml',
+    '.github/scripts/ci-rust-scope.cjs',
+    '.github/scripts/ci-rust-scope.test.cjs',
+  ];
+  for(const p of owned){
+    assert.equal(nodeV1Required([p]),true,p);
+    assert.equal(nodeV1Required([p,'README.md','aquilum-app/native/src/main.rs']),true,p);
+  }
+  for(const p of ['README.md','aquilum-app/native/src/main.rs','aquilum-app/core/src/documents/mod.rs',
+      '.github/scripts/ci-run-budget.cjs','modules/text-delta-codec/src/lib.rs'])
+    assert.equal(nodeV1Required([p]),false,p);
+  assert.equal(nodeV1Required([]),false);
+  assert.equal(nodeV1Required(null),true);
+  assert.equal(nodeV1Required(['']),true);
+});
+test('moving Node V1 authority out of its directory retains required CI',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'akula-node-v1-route-'));
+  const git=(...args)=>cp.execFileSync('git',args,{cwd:dir,encoding:'utf8'}).trim();
+  try{
+    git('init','-q');git('config','user.name','CI');git('config','user.email','ci@example.invalid');
+    const before='aquilum-app/core/src/node_v1/trust/admit.rs', after='old/authority.rs';
+    fs.mkdirSync(path.dirname(path.join(dir,before)),{recursive:true});
+    fs.writeFileSync(path.join(dir,before),'fn proof() {}');
+    git('add','.');git('commit','-qm','base');
+    const base=git('rev-parse','HEAD');
+    fs.mkdirSync(path.dirname(path.join(dir,after)),{recursive:true});
+    fs.renameSync(path.join(dir,before),path.join(dir,after));
+    git('add','-A');git('commit','-qm','move');
+    assert.equal(nodeV1Required(changed(base,'HEAD',dir)),true);
+    const cli=cp.execFileSync(process.execPath,[path.join(__dirname,'ci-rust-scope.cjs'),'--base='+base,'--head=HEAD'],{cwd:dir,encoding:'utf8'});
+    assert.ok(cli.split('\n').includes('node_v1_required=true'));
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('Node V1 runs inside required Linux gate with nonempty real trust witnesses',()=>{
+  const yaml=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.ok(yaml.includes('node_v1_required: $'+'{{ steps.scope.outputs.node_v1_required }}'));
+  const runner=yaml.split('  required-tests:\n')[1].split('\n  native-frames:')[0];
+  const step=runner.split('      - name: Require Node V1 signed authorization and durable fence\n')[1];
+  assert.ok(step,'required Node V1 step exists');
+  assert.ok(step.includes("if: needs.classify.outputs.node_v1_required != 'false'"));
+  assert.ok(step.includes('test "$NODE_V1_REQUIRED" = true'));
+  assert.ok(runner.includes("needs.classify.outputs.node_v1_required == 'true'"));
+  assert.ok(step.includes('cargo check --locked -p aquilum-core --features node-v1 --bin akula-node'));
+  assert.ok(step.includes('cargo test --locked -p aquilum-core --lib --features node-v1 node_v1::'));
+  for(const name of ['root_policy_rotation_and_symlink_are_fail_closed','grant_requires_current_signed_roster_and_owner_signature',
+      'signed_put_receipt_and_independent_read_survive_process_restart','wrong_bytes_rogue_peer_read_write_confusion_and_revoke_are_denied',
+      'damaged_durable_blob_cannot_be_served_or_confirmed']) assert.ok(step.includes(name),name);
+  assert.ok(step.includes('set -euo pipefail'));
+  assert.ok(yaml.includes('needs: [classify, required-tests, native-frames, shared-labs]'));
 });

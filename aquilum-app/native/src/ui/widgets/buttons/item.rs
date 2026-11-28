@@ -1,15 +1,16 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::{
-    AccessCtx, AccessEvent, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, Update, UpdateCtx,
-    Widget, WidgetMut, render_text,
+    AccessCtx, MeasureCtx, PaintCtx, PropertiesRef, Widget, WidgetMut, render_text,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, Point, Rect, RoundedRect, Size};
+use masonry::kurbo::{Affine, Axis, Point, Rect, RoundedRect};
 use masonry::layout::{LenReq, Length};
 
 use crate::ui::icons::Icon;
 use crate::ui::tokens::size;
 use crate::ui::widgets::{Press, Pressed};
+use crate::ui::widgets::press::press_events;
 use crate::ui::{text, theme};
 
 pub struct ItemButton {
@@ -42,30 +43,7 @@ impl ItemButton {
 impl Widget for ItemButton {
     type Action = Pressed;
 
-    fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        if self.press.pointer(ctx, event) {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
-    }
-
-    fn on_access_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &AccessEvent) {
-        if event.action == Action::Click {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
-    }
-
-    fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
-        match event {
-            Update::HoveredChanged(_) => ctx.request_paint_only(),
-            Update::FontsChanged => {
-                self.line.clear();
-                ctx.request_layout();
-            }
-            _ => {}
-        }
-    }
-
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
+    press_events!(line);
 
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, len_req: LenReq, _cross: Option<Length>) -> Length {
         match (axis, len_req) {
@@ -74,8 +52,6 @@ impl Widget for ItemButton {
             (Axis::Horizontal, _) => Length::px(size::SIZE_32),
         }
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -109,9 +85,7 @@ impl Widget for ItemButton {
         node.add_action(Action::Click);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
 
 pub fn paint_item_bg(painter: &mut Painter<'_>, bounds: Rect, active: bool, hovered: bool) {

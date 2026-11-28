@@ -1,16 +1,17 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::{
-    AccessCtx, AccessEvent, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, NewWidget, PaintCtx,
-    PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, Update,
-    UpdateCtx, Widget, render_text,
+    AccessCtx, MeasureCtx, NewWidget, PaintCtx,
+    PropertiesRef, Widget, render_text,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, RoundedRect, Size};
+use masonry::kurbo::{Affine, Axis, RoundedRect};
 use masonry::layout::{LenReq, Length};
 use masonry::peniko::Color;
 
 use crate::ui::icons::Icon;
 use crate::ui::tokens::size;
+use crate::ui::widgets::press::press_events;
 use crate::ui::{text, theme};
 
 use super::{Press, Pressed};
@@ -34,13 +35,9 @@ impl IconView {
 impl Widget for IconView {
     type Action = masonry::core::NoAction;
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, _axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(self.container)
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let origin = ctx.content_box().center() - masonry::kurbo::Vec2::new(self.size / 2.0, self.size / 2.0);
@@ -55,9 +52,7 @@ impl Widget for IconView {
 
     fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
 pub struct Chip {
     label: String,
@@ -75,30 +70,7 @@ impl Chip {
 impl Widget for Chip {
     type Action = Pressed;
 
-    fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        if self.press.pointer(ctx, event) {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
-    }
-
-    fn on_access_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &AccessEvent) {
-        if event.action == Action::Click {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
-    }
-
-    fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
-        match event {
-            Update::HoveredChanged(_) => ctx.request_paint_only(),
-            Update::FontsChanged => {
-                self.line.clear();
-                ctx.request_layout();
-            }
-            _ => {}
-        }
-    }
-
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
+    press_events!(line);
 
     fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(match axis {
@@ -106,8 +78,6 @@ impl Widget for Chip {
             Axis::Vertical => size::SIZE_20 + size::SPACE_4 * 2.0,
         })
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -135,7 +105,5 @@ impl Widget for Chip {
         node.add_action(Action::Click);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }

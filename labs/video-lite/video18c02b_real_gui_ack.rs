@@ -30,7 +30,13 @@ pub(crate) mod lab {
     const MAX_RECEIPT: usize = 256;
     const FRAME_DEADLINE: Duration = Duration::from_secs(75);
     const HEADER: &str = "AKULA-WIN-FIRST-PRESENTED-V1";
-    const VERSION: &str = "0.3.21"; // Test generation only, NOT a signed release.
+    pub(crate) fn candidate_version() -> Result<&'static str, String> {
+        include_str!("../../aquilum-app/native/Cargo.toml")
+            .split_once("[package]\nname = \"aquilum-native\"\nversion = \"")
+            .and_then(|(_, tail)| tail.split_once('"'))
+            .map(|(version, _)| version)
+            .ok_or_else(|| "missing tracked native candidate version".into())
+    }
     const REQUIRED: [&str; 5] = [
         "akula-app.exe", "shiva-pdf-preview.exe", "akula-video-mux.exe",
         "akula-yt-dlp.exe", "akula-quickjs.exe",
@@ -238,7 +244,7 @@ pub(crate) mod lab {
         }
         Ok((reader,writer))
     }
-    fn environment(writer: usize, random: &str, digest: &str) -> Vec<u16> {
+    fn environment(writer: usize, random: &str, digest: &str, version: &str) -> Vec<u16> {
         let mut vars:Vec<(String,String)> = std::env::vars_os().filter_map(|(k,v)| {
             let name=k.to_string_lossy().into_owned();
             if name.to_ascii_uppercase().starts_with("AKULA_VIDEO18C_") {
@@ -251,7 +257,7 @@ pub(crate) mod lab {
             ("AKULA_VIDEO18C_ACK_WRITE_HANDLE".into(), writer.to_string()),
             ("AKULA_VIDEO18C_ACK_NONCE".into(), random.to_string()),
             ("AKULA_VIDEO18C_GENERATION_SHA256".into(), digest.to_string()),
-            ("AKULA_VIDEO18C_GENERATION_VERSION".into(), VERSION.into()),
+            ("AKULA_VIDEO18C_GENERATION_VERSION".into(), version.into()),
             ("AKULA_VIDEO18C_CONTROLLER_PID".into(),
              unsafe {GetCurrentProcessId()}.to_string()),
         ]);
@@ -310,7 +316,8 @@ pub(crate) mod lab {
         let (reader,writer)=pipe()?;
         let random=nonce()?;
         if !lower_hex(&random,32) {return Err("invalid random challenge".into());}
-        let mut env=environment(writer.0 as usize,&random,digest);
+        let version=candidate_version()?;
+        let mut env=environment(writer.0 as usize,&random,digest,version);
         let app_wide=wide(app.as_os_str());
         let current=app.parent().unwrap();
         let cwd=wide(current.as_os_str());
@@ -391,7 +398,7 @@ pub(crate) mod lab {
                 "00000000000000000000000000000000"
             }
         } else {&random};
-        let expected=format!("{HEADER}\t{expected_nonce}\t{VERSION}\t{digest}\t{}\n",pi.pid);
+        let expected=format!("{HEADER}\t{expected_nonce}\t{version}\t{digest}\t{}\n",pi.pid);
         // The exact bytes are compared with external state, not with child
         // asserted identity alone. A wrong-nonce trial must fail closed.
         let valid=receipt==expected.as_bytes() && creation_time(child.0.0)?==first_creation;

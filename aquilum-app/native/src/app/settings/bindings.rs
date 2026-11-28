@@ -155,13 +155,7 @@ fn caret(root: &RenderRoot, field: WidgetId) -> usize {
     root.get_widget(field).and_then(|w| w.downcast::<TextEditor>().map(|e| e.inner().caret_offset())).unwrap_or(usize::MAX)
 }
 
-pub(super) fn same_setter(a: Setter, b: Setter) -> bool {
-    match (a, b) {
-        (Setter::Config(x), Setter::Config(y)) => std::ptr::fn_addr_eq(x, y),
-        (Setter::Scale, Setter::Scale) | (Setter::HomePage, Setter::HomePage) | (Setter::Autostart, Setter::Autostart) => true,
-        _ => false,
-    }
-}
+pub(super) use crate::ui::settings::schema::same_setter;
 
 fn update_steps(root: &mut RenderRoot, minus: Option<WidgetId>, plus: Option<WidgetId>, number: &schema::Number) {
     if let Some(minus) = minus {

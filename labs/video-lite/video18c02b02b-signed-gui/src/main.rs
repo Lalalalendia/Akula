@@ -94,7 +94,7 @@ mod signed_lab {
         // Only the feature-restricted ephemeral-key path may create SignedFive;
         // cryptographic authentication happens before parsing version/digests.
         let signed = admit_hosted_lab_signature(&bytes, &detached, &key, "0.3.20")?;
-        if signed.version() != "0.3.21" {
+        if signed.version() != super::gui_launcher::lab::candidate_version()? {
             return Err("unexpected lab-only signed candidate version".into());
         }
         if signed.source_commit() != required("EXPECTED_HEAD_SHA")? {

@@ -1,6 +1,5 @@
-use masonry::accesskit::{Node, Role};
-use masonry::core::{AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PropertiesRef, RegisterCtx, Widget, WidgetPod};
-use masonry::imaging::Painter;
+use crate::ui::widgets::layout::contract::passive_surface;
+use masonry::core::{ChildrenIds, LayoutCtx, MeasureCtx, NewWidget, PropertiesRef, RegisterCtx, Widget, WidgetPod};
 use masonry::kurbo::{Axis, Point, Size};
 use masonry::layout::{LayoutSize, LenDef, LenReq, Length, SizeDef};
 
@@ -84,13 +83,7 @@ impl Widget for Wrap {
         }
     }
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _painter: &mut Painter<'_>) {}
-
-    fn accessibility_role(&self) -> Role {
-        Role::GenericContainer
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
+    passive_surface!();
 
     fn children_ids(&self) -> ChildrenIds {
         self.children.iter().map(WidgetPod::id).collect()

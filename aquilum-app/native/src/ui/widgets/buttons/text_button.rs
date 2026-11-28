@@ -1,10 +1,9 @@
-use masonry::accesskit::{Action, Node, Role};
+use crate::ui::widgets::layout::contract::{leaf_widget, labeled_click};
 use masonry::core::{
-    AccessCtx, AccessEvent, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, Update, UpdateCtx,
-    Widget, WidgetMut, render_text,
+    MeasureCtx, PaintCtx, PropertiesRef, Widget, WidgetMut, render_text,
 };
 use masonry::imaging::{Composite, GroupRef, PaintSink, Painter};
-use masonry::kurbo::{Affine, Axis, Point, RoundedRect, Size};
+use masonry::kurbo::{Affine, Axis, Point, RoundedRect};
 use masonry::layout::{LenReq, Length};
 use masonry::peniko::BlendMode;
 
@@ -12,6 +11,7 @@ use super::{ButtonSize, Variant, paint_primary};
 use crate::ui::icons::Icon;
 use crate::ui::tokens::{number, size};
 use crate::ui::widgets::{Press, Pressed};
+use crate::ui::widgets::press::press_events;
 use crate::ui::{text, theme};
 
 pub struct TextButton {
@@ -103,30 +103,7 @@ impl TextButton {
 impl Widget for TextButton {
     type Action = Pressed;
 
-    fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        if self.press.pointer(ctx, event) {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
-    }
-
-    fn on_access_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &AccessEvent) {
-        if event.action == Action::Click {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
-    }
-
-    fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
-        match event {
-            Update::HoveredChanged(_) => ctx.request_paint_only(),
-            Update::FontsChanged => {
-                self.line.clear();
-                ctx.request_layout();
-            }
-            _ => {}
-        }
-    }
-
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
+    press_events!(line);
 
     fn measure(&mut self, ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         match axis {
@@ -138,8 +115,6 @@ impl Widget for TextButton {
         }
     }
 
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
-
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         if ctx.is_disabled() {
             let group = GroupRef::new().with_composite(Composite::new(BlendMode::default(), number::OPACITY_50 as f32));
@@ -149,16 +124,7 @@ impl Widget for TextButton {
         }
     }
 
-    fn accessibility_role(&self) -> Role {
-        Role::Button
-    }
+    labeled_click!(Button, label);
 
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, node: &mut Node) {
-        node.set_label(self.label.clone());
-        node.add_action(Action::Click);
-    }
-
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }

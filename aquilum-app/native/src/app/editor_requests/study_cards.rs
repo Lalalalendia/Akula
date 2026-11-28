@@ -13,6 +13,7 @@ use masonry::kurbo::Point;
 
 use super::super::{App, Popup};
 use super::study_load::StudyDeckSnapshot;
+use super::study::{bounded_text, feedback_answer};
 use crate::i18n::{t, t_with};
 use crate::ui::dialog::{ConfirmDialog, DialogAnswer, DialogIds};
 use crate::ui::menu::MenuChoice;
@@ -20,14 +21,7 @@ use crate::ui::menu::MenuChoice;
 const MAX_PICKER_COLLECTIONS: usize = 64;
 const MAX_CARD_TEXT: usize = 256;
 
-fn compact(text: &str) -> String {
-    let trimmed = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if trimmed.chars().count() > MAX_CARD_TEXT {
-        trimmed.chars().take(MAX_CARD_TEXT).collect::<String>() + "…"
-    } else {
-        trimmed
-    }
-}
+fn compact(text: &str) -> String { bounded_text(text, MAX_CARD_TEXT) }
 
 impl App {
     pub(in crate::app) fn open_study_picker(&mut self, root: &mut RenderRoot) {
@@ -153,13 +147,8 @@ impl App {
         snapshot: Box<StudyDeckSnapshot>, index: usize, revealed: bool,
         action: &ErasedAction,
     ) {
-        if action.downcast_ref::<DialogAnswer>() == Some(&DialogAnswer::Closed) {
-            root.remove_layer(dialog.layer);
-            return;
-        }
-        match dialog.answer(id, action) {
+        match feedback_answer(root, id, &dialog, action) {
             Some(answer) => {
-                root.remove_layer(dialog.layer);
                 if answer != DialogAnswer::Confirm { return; }
                 // show_study_card performs the single final pinned source
                 // revalidation immediately before rendering the next state.

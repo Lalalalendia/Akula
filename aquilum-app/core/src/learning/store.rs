@@ -10,7 +10,8 @@
 
 use std::path::Path;
 
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::Connection;
+#[cfg(test)] use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::collections::{self, CollectionError, Registry};
@@ -106,43 +107,20 @@ impl RegistryStore {
     /// Only host-owned app-data paths are valid. Never use a Markdown vault
     /// path or a path obtained from a plugin / imported table cell.
     pub fn open(app_data_file: &Path) -> Result<Self, StoreError> {
-        let mut connection = Connection::open(app_data_file).map_err(|_| StoreError::Storage)?;
-        connection.execute_batch(
-            "PRAGMA foreign_keys=ON;
-             PRAGMA journal_mode=WAL;
-             PRAGMA synchronous=FULL;
-             PRAGMA busy_timeout=3000;",
-        ).map_err(|_| StoreError::Storage)?;
-        let schema: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))
-            .map_err(|_| StoreError::Storage)?;
-        if schema == 0 {
-            // Refuse to take ownership of an unrelated existing database.
-            let others: i64 = connection.query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-                [], |row| row.get(0),
-            ).map_err(|_| StoreError::Storage)?;
-            if others != 0 {
-                return Err(StoreError::UnsupportedSchema);
-            }
-            let empty = encode(&Registry { collections: Vec::new(), tables: Vec::new() })?;
-            let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)
-                .map_err(|_| StoreError::Storage)?;
-            tx.execute_batch(
-                "CREATE TABLE language_registry (
+        let connection = super::sqlite_store::open(
+            app_data_file, VERSION,
+            "CREATE TABLE language_registry (
                     id INTEGER PRIMARY KEY CHECK(id=1),
                     revision INTEGER NOT NULL CHECK(revision>=0),
                     payload BLOB NOT NULL
                  );",
-            ).map_err(|_| StoreError::Storage)?;
-            tx.execute(
-                "INSERT INTO language_registry(id,revision,payload) VALUES(1,0,?1)",
-                params![empty],
-            ).map_err(|_| StoreError::Storage)?;
-            tx.execute_batch("PRAGMA user_version=1;").map_err(|_| StoreError::Storage)?;
-            tx.commit().map_err(|_| StoreError::Storage)?;
-        } else if schema != VERSION {
-            return Err(StoreError::UnsupportedSchema);
-        }
+            "INSERT INTO language_registry(id,revision,payload) VALUES(1,0,?1)",
+            || encode(&Registry { collections: Vec::new(), tables: Vec::new() }),
+        ).map_err(|error| match error {
+            super::sqlite_store::OpenError::Storage => StoreError::Storage,
+            super::sqlite_store::OpenError::UnsupportedSchema => StoreError::UnsupportedSchema,
+            super::sqlite_store::OpenError::Payload(error) => error,
+        })?;
         let store = Self { connection };
         // Never overwrite or silently reset an unsupported/corrupt file.
         store.load()?;
@@ -162,27 +140,17 @@ impl RegistryStore {
     /// the revision obtained from load(), not invent a new one.
     pub fn save(&mut self, expected_revision: u64, registry: &Registry) -> Result<u64, StoreError> {
         let payload = encode(registry)?;
-        let tx = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|_| StoreError::Storage)?;
-        let (current, previous_payload): (i64, Vec<u8>) = tx.query_row(
+        super::sqlite_replace::replace(
+            &mut self.connection, expected_revision, payload,
             "SELECT revision,payload FROM language_registry WHERE id=1",
-            [], |r| Ok((r.get(0)?, r.get(1)?)),
-        ).map_err(|_| StoreError::CorruptStore)?;
-        // Refuse to replace data corrupted after this connection was opened.
-        decode(&previous_payload)?;
-        if u64::try_from(current).map_err(|_| StoreError::CorruptStore)? != expected_revision {
-            return Err(StoreError::StaleRevision);
-        }
-        let next = current.checked_add(1).ok_or(StoreError::RevisionExhausted)?;
-        let updated = tx.execute(
             "UPDATE language_registry SET revision=?1,payload=?2 WHERE id=1 AND revision=?3",
-            params![next, payload, current],
-        ).map_err(|_| StoreError::Storage)?;
-        if updated != 1 {
-            return Err(StoreError::StaleRevision);
-        }
-        tx.commit().map_err(|_| StoreError::Storage)?;
-        u64::try_from(next).map_err(|_| StoreError::RevisionExhausted)
+            decode, |error| match error {
+                super::sqlite_replace::ReplaceError::Storage => StoreError::Storage,
+                super::sqlite_replace::ReplaceError::Corrupt => StoreError::CorruptStore,
+                super::sqlite_replace::ReplaceError::Stale => StoreError::StaleRevision,
+                super::sqlite_replace::ReplaceError::Exhausted => StoreError::RevisionExhausted,
+            },
+        )
     }
 }
 

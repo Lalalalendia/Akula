@@ -1,12 +1,13 @@
+use crate::ui::widgets::layout::contract::leaf_widget;
 use masonry::accesskit::{Action, Node, Role};
 use masonry::core::keyboard::KeyState;
 use masonry::core::{
-    AccessCtx, AccessEvent, ChildrenIds, CursorIcon, EventCtx, LayoutCtx, MeasureCtx, PaintCtx,
-    PointerButton, PointerEvent, PropertiesMut, PropertiesRef, QueryCtx, RegisterCtx, TextEvent,
+    AccessCtx, AccessEvent, CursorIcon, EventCtx, MeasureCtx, PaintCtx,
+    PointerButton, PointerEvent, PropertiesMut, PropertiesRef, QueryCtx, TextEvent,
     Update, UpdateCtx, Widget, WidgetMut, render_text,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, Point, Rect, Size, Vec2};
+use masonry::kurbo::{Affine, Axis, Point, Rect, Vec2};
 use masonry::layout::{LenReq, Length};
 use masonry::parley::{Affinity, Cursor, Selection};
 
@@ -265,16 +266,12 @@ impl Widget for Caption {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         match axis {
             Axis::Vertical => Length::px(size::SIZE_20),
             Axis::Horizontal => Length::ZERO,
         }
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let bounds = ctx.content_box();
@@ -318,9 +315,7 @@ impl Widget for Caption {
         node.set_value(self.text.clone());
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
 
 #[cfg(test)]

@@ -843,3 +843,111 @@ fn situation_22_home_stats_table_all_five_rows() {
     assert_eq!(plain(&output.rows[13]), "7");
     assert_eq!(plain(&output.rows[14]), "\u{2014}");
 }
+
+#[test]
+fn repeating_operator_levels_preserve_precedence_and_left_associativity() {
+    use super::ast::{BinaryOp::*, Expr, Shape, UnaryOp};
+    fn value(source: &str) -> Expr {
+        let query = parse(&format!("TABLE WITHOUT ID {source} AS result")).unwrap();
+        match query.shape {
+            Shape::Table { columns, show_path: false } => {
+                assert_eq!(columns.len(), 1);
+                columns.into_iter().next().unwrap().value
+            }
+            _ => panic!("expected one expression column"),
+        }
+    }
+    let v = |name: &str| Expr::Variable(name.to_owned());
+    let bin = |operator, left, right| Expr::Binary {
+        operator, left: Box::new(left), right: Box::new(right),
+    };
+    assert_eq!(value("a - b - c"), bin(Subtract, bin(Subtract, v("a"), v("b")), v("c")));
+    assert_eq!(value("a / b % c * d"), bin(Multiply, bin(Modulo, bin(Divide, v("a"), v("b")), v("c")), v("d")));
+    assert_eq!(value("a + b * c"), bin(Add, v("a"), bin(Multiply, v("b"), v("c"))));
+    assert_eq!(value("(a + b) * c"), bin(Multiply, bin(Add, v("a"), v("b")), v("c")));
+    assert_eq!(value("a OR b || c AND d && e"),
+        bin(Or, bin(Or, v("a"), v("b")), bin(And, bin(And, v("c"), v("d")), v("e"))));
+    assert_eq!(value("-a * b < c + d"),
+        bin(Less, bin(Multiply, Expr::Unary { operator: UnaryOp::Negate, operand: Box::new(v("a")) }, v("b")),
+            bin(Add, v("c"), v("d"))));
+    assert_eq!(value("a <= b"), bin(LessOrEqual, v("a"), v("b")));
+    eprintln!("AKULA_REUSE15_DATAVIEW_PRECEDENCE_PASS");
+}
+
+#[test]
+fn repeating_operator_levels_preserve_syntax_failures_and_clause_boundary() {
+    use super::ast::{Clause, Shape};
+    // A chain must not consume query clauses, column delimiters or a second comparison.
+    let parsed = parse("TABLE WITHOUT ID a + b AS sum, c * d AS product WHERE a > b LIMIT 2").unwrap();
+    assert!(matches!(parsed.shape, Shape::Table { columns, show_path: false } if columns.len() == 2));
+    assert!(matches!(parsed.clauses.as_slice(), [Clause::Where(_), Clause::Limit(2)]));
+    assert_eq!(parse("TABLE WITHOUT ID a +").unwrap_err(),
+        "Запрос кончился там, где ожидается значение");
+    assert_eq!(parse("TABLE WITHOUT ID a OR").unwrap_err(),
+        "Запрос кончился там, где ожидается значение");
+    assert_eq!(parse("TABLE WITHOUT ID a < b < c").unwrap_err(),
+        "Лишнее в запросе после разбора: «<»");
+    eprintln!("AKULA_REUSE15_DATAVIEW_BOUNDARY_PASS");
+}
+
+#[test]
+fn comma_lists_preserve_empty_nested_calls_columns_and_sort_keys() {
+    use super::ast::{Clause, Direction, Expr, Shape, SortKey};
+    use super::value::Value;
+    let parsed = parse("TABLE WITHOUT ID list(), [], LIST(1, 2), [a, f(b, c)], f([a, b], g(), dur(1 week)) AS nested SORT a DESC, b ASC LIMIT 2").unwrap();
+    let Shape::Table { columns, show_path: false } = parsed.shape else { panic!("expected table") };
+    let call = |name: &str, arguments: Vec<Expr>| Expr::Call { name: name.to_owned(), arguments };
+    let var = |name: &str| Expr::Variable(name.to_owned());
+    let num = |n| Expr::Literal(Value::Number(n));
+    assert_eq!(columns.len(), 5);
+    assert_eq!(columns[0].value, call("list", vec![]));
+    assert_eq!(columns[1].value, columns[0].value);
+    assert_eq!(columns[2].value, call("list", vec![num(1.0), num(2.0)]));
+    assert_eq!(columns[3].value, call("list", vec![var("a"), call("f", vec![var("b"), var("c")])]));
+    assert_eq!(columns[4].value, call("f", vec![
+        call("list", vec![var("a"), var("b")]), call("g", vec![]),
+        call("dur", vec![Expr::Literal(Value::Text("1 week".to_owned()))]),
+    ]));
+    assert_eq!(columns[4].title, "nested");
+    assert_eq!(parsed.clauses, vec![Clause::Sort(vec![
+        SortKey { value: var("a"), direction: Direction::Descending },
+        SortKey { value: var("b"), direction: Direction::Ascending },
+    ]), Clause::Limit(2)]);
+    let empty = parse("TABLE WITHOUT ID LIMIT 2").unwrap();
+    assert!(matches!(empty.shape, Shape::Table { columns, show_path: false } if columns.is_empty()));
+    eprintln!("AKULA_REUSE16_DATAVIEW_LISTS_PASS");
+}
+
+#[test]
+fn comma_lists_preserve_delimiter_errors_and_required_items() {
+    for (source, error) in [
+        ("f(a,)", "Здесь ожидается значение, а не «)»"),
+        ("[a,]", "Здесь ожидается значение, а не «]»"),
+        ("f(a", "Запрос кончился, а ожидается закрывающая «)»"),
+        ("[a", "Запрос кончился, а ожидается закрывающая «]»"),
+        ("f(a b)", "Ожидается закрывающая «)», а не «b»"),
+        ("a,", "Запрос кончился там, где ожидается значение"),
+        ("a SORT a,", "Запрос кончился там, где ожидается значение"),
+        ("a SORT", "Запрос кончился там, где ожидается значение"),
+    ] {
+        assert_eq!(parse(&format!("TABLE WITHOUT ID {source}")).unwrap_err(), error, "{source}");
+    }
+    eprintln!("AKULA_REUSE16_DATAVIEW_DELIMITERS_PASS");
+}
+
+#[test]
+fn source_chains_reuse_precedence_without_changing_source_grammar() {
+    use super::ast::{Clause, Source};
+    let f = |path: &str| Source::Folder(path.into());
+    let and = |a, b| Source::And(Box::new(a), Box::new(b));
+    let or = |a, b| Source::Or(Box::new(a), Box::new(b));
+    let p = parse(r#"LIST FROM "a" OR "b" || "c" AND "d" && NOT "e" LIMIT 3"#).unwrap();
+    assert_eq!(p.source, Some(or(or(f("a"), f("b")), and(and(f("c"), f("d")), Source::Not(Box::new(f("e")))))));
+    assert_eq!(p.clauses, vec![Clause::Limit(3)]);
+    let p = parse(r#"LIST FROM ("a" OR "b") AND "c""#).unwrap();
+    assert_eq!(p.source, Some(and(or(f("a"), f("b")), f("c"))));
+    for text in [r#"LIST FROM "a" OR"#, r#"LIST FROM "a" &&"#, r#"LIST FROM ("a" OR "b""#] {
+        assert!(parse(text).is_err(), "invalid source chain: {text}");
+    }
+    eprintln!("AKULA_REUSE23_SOURCE_PRECEDENCE_PASS");
+}

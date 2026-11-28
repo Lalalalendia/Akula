@@ -33,6 +33,7 @@ jobs:
       perf_core_changed: ${{ steps.scope.outputs.perf_core_changed }}
       b1_shared_compat: ${{ steps.scope.outputs.b1_shared_compat }}
       node_shared_compat: ${{ steps.scope.outputs.node_shared_compat }}
+      node_v1_required: ${{ steps.scope.outputs.node_v1_required }}
       shared_core_cargo_risky: ${{ steps.scope.outputs.shared_core_cargo_risky }}
       shared_core_lib_risky: ${{ steps.scope.outputs.shared_core_lib_risky }}
       shared_lock_risky: ${{ steps.scope.outputs.shared_lock_risky }}
@@ -241,7 +242,7 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
 
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true' || needs.classify.outputs.text_delta_module_required == 'true'
+        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true' || needs.classify.outputs.text_delta_module_required == 'true' || needs.classify.outputs.node_v1_required == 'true'
 
 
       # Text Delta is outside the Cargo workspace. Tests execute in the existing
@@ -299,7 +300,7 @@ jobs:
 
       - name: Restore shared main Rust cache (read-only on PRs)
         uses: swatinem/rust-cache@v2
-        if: needs.classify.outputs.mode != 'none'
+        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.node_v1_required == 'true'
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           shared-key: akula-main-gate-v1
@@ -424,6 +425,30 @@ jobs:
           cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
           cargo test --locked -p aquilum-core --features node-lab \
             --test headless_node_d1 --test headless_node_d2 --test node_catalog_lab -- --nocapture
+
+      # Node V1 remains default-OFF. This mandatory Linux test is independent
+      # of the temporary integration branch and never installs or starts a service.
+      - name: Require Node V1 signed authorization and durable fence
+        if: needs.classify.outputs.node_v1_required != 'false'
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          NODE_V1_REQUIRED: ${{ needs.classify.outputs.node_v1_required }}
+        run: |
+          set -euo pipefail
+          test "$NODE_V1_REQUIRED" = true
+          cargo check --locked -p aquilum-core --features node-v1 --bin akula-node
+          log="$RUNNER_TEMP/akula-node-v1-required.log"
+          cargo test --locked -p aquilum-core --lib --features node-v1 node_v1:: -- --nocapture --test-threads=1 2>&1 | tee "$log"
+          for proof in \
+            node_v1::trust::tests::root_policy_rotation_and_symlink_are_fail_closed \
+            node_v1::trust::tests::grant_requires_current_signed_roster_and_owner_signature \
+            node_v1::trust::put_tests::signed_put_receipt_and_independent_read_survive_process_restart \
+            node_v1::trust::put_tests::wrong_bytes_rogue_peer_read_write_confusion_and_revoke_are_denied \
+            node_v1::trust::put_tests::damaged_durable_blob_cannot_be_served_or_confirmed; do
+            grep -Fxq "test $proof ... ok" "$log"
+          done
+          echo 'AKULA_NODE_V1_REQUIRED_PASS signed_read=1 signed_put=1 revoke=1 durable_fence=1'
 
       # RELEASE-SIGNED-CANDIDATE-01: real CLI Minisign -> native Rust interop.
       # Reuse the existing required Rust runner rather than queuing another job.

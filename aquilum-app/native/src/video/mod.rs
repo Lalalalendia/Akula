@@ -1,5 +1,7 @@
 #[cfg(windows)] pub(crate) mod optional_ytdlp;
-pub(crate) mod download;
+#[cfg(any(windows, test))]
+pub(crate) mod optional_tool_transfer;
+pub(crate) mod captions; pub(crate) mod preview; pub(crate) mod download; mod worker_process;
 pub(crate) mod library;
 pub(crate) mod light;
 pub(crate) mod queue; mod queue_dispatch;
@@ -33,6 +35,7 @@ pub fn poster(path: &Path) -> Option<ImageBrush> {
 #[cfg(target_os = "macos")]
 pub use self::macos::poster;
 const MOVED: f64 = 0.05;
+const SEEK_SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
 #[derive(Clone, Debug, Default)]
 pub struct State {
     pub frame: Option<ImageBrush>,
@@ -44,6 +47,9 @@ pub struct State {
 struct Player {
     engine: Engine,
     state: State,
+    source: Option<aquilum_core::background_jobs::speech::playback::MediaSource>,
+    caption: Option<std::sync::Arc<str>>,
+    seek_until: Option<std::time::Instant>,
 }
 impl Player {
     fn tick(&mut self) -> bool {
@@ -55,7 +61,10 @@ impl Player {
         let (playing, position, duration, muted) = self.engine.status();
         let moved = (position - self.state.position).abs() > MOVED || playing != self.state.playing || muted != self.state.muted;
         self.state = State { frame: self.state.frame.take(), playing, position, duration, muted };
-        changed || moved
+        let cue = captions::for_source(self.source.as_ref(), position);
+        let caption_changed = self.caption != cue;
+        self.caption = cue;
+        changed || moved || caption_changed
     }
 }
 
@@ -71,8 +80,10 @@ pub fn toggle(path: &Path) -> bool {
     PLAYERS.with(|players| {
         let mut players = players.borrow_mut();
         if !players.contains_key(path) {
+            let source = aquilum_core::background_jobs::speech::playback::MediaSource::open(path).ok();
             let Some(engine) = Engine::open(path) else { return false };
-            players.insert(path.to_path_buf(), Player { engine, state: State::default() });
+            let source = source.filter(|media| media.is_current());
+            players.insert(path.to_path_buf(), Player { engine, state: State::default(), source, caption: None, seek_until: None });
         }
         if let Some(player) = players.get_mut(path) {
             player.engine.toggle();
@@ -86,6 +97,7 @@ pub fn seek(path: &Path, fraction: f64) {
     PLAYERS.with(|players| {
         if let Some(player) = players.borrow_mut().get_mut(path) {
             player.engine.seek(fraction);
+            player.seek_until = Some(std::time::Instant::now() + SEEK_SETTLE);
             player.tick();
         }
     });
@@ -129,7 +141,7 @@ impl Owned {
             for path in &self.0 {
                 if let Some(player) = players.get_mut(path) {
                     changed |= player.tick();
-                    playing |= player.state.playing;
+                    playing |= player.state.playing || player.seek_until.is_some_and(|end| std::time::Instant::now() < end);
                 }
             }
             (changed, playing)
@@ -146,7 +158,6 @@ impl Owned {
         });
     }
 }
-
 impl Drop for Owned {
     fn drop(&mut self) {
         self.stop();
@@ -154,29 +165,5 @@ impl Drop for Owned {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    #[ignore]
-    fn plays_a_real_file() {
-        let path = std::path::PathBuf::from(std::env::var("AQ_VIDEO").unwrap());
-        assert!(super::toggle(&path), "движок не открылся");
-        assert!(super::state(&path).unwrap().playing);
-        super::toggle(&path);
-        assert!(!super::state(&path).unwrap().playing);
-        super::toggle(&path);
-        assert!(super::state(&path).unwrap().playing);
-        let mut owned = super::Owned::default();
-        owned.add(path.clone());
-        let mut frames = 0;
-        for _ in 0..200 {
-            std::thread::sleep(std::time::Duration::from_millis(16));
-            let (changed, _) = owned.tick();
-            if changed && super::state(&path).and_then(|s| s.frame).is_some() {
-                frames += 1;
-            }
-        }
-        let state = super::state(&path).unwrap();
-        eprintln!("кадров {frames}, позиция {:.2} из {:.2}, играет {}", state.position, state.duration, state.playing);
-        assert!(frames > 0);
-    }
-}
+#[path = "playback_tests.rs"]
+mod tests;

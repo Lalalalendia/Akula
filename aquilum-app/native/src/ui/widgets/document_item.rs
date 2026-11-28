@@ -1,11 +1,12 @@
-use masonry::accesskit::{Action, Node, Role};
+use crate::ui::widgets::layout::contract::{leaf_widget, labeled_click};
+use masonry::accesskit::Action;
 use masonry::core::{
-    AccessCtx, AccessEvent, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, NewWidget, PaintCtx,
-    PointerButton, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, Update,
+    AccessEvent, EventCtx, MeasureCtx, NewWidget, PaintCtx,
+    PointerButton, PointerEvent, PropertiesMut, PropertiesRef, Update,
     UpdateCtx, Widget, render_text,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, Axis, Point, Size};
+use masonry::kurbo::{Affine, Axis, Point};
 use masonry::layout::{LenReq, Length};
 
 use crate::ui::tokens::size;
@@ -82,8 +83,6 @@ impl Widget for DocumentItem {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, len_req: LenReq, _cross: Option<Length>) -> Length {
         match (axis, len_req) {
             (Axis::Vertical, _) => Length::px(size::SIZE_32),
@@ -91,8 +90,6 @@ impl Widget for DocumentItem {
             (Axis::Horizontal, _) => Length::ZERO,
         }
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -113,16 +110,7 @@ impl Widget for DocumentItem {
         render_text(painter, Affine::translate((bounds.x0 + pad, y)), layout, &[t.text_link.into()], true);
     }
 
-    fn accessibility_role(&self) -> Role {
-        Role::Link
-    }
+    labeled_click!(Link, label);
 
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, node: &mut Node) {
-        node.set_label(self.label.clone());
-        node.add_action(Action::Click);
-    }
-
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }

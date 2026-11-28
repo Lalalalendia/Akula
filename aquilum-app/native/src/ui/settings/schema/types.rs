@@ -1,19 +1,6 @@
-use aquilum_core::settings::models::AppConfig;
-#[derive(Clone, Debug, PartialEq)]
-pub enum Value {
-    Bool(bool),
-    Index(usize),
-    Number(f64),
-    Text(String),
-}
-
-#[derive(Clone, Copy)]
-pub enum Setter {
-    Config(fn(&mut AppConfig, &Value)),
-    Scale,
-    HomePage,
-    Autostart,
-}
+mod setter;
+pub use setter::{Setter, Value};
+pub(crate) use setter::same_setter;
 
 mod context;
 pub use context::Context;

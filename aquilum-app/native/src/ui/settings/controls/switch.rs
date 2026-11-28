@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widgets::layout::contract::leaf_widget;
 
 pub struct Switch {
     on: bool,
@@ -51,7 +52,7 @@ impl Widget for Switch {
     fn on_anim_frame(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, interval: u64) {
         let goal = if self.on { 1.0 } else { 0.0 };
         let step = crate::ui::motion::step(interval as f64 / 1e9, crate::ui::motion::NORMAL);
-        self.travel = if self.travel < goal { (self.travel + step).min(goal) } else { (self.travel - step).max(goal) };
+        self.travel = crate::ui::motion::approach(self.travel, goal, step);
         ctx.request_paint_only();
         if self.travel != goal {
             ctx.request_anim_frame();
@@ -70,16 +71,12 @@ impl Widget for Switch {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(match axis {
             Axis::Horizontal => size::SWITCH_WIDTH,
             Axis::Vertical => size::SWITCH_HEIGHT,
         })
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -112,7 +109,5 @@ impl Widget for Switch {
         }
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }

@@ -15,24 +15,28 @@ pub fn expression(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
     or_level(cursor)
 }
 
-fn or_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
-    let mut left = and_level(cursor)?;
-    loop {
-        if !cursor.take_symbol(Symbol::PipePipe) && !cursor.take_word("or") {
-            return Ok(left);
-        }
-        left = binary(BinaryOp::Or, left, and_level(cursor)?);
+// Expression and source precedence levels fold left. Comparison deliberately
+// stays separate: its grammar accepts only a single comparison operator.
+pub(super) fn left_chain<T, O: Copy>(
+    cursor: &mut Cursor<'_>,
+    operand: impl Fn(&mut Cursor<'_>) -> Result<T, String>,
+    operators: &[(Symbol, Option<&str>, O)], combine: impl Fn(O, T, T) -> T,
+) -> Result<T, String> {
+    let mut left = operand(cursor)?;
+    while let Some(operator) = operators.iter().find_map(|&(symbol, word, op)| {
+        (cursor.take_symbol(symbol) || word.is_some_and(|w| cursor.take_word(w))).then_some(op)
+    }) {
+        left = combine(operator, left, operand(cursor)?);
     }
+    Ok(left)
+}
+
+fn or_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
+    left_chain(cursor, and_level, &[(Symbol::PipePipe, Some("or"), BinaryOp::Or)], binary)
 }
 
 fn and_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
-    let mut left = compare_level(cursor)?;
-    loop {
-        if !cursor.take_symbol(Symbol::AmpAmp) && !cursor.take_word("and") {
-            return Ok(left);
-        }
-        left = binary(BinaryOp::And, left, compare_level(cursor)?);
-    }
+    left_chain(cursor, compare_level, &[(Symbol::AmpAmp, Some("and"), BinaryOp::And)], binary)
 }
 
 fn compare_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
@@ -56,33 +60,18 @@ fn compare_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
 }
 
 fn additive_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
-    let mut left = multiplicative_level(cursor)?;
-    loop {
-        let operator = if cursor.take_symbol(Symbol::Plus) {
-            BinaryOp::Add
-        } else if cursor.take_symbol(Symbol::Minus) {
-            BinaryOp::Subtract
-        } else {
-            return Ok(left);
-        };
-        left = binary(operator, left, multiplicative_level(cursor)?);
-    }
+    left_chain(cursor, multiplicative_level, &[
+        (Symbol::Plus, None, BinaryOp::Add),
+        (Symbol::Minus, None, BinaryOp::Subtract),
+    ], binary)
 }
 
 fn multiplicative_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
-    let mut left = unary_level(cursor)?;
-    loop {
-        let operator = if cursor.take_symbol(Symbol::Star) {
-            BinaryOp::Multiply
-        } else if cursor.take_symbol(Symbol::Slash) {
-            BinaryOp::Divide
-        } else if cursor.take_symbol(Symbol::Percent) {
-            BinaryOp::Modulo
-        } else {
-            return Ok(left);
-        };
-        left = binary(operator, left, unary_level(cursor)?);
-    }
+    left_chain(cursor, unary_level, &[
+        (Symbol::Star, None, BinaryOp::Multiply),
+        (Symbol::Slash, None, BinaryOp::Divide),
+        (Symbol::Percent, None, BinaryOp::Modulo),
+    ], binary)
 }
 
 fn unary_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
@@ -122,6 +111,23 @@ fn postfix_level(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
     }
 }
 
+// Parse a nonempty comma-separated sequence; callers decide when empty is legal.
+pub(super) fn comma_separated<T>(
+    cursor: &mut Cursor<'_>, mut item: impl FnMut(&mut Cursor<'_>) -> Result<T, String>,
+) -> Result<Vec<T>, String> {
+    let mut items = vec![item(cursor)?];
+    while cursor.take_symbol(Symbol::Comma) {
+        items.push(item(cursor)?);
+    }
+    Ok(items)
+}
+
+fn delimited_expressions(cursor: &mut Cursor<'_>, end: Symbol, expected: &str) -> Result<Vec<Expr>, String> {
+    let items = if cursor.at_symbol(end) { Vec::new() } else { comma_separated(cursor, expression)? };
+    cursor.expect_symbol(end, expected)?;
+    Ok(items)
+}
+
 fn primary(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
     if let Some(lambda) = lambda(cursor)? {
         return Ok(lambda);
@@ -132,16 +138,7 @@ fn primary(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
         return Ok(inner);
     }
     if cursor.take_symbol(Symbol::OpenBracket) {
-        let mut items = Vec::new();
-        if !cursor.at_symbol(Symbol::CloseBracket) {
-            loop {
-                items.push(expression(cursor)?);
-                if !cursor.take_symbol(Symbol::Comma) {
-                    break;
-                }
-            }
-        }
-        cursor.expect_symbol(Symbol::CloseBracket, "закрывающая «]»")?;
+        let items = delimited_expressions(cursor, Symbol::CloseBracket, "закрывающая «]»")?;
         return Ok(Expr::Call {
             name: "list".to_owned(),
             arguments: items,
@@ -176,16 +173,7 @@ fn primary(cursor: &mut Cursor<'_>) -> Result<Expr, String> {
                 });
             }
             if cursor.take_symbol(Symbol::OpenParen) {
-                let mut arguments = Vec::new();
-                if !cursor.at_symbol(Symbol::CloseParen) {
-                    loop {
-                        arguments.push(expression(cursor)?);
-                        if !cursor.take_symbol(Symbol::Comma) {
-                            break;
-                        }
-                    }
-                }
-                cursor.expect_symbol(Symbol::CloseParen, "закрывающая «)»")?;
+                let arguments = delimited_expressions(cursor, Symbol::CloseParen, "закрывающая «)»")?;
                 return Ok(Expr::Call {
                     name: word.to_lowercase(),
                     arguments,

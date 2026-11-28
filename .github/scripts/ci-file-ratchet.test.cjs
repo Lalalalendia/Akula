@@ -186,3 +186,31 @@ test('index worker performance comparisons remain opt-in without losing required
   assert.equal(require('./ci-rust-scope.cjs').classify(production),'workspace',
     'Core watcher edits must retain required workspace tests');
 });
+
+// The actual exact-tree proof (including tampered and partial replacements) is
+// exercised in ci-pr-concurrency.test.cjs. These are the consumer-level rules.
+test('only verified native LANG transfer can retain a previous consumer',()=>{
+ const f=ratchet.approvedNativeConsumerTransfer;
+ const target='.github/workflows/akula-language-native-ui.yml';
+ const annotation='.github/workflows/akula-language-annotation-rebind-native-ui.yml';
+ const cards='.github/workflows/akula-language-flashcards-native-ui.yml';
+ assert.equal(f([annotation],[target],true),true);
+ assert.equal(f([cards],[target],true),true);
+ assert.equal(f([annotation],[target],false),false);
+ assert.equal(f(['.github/workflows/other.yml'],[target],true),false);
+ assert.equal(f([annotation],['.github/workflows/other.yml'],true),false);
+ assert.equal(f([annotation],[target,'.github/workflows/other.yml'],true),false);
+ assert.equal(f([],[target],true),false);
+});
+test('native LANG path names alone cannot authorize consumer transfer',()=>fixture(x=>{
+ const old='.github/workflows/akula-language-annotation-rebind-native-ui.yml';
+ const cards='.github/workflows/akula-language-flashcards-native-ui.yml';
+ const target='.github/workflows/akula-language-native-ui.yml';
+ const p='aquilum-app/core/src/old.rs';
+ const body="on:\n  pull_request:\n    paths:\n      - '"+p+"'\n";
+ x.write(old,body);x.write(cards,body.replace(p,'docs/other.md'));x.write(target,body.replace(p,'docs/old.md'));
+ const baseline=x.commit();
+ fs.unlinkSync(path.join(x.cwd,old));fs.unlinkSync(path.join(x.cwd,cards));x.write(target,body);
+ const h=x.commit();
+ assert.match(ratchet.audit(x.cwd,baseline,h).errors.join(' '),/NEW WORKFLOW CONSUMER/);
+}));

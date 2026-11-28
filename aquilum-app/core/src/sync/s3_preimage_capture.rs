@@ -335,6 +335,25 @@ mod tests {
         fn admission(&self) -> RegisteredReadAdmission<'_> {
             RegisteredReadAdmission::open(&self.core, &self.root).unwrap()
         }
+
+        fn open_stores(&self) -> (
+            RegisteredReadAdmission<'_>,
+            SqliteRegisteredS3Bindings,
+            SqliteCustodyIdentityStore,
+            SqliteSyncJournal,
+        ) {
+            let admission = self.admission();
+            let bindings = SqliteRegisteredS3Bindings::open(
+                &admission, &self.appdata.join("profile.sqlite"),
+            ).unwrap();
+            let custody = SqliteCustodyIdentityStore::open(
+                &admission, &self.appdata.join("custody.sqlite"),
+            ).unwrap();
+            let journal = SqliteSyncJournal::open(
+                &self.appdata.join("operation.sqlite"),
+            ).unwrap();
+            (admission, bindings, custody, journal)
+        }
     }
 
     fn fixture() -> Fixture {
@@ -449,16 +468,7 @@ mod tests {
     #[test]
     fn guarded_s3_replace_attempt_fences_same_baseline_without_file_write() {
         let f=fixture();
-        let admission=f.admission();
-        let bindings=SqliteRegisteredS3Bindings::open(
-            &admission,&f.appdata.join("profile.sqlite"),
-        ).unwrap();
-        let custody=SqliteCustodyIdentityStore::open(
-            &admission,&f.appdata.join("custody.sqlite"),
-        ).unwrap();
-        let mut journal=SqliteSyncJournal::open(
-            &f.appdata.join("operation.sqlite"),
-        ).unwrap();
+        let (admission, bindings, custody, mut journal) = f.open_stores();
         let mut cache=SqliteDagStore::open(
             &f.appdata.join("cache.sqlite"),
         ).unwrap();
@@ -513,16 +523,7 @@ mod tests {
     #[test]
     fn guarded_replace_attempt_holds_after_local_inode_replacement() {
         let f=fixture();
-        let admission=f.admission();
-        let bindings=SqliteRegisteredS3Bindings::open(
-            &admission,&f.appdata.join("profile.sqlite"),
-        ).unwrap();
-        let custody=SqliteCustodyIdentityStore::open(
-            &admission,&f.appdata.join("custody.sqlite"),
-        ).unwrap();
-        let mut journal=SqliteSyncJournal::open(
-            &f.appdata.join("operation.sqlite"),
-        ).unwrap();
+        let (admission, bindings, custody, mut journal) = f.open_stores();
         let mut cache=SqliteDagStore::open(
             &f.appdata.join("cache.sqlite"),
         ).unwrap();
@@ -554,16 +555,7 @@ mod tests {
     #[test]
     fn fenced_s3_update_can_use_real_guarded_filegate_but_not_promote_baseline() {
         let f = fixture();
-        let admission = f.admission();
-        let bindings = SqliteRegisteredS3Bindings::open(
-            &admission, &f.appdata.join("profile.sqlite"),
-        ).unwrap();
-        let custody = SqliteCustodyIdentityStore::open(
-            &admission, &f.appdata.join("custody.sqlite"),
-        ).unwrap();
-        let mut journal = SqliteSyncJournal::open(
-            &f.appdata.join("operation.sqlite"),
-        ).unwrap();
+        let (admission, bindings, custody, mut journal) = f.open_stores();
         let mut cache = SqliteDagStore::open(
             &f.appdata.join("cache.sqlite"),
         ).unwrap();
@@ -627,16 +619,7 @@ mod tests {
     #[test]
     fn fenced_s3_filegate_history_failure_is_uncertain_and_original_survives() {
         let f = fixture();
-        let admission = f.admission();
-        let bindings = SqliteRegisteredS3Bindings::open(
-            &admission, &f.appdata.join("profile.sqlite"),
-        ).unwrap();
-        let custody = SqliteCustodyIdentityStore::open(
-            &admission, &f.appdata.join("custody.sqlite"),
-        ).unwrap();
-        let mut journal = SqliteSyncJournal::open(
-            &f.appdata.join("operation.sqlite"),
-        ).unwrap();
+        let (admission, bindings, custody, mut journal) = f.open_stores();
         let mut cache = SqliteDagStore::open(
             &f.appdata.join("cache.sqlite"),
         ).unwrap();
@@ -695,16 +678,7 @@ mod tests {
     #[test]
     fn s3_protected_preimage_is_durable_read_only_and_idempotent() {
         let f = fixture();
-        let admission = f.admission();
-        let bindings = SqliteRegisteredS3Bindings::open(
-            &admission, &f.appdata.join("profile.sqlite"),
-        ).unwrap();
-        let custody = SqliteCustodyIdentityStore::open(
-            &admission, &f.appdata.join("custody.sqlite"),
-        ).unwrap();
-        let mut journal = SqliteSyncJournal::open(
-            &f.appdata.join("operation.sqlite"),
-        ).unwrap();
+        let (admission, bindings, custody, mut journal) = f.open_stores();
         let copy_db = f.appdata.join("originals.sqlite");
         {
             let mut copy = SqliteProtectionStore::open(&copy_db).unwrap();
@@ -736,16 +710,7 @@ mod tests {
     #[test]
     fn refuses_a_baseline_from_another_path_even_with_identical_bytes() {
         let f = fixture_with_previous_path("notes/some-other.md");
-        let admission = f.admission();
-        let bindings = SqliteRegisteredS3Bindings::open(
-            &admission, &f.appdata.join("profile.sqlite"),
-        ).unwrap();
-        let custody = SqliteCustodyIdentityStore::open(
-            &admission, &f.appdata.join("custody.sqlite"),
-        ).unwrap();
-        let journal = SqliteSyncJournal::open(
-            &f.appdata.join("operation.sqlite"),
-        ).unwrap();
+        let (admission, bindings, custody, journal) = f.open_stores();
         let mut copy = SqliteProtectionStore::open(
             &f.appdata.join("originals.sqlite"),
         ).unwrap();
@@ -762,16 +727,7 @@ mod tests {
     #[test]
     fn s3_protected_preimage_refuses_pending_dirty_and_mismatched_local() {
         let f = fixture();
-        let admission = f.admission();
-        let bindings = SqliteRegisteredS3Bindings::open(
-            &admission, &f.appdata.join("profile.sqlite"),
-        ).unwrap();
-        let custody = SqliteCustodyIdentityStore::open(
-            &admission, &f.appdata.join("custody.sqlite"),
-        ).unwrap();
-        let journal = SqliteSyncJournal::open(
-            &f.appdata.join("operation.sqlite"),
-        ).unwrap();
+        let (admission, bindings, custody, journal) = f.open_stores();
         let mut copy = SqliteProtectionStore::open(
             &f.appdata.join("originals.sqlite"),
         ).unwrap();
@@ -813,16 +769,7 @@ mod tests {
     #[test]
     fn s3_protected_preimage_refuses_replaced_custody_lock() {
         let f = fixture();
-        let admission = f.admission();
-        let bindings = SqliteRegisteredS3Bindings::open(
-            &admission, &f.appdata.join("profile.sqlite"),
-        ).unwrap();
-        let custody = SqliteCustodyIdentityStore::open(
-            &admission, &f.appdata.join("custody.sqlite"),
-        ).unwrap();
-        let journal = SqliteSyncJournal::open(
-            &f.appdata.join("operation.sqlite"),
-        ).unwrap();
+        let (admission, bindings, custody, journal) = f.open_stores();
         let mut copy = SqliteProtectionStore::open(
             &f.appdata.join("originals.sqlite"),
         ).unwrap();

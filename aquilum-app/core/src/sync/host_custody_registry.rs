@@ -481,6 +481,18 @@ mod tests {
         (temp, database, vault, appdata, record)
     }
 
+    // Only successful baseline setup is shared; each test retains its own
+    // admission, tampering, mutation and denial assertions.
+    fn provision_enrolled_fixture(
+        db: &Path, vault: &Path, appdata: &Path, record: &HostCustodyRecord,
+    ) -> SharedHostCustodyRegistry {
+        let mut registry = SharedHostCustodyRegistry::provision_new(
+            db, &[vault, appdata],
+        ).unwrap();
+        registry.enroll(record).unwrap();
+        registry
+    }
+
     /// Negative trust falsifier for MCP and replica grants: a second
     /// user-provisioned valid host ledger can contain exactly the same durable
     /// enrollment as the alleged installer ledger. Even successful
@@ -600,10 +612,7 @@ mod tests {
         const CHILD: &str =
             "sync::host_custody_registry::tests::host_custody_process_child_entrypoint";
         let (_temp, db, vault, appdata, record) = specimen();
-        let mut owner = SharedHostCustodyRegistry::provision_new(
-            &db, &[vault.as_path(), appdata.as_path()],
-        ).unwrap();
-        owner.enroll(&record).unwrap();
+        let owner = provision_enrolled_fixture(&db, &vault, &appdata, &record);
         drop(owner);
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .arg("--exact")
@@ -743,10 +752,7 @@ mod tests {
         let (_temp, db, vault, appdata, record) = specimen();
         let child = vault.join("independent-appdata-child");
         fs::create_dir(&child).unwrap();
-        let mut host = SharedHostCustodyRegistry::provision_new(
-            &db, &[vault.as_path(), appdata.as_path()],
-        ).unwrap();
-        host.enroll(&record).unwrap();
+        let mut host = provision_enrolled_fixture(&db, &vault, &appdata, &record);
         let mut changed = false;
         let child_identity = PhysicalObjectId { device: 9000, file: 9999 };
         assert!(matches!(host.with_unenrolled_epoch(
@@ -758,10 +764,7 @@ mod tests {
     #[test]
     fn same_path_new_physical_root_or_same_root_new_vault_is_hold() {
         let (_temp, db, vault, appdata, record) = specimen();
-        let mut owner = SharedHostCustodyRegistry::provision_new(
-            &db, &[vault.as_path(), appdata.as_path()],
-        ).unwrap();
-        owner.enroll(&record).unwrap();
+        let mut owner = provision_enrolled_fixture(&db, &vault, &appdata, &record);
         assert!(matches!(owner.inspect(Path::new(&record.root_path),
             PhysicalObjectId { device: 1001, file: 9002 }),
             Err(HostCustodyError::ConflictingEnrollment)));
@@ -786,10 +789,7 @@ mod tests {
         record.root_identity = PhysicalObjectId {
             device: observed.0, file: observed.1,
         };
-        let mut owner = SharedHostCustodyRegistry::provision_new(
-            &db, &[vault.as_path(), appdata.as_path()],
-        ).unwrap();
-        owner.enroll(&record).unwrap();
+        let owner = provision_enrolled_fixture(&db, &vault, &appdata, &record);
         drop(owner);
         let old_path = temp.path().join("vault-moved-away");
         fs::rename(&vault, &old_path).unwrap();
@@ -806,10 +806,7 @@ mod tests {
     #[test]
     fn damaged_index_cannot_disappear_into_unregistered_state() {
         let (_temp, db, vault, appdata, record) = specimen();
-        let mut owner = SharedHostCustodyRegistry::provision_new(
-            &db, &[vault.as_path(), appdata.as_path()],
-        ).unwrap();
-        owner.enroll(&record).unwrap();
+        let owner = provision_enrolled_fixture(&db, &vault, &appdata, &record);
         drop(owner);
         let conn = Connection::open(&db).unwrap();
         conn.execute(
@@ -824,10 +821,7 @@ mod tests {
     #[test]
     fn tamper_checksum_missing_table_and_future_schema_fail_closed() {
         let (_temp, db, vault, appdata, record) = specimen();
-        let mut owner = SharedHostCustodyRegistry::provision_new(
-            &db, &[vault.as_path(), appdata.as_path()],
-        ).unwrap();
-        owner.enroll(&record).unwrap();
+        let owner = provision_enrolled_fixture(&db, &vault, &appdata, &record);
         drop(owner);
         let conn = Connection::open(&db).unwrap();
         conn.execute("UPDATE shared_custody SET record_blake3 = 'fake'", []).unwrap();
@@ -846,10 +840,7 @@ mod tests {
     #[test]
     fn caller_spelling_must_not_hide_a_registered_physical_root() {
         let (_temp, db, vault, appdata, record) = specimen();
-        let mut installer = SharedHostCustodyRegistry::provision_new(
-            &db, &[vault.as_path(), appdata.as_path()],
-        ).unwrap();
-        installer.enroll(&record).unwrap();
+        let installer = provision_enrolled_fixture(&db, &vault, &appdata, &record);
         drop(installer);
         let other_core = SharedHostCustodyRegistry::open_existing(&db).unwrap();
         // Pass the uncanonicalized path used by the second Core. On Windows
@@ -868,10 +859,7 @@ mod tests {
     #[test]
     fn symlink_alias_cannot_represent_same_physical_root_in_host_ledger() {
         let (temp, db, vault, appdata, record) = specimen();
-        let mut installer = SharedHostCustodyRegistry::provision_new(
-            &db, &[vault.as_path(), appdata.as_path()],
-        ).unwrap();
-        installer.enroll(&record).unwrap();
+        let installer = provision_enrolled_fixture(&db, &vault, &appdata, &record);
         drop(installer);
         let alias = temp.path().join("aliased-vault");
         std::os::unix::fs::symlink(&vault, &alias).unwrap();
@@ -885,10 +873,7 @@ mod tests {
     #[test]
     fn substituted_host_parent_symlink_cannot_select_a_private_empty_ledger() {
         let (temp, db, vault, appdata, record) = specimen();
-        let mut installer = SharedHostCustodyRegistry::provision_new(
-            &db, &[vault.as_path(), appdata.as_path()],
-        ).unwrap();
-        installer.enroll(&record).unwrap();
+        let installer = provision_enrolled_fixture(&db, &vault, &appdata, &record);
         drop(installer);
 
         let old_parent = db.parent().unwrap().to_path_buf();
@@ -956,10 +941,7 @@ mod tests {
     #[test]
     fn symlinked_wal_or_shm_never_becomes_an_installer_host_member() {
         let (temp, db, vault, appdata, record) = specimen();
-        let mut owner = SharedHostCustodyRegistry::provision_new(
-            &db, &[vault.as_path(), appdata.as_path()],
-        ).unwrap();
-        owner.enroll(&record).unwrap();
+        let owner = provision_enrolled_fixture(&db, &vault, &appdata, &record);
         drop(owner);
         let other = temp.path().join("external-fake-journal");
         fs::write(&other, b"untrusted journal bytes").unwrap();

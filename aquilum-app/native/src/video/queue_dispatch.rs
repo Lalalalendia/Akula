@@ -7,7 +7,7 @@ pub(super) fn download_one(
     executable: &std::ffi::OsStr,
     quickjs: Option<&std::ffi::OsStr>, url: &str,
     on_progress: impl FnMut(super::download::Progress),
-) -> Result<std::path::PathBuf, String> {
+) -> Result<super::download::Completed, String> {
     #[cfg(all(windows, feature = "installed", not(feature = "video-ui-e2e")))]
     {
         let runtime = quickjs.ok_or("Install verified QuickJS in Settings > System")?;

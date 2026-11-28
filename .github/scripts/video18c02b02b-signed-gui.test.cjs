@@ -20,7 +20,7 @@ function verify(files){
   for(const key of [
     'admit_hosted_lab_signature(', 'signed.verify_stage(current)?',
     'signed.verify_first_presented_frame_ack(receipt, nonce, os_pid).is_ok()',
-    'signed.generation_sha256()', 'signed.version() != "0.3.21"',
+    'signed.generation_sha256()', 'signed.version() != super::gui_launcher::lab::candidate_version()?',
     'signed.source_commit() != required("EXPECTED_HEAD_SHA")?',
     'signed.cargo_lock_sha256() != got_lock',
     'gui_launcher::lab::guarded_pr()', 'gui_launcher::lab::validate_app',
@@ -52,7 +52,7 @@ function verify(files){
     cargo.includes('lab-only-signature')&&cargo.includes('base64 = "0.22"'),
     'VIDEO18C02B02B_HOLD: signed GUI lab is not isolated and nonshipping');
   for(const t of [
-    'Video18c02b02bBuild-', "version='0.3.21'",'source_commit=$env:EXPECTED_HEAD_SHA',
+    'Video18c02b02bBuild-', "version=$currentVersion[0]",'source_commit=$env:EXPECTED_HEAD_SHA',
     "cargo_lock_sha256=$lockSha",'sha256=$sha;size=',
     "$sha -cne $expected[$name]", "schema=1",
     "purpose='protected-video-five-exe'", 'Get-Command minisign.exe',

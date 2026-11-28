@@ -9,6 +9,8 @@ on:
       # Subscribe only new feature-owned files: shared/native family already
       # has mandatory CI owners and must not gain another broad trigger.
       - 'aquilum-app/native/src/app/yandex_disk_preview.rs'
+      - 'modules/secret-store-common/src/native_backend.rs'
+      - 'modules/secret-store-common/src/validation.rs'
       - 'aquilum-app/native/src/app/yandex_disk_preview/lifecycle.rs'
       - 'aquilum-app/native/src/ui/settings/schema/sync/yandex_disk.rs'
       - 'aquilum-app/native/src/ui/settings/schema/sync/yandex_disk/lifecycle.rs'

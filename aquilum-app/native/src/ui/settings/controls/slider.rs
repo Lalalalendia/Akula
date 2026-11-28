@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widgets::layout::contract::leaf_widget;
 
 pub struct Slider {
     label: String,
@@ -122,8 +123,6 @@ impl Widget for Slider {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, len_req: LenReq, _cross: Option<Length>) -> Length {
         match axis {
             Axis::Horizontal => match len_req {
@@ -133,8 +132,6 @@ impl Widget for Slider {
             Axis::Vertical => Length::px(Self::line() + size::SPACE_4 + size::SIZE_16),
         }
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -175,7 +172,5 @@ impl Widget for Slider {
         node.add_action(Action::Decrement);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }

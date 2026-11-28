@@ -81,18 +81,8 @@ impl IndexSynchronizer {
                     probe: file_probe,
                     path: entry.path().to_path_buf(),
                 });
-                if prepare_batch.len() >= PREPARE_BATCH_SIZE {
-                    flush_prepare_batch(
-                        &self.root,
-                        &self.index,
-                        &mut self.writer,
-                        &transaction,
-                        &mut prepare_batch,
-                        &mut pending,
-                    )?;
-                }
             }
-            if processed >= COMMIT_BATCH_SIZE {
+            if prepare_batch.len() >= PREPARE_BATCH_SIZE || processed >= COMMIT_BATCH_SIZE {
                 flush_prepare_batch(
                     &self.root,
                     &self.index,
@@ -101,6 +91,8 @@ impl IndexSynchronizer {
                     &mut prepare_batch,
                     &mut pending,
                 )?;
+            }
+            if processed >= COMMIT_BATCH_SIZE {
                 if pending > 0 {
                     commit(&mut self.writer, &self.index, &self.progress)?;
                 }

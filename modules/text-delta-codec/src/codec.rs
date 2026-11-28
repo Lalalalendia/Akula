@@ -187,17 +187,20 @@ pub fn encode(
     let mut chosen = fallback.clone();
     let mut mode = TextDeltaMode::FullZstd;
     if let Some((old_id, old_bytes)) = old {
-        let patch = splice(old_bytes, target)?;
-        if let Ok(compressed) = zstd::bulk::compress(&patch, LEVEL) {
+        // Apply identical whole-frame admission and strict size ordering to both deltas.
+        let mut consider = |candidate_mode, compressed| {
             if let Ok(candidate) = to_header(
-                TextDeltaMode::SpliceZstd, Some((old_id, old_bytes)),
-                target_id, target, compressed,
+                candidate_mode, Some((old_id, old_bytes)), target_id, target, compressed,
             ) {
                 if candidate.len() < chosen.len() {
                     chosen = candidate;
-                    mode = TextDeltaMode::SpliceZstd;
+                    mode = candidate_mode;
                 }
             }
+        };
+        let patch = splice(old_bytes, target)?;
+        if let Ok(compressed) = zstd::bulk::compress(&patch, LEVEL) {
+            consider(TextDeltaMode::SpliceZstd, compressed);
         }
         if old_bytes.len() >= 64 {
             // Raw dictionary is NOT zstd CLI --patch-from byte-for-byte:
@@ -206,15 +209,7 @@ pub fn encode(
                 zstd::bulk::Compressor::with_dictionary(LEVEL, old_bytes)
             {
                 if let Ok(compressed) = compressor.compress(target) {
-                    if let Ok(candidate) = to_header(
-                        TextDeltaMode::DictionaryZstd,
-                        Some((old_id, old_bytes)), target_id, target, compressed,
-                    ) {
-                        if candidate.len() < chosen.len() {
-                            chosen = candidate;
-                            mode = TextDeltaMode::DictionaryZstd;
-                        }
-                    }
+                    consider(TextDeltaMode::DictionaryZstd, compressed);
                 }
             }
         }

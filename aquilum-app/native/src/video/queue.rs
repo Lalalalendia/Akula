@@ -23,7 +23,7 @@ pub fn enqueue(
     url: String,
     data_dir: PathBuf,
     registered_roots: Vec<PathBuf>,
-    changed: Arc<dyn Fn(bool, &str) + Send + Sync>,
+    changed: Arc<dyn Fn(bool, &str) + Send + Sync>, published: impl FnOnce(PathBuf) + Send + 'static,
 ) -> Result<bool, &'static str> {
     let id = youtube::video_id(&url).ok_or("invalid single-video URL")?.to_owned();
     {
@@ -68,29 +68,22 @@ pub fn enqueue(
                     })
                 })
         }));
-        match result {
-            Ok(path) => change(&id, Status::Ready(path)),
-            Err(error) => change(&id, Status::Failed(error)),
-        }
-        changed(true, &url);
+        complete(&id, &url, result, &*changed, published);
     });
     Ok(true)
+}
+fn complete(id: &str, url: &str, result: Result<download::Completed, String>, changed: &dyn Fn(bool, &str), published: impl FnOnce(PathBuf)) {
+    match result {
+        Ok(done) => {
+            if done.newly_published { published(done.path.clone()); }
+            change(id, Status::Ready(done.path));
+        }
+        Err(error) => change(id, Status::Failed(error)),
+    }
+    changed(true, url);
 }
 #[cfg(all(test, windows, feature = "installed", not(feature = "video-ui-e2e")))]
 #[path = "queue_01k_tests.rs"]
 mod installed_tests;
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn untrusted_link_never_creates_a_download_job() {
-        let dir = tempfile::tempdir().unwrap();
-        let notify = Arc::new(|_: bool, _: &str| {});
-        assert!(enqueue(
-            "https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ".into(),
-            dir.path().to_path_buf(), vec![], notify
-        ).is_err());
-        assert!(status("https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ").is_none());
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
-    }
-}
+mod tests;

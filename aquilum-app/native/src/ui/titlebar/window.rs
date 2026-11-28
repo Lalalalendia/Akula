@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widgets::layout::contract::{leaf_widget, passive_surface};
 
 pub struct DragArea;
 
@@ -15,8 +16,6 @@ impl Widget for DragArea {
         drag_or_maximize(ctx, event);
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, _axis: Axis, len_req: LenReq, _cross: Option<Length>) -> Length {
         match len_req {
             LenReq::FitContent(space) => space,
@@ -24,19 +23,9 @@ impl Widget for DragArea {
         }
     }
 
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
+    passive_surface!();
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _painter: &mut Painter<'_>) {}
-
-    fn accessibility_role(&self) -> Role {
-        Role::GenericContainer
-    }
-
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
-
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -103,16 +92,12 @@ impl Widget for WindowButton {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(match axis {
             Axis::Horizontal => size::WINDOW_CONTROL_WIDTH,
             Axis::Vertical => size::TABS_HEIGHT,
         })
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -166,9 +151,7 @@ impl Widget for WindowButton {
         node.add_action(Action::Click);
     }
 
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
 
 pub fn window_controls(maximized: bool) -> (NewWidget<impl Widget>, Handle<WindowButton>) {

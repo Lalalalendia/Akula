@@ -800,6 +800,8 @@ test('B0c Windows owned sources run only through required main route; non-main a
   assert.equal(matches(policy,router.NATIVE),false,'native manifest must not launch directly');
   const owners=[
     "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs",
+    "aquilum-app/core/src/server_bootstrap_ssh_common.rs",
+    "aquilum-app/core/src/server_bootstrap_ssh_common_tests.rs",
     "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs",
     "aquilum-app/core/src/server_bootstrap_modules.rs",
     "aquilum-app/core/tests/server_bootstrap_b0c_windows.rs",
@@ -814,7 +816,7 @@ test('B0c Windows owned sources run only through required main route; non-main a
     "aquilum-app/native/assets/locales/en.json",
     "aquilum-app/native/src/ui/settings/schema/tests.rs",
   ];
-  assert.deepEqual(router.OWNED_SUITES.owned_b0c_ssh,owners,'exact previous 14 source owners');
+  assert.deepEqual(router.OWNED_SUITES.owned_b0c_ssh,owners,'previous 14 source owners plus shared SSH parser and tests');
   const direct=body.split('    paths:\n')[1]?.split('  workflow_dispatch:')[0]||'';
   const directOwners=[...direct.matchAll(/^      - "([^"]+)"$/gm)].map(m=>m[1]);
   assert.deepEqual(directOwners,owners,'non-main PRs retain all source triggers');
@@ -948,4 +950,18 @@ test('Text Delta lightweight S3 test runs the actual pack parser; full AWS remai
   assert.equal(textDeltaPackBoundaryChanged([
     'aquilum-app/core/src/sync/s3_transport/pack_probe.rs']),true);
   assert.match(app,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+});
+
+test('shared SSH parser and its tests select Linux and Windows witnesses without new workflow',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const router=require('./ci-shared-manifest-route.cjs');
+  const linux=fs.readFileSync(path.join(__dirname,'../workflows/core-server-bootstrap-b0b.yml'),'utf8');
+  const windows=fs.readFileSync(path.join(__dirname,'../workflows/core-server-bootstrap-b0c-windows-ssh.yml'),'utf8');
+  for(const p of ['aquilum-app/core/src/server_bootstrap_ssh_common.rs','aquilum-app/core/src/server_bootstrap_ssh_common_tests.rs']){
+    assert.equal(matches(parse(linux),p),true);
+    assert.equal(matches(parse(windows),p),true);
+    assert.equal(router.assess({paths:[p]}).owned_b0c_ssh,true);
+  }
+  for(const body of [linux,windows])
+    assert.ok(body.includes('cargo test --locked -p aquilum-core --features server-bootstrap-b0-openssh-lab --lib shared_ssh_parser_ -- --nocapture'));
 });

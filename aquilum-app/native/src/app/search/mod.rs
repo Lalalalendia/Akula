@@ -1,17 +1,15 @@
 mod input;
-mod query;
+mod query; mod media;
 mod render;
 mod worker;
 
 use std::sync::Arc;
-
 use crate::ui::editor::TextEditor;
 
 use aquilum_core::search::models::{SearchIndexStatus, SearchResult};
 use masonry::accesskit::Role;
 use masonry::app::RenderRoot;
 use masonry::core::{NewWidget, WidgetId};
-use masonry::kurbo::Point;
 use masonry::widgets::Flex;
 
 use super::{App, Popup};
@@ -34,6 +32,7 @@ pub(super) struct SearchState {
     query: String,
     worker: worker::Worker,
     results: Vec<SearchResult>,
+    speech: Vec<aquilum_core::background_jobs::speech::search::Hit>,
     terms: Vec<String>,
     status: Option<SearchIndexStatus>,
     failed: bool,
@@ -48,11 +47,11 @@ impl SearchState {
     }
 
     pub fn result_count(&self) -> usize {
-        self.results.len()
+        self.results.len() + self.speech.len()
     }
 
     pub fn selected_path(&self) -> std::path::PathBuf {
-        std::path::PathBuf::from(&self.results[self.selected].path)
+        self.results.get(self.selected).map_or_else(|| self.speech[self.selected - self.results.len()].path.clone(), |note| note.path.clone().into())
     }
 
     #[cfg(feature = "memory-probe")]
@@ -86,7 +85,7 @@ pub(super) fn select_card(root: &mut RenderRoot, kind: CardKind, cards: &[Widget
 
 impl App {
     pub fn open_search(&mut self, root: &mut RenderRoot) {
-        if matches!(self.popup, Some(Popup::Search(_))) {
+        if matches!(self.popup, Some(Popup::Search(_) | Popup::Transcript(_))) {
             return;
         }
         let search_box = search::search_box("");
@@ -94,9 +93,7 @@ impl App {
         let body_handle = Handle::of(&body);
         let card = search::dialog_card(search_box.widget, body, search::footer());
         let layer = Modal::new(card, &t("search.title"), CardSize::Window(search::card_size), Role::Dialog, false);
-        let layer_id = layer.id();
-        root.add_layer(layer, Point::ORIGIN);
-        root.focus_on(Some(search_box.field.id()));
+        let layer_id = super::ui_actions::mount_modal(root, layer, search_box.field.id());
         let status = self.tree.root().map(|w| self.workspace.core.search.status(Some(&w.to_string_lossy())));
         self.popup = Some(Popup::Search(SearchState {
             layer: layer_id,
@@ -106,8 +103,8 @@ impl App {
             body: body_handle,
             list: None,
             query: String::new(),
-            worker: worker::Worker::spawn(Arc::clone(&self.workspace.core), self.search_tx.clone(), Arc::clone(&self.workspace.wake)),
-            results: Vec::new(),
+            worker: worker::Worker::spawn(Arc::clone(&self.workspace.core), self.workspace.data_dir.clone(), self.search_tx.clone(), Arc::clone(&self.workspace.wake)),
+            results: Vec::new(), speech: Vec::new(),
             terms: Vec::new(),
             status,
             failed: false,
@@ -119,10 +116,7 @@ impl App {
 
     fn close_search(&mut self, root: &mut RenderRoot) {
         if let Some(Popup::Search(state)) = self.popup.take() {
-            crate::ui::dialog::close(root, state.layer);
-            if let Some(ids) = &self.note_ids {
-                root.focus_on(Some(ids.body.id()));
-            }
+            self.close_picker(root, state.layer);
         }
     }
 }

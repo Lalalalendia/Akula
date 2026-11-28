@@ -1,16 +1,17 @@
-use masonry::accesskit::{Action, Node, Role};
+use crate::ui::widgets::layout::contract::{leaf_widget, labeled_click};
 use masonry::core::{
-    AccessCtx, AccessEvent, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, Update, UpdateCtx,
+    MeasureCtx, PaintCtx, PropertiesMut, PropertiesRef, Update, UpdateCtx,
     Widget, WidgetMut,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Axis, Rect, RoundedRect, Size, Stroke, Vec2};
+use masonry::kurbo::{Axis, Rect, RoundedRect, Stroke, Vec2};
 use masonry::layout::{LenReq, Length};
 
 use crate::ui::icons::{self, Icon};
 use crate::ui::theme;
 use crate::ui::tokens::size;
 use crate::ui::widgets::{Press, Pressed};
+use crate::ui::widgets::press::press_events;
 
 pub struct IconButton {
     icon: Icon,
@@ -61,17 +62,7 @@ impl IconButton {
 impl Widget for IconButton {
     type Action = Pressed;
 
-    fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        if self.press.pointer(ctx, event) {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
-    }
-
-    fn on_access_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &AccessEvent) {
-        if event.action == Action::Click {
-            ctx.submit_action::<Pressed>(Pressed);
-        }
-    }
+    press_events!();
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
         if matches!(event, Update::HoveredChanged(_)) {
@@ -79,13 +70,9 @@ impl Widget for IconButton {
         }
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
-
     fn measure(&mut self, _ctx: &mut MeasureCtx<'_>, _props: &PropertiesRef<'_>, _axis: Axis, _len_req: LenReq, _cross: Option<Length>) -> Length {
         Length::px(self.size)
     }
-
-    fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         let t = theme::current();
@@ -126,18 +113,9 @@ impl Widget for IconButton {
         self.icon.draw(painter, origin, glyph, stroke, color);
     }
 
-    fn accessibility_role(&self) -> Role {
-        Role::Button
-    }
+    labeled_click!(Button, label);
 
-    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, node: &mut Node) {
-        node.set_label(self.label.clone());
-        node.add_action(Action::Click);
-    }
-
-    fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
-    }
+    leaf_widget!();
 }
 
 pub fn paint_close(painter: &mut Painter<'_>, rect: Rect, hovered: bool, alpha: f32) {

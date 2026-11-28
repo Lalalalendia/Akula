@@ -1,5 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict');
+const installedRoute = require('./video-tools-installed-contract.cjs');
 const fs=require('node:fs');
 const path=require('node:path');
 const {test}=require('node:test');
@@ -13,7 +14,7 @@ const paths={
   verify:'scripts/video-tools-01o-signed-floor.cjs',
   flow:'.github/workflows/akula-video-tools-01a-isolated-lab.yml',
   trust:'aquilum-app/native/src/video/tools_package.rs',
-  queue:'aquilum-app/native/src/video/queue.rs',
+  ...installedRoute.paths,
   doc:'docs/release/video-tools-01o-real-mux-floor.md'
 };
 const load=()=>Object.fromEntries(Object.entries(paths).map(([k,v])=>
@@ -25,9 +26,9 @@ function check(s){
     s.rust.includes('version_01o::probe_identity()'),
     'source-controlled two distinct build identities missing');
   hold(s.trust.includes('pub(super) const APPROVED_VIDEO_TOOLS_KEY: &str = "";')&&
-    s.trust.includes('false // a future, separately reviewed release gate must replace this constant')&&
-    s.queue.includes('if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e")))'),
-    'production key or queue HOLD bypassed');
+    s.trust.includes('false // a future, separately reviewed release gate must replace this constant'),
+    'production publisher key or release HOLD bypassed');
+  installedRoute.checkInstalledRoute(s, hold);
   for(const t of [
     'cp.execFileSync(signer,','sha(content)!==b.sha256',
     'if(!newer(candidate.version,current.version))return',
