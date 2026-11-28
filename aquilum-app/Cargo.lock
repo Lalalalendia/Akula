@@ -363,7 +363,7 @@ version = "0.1.0"
 
 [[package]]
 name = "aquilum-core"
-version = "0.3.21"
+version = "0.3.22"
 dependencies = [
  "akula-node-catalog",
  "akula-server-bootstrap-b0",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "aquilum-native"
-version = "0.3.21"
+version = "0.3.22"
 dependencies = [
  "accesskit_macos",
  "accesskit_unix",
