@@ -15,12 +15,12 @@ pub(super) const URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe";
 const FILENAME: &str = "yt-dlp-2026.10.26.exe";
 #[path = "optional_tool_verify.rs"] mod pinned_file;
-#[path = "optional_tool_transfer.rs"] mod pinned_transfer;
+use super::optional_tool_transfer as pinned_transfer;
 #[path = "optional_tool_state.rs"] mod tool_state;
 #[path = "optional_tool_install.rs"] mod pinned_install;
 use tool_state::ToolState;
 #[path = "light_windows_version.rs"]
-mod version_gate; #[path = "optional_quickjs.rs"] pub(crate) mod quickjs;
+pub(crate) mod version_gate; #[path = "optional_quickjs.rs"] pub(crate) mod quickjs;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Status {

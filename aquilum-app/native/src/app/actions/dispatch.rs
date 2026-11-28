@@ -9,9 +9,8 @@ impl App {
         if self.on_suggest_pick(root, id, &action) || self.on_find_action(root, id, &action) || self.on_sash(root, id, &action) {
             return Outcome::default();
         }
-        if matches!(self.popup, Some(Popup::Settings { .. })) {
-            return self.on_settings_action(root, id, &action);
-        }
+        if matches!(self.popup, Some(Popup::Transcript(_))) { return self.on_search_transcript_action(root, id, &action); }
+        if matches!(self.popup, Some(Popup::Settings { .. })) { return self.on_settings_action(root, id, &action); }
         if matches!(self.popup, Some(Popup::Reader(_))) {
             return self.on_reader_action(root, id, &action);
         }

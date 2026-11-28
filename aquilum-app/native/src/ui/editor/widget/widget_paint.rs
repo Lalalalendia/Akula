@@ -130,7 +130,7 @@ impl TextEditor {
 
     pub(super) fn do_post_paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         if !self.videos.is_empty() && self.laid_out() {
-            self.paint_videos(painter);
+            self.paint_videos(ctx, painter);
         }
         if !(ctx.is_focus_target() && ctx.is_window_focused() && self.laid_out()) {
             return;

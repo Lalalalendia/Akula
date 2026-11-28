@@ -1,6 +1,5 @@
 use super::*;
 mod tick;
-
 impl App {
     pub fn title(&self) -> String {
         let product = if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" };
@@ -29,9 +28,10 @@ impl App {
             Some(note) => note.flush(&self.workspace.core, &self.text),
             None => crate::disk::wait(),
         }
+        self.workspace.speech.take();
+        crate::video::captions::select(None);
         self.workspace.core.shutdown();
     }
-
     pub fn hold_due(&mut self, now: Instant) -> bool {
         self.hold.is_some_and(|until| until <= now) && self.hold.take().is_some()
     }

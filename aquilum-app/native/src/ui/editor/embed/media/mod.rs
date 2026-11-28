@@ -1,4 +1,4 @@
-mod controls;
+pub(crate) mod captions; mod controls;
 mod hit;
 mod markdown;
 mod paint;

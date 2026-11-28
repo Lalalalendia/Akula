@@ -19,7 +19,7 @@ impl App {
         });
         if let Err(reason) = crate::video::queue::enqueue(
             url.to_owned(), self.workspace.data_dir.clone(),
-            self.workspace.core.known_roots(), changed,
+            self.workspace.core.known_roots(), changed, self.workspace.speech().published_listener(),
         ) {
             report!("видеозагрузка отклонена: {reason}");
         }

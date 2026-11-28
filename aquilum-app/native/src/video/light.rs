@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use super::worker_process::{ChildGuard, diagnostic_tail};
-use super::{download, library::{Library, LIBRARY_MAX, SINGLE_VIDEO_MAX}, youtube};
+use super::{download::{self, Completed}, library::{Library, LIBRARY_MAX, SINGLE_VIDEO_MAX}, youtube};
 #[cfg(all(windows, feature = "video-rust-bundle"))]
 #[path = "light_windows_version.rs"]
 mod windows_version;
@@ -174,7 +174,7 @@ fn run_mux(executable: &Path, stage: &Path, result: &Path) -> Result<(), String>
 fn download_rust(
     library: &Library, executable: &OsStr, mux: &Path, quickjs: &Path, url: &str,
     on_progress: impl FnMut(download::Progress),
-) -> Result<PathBuf, String> {
+) -> Result<Completed, String> {
     #[cfg(all(windows, feature = "video-ui-e2e"))]
     let transport = super::ui_acceptance::transport_url(url)?;
     #[cfg(not(all(windows, feature = "video-ui-e2e")))]
@@ -186,10 +186,10 @@ fn download_rust_from_source(
     library: &Library, executable: &OsStr, mux: &Path, quickjs: &Path,
     url: &str, transport_url: &str,
     mut on_progress: impl FnMut(download::Progress),
-) -> Result<PathBuf, String> {
+) -> Result<Completed, String> {
     let id = youtube::video_id(url).ok_or("unsupported single YouTube URL")?;
     if let Some(existing) = library.existing(id).map_err(|e| e.to_string())? {
-        return Ok(existing);
+        return Ok(Completed::cached(existing));
     }
     check_mux(mux)?;
     let used = library.used_bytes().map_err(|e| e.to_string())?;
@@ -216,11 +216,11 @@ fn download_rust_from_source(
         .and_then(|file| file.sync_all()).map_err(|e| e.to_string())?;
     let target = library.published(id, "mp4").map_err(|e| e.to_string())?;
     if let Some(existing) = library.existing(id).map_err(|e| e.to_string())? {
-        return Ok(existing);
+        return Ok(Completed::cached(existing));
     }
     fs::hard_link(&output, &target)
         .map_err(|e| format!("cannot atomically publish FFmpeg-free local video: {e}"))?;
-    Ok(target)
+    Ok(Completed::published(target))
 }
 
 // VIDEO-05: pinned official runtimes. Never fetch executables or EJS at runtime.
@@ -297,7 +297,7 @@ fn bundled_mux_from_exe(application: &Path, expected_sha256: &str) -> Result<Pat
 pub(super) fn download_one_or_legacy(
     library: &Library, executable: &OsStr, url: &str,
     on_progress: impl FnMut(download::Progress),
-) -> Result<PathBuf, String> {
+) -> Result<Completed, String> {
     if cfg!(all(windows, feature = "installed", not(feature = "video-ui-e2e"))) {
         return Err("VIDEO_TOOLS_01K_HOLD: publisher-approved process launch is unavailable".into());
     }

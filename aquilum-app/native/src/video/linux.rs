@@ -1,6 +1,5 @@
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
-
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app::AppSink;
@@ -8,7 +7,6 @@ use gstreamer_video::{VideoCapsBuilder, VideoFormat, VideoInfo};
 use masonry::peniko::{Blob, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
 
 const PREROLL: gst::ClockTime = gst::ClockTime::from_seconds(5);
-
 pub struct Engine {
     playbin: gst::Element,
     sink: AppSink,
@@ -50,16 +48,16 @@ impl Engine {
         self.playbin.query_duration::<gst::ClockTime>().map_or(0.0, |d| d.seconds_f64())
     }
 
-    fn seek_to(&mut self, seconds: f64) {
+    fn seek_to(&mut self, seconds: f64, mode: gst::SeekFlags) {
         let at = gst::ClockTime::from_nseconds((seconds.max(0.0) * 1e9) as u64);
-        let _ = self.playbin.seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT, at);
+        let _ = self.playbin.seek_simple(gst::SeekFlags::FLUSH | mode, at);
         self.last = None;
     }
 
     pub fn toggle(&mut self) {
         self.poll();
         if self.ended {
-            self.seek_to(0.0);
+            self.seek_to(0.0, gst::SeekFlags::KEY_UNIT);
             self.ended = false;
             self.play = false;
         }
@@ -67,14 +65,15 @@ impl Engine {
         let _ = self.playbin.set_state(if self.play { gst::State::Playing } else { gst::State::Paused });
     }
 
-    pub fn seek(&mut self, fraction: f64) {
+    pub fn seek(&mut self, fraction: f64) { self.seek_with(fraction, gst::SeekFlags::KEY_UNIT); }
+    pub(super) fn seek_exact(&mut self, fraction: f64) { self.seek_with(fraction, gst::SeekFlags::ACCURATE); }
+    fn seek_with(&mut self, fraction: f64, mode: gst::SeekFlags) {
         let duration = self.duration();
         if duration > 0.0 {
             self.ended = false;
-            self.seek_to(duration * fraction.clamp(0.0, 1.0));
+            self.seek_to(duration * fraction.clamp(0.0, 1.0), mode);
         }
     }
-
     pub fn mute(&mut self) {
         let muted = self.playbin.property::<bool>("mute");
         self.playbin.set_property("mute", !muted);
@@ -85,9 +84,10 @@ impl Engine {
         let position = self.playbin.query_position::<gst::ClockTime>().map_or(0.0, |p| p.seconds_f64());
         (self.play, position, self.duration(), self.playbin.property::<bool>("mute"))
     }
-
     pub fn frame(&mut self) -> Option<ImageBrush> {
-        let sample = self.sink.try_pull_sample(gst::ClockTime::ZERO).or_else(|| self.sink.try_pull_preroll(gst::ClockTime::ZERO))?;
+        // Pulling a playing sample clears Appsink’s paused preroll buffer.
+        let sample = if self.play { self.sink.try_pull_sample(gst::ClockTime::ZERO) }
+            else { self.sink.try_pull_preroll(gst::ClockTime::ZERO) }?;
         let buffer = sample.buffer()?;
         if buffer.pts().is_some() && buffer.pts() == self.last {
             return None;

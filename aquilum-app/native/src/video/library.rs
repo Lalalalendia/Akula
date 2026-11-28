@@ -1,9 +1,9 @@
 //! Per-device video storage. This directory must never be a vault attachment,
 //! S3 input, Dropbox/Yandex source, or part of Markdown state.
+mod search; pub(crate) use search::search_root;
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
-
 pub const SINGLE_VIDEO_MAX: u64 = 2 * 1024 * 1024 * 1024;
 pub const LIBRARY_MAX: u64 = 20 * 1024 * 1024 * 1024;
 const EXTENSIONS: &[&str] = &["mp4", "webm", "mkv", "mov", "m4v"];
