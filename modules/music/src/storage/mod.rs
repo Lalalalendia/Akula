@@ -71,7 +71,7 @@ impl Store {
             match (app, version) {
                 (0, 0) => {
                     let objects: i64 = tx.query_row(
-                        "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+                        "SELECT COUNT(*) FROM sqlite_schema",
                         [],
                         |r| r.get(0),
                     )?;
