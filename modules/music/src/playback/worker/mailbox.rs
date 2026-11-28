@@ -22,6 +22,7 @@ pub enum SubmitError {
     WrongOwner,
     InvalidQueue,
     Full,
+    Poisoned,
 }
 
 /// The UI queues intent, not effects already committed to the reducer.
@@ -64,6 +65,10 @@ impl Mailbox {
         }
         self.queue.push_back(command);
         Ok(())
+    }
+
+    pub(super) fn stop_pending(&self) -> bool {
+        matches!(self.queue.front(), Some(Command::Stop))
     }
 
     pub(super) fn pop(&mut self) -> Option<Command> {

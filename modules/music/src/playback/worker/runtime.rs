@@ -47,6 +47,9 @@ impl Runtime {
     }
 
     pub fn submit(&mut self, owner: NonZeroU64, command: Command) -> Result<(), (SubmitError, Command)> {
+        if self.poisoned {
+            return Err((SubmitError::Poisoned, command));
+        }
         self.mailbox.submit(owner, command)
     }
 
@@ -72,24 +75,33 @@ impl Runtime {
 
     pub fn complete(&mut self, ticket: Ticket, success: bool) -> Result<bool, RuntimeError> {
         self.check_live()?;
+        self.prioritize_stop()?;
         let event = self.backend.complete(ticket, success);
         self.receive(ticket, event)
     }
 
     pub fn notify(&mut self, ticket: Ticket, event: Event) -> Result<bool, RuntimeError> {
         self.check_live()?;
+        self.prioritize_stop()?;
         let event = self.backend.notify(ticket, event);
         self.receive(ticket, event)
     }
 
-    /// The host must allocate a globally fresh owner; this check prevents
-    /// reusing the immediately active owner, not historic IDs across process runs.
+    /// Owners must increase across account changes within this lifetime.
+    /// A process restart still requires an externally unique owner range.
     pub fn switch_owner(&mut self, owner: NonZeroU64) -> Result<(), RuntimeError> {
-        if owner == self.owner {
+        if owner <= self.owner {
             return Err(RuntimeError::OwnerReuse);
         }
         self.backend.quiesce();
         *self = Self::new(owner);
+        Ok(())
+    }
+
+    fn prioritize_stop(&mut self) -> Result<(), RuntimeError> {
+        if self.mailbox.stop_pending() {
+            self.step()?;
+        }
         Ok(())
     }
 

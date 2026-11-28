@@ -226,3 +226,39 @@ fn explicit_stop_during_seek_cancels_pending_io() {
     assert!(!rt.backend().pending());
     assert!(!rt.backend().playing());
 }
+
+#[test]
+fn queued_stop_precedes_racing_load_completion() {
+    let mut rt = Runtime::new(owner(1));
+    send(&mut rt, replace());
+    let load = rt.player().ticket();
+    rt.submit(owner(1), Command::Stop).unwrap();
+    assert!(!rt.complete(load, true).unwrap());
+    assert_eq!(rt.player().phase(), Phase::Idle);
+    assert!(!rt.backend().playing());
+    assert!(!rt.step().unwrap());
+}
+
+#[test]
+fn queued_stop_precedes_racing_terminal_notification() {
+    let mut rt = Runtime::new(owner(1));
+    let run = playing(&mut rt);
+    send(&mut rt, Command::Repeat(Repeat::One));
+    rt.submit(owner(1), Command::Stop).unwrap();
+    assert!(!rt.notify(run, Event::Ended).unwrap());
+    assert_eq!(rt.player().phase(), Phase::Idle);
+    assert!(!rt.backend().pending());
+    assert!(!rt.backend().playing());
+}
+
+#[test]
+fn owner_ids_must_increase_and_poison_rejects_submission() {
+    let mut rt = Runtime::new(owner(1));
+    let run = playing(&mut rt);
+    assert!(rt.notify(run, Event::Progress { position_ms: 180_001 }).is_err());
+    assert_eq!(rt.submit(owner(1), Command::Next), Err((SubmitError::Poisoned, Command::Next)));
+    rt.switch_owner(owner(2)).unwrap();
+    assert_eq!(rt.switch_owner(owner(1)), Err(RuntimeError::OwnerReuse));
+    assert_eq!(rt.queued(), 0);
+    assert!(!rt.backend().playing());
+}
