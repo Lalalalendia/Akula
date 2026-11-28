@@ -4,8 +4,8 @@ impl App {
         let core = &self.workspace.core;
         let workspace = self.tree.root().map(Path::to_path_buf);
         match action {
-            // This handler is reached only for ordinary settings buttons.
-            // Review actions require the separately confirmed modal flow.
+            // Review actions have a separately confirmed modal flow.
+            Action::Speech(action) => self.press_speech(action, dialog.section),
             Action::OpenCloudProvider(_) => Effect::None, Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
             #[cfg(feature = "yandex-disk-readonly-preview")] a @ (Action::YandexDiskLoginReadOnly | Action::YandexDiskConfirmAccount | Action::YandexDiskInspectLocal | Action::YandexDiskForgetLocal) => self.press_yandex_disk(a, dialog.section),
             #[cfg(feature = "dropbox-readonly-preview")]

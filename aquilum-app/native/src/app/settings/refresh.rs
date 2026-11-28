@@ -24,11 +24,11 @@ impl App {
         fresh.sync_notice = dialog.sync_notice;
         fresh.yandex_notice = dialog.yandex_notice;
         fresh.server_advanced = dialog.server_advanced;
-        fresh.cloud_popup = dialog.cloud_popup;
+        fresh.cloud_popup = dialog.cloud_popup; fresh.transcript = dialog.transcript;
         if let Some(cloud) = fresh.cloud_popup.as_mut() {
             cloud.rebuild(root, &config, &ctx);
         }
-        if fresh.cloud_popup.is_none() { root.focus_on(Some(fresh.layer)); }
+        if fresh.cloud_popup.is_none() && fresh.transcript.is_none() { root.focus_on(Some(fresh.layer)); }
         if let Some(offset) = offset {
             fresh.content.edit(root, |mut area| ScrollArea::set_offset(&mut area, offset));
         }

@@ -3,6 +3,7 @@ pub use cloud_provider::CloudProvider;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     OpenCloudProvider(CloudProvider),
+    Speech(crate::workspace::speech_jobs::Action),
     #[cfg(feature = "dropbox-readonly-preview")] DropboxLoginAccount, #[cfg(feature = "dropbox-readonly-preview")] DropboxResumeAccount,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxForgetAccount,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxConnectReadOnly,
@@ -11,8 +12,7 @@ pub enum Action {
     InspectRecovery(String),
     RequestRecoveryReview(NativeRecoveryDecision),
     OpenTrash,
-    Restore(String), TrashPage(usize),
-    CreateTemplates,
+    Restore(String), TrashPage(usize), CreateTemplates,
     NewToken,
     Copy(usize, String),
     OpenUrl(&'static str),

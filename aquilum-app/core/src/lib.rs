@@ -1,7 +1,7 @@
-//! The Aquilum core: notes on disk, documents, search, history, settings and UI state, with no
-//! knowledge of the UI that hosts it.
+//! Aquilum core for notes, documents, search, history, settings and UI-independent state.
 
 pub mod app_core;
+pub mod background_jobs;
 pub mod documents;
 pub mod files;
 pub mod history;

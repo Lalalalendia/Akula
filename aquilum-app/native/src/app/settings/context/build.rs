@@ -11,8 +11,7 @@ impl App {
                 known.into_iter().find(|w| w.path == path).map(|w| w.home_page)
             })
             .unwrap_or_default();
-        // SQLite is opened only for this page, and strictly read-only.
-        // Missing/unsupported journals are NOT described as "synchronized".
+        // The Sync section inspects the journal read-only.
         let sync_recovery = if section == Section::Sync {
             workspace.as_deref().map(|vault| {
                 aquilum_core::sync::native_recovery_overview(
@@ -41,6 +40,7 @@ impl App {
         let bucket = self.workspace.core.settings.get_config().s3_onboarding.bucket;
         Context {
             workspace: workspace.clone(),
+            speech: (section == Section::System).then(|| self.workspace.speech().view()),
             sync_recovery,
             #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_status: self.yandex_disk_preview.status.to_owned(), #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_busy: self.yandex_disk_preview.busy, #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_review_account: self.yandex_disk_preview.review_account.clone(), #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_app_configured: crate::app::yandex_disk_preview::YandexDiskPreview::has_registered_app(), #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_vault_ready: self.yandex_disk_local_vault().is_some(), #[cfg(feature = "yandex-disk-readonly-preview")] yandex_disk_saved_account: self.yandex_saved_public_account(),
             #[cfg(feature = "s3-e2e01-review-preview")] s3_bound_publications,

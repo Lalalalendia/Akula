@@ -1,4 +1,5 @@
 use super::*; #[cfg(windows)] mod video_tools;
+mod speech;
 pub(super) const PROJECT_TELEGRAM_URL: &str = "https://t.me/AkulaHubl";
 pub(super) fn update_row(status: &crate::updater::Status) -> Row {
     use crate::updater::Status;
@@ -44,23 +45,22 @@ pub(super) fn system(config: &AppConfig, ctx: &Context) -> Vec<Block> {
                 None => info(t("settings.system.launch"), Some(t("settings.system.launchUnavailable")), Control::Locked(false)),
             }],
         },
-        Block {
-            title: t("settings.system.about"),
-            rows: vec![
-                info(
-                    t("settings.system.projectTelegram"),
-                    Some(t("settings.system.projectTelegramHint")),
-                    Control::Buttons(vec![Button::new(PROJECT_TELEGRAM_URL.to_owned(), Action::OpenUrl(PROJECT_TELEGRAM_URL))]),
-                ),
-                info(
-                    t("settings.system.version"),
-                    Some(t("settings.system.versionHint")),
-                    Control::Status { text: env!("CARGO_PKG_VERSION").to_owned(), tone: Tone::Muted },
-                ),
-            ],
-        },
     ];
-    #[cfg(windows)]
-    blocks.insert(2, video_tools::optional_ytdlp_block(ctx));
+    #[cfg(windows)] blocks.push(video_tools::optional_ytdlp_block(ctx));
+    blocks.extend(ctx.speech.as_ref().map(speech::block));
+    blocks.push(Block { title: t("settings.system.about"),
+        rows: vec![
+            info(
+                t("settings.system.projectTelegram"),
+                Some(t("settings.system.projectTelegramHint")),
+                Control::Buttons(vec![Button::new(PROJECT_TELEGRAM_URL.to_owned(), Action::OpenUrl(PROJECT_TELEGRAM_URL))]),
+            ),
+            info(
+                t("settings.system.version"),
+                Some(t("settings.system.versionHint")),
+                Control::Status { text: env!("CARGO_PKG_VERSION").to_owned(), tone: Tone::Muted },
+            ),
+        ],
+    });
     blocks
 }
