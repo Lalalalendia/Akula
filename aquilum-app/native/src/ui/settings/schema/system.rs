@@ -61,6 +61,8 @@ pub(super) fn system(config: &AppConfig, ctx: &Context) -> Vec<Block> {
         },
     ];
     #[cfg(windows)] blocks.insert(2, video_tools::optional_ytdlp_block(ctx));
-    if let Some(speech) = &ctx.speech { blocks.insert(2, speech::block(speech)); }
+    if let Some(speech) = &ctx.speech {
+        blocks.insert(blocks.len() - 1, speech::block(speech));
+    }
     blocks
 }
