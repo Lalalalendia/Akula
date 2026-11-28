@@ -4,6 +4,7 @@ mod commands;
 mod config; mod downloads;
 mod export;
 mod manager;
+mod toolkit;
 mod view; pub(crate) use view::{BatchReport, JobRow, Notice, Selection, Track, View};
 pub(crate) mod playback; pub(crate) mod transcript;
 #[cfg(test)]
@@ -21,6 +22,10 @@ const PAGE_SIZE: u32 = 8;
 type Wake = Arc<dyn Fn() + Send + Sync>;
 
 pub(crate) use commands::{Action, Command, Tool};
+
+pub(crate) fn can_install_tools() -> bool {
+    toolkit::supported()
+}
 
 #[derive(Default)]
 struct Shared {

@@ -299,6 +299,7 @@ fn recognize(
         .args(["-ng", "-np", "-oj", "-p", "1", "-t"])
         .arg(threads.to_string())
         .env("OMP_NUM_THREADS", threads.to_string())
+        .env_remove("GGML_BACKEND_PATH")
         .args(["-l", language, "-m"])
         .arg(&tools.model)
         .args(["--vad", "-vm"])

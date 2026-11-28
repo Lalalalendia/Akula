@@ -1,12 +1,38 @@
 mod batch; mod downloads; mod item; mod notice;
 use super::*;
-use crate::workspace::speech_jobs::{Action as Speech, Tool, View};
+use crate::workspace::speech_jobs::{Action as Speech, Tool, View, can_install_tools};
 use aquilum_core::background_jobs::State;
 use item::{button, buttons, file_name, label, status};
 use std::path::Path;
 
 pub(super) fn block(view: &View) -> Block {
-    let mut rows = batch::controls(view);
+    let mut rows = Vec::new();
+    if can_install_tools() {
+        let action = if view.tools.iter().all(Option::is_some) {
+            "reinstallTools"
+        } else {
+            "installTools"
+        };
+        let (hint, enabled) = match view.installing_tools {
+            Some(percent) => (
+                t_with(
+                    "settings.system.speech.installProgress",
+                    &[("percent", &percent.to_string())],
+                ),
+                false,
+            ),
+            None => (
+                label("installHint"),
+                view.loaded && view.active.is_none() && !view.processing_queue && !view.preparing,
+            ),
+        };
+        rows.push(info(
+            label("toolkit"),
+            Some(hint),
+            buttons(vec![button(action, Speech::InstallTools).enabled(enabled)]),
+        ));
+    }
+    rows.extend(batch::controls(view));
     if let Some(selection) = &view.selection {
         rows.push(info(
             file_name(&selection.source),
@@ -118,7 +144,10 @@ pub(super) fn block(view: &View) -> Block {
             name,
             Some(file.map_or_else(|| label("missing"), file_name)),
             buttons(vec![button("chooseTool", Speech::PickTool(tool)).enabled(
-                view.loaded && view.active.is_none() && !view.preparing,
+                view.loaded
+                    && view.active.is_none()
+                    && !view.preparing
+                    && view.installing_tools.is_none(),
             )]),
         ));
     }

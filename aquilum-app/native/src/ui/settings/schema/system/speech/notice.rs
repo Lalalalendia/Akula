@@ -7,6 +7,7 @@ pub(super) fn row(notice: &Notice) -> Row {
         Notice::Error(error) => (error.chars().take(300).collect(), Tone::Danger),
         Notice::LeaseBusy => (label("leaseBusy"), Tone::Secondary),
         Notice::Exported => (label("exported"), Tone::Secondary),
+        Notice::ToolkitInstalled => (label("toolkitInstalled"), Tone::Secondary),
         Notice::BatchTooLarge => (
             t_with(
                 "settings.system.speech.batchLimit",
