@@ -1,7 +1,7 @@
-//! Standalone music domain. No network, UI, account credentials or disk writes.
+//! Standalone music domain and local statistics; no network, UI or credentials.
 #![forbid(unsafe_code)]
-
 mod listening;
+pub mod storage;
 mod summary;
 
 pub use listening::{ListenRecord, ListenSession, Outcome, SessionError, TrackKey};

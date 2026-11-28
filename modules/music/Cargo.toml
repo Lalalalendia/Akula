@@ -10,3 +10,4 @@ description = "Deterministic music playback and listening statistics contracts"
 [workspace]
 
 [dependencies]
+rusqlite = { version = "=0.41.1", features = ["bundled"] }
