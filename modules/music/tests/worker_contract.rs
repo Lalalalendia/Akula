@@ -2,7 +2,7 @@ use akula_music::TrackKey;
 use akula_music::playback::worker::{
     BackendError, Command, Mailbox, MockBackend, Runtime, RuntimeError, SubmitError, COMMAND_CAPACITY,
 };
-use akula_music::playback::{Effect, Event, Phase, Player, Repeat, Ticket, Track, MAX_QUEUE};
+use akula_music::playback::{Event, Phase, Player, Repeat, Ticket, Track, MAX_QUEUE};
 use std::num::NonZeroU64;
 
 fn owner(id: u64) -> NonZeroU64 {
