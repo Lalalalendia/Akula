@@ -1,8 +1,9 @@
 use super::{Tool, Tools, toolkit};
+mod preferences;
 mod storage;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::Read;
+mod trust;
+use trust::digest;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -18,6 +19,8 @@ pub(super) struct Config {
     managed_tools: Option<PathBuf>,
     #[serde(default)]
     pub(super) auto_downloads: bool,
+    #[serde(default)]
+    pub(super) cpu_mode: aquilum_core::background_jobs::speech::CpuMode,
 }
 
 impl Config {
@@ -34,6 +37,10 @@ impl Config {
         next.save(profile)?;
         *self = next;
         Ok(())
+    }
+
+    pub(super) fn same_tools(&self, other: &Self) -> bool {
+        self.files == other.files && self.managed_tools == other.managed_tools
     }
 
     pub(super) fn paths(&self) -> [Option<PathBuf>; 5] {
@@ -85,21 +92,5 @@ impl Config {
                 tool,
             ),
         }
-    }
-}
-
-fn digest(path: &Path) -> Result<String, String> {
-    if !path.is_file() {
-        return Err("expected a regular local file".into());
-    }
-    let mut reader = File::open(path).map_err(|error| error.to_string())?;
-    let mut hash = blake3::Hasher::new();
-    let mut block = [0; 64 * 1024];
-    loop {
-        let count = reader.read(&mut block).map_err(|error| error.to_string())?;
-        if count == 0 {
-            return Ok(hash.finalize().to_hex().to_string());
-        }
-        hash.update(&block[..count]);
     }
 }

@@ -33,18 +33,6 @@ impl Config {
             .map_err(|error| format!("{error:?}"))?;
         Ok(())
     }
-
-    pub(in crate::workspace::speech_jobs) fn set_auto_downloads(
-        &mut self,
-        profile: &Path,
-        enabled: bool,
-    ) -> Result<(), String> {
-        let mut next = self.clone();
-        next.auto_downloads = enabled;
-        next.save(profile)?;
-        *self = next;
-        Ok(())
-    }
 }
 
 fn config_path(profile: &Path) -> PathBuf {

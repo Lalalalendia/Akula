@@ -2,7 +2,6 @@ mod notice;
 use super::{JobId, PathBuf};
 use aquilum_core::background_jobs::State;
 pub(crate) use notice::{BatchReport, Notice};
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Track {
     pub(crate) index: u32,
@@ -39,6 +38,7 @@ pub(crate) struct View {
     pub(crate) preparing: bool,
     pub(crate) installing_tools: Option<u8>,
     pub(crate) auto_downloads: bool,
+    pub(crate) cpu_mode: aquilum_core::background_jobs::speech::CpuMode,
     pub(crate) admitting_download: Option<PathBuf>,
     pub(crate) loaded: bool,
     pub(crate) older: bool,

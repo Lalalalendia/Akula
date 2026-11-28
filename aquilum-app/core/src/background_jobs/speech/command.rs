@@ -1,7 +1,7 @@
-use super::{Error, Result};
+use super::{Error, Result, resources::Limits};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 pub(super) struct Workspace(PathBuf);
@@ -31,23 +31,13 @@ impl Drop for Workspace {
     }
 }
 
-struct Running(Child);
-
-impl Drop for Running {
-    fn drop(&mut self) {
-        if !matches!(self.0.try_wait(), Ok(Some(_))) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-}
-
 pub(super) fn run(
     command: &mut Command,
     workspace: &Workspace,
     stdout: Option<&Path>,
     output: (&Path, u64),
     timeout: Duration,
+    limits: Limits,
     check: &mut impl FnMut() -> Result<()>,
 ) -> Result<()> {
     const LOG_LIMIT: u64 = 4 * 1024 * 1024;
@@ -58,23 +48,13 @@ pub(super) fn run(
     };
     let label = command.get_program().to_string_lossy().into_owned();
     check()?;
-    #[cfg(target_os = "linux")]
-    limit_process(command);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
-        command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
-    }
-    let mut child = Running(
+    let mut child = limits.spawn(
         command
             .current_dir(&workspace.0)
             .stdin(Stdio::null())
             .stdout(out)
-            .stderr(File::create(&stderr)?)
-            .spawn()?,
-    );
+            .stderr(File::create(&stderr)?),
+    )?;
     let start = Instant::now();
     loop {
         if start.elapsed() >= timeout {
@@ -84,7 +64,7 @@ pub(super) fn run(
         if length(output.0)? > output.1 || length(&stderr)? > LOG_LIMIT {
             return Err(Error::Invalid(format!("{label} exceeded its output limit")));
         }
-        if let Some(status) = child.0.try_wait()? {
+        if let Some(status) = child.child.try_wait()? {
             if status.success() {
                 if length(output.0)? > output.1 {
                     return Err(Error::Invalid(format!("{label} exceeded its output limit")));
@@ -102,36 +82,6 @@ pub(super) fn run(
             )));
         }
         std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn limit_process(command: &mut Command) {
-    use rustix::process::{self, Resource, Rlimit, Signal};
-    use std::os::unix::process::CommandExt;
-
-    const ADDRESS_SPACE: u64 = 4 * 1024 * 1024 * 1024;
-    let parent = process::getpid();
-    // SAFETY: the child performs only Linux syscalls and creates errors from
-    // numeric OS codes between fork and exec.
-    unsafe {
-        command.pre_exec(move || {
-            process::set_parent_process_death_signal(Some(Signal::Kill))?;
-            if process::getppid() != Some(parent) {
-                return Err(rustix::io::Errno::SRCH.into());
-            }
-            let inherited = process::getrlimit(Resource::As);
-            let limit = |value: Option<u64>| value.unwrap_or(ADDRESS_SPACE).min(ADDRESS_SPACE);
-            process::setrlimit(
-                Resource::As,
-                Rlimit {
-                    current: Some(limit(inherited.current)),
-                    maximum: Some(limit(inherited.maximum)),
-                },
-            )?;
-            process::nice(10)?;
-            Ok(())
-        });
     }
 }
 

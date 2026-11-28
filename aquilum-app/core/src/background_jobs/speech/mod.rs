@@ -4,7 +4,13 @@ mod command;
 pub mod edits;
 mod media;
 mod output;
-pub mod playback; pub mod search;
+pub mod playback;
+pub mod search;
+mod resources;
+pub use resources::CpuMode;
+use resources::Limits;
+mod execute;
+pub use execute::{work, work_queued};
 #[cfg(test)]
 mod tests;
 
@@ -34,7 +40,7 @@ pub enum Error {
     Queue(super::Error),
     Io(std::io::Error),
     Json(serde_json::Error),
-    Invalid(String),
+    Invalid(String), ResourcePressure,
 }
 
 impl std::fmt::Display for Error {
@@ -44,6 +50,7 @@ impl std::fmt::Display for Error {
             Self::Io(error) => error.fmt(f),
             Self::Json(error) => error.fmt(f),
             Self::Invalid(message) => f.write_str(message),
+            Self::ResourcePressure => f.write_str("not enough available memory for speech recognition"),
         }
     }
 }
@@ -54,7 +61,7 @@ impl std::error::Error for Error {
             Self::Queue(error) => Some(error),
             Self::Io(error) => Some(error),
             Self::Json(error) => Some(error),
-            Self::Invalid(_) => None,
+            Self::Invalid(_) | Self::ResourcePressure => None,
         }
     }
 }
@@ -160,49 +167,6 @@ pub fn tracks(ffprobe: &Path, source: &Path) -> Result<Vec<Track>> {
     .tracks)
 }
 
-/// Process one selected job. The controller may pause or cancel from a
-/// separate connection. Already committed windows are never sent to Whisper.
-pub fn work(queue: &mut Queue, tools: &Tools, id: JobId, threads: u8) -> Result<Outcome> {
-    work_job(queue, tools, id, threads, false)
-}
-
-/// Automatic draining claims queued jobs when no live worker owns a speech job.
-pub fn work_queued(queue: &mut Queue, tools: &Tools, id: JobId, threads: u8) -> Result<Outcome> {
-    work_job(queue, tools, id, threads, true)
-}
-
-fn work_job(queue: &mut Queue, tools: &Tools, id: JobId, threads: u8, queued_only: bool) -> Result<Outcome> {
-    if !(1..=8).contains(&threads) {
-        return Err(Error::Invalid("expected 1 to 8 CPU threads".into()));
-    }
-    let lease = if queued_only { queue.claim_queued(KIND, id, LEASE)? }
-        else { queue.claim(KIND, Some(id), LEASE)? };
-    let Some(lease) = lease else {
-        return Ok(Outcome::Idle);
-    };
-    match process_job(queue, tools, &lease, threads) {
-        Ok(()) => Ok(Outcome::Completed),
-        Err(Error::Queue(super::Error::Conflict)) => Ok(Outcome::Interrupted),
-        Err(error) => {
-            let message = failure_message(&error);
-            match queue.fail(&lease, &message) {
-                Ok(()) => Err(error),
-                Err(super::Error::Conflict) => Ok(Outcome::Interrupted),
-                Err(failure) => Err(failure.into()),
-            }
-        }
-    }
-}
-
-fn failure_message(error: &Error) -> String {
-    let message = error.to_string().replace('\0', "\u{fffd}");
-    let mut end = message.len().min(8192);
-    while !message.is_char_boundary(end) {
-        end -= 1;
-    }
-    message[..end].to_owned()
-}
-
 fn process_job(queue: &mut Queue, tools: &Tools, lease: &Lease, threads: u8) -> Result<()> {
     let job = queue.get(lease.job())?.ok_or(super::Error::Conflict)?;
     let source = Path::new(&job.spec.source);
@@ -298,7 +262,6 @@ fn recognize(
     command
         .args(["-ng", "-np", "-oj", "-p", "1", "-t"])
         .arg(threads.to_string())
-        .env("OMP_NUM_THREADS", threads.to_string())
         .env_remove("GGML_BACKEND_PATH")
         .args(["-l", language, "-m"])
         .arg(&tools.model)
@@ -314,6 +277,7 @@ fn recognize(
         None,
         (&json, JSON_LIMIT),
         ASR_TIMEOUT,
+        Limits::Recognition(threads),
         check,
     )?;
     output::decode_whisper(&fs::read(json)?, range)

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Notice {
     Error(String),
-    LeaseBusy,
+    LeaseBusy, MemoryPressure,
     Exported,
     ToolkitInstalled,
     Batch(BatchReport),

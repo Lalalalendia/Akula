@@ -36,7 +36,7 @@ pub(crate) enum Action {
     PickTool(Tool),
     PickMedia, PickBatch,
     UseTrack(u32),
-    DismissMedia, AutoDownloads(bool),
+    DismissMedia, AutoDownloads(bool), CpuMode(aquilum_core::background_jobs::speech::CpuMode),
     Run(JobId), RunQueue, StopQueue,
     Pause(JobId),
     Cancel(JobId),
