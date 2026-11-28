@@ -19,7 +19,7 @@ impl Manager<'_> {
     pub(super) fn inspect(&mut self, source: PathBuf) -> Result<(), String> {
         self.view.selection = None;
         let probe = self.config.checked(Tool::Probe)?;
-        let tracks = speech::tracks(probe, &source).map_err(|error| error.to_string())?;
+        let tracks = speech::tracks(&probe, &source).map_err(|error| error.to_string())?;
         if tracks.is_empty() {
             return Err("the media file has no audio tracks".into());
         }

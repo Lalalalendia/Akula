@@ -3,7 +3,6 @@ use crate::ui::settings::transcript::Editor;
 use aquilum_core::background_jobs::JobId;
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
-
 impl App {
     pub(super) fn open_transcript(
         &self,
@@ -39,10 +38,11 @@ impl App {
     }
 
     pub(super) fn poll_transcript(&mut self, root: &mut RenderRoot) {
-        if let Some(Popup::Settings { dialog, .. }) = &mut self.popup
-            && let Some(editor) = dialog.transcript.as_mut()
-        {
-            editor.poll(root);
-        }
+        let editor = match &mut self.popup {
+            Some(Popup::Settings { dialog, .. }) => dialog.transcript.as_mut(),
+            Some(Popup::Transcript(editor)) => Some(editor.as_mut()),
+            _ => None,
+        };
+        if let Some(editor) = editor { editor.poll(root); }
     }
 }

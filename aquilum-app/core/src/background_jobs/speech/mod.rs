@@ -5,8 +5,12 @@ pub mod edits;
 mod media;
 mod output;
 pub mod playback;
-mod resources; pub use resources::CpuMode; use resources::Limits;
-mod execute; pub use execute::{work, work_queued};
+pub mod search;
+mod resources;
+pub use resources::CpuMode;
+use resources::Limits;
+mod execute;
+pub use execute::{work, work_queued};
 #[cfg(test)]
 mod tests;
 
@@ -258,6 +262,7 @@ fn recognize(
     command
         .args(["-ng", "-np", "-oj", "-p", "1", "-t"])
         .arg(threads.to_string())
+        .env_remove("GGML_BACKEND_PATH")
         .args(["-l", language, "-m"])
         .arg(&tools.model)
         .args(["--vad", "-vm"])
@@ -271,7 +276,8 @@ fn recognize(
         temp,
         None,
         (&json, JSON_LIMIT),
-        ASR_TIMEOUT, Limits::Recognition(threads),
+        ASR_TIMEOUT,
+        Limits::Recognition(threads),
         check,
     )?;
     output::decode_whisper(&fs::read(json)?, range)

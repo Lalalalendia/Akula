@@ -1,4 +1,6 @@
 #[cfg(windows)] pub(crate) mod optional_ytdlp;
+#[cfg(any(windows, test))]
+pub(crate) mod optional_tool_transfer;
 pub(crate) mod captions; pub(crate) mod preview; pub(crate) mod download; mod worker_process;
 pub(crate) mod library;
 pub(crate) mod light;

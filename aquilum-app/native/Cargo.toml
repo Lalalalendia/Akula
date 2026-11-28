@@ -38,7 +38,7 @@ installed = ["dropbox-readonly-preview", "server-readonly-preflight"]
 messaging-w4-pilot = []
 memory-probe = []
 # Opt-in experimental local DICOM viewing. Not included in the installed build.
-dicom-preview = ["dep:dicom-core", "dep:dicom-object", "dep:dicom-pixeldata", "dep:zip"]
+dicom-preview = ["dep:dicom-core", "dep:dicom-object", "dep:dicom-pixeldata"]
 # User-visible Windows read-only SSH verification. No install grant.
 server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
@@ -81,7 +81,7 @@ arboard = { version = "3", default-features = false, features = ["image-data", "
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
-# Same pinned ureq 2.12 series already used by core: user-triggered optional yt-dlp only.
+# Same pinned ureq 2.12 series already used by core for network requests.
 ureq = "2.12"
 # Pinned after upstream #844: crates.io 0.10.0 incorrectly decodes 8-bit monochrome RLE.
 # All three packages share the same exact source revision.
@@ -89,7 +89,8 @@ dicom-core = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0
 dicom-object = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", optional = true }
 dicom-pixeldata = { git = "https://github.com/Enet4/dicom-rs", rev = "bcc6907c62a99a0a53523b5e80a22002ad12a63d", features = ["image"], optional = true }
 # ZIP is read directly by a bounded ZIP reader; nothing is unpacked to the vault.
-zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"], optional = true }
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+tempfile = "3"
 uuid = { version = "1.23.5", features = ["v4"] }
 rfd = "0.16"
 pulldown-cmark = { version = "0.13", default-features = false }
@@ -135,7 +136,7 @@ accesskit_unix = "=0.22.1"
 [target.'cfg(target_os = "windows")'.dependencies]
 zeroize = "1.9.0"
 windows-core = "0.62"
-windows = { version = "0.62", features = ["Win32_Security_Credentials", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectManipulation", "Win32_Graphics_Dwm", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Graphics_Imaging", "Win32_Media_Audio", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_Registry", "Win32_UI_Input_Pointer", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Security_Credentials", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectManipulation", "Win32_Graphics_Dwm", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Graphics_Imaging", "Win32_Media_Audio", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_UI_Input_Pointer", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
 # Под accesskit 0.24 из Masonry: та же версия, что у accesskit_winit 0.32.
 accesskit_windows = "=0.32.1"
 
@@ -149,6 +150,3 @@ gstreamer-video = "0.24"
 wuff = "0.2.9"
 # Переименование семейства кириллической половины Inter (см. build.rs).
 write-fonts = { version = "0.50", features = ["read"] }
-
-[dev-dependencies]
-tempfile = "3"

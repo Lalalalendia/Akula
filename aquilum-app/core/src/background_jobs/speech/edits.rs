@@ -2,9 +2,7 @@
 
 use super::{Cue, Error, JobId, KIND, Queue, Result};
 use rusqlite::{Transaction, TransactionBehavior, params};
-
 const WINDOWS_PER_PAGE: i64 = 4;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CueId {
     pub window: i64,
@@ -90,6 +88,8 @@ pub fn save(queue: &Queue, job: JobId, id: CueId, expected: i64, text: &str) -> 
     tx.commit().map_err(super::super::Error::from)?;
     Ok(row)
 }
+
+pub fn page_of(cue: CueId) -> i64 { cue.window / WINDOWS_PER_PAGE }
 
 pub(super) fn snapshot(queue: &Queue) -> Result<Transaction<'_>> {
     Ok(queue

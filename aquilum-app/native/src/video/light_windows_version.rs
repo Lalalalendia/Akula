@@ -4,7 +4,7 @@ pub(super) fn supports_pinned_windows_video_runtime(major: u32) -> bool {
     major >= 10
 }
 
-pub(super) fn require_pinned_windows_video_runtime() -> Result<(), String> {
+pub(crate) fn require_pinned_windows_video_runtime() -> Result<(), String> {
     // The ABI layout exactly matches RTL_OSVERSIONINFOW / OSVERSIONINFOW.
     // RtlGetVersion returns the actual Windows version independent of
     // GetVersionExW application compatibility manifest behavior.

@@ -5,13 +5,13 @@ use std::sync::mpsc::{self, Receiver, Sender};
 pub(crate) enum Task {
     Page(i64),
     Save(edits::CueId, i64, String),
-    VerifyMedia,
+    VerifyMedia, Locate(aquilum_core::background_jobs::speech::search::Target),
 }
 
 pub(crate) enum Reply {
     Page(edits::Page),
     Saved(edits::Row),
-    Media(Transcript),
+    Media(Transcript), Located(edits::Page, Transcript, i64),
 }
 
 pub(crate) type Response = Result<Reply, String>;

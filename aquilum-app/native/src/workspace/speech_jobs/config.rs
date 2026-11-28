@@ -1,5 +1,6 @@
-use super::{Tool, Tools};
-mod preferences; mod storage;
+use super::{Tool, Tools, toolkit};
+mod preferences;
+mod storage;
 use serde::{Deserialize, Serialize};
 mod trust;
 use trust::digest;
@@ -14,6 +15,8 @@ struct TrustedFile {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct Config {
     files: [Option<TrustedFile>; 5],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    managed_tools: Option<PathBuf>,
     #[serde(default)]
     pub(super) auto_downloads: bool,
     #[serde(default)]
@@ -37,11 +40,30 @@ impl Config {
     }
 
     pub(super) fn same_tools(&self, other: &Self) -> bool {
-        self.files == other.files
+        self.files == other.files && self.managed_tools == other.managed_tools
     }
 
     pub(super) fn paths(&self) -> [Option<PathBuf>; 5] {
-        self.files.clone().map(|file| file.map(|file| file.path))
+        Tool::ALL.map(|tool| {
+            self.files[tool as usize]
+                .as_ref()
+                .map(|file| file.path.clone())
+                .or_else(|| self.managed_tools.as_ref().map(|root| toolkit::path(root, tool)))
+        })
+    }
+
+    pub(super) fn use_installed(
+        &mut self,
+        profile: &Path,
+        install: tempfile::TempDir,
+    ) -> Result<(), String> {
+        let mut next = self.clone();
+        next.files = Default::default();
+        next.managed_tools = Some(install.path().to_owned());
+        next.save(profile)?;
+        *self = next;
+        let _ = install.keep();
+        Ok(())
     }
 
     pub(super) fn verify(&self) -> Result<Tools, String> {
@@ -52,16 +74,23 @@ impl Config {
             self.checked(Tool::Model)?,
             self.checked(Tool::Vad)?,
         ];
-        Tools::new(probe, ffmpeg, whisper, model, vad).map_err(|error| error.to_string())
+        Tools::new(&probe, &ffmpeg, &whisper, &model, &vad).map_err(|error| error.to_string())
     }
 
-    pub(super) fn checked(&self, tool: Tool) -> Result<&Path, String> {
-        let file = self.files[tool as usize]
-            .as_ref()
-            .ok_or_else(|| "speech tool is not configured".to_string())?;
-        if digest(&file.path)? != file.digest {
-            return Err("speech tool or model changed. Select the file again in Settings".into());
+    pub(super) fn checked(&self, tool: Tool) -> Result<PathBuf, String> {
+        match &self.files[tool as usize] {
+            Some(file) => {
+                if digest(&file.path)? != file.digest {
+                    return Err("speech tool or model changed. Select the file again in Settings".into());
+                }
+                Ok(file.path.clone())
+            }
+            None => toolkit::checked(
+                self.managed_tools
+                    .as_deref()
+                    .ok_or("speech tool is not configured")?,
+                tool,
+            ),
         }
-        Ok(&file.path)
     }
 }

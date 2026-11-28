@@ -1,4 +1,6 @@
 mod batch; mod downloads; mod playback; mod transcript;
+#[cfg(all(windows, target_arch = "x86_64"))]
+mod stock;
 use super::*;
 use crate::ui::settings::{Binding, schema::Action};
 use crate::workspace::speech_jobs::{Action as Speech, Command, Tool, View};

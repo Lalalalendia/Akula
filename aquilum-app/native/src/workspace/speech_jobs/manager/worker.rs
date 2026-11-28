@@ -29,6 +29,9 @@ impl Manager<'_> {
     }
 
     pub(super) fn start(&mut self, id: JobId, queued_only: bool) -> Result<(), String> {
+        if self.installation.is_some() {
+            return Err("speech toolkit installation is in progress".into());
+        }
         if self.worker.is_some() {
             return Err("a speech job is already active".into());
         }

@@ -27,3 +27,21 @@ impl Config {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn speech_admission_tracks_the_installed_kit_independently_of_cpu_mode() {
+        let original = Config {
+            managed_tools: Some("first-kit".into()),
+            ..Config::default()
+        };
+        let mut changed = original.clone();
+        changed.cpu_mode = CpuMode::Quiet;
+        assert!(original.same_tools(&changed));
+        changed.managed_tools = Some("replacement-kit".into());
+        assert!(!original.same_tools(&changed));
+    }
+}

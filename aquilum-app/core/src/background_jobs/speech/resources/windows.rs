@@ -17,7 +17,7 @@ use windows_sys::Win32::{
         },
         SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX},
         Threading::{
-            BELOW_NORMAL_PRIORITY_CLASS, CREATE_SUSPENDED, GetCurrentProcess,
+            BELOW_NORMAL_PRIORITY_CLASS, CREATE_NO_WINDOW, CREATE_SUSPENDED, GetCurrentProcess,
             GetProcessAffinityMask, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
         },
     },
@@ -79,7 +79,7 @@ pub(super) fn spawn(
         return Err(io::Error::last_os_error());
     }
     let mut child = command
-        .creation_flags(CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS)
+        .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS)
         .spawn()?;
     if let Err(error) = start_in_job(&child, &job) {
         let _ = child.kill();

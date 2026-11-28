@@ -1,4 +1,5 @@
 mod batch; mod downloads; mod intake; mod transcript; mod worker; mod view;
+mod install;
 use worker::Worker;
 use super::config::Config;
 use super::playback::Attached;
@@ -16,6 +17,7 @@ struct Manager<'a> {
     database: PathBuf,
     config: Config,
     downloads: downloads::Downloads,
+    installation: Option<install::Installation>,
     worker: Option<Worker>,
     bounds: Vec<JobId>,
     view: View,
@@ -52,6 +54,7 @@ pub(super) fn serve(
         database,
         config: Config::default(),
         downloads: downloads::Downloads::default(),
+        installation: None,
         worker: None,
         bounds: Vec::new(),
         view: View {
@@ -68,7 +71,11 @@ pub(super) fn serve(
     }
     manager.publish();
     loop {
-        let command = if manager.worker.is_some() || manager.view.processing_queue || manager.downloads.busy() {
+        let command = if manager.worker.is_some()
+            || manager.view.processing_queue
+            || manager.downloads.busy()
+            || manager.installation.is_some()
+        {
             match commands.recv_timeout(POLL) {
                 Ok(command) => Some(command),
                 Err(RecvTimeoutError::Timeout) => None,
@@ -92,6 +99,7 @@ pub(super) fn serve(
             }
         }
         manager.reap();
+        manager.poll_installation();
         manager.poll_downloads();
         manager.advance_queue();
         manager.refresh_captions();
@@ -106,7 +114,11 @@ pub(super) fn serve(
 impl Manager<'_> {
     fn handle(&mut self, command: Command) -> Result<(), String> {
         match command {
+            Command::Action(Action::InstallTools) => self.install_tools(),
             Command::SetTool(tool, path) => self.prepare(|this| {
+                if this.installation.is_some() {
+                    return Err("speech toolkit installation is in progress".into());
+                }
                 this.config.choose(&this.profile, tool, path)?;
                 this.view.selection = None;
                 Ok(())

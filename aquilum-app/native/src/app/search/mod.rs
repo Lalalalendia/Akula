@@ -1,10 +1,9 @@
 mod input;
-mod query;
+mod query; mod media;
 mod render;
 mod worker;
 
 use std::sync::Arc;
-
 use crate::ui::editor::TextEditor;
 
 use aquilum_core::search::models::{SearchIndexStatus, SearchResult};
@@ -33,6 +32,7 @@ pub(super) struct SearchState {
     query: String,
     worker: worker::Worker,
     results: Vec<SearchResult>,
+    speech: Vec<aquilum_core::background_jobs::speech::search::Hit>,
     terms: Vec<String>,
     status: Option<SearchIndexStatus>,
     failed: bool,
@@ -47,11 +47,11 @@ impl SearchState {
     }
 
     pub fn result_count(&self) -> usize {
-        self.results.len()
+        self.results.len() + self.speech.len()
     }
 
     pub fn selected_path(&self) -> std::path::PathBuf {
-        std::path::PathBuf::from(&self.results[self.selected].path)
+        self.results.get(self.selected).map_or_else(|| self.speech[self.selected - self.results.len()].path.clone(), |note| note.path.clone().into())
     }
 
     #[cfg(feature = "memory-probe")]
@@ -85,7 +85,7 @@ pub(super) fn select_card(root: &mut RenderRoot, kind: CardKind, cards: &[Widget
 
 impl App {
     pub fn open_search(&mut self, root: &mut RenderRoot) {
-        if matches!(self.popup, Some(Popup::Search(_))) {
+        if matches!(self.popup, Some(Popup::Search(_) | Popup::Transcript(_))) {
             return;
         }
         let search_box = search::search_box("");
@@ -103,8 +103,8 @@ impl App {
             body: body_handle,
             list: None,
             query: String::new(),
-            worker: worker::Worker::spawn(Arc::clone(&self.workspace.core), self.search_tx.clone(), Arc::clone(&self.workspace.wake)),
-            results: Vec::new(),
+            worker: worker::Worker::spawn(Arc::clone(&self.workspace.core), self.workspace.data_dir.clone(), self.search_tx.clone(), Arc::clone(&self.workspace.wake)),
+            results: Vec::new(), speech: Vec::new(),
             terms: Vec::new(),
             status,
             failed: false,

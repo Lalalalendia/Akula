@@ -5,6 +5,7 @@ pub(crate) enum Notice {
     Error(String),
     LeaseBusy, MemoryPressure,
     Exported,
+    ToolkitInstalled,
     Batch(BatchReport),
     BatchTooLarge,
     DownloadQueued(PathBuf),

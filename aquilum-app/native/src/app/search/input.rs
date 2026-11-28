@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use masonry::app::RenderRoot;
 use masonry::core::keyboard::{Key, Modifiers};
 use crate::ui::keymap::{self, Command, Scope};
@@ -16,16 +14,6 @@ impl App {
     fn select_result(&mut self, root: &mut RenderRoot, index: usize) {
         let Some(Popup::Search(state)) = &mut self.popup else { return };
         select_card(root, crate::ui::search::CardKind::Result, &state.cards, state.list, &mut state.selected, index);
-    }
-
-    fn open_selected(&mut self, root: &mut RenderRoot, new_tab: bool) -> Outcome {
-        let Some(Popup::Search(state)) = &self.popup else { return Outcome::default() };
-        let Some(result) = state.results.get(state.selected) else { return Outcome::default() };
-        let path = PathBuf::from(&result.path);
-        let offset = result.match_offset;
-        self.close_search(root);
-        let title = self.open_in_with_offset(root, path, new_tab, Some(offset));
-        Outcome { title, ..Outcome::default() }
     }
 
     fn create_from_query(&mut self, root: &mut RenderRoot) -> Outcome {

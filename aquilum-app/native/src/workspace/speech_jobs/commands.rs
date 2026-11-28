@@ -32,6 +32,7 @@ impl Tool {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Action {
+    InstallTools,
     PickTool(Tool),
     PickMedia, PickBatch,
     UseTrack(u32),

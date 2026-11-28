@@ -36,6 +36,7 @@ pub(crate) struct View {
     pub(crate) has_queued: bool,
     pub(crate) caption_job: Option<JobId>,
     pub(crate) preparing: bool,
+    pub(crate) installing_tools: Option<u8>,
     pub(crate) auto_downloads: bool,
     pub(crate) cpu_mode: aquilum_core::background_jobs::speech::CpuMode,
     pub(crate) admitting_download: Option<PathBuf>,
@@ -49,6 +50,7 @@ impl View {
     pub(crate) fn ready(&self) -> bool {
         self.loaded
             && !self.preparing
+            && self.installing_tools.is_none()
             && self.active.is_none()
             && self.tools.iter().all(Option::is_some)
     }
