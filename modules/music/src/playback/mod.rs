@@ -1,8 +1,8 @@
 //! Single-owner, deterministic queue and backend command reducer.
-
 mod controller;
 mod events;
 pub mod worker;
+pub mod pcm;
 use crate::TrackKey;
 use std::num::NonZeroU64;
 
