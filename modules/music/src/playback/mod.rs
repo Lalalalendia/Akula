@@ -2,7 +2,7 @@
 
 mod controller;
 mod events;
-
+pub mod worker;
 use crate::TrackKey;
 use std::num::NonZeroU64;
 
